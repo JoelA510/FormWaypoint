@@ -113,4 +113,5 @@ FormWaypoint is a shipping documentation automation platform that converts diver
 For more details on specific subsystems:
 
 - [Output Generation & ERP Exports](docs/architecture/output-generation.md)
-- [Validation & Overrides](docs/architecture/validation.md)
+- [Ingestion Pipeline](docs/architecture/ingestion-pipeline.md)
+- [Security & QA Guardrails](docs/architecture/security-qa-guardrails.md)
