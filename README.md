@@ -94,6 +94,20 @@ FormWaypoint is a shipping documentation automation platform that converts diver
 3. **Access Application**:
     Open browser to `http://localhost:5173`.
 
+### Production Build (Docker)
+
+1. **Build the Docker image**:
+
+   ```bash
+   docker build -t shipping-api -f apps/api/Dockerfile .
+   ```
+
+2. **Run the container**:
+
+   ```bash
+   docker run -p 3001:3001 --env-file apps/api/.env shipping-api
+   ```
+
 ## Architecture Guide
 
 For more details on specific subsystems:
