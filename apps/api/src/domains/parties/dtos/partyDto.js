@@ -1,14 +1,11 @@
 const { z } = require('zod');
+const { AddressSchema } = require('../../../shared/dtos/addressDto');
 
 const CreatePartySchema = z.object({
     name: z.string().min(1),
-    addressLine1: z.string().min(1),
-    addressLine2: z.string().optional(),
-    city: z.string().min(1),
-    stateOrProvince: z.string().optional(),
-    postalCode: z.string().min(1),
-    countryCode: z.string().length(2),
+    ...AddressSchema.shape,
     contactName: z.string().optional(),
+
     phone: z.string().optional(),
     email: z.string().email().optional(),
     taxIdOrEori: z.string().optional(),
