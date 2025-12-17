@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            font-size: 10px;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            border-bottom: 2px solid #000;
+            padding-bottom: 5px;
+            margin-bottom: 10px;
+        }
+
+        .logo {
+            font-size: 24px;
+            font-weight: bold;
+            color: #351c15;
+            /* UPS Brown */
+        }
+
+        .title {
+            font-size: 18px;
+            font-weight: bold;
+            text-align: right;
+        }
+
+        .section {
+            border: 1px solid #000;
+            margin-bottom: 5px;
+            padding: 5px;
+        }
+
+        .section-header {
+            background-color: #d0d0d0;
+            font-weight: bold;
+            padding: 2px 5px;
+            margin: -5px -5px 5px -5px;
+            border-bottom: 1px solid #000;
+        }
+
+        .row {
+            display: flex;
+            margin-bottom: 2px;
+        }
+
+        .col {
+            flex: 1;
+            padding-right: 5px;
+        }
+
+        .label {
+            font-size: 8px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .value {
+            font-size: 10px;
+            min-height: 12px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 9px;
+        }
+
+        th,
+        td {
+            border: 1px solid #000;
+            padding: 4px;
+            text-align: left;
+        }
+
+        th {
+            background-color: #f0f0f0;
+        }
+
+        .text-center {
+            text-align: center;
+        }
+
+        .text-right {
+            text-align: right;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <div class="logo">UPS Freight</div>
+        <div class="title">BILL OF LADING</div>
+    </div>
+
+    <div class="row">
+        <div class="col section">
+            <div class="section-header">SHIP FROM</div>
+            <div class="label">Name</div>
+            <div class="value">{{header.shipper}}</div>
+            <div class="label">Address</div>
+            <div class="value">{{header.shipperAddress}}</div>
+            <div class="label">City/State/Zip</div>
+            <div class="value">{{header.shipperCityStateZip}}</div>
+            <div class="label">SID #</div>
+            <div class="value">{{header.shipperRef}}</div>
+        </div>
+        <div class="col section">
+            <div class="section-header">SHIP TO</div>
+            <div class="label">Name</div>
+            <div class="value">{{header.consignee}}</div>
+            <div class="label">Address</div>
+            <div class="value">{{header.consigneeAddress}}</div>
+            <div class="label">City/State/Zip</div>
+            <div class="value">{{header.consigneeCityStateZip}}</div>
+            <div class="label">Location #</div>
+            <div class="value">{{header.consigneeRef}}</div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col section">
+            <div class="section-header">THIRD PARTY FREIGHT CHARGES BILL TO</div>
+            <div class="value">
+                {{#if header.billTo}}
+                {{header.billTo}}
+                {{else}}
+                (Leave blank if prepaid/collect)
+                {{/if}}
+            </div>
+        </div>
+        <div class="col section">
+            <div class="section-header">FREIGHT CHARGES</div>
+            <div class="value">
+                <input type="checkbox"> Prepaid
+                <input type="checkbox"> Collect
+                <input type="checkbox"> 3rd Party
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">CUSTOMER ORDER INFORMATION</div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Customer Order #</th>
+                    <th># Pkgs</th>
+                    <th>Weight</th>
+                    <th>Pallet/Slip</th>
+                    <th>Additional Info</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>{{id}}</td>
+                    <td>{{header.totalQty}}</td>
+                    <td>{{header.totalWeight}} kg</td>
+                    <td>{{#if header.isPallet}}Y{{else}}N{{/if}}</td>
+                    <td>{{header.specialInstructions}}</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="section">
+        <div class="section-header">CARRIER INFORMATION</div>
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 10%">Handling Units</th>
+                    <th style="width: 10%">Pkg Type</th>
+                    <th style="width: 40%">Description of Articles, Special Marks and Exceptions</th>
+                    <th style="width: 10%">NMFC #</th>
+                    <th style="width: 10%">Class</th>
+                    <th style="width: 10%">Weight (lbs)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{#each lines}}
+                <tr>
+                    <td>{{quantity}}</td>
+                    <td>{{packageType}}</td>
+                    <td>{{description}}</td>
+                    <td>{{nmfc}}</td>
+                    <td>{{class}}</td>
+                    <td>{{weightLbs}}</td>
+                </tr>
+                {{/each}}
+                <tr style="font-weight: bold; background-color: #f9f9f9;">
+                    <td colspan="5" class="text-right">GRAND TOTAL</td>
+                    <td>{{header.totalWeightLbs}}</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="section">
+        <div class="label">Note</div>
+        <div class="value">Where the rate is dependent on value, shippers are required to state specifically in writing
+            the agreed or declared value of the property. The agreed or declared value of the property is hereby
+            specifically stated by the shipper to be not exceeding __________________ per __________________.</div>
+    </div>
+
+    <div class="row">
+        <div class="col section">
+            <div class="section-header">SHIPPER SIGNATURE / DATE</div>
+            <div class="value" style="margin-top: 20px; border-top: 1px solid #000;">
+                This is to certify that the above named materials are properly classified, described, packaged, marked
+                and labeled, and are in proper condition for transportation according to the applicable regulations of
+                the DOT.
+            </div>
+        </div>
+        <div class="col section">
+            <div class="section-header">CARRIER SIGNATURE / DATE</div>
+            <div class="value" style="margin-top: 20px; border-top: 1px solid #000;">
+                Carrier acknowledges receipt of packages and required placards. Carrier certifies emergency response
+                information was made available and/or carrier has the DOT emergency response guidebook or equivalent
+                documentation in the vehicle.
+            </div>
+        </div>
+    </div>
+
+    <div style="margin-top: 20px; font-size: 8px; text-align: center;">
+        Created via Shipping Doc Gen | Date: {{date}} | Page 1 of 1
+    </div>
+</body>
+
+</html>

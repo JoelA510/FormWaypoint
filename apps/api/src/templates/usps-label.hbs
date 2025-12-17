@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            font-size: 10px;
+            margin: 0;
+            padding: 10px;
+            width: 400px;
+            /* Label size approx 4x6 inches */
+            height: 600px;
+            border: 1px dashed #ccc;
+            /* Visual guide */
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            border-bottom: 2px solid #000;
+            padding-bottom: 5px;
+            margin-bottom: 10px;
+        }
+
+        .logo {
+            font-size: 18px;
+            font-weight: bold;
+            color: #333366;
+            /* USPS Blue */
+        }
+
+        .title {
+            font-size: 14px;
+            font-weight: bold;
+            text-align: right;
+        }
+
+        .section {
+            border: 1px solid #000;
+            margin-bottom: 5px;
+            padding: 5px;
+        }
+
+        .section-header {
+            background-color: #e0e0e0;
+            font-weight: bold;
+            padding: 2px 5px;
+            margin: -5px -5px 5px -5px;
+            border-bottom: 1px solid #000;
+            font-size: 9px;
+        }
+
+        .label {
+            font-size: 8px;
+            font-weight: bold;
+            color: #555;
+        }
+
+        .value {
+            font-size: 10px;
+            min-height: 12px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 8px;
+        }
+
+        th,
+        td {
+            border: 1px solid #000;
+            padding: 2px;
+            text-align: left;
+        }
+
+        th {
+            background-color: #f0f0f0;
+        }
+
+        .barcode {
+            height: 50px;
+            background-color: #eee;
+            text-align: center;
+            line-height: 50px;
+            margin-top: 10px;
+            font-family: 'Courier New', monospace;
+            letter-spacing: 2px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <div class="logo">USPS PRIORITY MAIL</div>
+        <div class="title">INTERNATIONAL</div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">FROM:</div>
+        <div class="value">{{header.shipper}}</div>
+        <div class="value">{{header.shipperAddress}}</div>
+        <div class="value">{{header.shipperCityStateZip}}</div>
+        <div class="value">{{header.shipperPhone}}</div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">TO:</div>
+        <div class="value" style="font-size: 12px; font-weight: bold;">{{header.consignee}}</div>
+        <div class="value">{{header.consigneeAddress}}</div>
+        <div class="value">{{header.consigneeCityStateZip}}</div>
+        <div class="value">{{header.consigneePhone}}</div>
+        <div class="value" style="margin-top: 5px;">DESTINATION: {{header.consigneeCountry}}</div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">CUSTOMS DECLARATION</div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Qty</th>
+                    <th>Description</th>
+                    <th>Weight (kg)</th>
+                    <th>Value ($)</th>
+                    <th>HS Code</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{#each lines}}
+                <tr>
+                    <td>{{quantity}}</td>
+                    <td>{{description}}</td>
+                    <td>{{netWeightKg}}</td>
+                    <td>{{valueUsd}}</td>
+                    <td>{{htsCode}}</td>
+                </tr>
+                {{/each}}
+                <tr style="font-weight: bold;">
+                    <td colspan="2" style="text-align: right;">TOTAL:</td>
+                    <td>{{header.totalWeight}}</td>
+                    <td>{{header.totalValue}}</td>
+                    <td></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="section">
+        <div class="label">Category of Item:</div>
+        <div class="value">
+            <input type="checkbox" checked> Merchandise
+            <input type="checkbox"> Gift
+            <input type="checkbox"> Documents
+        </div>
+        <div class="label" style="margin-top: 5px;">Comments:</div>
+        <div class="value">{{header.specialInstructions}}</div>
+    </div>
+
+    <div class="section">
+        <div class="section-header">CERTIFICATION</div>
+        <div class="value" style="font-size: 8px;">
+            I certify that the particulars given in this customs declaration are correct and that this item does not
+            contain any dangerous article or article prohibited by legislation or by postal or customs regulations.
+        </div>
+        <div style="margin-top: 15px; border-top: 1px solid #000; display: flex; justify-content: space-between;">
+            <div style="padding: 2px;">Signature</div>
+            <div style="padding: 2px;">Date: {{date}}</div>
+        </div>
+    </div>
+
+    <div class="barcode">
+        USPS TRACKING # (MOCK)
+    </div>
+</body>
+
+</html>

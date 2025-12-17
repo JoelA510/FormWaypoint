@@ -1,0 +1,30 @@
+{
+  "$schema": "https://raw.githubusercontent.com/streetsidesoftware/cspell/main/packages/cspell-types/cspell.schema.json",
+  "version": "0.2",
+  "language": "en",
+  "words": [
+    "CIPL",
+    "ECCN",
+    "HOCR",
+    "HMAC",
+    "Incoterm",
+    "Incoterms",
+    "Kuehne",
+    "Nagel",
+    "NCBFAA",
+    "NMFTA",
+    "pdfminer",
+    "PITR",
+    "Pulumi",
+    "Supabase",
+    "Tesseract",
+    "WCAG",
+    "VICS",
+    "pytest"
+  ],
+  "ignorePaths": [
+    "node_modules",
+    "dist",
+    "build"
+  ]
+}
