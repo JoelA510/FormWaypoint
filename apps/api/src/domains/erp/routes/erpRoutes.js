@@ -2,22 +2,10 @@ const express = require('express');
 const router = express.Router();
 const ErpService = require('../services/ErpService');
 
-router.post('/configs', async (req, res) => {
-    const result = await ErpService.createConfig(req.body, req.user?.id);
-    if (result.isSuccess) {
-        res.status(201).json(result.getValue());
-    } else {
-        res.status(400).json({ error: result.getError() });
-    }
-});
+const handleRequest = require('../../../shared/utils/requestHandler');
 
-router.post('/jobs/:configId/trigger', async (req, res) => {
-    const result = await ErpService.triggerExport(req.params.configId);
-    if (result.isSuccess) {
-        res.json(result.getValue());
-    } else {
-        res.status(500).json({ error: result.getError() });
-    }
-});
+router.post('/configs', (req, res) => handleRequest(res, ErpService.createConfig(req.body, req.user?.id), { successStatus: 201, errorStatus: 400 }));
+
+router.post('/jobs/:configId/trigger', (req, res) => handleRequest(res, ErpService.triggerExport(req.params.configId)));
 
 module.exports = router;

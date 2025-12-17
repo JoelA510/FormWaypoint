@@ -2,33 +2,12 @@ const express = require('express');
 const router = express.Router();
 const ProductService = require('../services/ProductService');
 
-router.post('/', async (req, res) => {
-    const result = await ProductService.upsertProduct(req.body, req.user?.id);
-    if (result.isSuccess) {
-        res.json(result.getValue());
-    } else {
-        res.status(400).json({ error: result.getError() });
-    }
-});
+const handleRequest = require('../../../shared/utils/requestHandler');
 
-router.get('/', async (req, res) => {
-    const result = await ProductService.listProducts(req.query);
-    if (result.isSuccess) {
-        res.json(result.getValue());
-    } else {
-        res.status(500).json({ error: result.getError() });
-    }
-});
+router.post('/', (req, res) => handleRequest(res, ProductService.upsertProduct(req.body, req.user?.id), { successStatus: 200, errorStatus: 400 }));
 
-router.get('/:sku', async (req, res) => {
-    const result = await ProductService.resolveSku(req.params.sku);
-    if (result.isSuccess) {
-        const item = result.getValue();
-        if (!item) return res.status(404).json({ error: 'SKU not found' });
-        res.json(item);
-    } else {
-        res.status(500).json({ error: result.getError() });
-    }
-});
+router.get('/', (req, res) => handleRequest(res, ProductService.listProducts(req.query)));
+
+router.get('/:sku', (req, res) => handleRequest(res, ProductService.resolveSku(req.params.sku), { errorStatus: 404 }));
 
 module.exports = router;
