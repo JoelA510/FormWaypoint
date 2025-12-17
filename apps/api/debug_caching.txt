@@ -1,0 +1,21 @@
+FAIL tests/caching.test.js
+  ΓùÅ Test suite failed to run
+
+    Cannot find module '../src/prisma/client' from 'tests/caching.test.js'
+
+      2 | const express = require('express');
+      3 | const { connection: redis } = require('../src/services/redis');
+    > 4 | const prisma = require('../src/prisma/client'); // Mock this
+        |                ^
+      5 | const { getCarrierGateway } = require('../src/services/carriers/carrierGateway'); // Mock this
+      6 |
+      7 | // Mocks
+
+      at Resolver._throwModNotFoundError (node_modules/jest-resolve/build/resolver.js:427:11)
+      at Object.require (tests/caching.test.js:4:16)
+
+Test Suites: 1 failed, 1 total
+Tests:       0 total
+Snapshots:   0 total
+Time:        0.693 s
+Ran all test suites matching /tests\\caching.test.js/i.

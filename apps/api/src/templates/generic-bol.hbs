@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            margin: 0;
+            padding: 15px;
+        }
+
+        .header {
+            border: 3px double #000;
+            padding: 10px;
+            margin-bottom: 15px;
+        }
+
+        .doc-title {
+            font-size: 20px;
+            font-weight: bold;
+            text-align: center;
+            letter-spacing: 2px;
+        }
+
+        .bol-number {
+            text-align: center;
+            font-size: 14px;
+            margin-top: 5px;
+        }
+
+        .section {
+            margin-bottom: 10px;
+            border: 2px solid #000;
+            padding: 8px;
+            background: #fff;
+        }
+
+        .section-title {
+            font-weight: bold;
+            background: #000;
+            color: #fff;
+            padding: 4px;
+            margin: -8px -8px 8px -8px;
+            font-size: 11px;
+        }
+
+        .row {
+            display: flex;
+            margin-bottom: 4px;
+        }
+
+        .col {
+            flex: 1;
+            padding-right: 10px;
+        }
+
+        .label {
+            font-size: 9px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .value {
+            border-bottom: 1px solid #000;
+            min-height: 18px;
+            padding: 2px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 8px;
+        }
+
+        th,
+        td {
+            border: 1px solid #000;
+            padding: 5px;
+            text-align: left;
+        }
+
+        th {
+            background: #e0e0e0;
+            font-weight: bold;
+        }
+
+        .text-right {
+            text-align: right;
+        }
+
+        .checkbox {
+            width: 12px;
+            height: 12px;
+            border: 1px solid #000;
+            display: inline-block;
+            margin-right: 5px;
+        }
+
+        .signature-box {
+            height: 40px;
+            border: 1px solid #000;
+            margin-top: 5px;
+        }
+
+        .instructions {
+            font-size: 9px;
+            font-style: italic;
+            color: #444;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <div class="doc-title">BILL OF LADING</div>
+        <div class="bol-number">BOL #: {{id}}</div>
+        <div style="text-align: center; font-size: 10px;">Date: {{date}}</div>
+    </div>
+
+    <div class="section">
+        <div class="section-title">Shipper Information</div>
+        <div class="label">Company Name</div>
+        <div class="value">{{header.shipper}}</div>
+        <div class="row" style="margin-top: 5px;">
+            <div class="col">
+                <div class="label">Contact</div>
+                <div class="value">{{header.shipperContact}}</div>
+            </div>
+            <div class="col">
+                <div class="label">Phone</div>
+                <div class="value">{{header.shipperPhone}}</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-title">Consignee Information</div>
+        <div class="label">Company Name</div>
+        <div class="value">{{header.consignee}}</div>
+        <div class="row" style="margin-top: 5px;">
+            <div class="col">
+                <div class="label">Contact</div>
+                <div class="value">{{header.consigneeContact}}</div>
+            </div>
+            <div class="col">
+                <div class="label">Phone</div>
+                <div class="value">{{header.consigneePhone}}</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col section">
+            <div class="section-title">Freight Charges</div>
+            <div>
+                <span class="checkbox"></span> Prepaid
+                <span class="checkbox" style="margin-left: 20px;"></span> Collect
+                <span class="checkbox" style="margin-left: 20px;"></span> 3rd Party
+            </div>
+            <div class="instructions">Check applicable box</div>
+        </div>
+        <div class="col section">
+            <div class="section-title">Service Level</div>
+            <div>
+                <span class="checkbox"></span> Standard
+                <span class="checkbox" style="margin-left: 20px;"></span> Express
+                <span class="checkbox" style="margin-left: 20px;"></span> Freight
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-title">Commodity Description</div>
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 5%;">#</th>
+                    <th style="width: 40%;">Description</th>
+                    <th style="width: 8%;">Qty</th>
+                    <th style="width: 12%;">Weight</th>
+                    <th style="width: 10%;">Dimensions</th>
+                    <th style="width: 12%;">Value</th>
+                    <th style="width: 13%;">HTS/HS Code</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{#each lines}}
+                <tr>
+                    <td>{{@index}}</td>
+                    <td>{{description}}</td>
+                    <td>{{quantity}}</td>
+                    <td>{{netWeightKg}} kg</td>
+                    <td>{{dimensions}}</td>
+                    <td>{{valueUsd}} USD</td>
+                    <td>{{htsCode}}</td>
+                </tr>
+                {{/each}}
+                <tr style="font-weight: bold;">
+                    <td colspan="2" class="text-right">TOTAL:</td>
+                    <td>{{header.totalQty}}</td>
+                    <td>{{header.totalWeight}} kg</td>
+                    <td>-</td>
+                    <td>{{header.totalValue}} USD</td>
+                    <td>-</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="section">
+        <div class="section-title">Special Instructions</div>
+        <div class="value" style="min-height: 40px;">{{header.specialInstructions}}</div>
+    </div>
+
+    <div class="row">
+        <div class="col section">
+            <div class="section-title">Shipper Signature</div>
+            <div>
+                <div class="label">Signature</div>
+                <div class="signature-box"></div>
+            </div>
+            <div class="row" style="margin-top: 5px;">
+                <div class="col">
+                    <div class="label">Print Name</div>
+                    <div class="value"></div>
+                </div>
+                <div class="col">
+                    <div class="label">Date</div>
+                    <div class="value"></div>
+                </div>
+            </div>
+        </div>
+        <div class="col section">
+            <div class="section-title">Carrier Signature</div>
+            <div>
+                <div class="label">Signature</div>
+                <div class="signature-box"></div>
+            </div>
+            <div class="row" style="margin-top: 5px;">
+                <div class="col">
+                    <div class="label">Print Name</div>
+                    <div class="value"></div>
+                </div>
+                <div class="col">
+                    <div class="label">Date</div>
+                    <div class="value"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div style="font-size: 8px; margin-top: 10px; border-top: 1px solid #000; padding-top: 5px;">
+        <p><strong>Note:</strong> This document constitutes a contract between the shipper and carrier. Subject to the
+            terms and conditions on reverse side (if applicable).</p>
+    </div>
+</body>
+
+</html>

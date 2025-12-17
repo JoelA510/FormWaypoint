@@ -1,0 +1,278 @@
+name: Codex Review Bot
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+  push:
+    branches: ['**']
+  check_suite:
+    types: [completed, requested, rerequested]
+  workflow_run:
+    workflows: ['CI']
+    types: [completed]
+
+permissions:
+  pull-requests: write
+  issues: write
+  contents: read
+  checks: read
+  statuses: read
+
+jobs:
+  review:
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: codex-review-${{ github.event.pull_request.head.sha || github.event.after || github.event.check_suite.head_sha || github.event.workflow_run.head_sha || github.sha }}
+      cancel-in-progress: false
+    steps:
+      - name: Run Codex review bot
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const marker = '<!-- codex-review-bot -->';
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            async function findPullRequestBySha(sha) {
+              if (!sha) return null;
+              const prs = await github.paginate(github.rest.repos.listPullRequestsAssociatedWithCommit, {
+                owner,
+                repo,
+                commit_sha: sha,
+                per_page: 100,
+              });
+              return prs.find((candidate) => candidate.state !== 'closed') || null;
+            }
+
+            let pr = context.payload.pull_request || null;
+            let eventHeadSha = null;
+            if (context.eventName === 'push') {
+              eventHeadSha = context.payload.after;
+            } else if (context.eventName === 'check_suite') {
+              eventHeadSha = context.payload.check_suite?.head_sha ?? null;
+            } else if (context.eventName === 'workflow_run') {
+              eventHeadSha = context.payload.workflow_run?.head_sha ?? null;
+            } else {
+              eventHeadSha = context.sha;
+            }
+
+            if (!pr) {
+              pr = await findPullRequestBySha(eventHeadSha);
+            }
+
+            if (!pr) {
+              core.info('No associated pull request detected for this event. Exiting.');
+              return;
+            }
+
+            if (pr.state === 'closed') {
+              core.info(`PR #${pr.number} is closed; skipping.`);
+              return;
+            }
+
+            const headSha = pr.head.sha;
+            const baseSha = pr.base.sha;
+            const prNumber = pr.number;
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner,
+              repo,
+              pull_number: prNumber,
+              per_page: 100,
+            });
+
+            const changeTypes = new Set();
+            for (const file of files) {
+              const filename = file.filename;
+              if (/package-lock\.json$|yarn\.lock$|pnpm-lock\.yaml$/.test(filename)) {
+                changeTypes.add('deps');
+              }
+              if (/\.md$/i.test(filename) || filename.startsWith('docs/')) {
+                changeTypes.add('docs-only');
+              }
+              if (filename.startsWith('.github/') || filename.startsWith('infra/') || filename.includes('workflow')) {
+                changeTypes.add('config/CI');
+              }
+              if (/migrations?\//.test(filename) && /\.sql$/i.test(filename)) {
+                changeTypes.add('db/migrations');
+              }
+              if (/security/i.test(filename) || filename.includes('supabase/sec')) {
+                changeTypes.add('security');
+              }
+              if (!/\.md$/i.test(filename) && !filename.endsWith('.lock') && !filename.endsWith('.json') && !filename.startsWith('.github/')) {
+                changeTypes.add('code');
+              }
+            }
+
+            if (changeTypes.size === 0) {
+              changeTypes.add('config/CI');
+            }
+
+            const changeTypeList = Array.from(changeTypes).sort();
+
+            async function resolveCiState(ref) {
+              try {
+                const status = await github.rest.repos.getCombinedStatusForRef({
+                  owner,
+                  repo,
+                  ref,
+                });
+                return status.data.state;
+              } catch (error) {
+                core.warning(`Unable to fetch combined status: ${error.message}`);
+                return 'unknown';
+              }
+            }
+
+            const ciState = await resolveCiState(headSha);
+
+            async function collectFailedChecks(ref) {
+              try {
+                const suites = await github.rest.checks.listSuitesForRef({
+                  owner,
+                  repo,
+                  ref,
+                  per_page: 100,
+                });
+                const failed = [];
+                for (const suite of suites.data.check_suites) {
+                  if (!suite.conclusion || suite.conclusion === 'success' || suite.conclusion === 'neutral' || suite.conclusion === 'skipped') {
+                    continue;
+                  }
+                  const runs = await github.paginate(github.rest.checks.listForSuite, {
+                    owner,
+                    repo,
+                    check_suite_id: suite.id,
+                    per_page: 100,
+                  });
+                  for (const run of runs) {
+                    if (run.conclusion && run.conclusion !== 'success' && run.conclusion !== 'neutral' && run.conclusion !== 'skipped') {
+                      failed.push({
+                        name: run.name,
+                        conclusion: run.conclusion,
+                        html_url: run.html_url,
+                      });
+                    }
+                  }
+                }
+                return failed;
+              } catch (error) {
+                core.warning(`Unable to gather failed checks: ${error.message}`);
+                return [];
+              }
+            }
+
+            const failedChecks = ciState === 'failure' ? await collectFailedChecks(headSha) : [];
+
+            const now = new Date().toISOString().replace('T', ' ').replace('Z', ' UTC');
+            const filesReviewed = files.length;
+            const patchesProposed = 0;
+
+            const diagnostics = [];
+            if (changeTypes.has('code')) {
+              diagnostics.push('npm ci', 'npm run lint', 'npm test -- --watch=false', 'npm run build');
+            }
+            if (changeTypes.has('docs-only')) {
+              diagnostics.push('npx --yes markdown-link-check <changed-docs>', 'npx --yes cspell <changed-docs>');
+            }
+            if (changeTypes.has('config/CI')) {
+              diagnostics.push('act --list');
+            }
+            if (changeTypes.has('db/migrations')) {
+              diagnostics.push('supabase db lint', 'supabase db reset --preview');
+            }
+            if (changeTypes.has('security')) {
+              diagnostics.push('npm run lint:security');
+            }
+
+            if (diagnostics.length === 0) {
+              diagnostics.push('npm ci');
+            }
+
+            const diagnosticsBlock = diagnostics.join('\n');
+
+            let ciSection = '_CI status pending._';
+            if (ciState === 'success') {
+              ciSection = 'CI reported **success**.';
+            } else if (ciState === 'failure') {
+              if (failedChecks.length === 0) {
+                ciSection = 'CI reported **failure**. Unable to map failures to files automatically.';
+              } else {
+                ciSection = failedChecks
+                  .map((check) => `- ${check.name}: ${check.conclusion} ([logs](${check.html_url}))`)
+                  .join('\n');
+              }
+            } else if (ciState === 'pending') {
+              ciSection = 'CI is still running (**pending**).';
+            } else {
+              ciSection = `CI state: **${ciState}**.`;
+            }
+
+            const commentLines = [
+              marker,
+              '### Status',
+              `- Head SHA: \`${headSha}\``,
+              `- Base SHA: \`${baseSha}\``,
+              `- CI state: **${ciState}**`,
+              `- Files reviewed: ${filesReviewed}`,
+              `- Patches proposed: ${patchesProposed}`,
+              `- Change types: ${changeTypeList.join(', ')}`,
+              '',
+              '### Findings',
+              'No issues found in changed scope.',
+              '',
+              '### Proposed patches',
+              '_None_',
+              '',
+              '### CI failure mapping',
+              ciSection,
+              '',
+              '### Diagnostic plan',
+              '```bash',
+              diagnosticsBlock,
+              '```',
+              '',
+              '### Next actions',
+              `- [ ] Awaiting updates for head \`${headSha}\``,
+              '',
+              '### Meta',
+              `Processed at ${now}`,
+              `Idempotency key = ${headSha}`,
+            ];
+
+            const body = commentLines.join('\n');
+
+            const existingComments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number: prNumber,
+              per_page: 100,
+            });
+
+            const stickyComment = existingComments.find((comment) => comment.body && comment.body.includes(marker));
+
+            if (stickyComment && stickyComment.body.includes(`Idempotency key = ${headSha}`)) {
+              core.info(`Comment already up-to-date for head ${headSha}.`);
+              return;
+            }
+
+            if (stickyComment) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: stickyComment.id,
+                body,
+              });
+              core.info(`Updated existing sticky comment ${stickyComment.id}.`);
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: prNumber,
+                body,
+              });
+              core.info(`Created new sticky comment for PR #${prNumber}.`);
+            }

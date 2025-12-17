@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shipping-doc-gen.io/schemas/canonical-shipment.json",
+  "title": "Canonical Shipment",
+  "type": "object",
+  "required": ["shipment_id", "created_at", "source_filename", "source_hash", "shipper", "consignee", "export_date", "transport_mode", "totals", "line_items"],
+  "properties": {
+    "shipment_id": { "type": "string", "description": "Internal unique shipment identifier." },
+    "created_at": { "type": "string", "format": "date-time" },
+    "source_filename": { "type": "string" },
+    "source_hash": { "type": "string", "description": "Checksum of the original document." },
+    "incoterms": { "type": "string", "pattern": "^[A-Z]{3}$" },
+    "terms_of_sale": { "type": "string" },
+    "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+    "total_invoice_value_usd": { "type": "number", "minimum": 0 },
+    "shipper": { "$ref": "#/definitions/party" },
+    "consignee": { "$ref": "#/definitions/party" },
+    "intermediate_consignee": { "$ref": "#/definitions/party" },
+    "notify_party": { "$ref": "#/definitions/party" },
+    "export_date": { "type": "string", "format": "date" },
+    "export_reason": { "type": "string" },
+    "origin_country_overall": { "type": "string", "pattern": "^[A-Z]{2}$" },
+    "transport_mode": { "type": "string", "enum": ["air", "ocean", "ground", "rail", "multimodal"] },
+    "carrier_preference": { "type": "string" },
+    "port_of_export": { "type": "string" },
+    "port_of_unloading": { "type": "string" },
+    "license": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "type": "string" },
+        "number": { "type": "string" },
+        "expiry": { "type": "string", "format": "date" },
+        "eccn": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "routing": {
+      "type": "object",
+      "properties": {
+        "freight_forwarder": { "type": "string" },
+        "account_numbers": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "totals": {
+      "type": "object",
+      "required": ["packages", "quantity", "net_weight_kg", "gross_weight_kg", "cbm"],
+      "properties": {
+        "packages": { "type": "integer", "minimum": 0 },
+        "quantity": { "type": "number", "minimum": 0 },
+        "net_weight_kg": { "type": "number", "minimum": 0 },
+        "gross_weight_kg": { "type": "number", "minimum": 0 },
+        "cbm": { "type": "number", "minimum": 0 }
+      }
+    },
+    "line_items": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/line_item" }
+    },
+    "discrepancies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["field", "severity", "message"],
+        "properties": {
+          "field": { "type": "string" },
+          "severity": { "type": "string", "enum": ["info", "warning", "error"] },
+          "message": { "type": "string" },
+          "proposed_value": { "type": ["string", "number", "boolean", "null"] }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "party": {
+      "type": "object",
+      "required": ["name", "address"],
+      "properties": {
+        "name": { "type": "string" },
+        "address": { "$ref": "#/definitions/address" },
+        "tax_id": { "type": "string" },
+        "contact": { "$ref": "#/definitions/contact" }
+      }
+    },
+    "address": {
+      "type": "object",
+      "required": ["line1", "city", "state", "postal_code", "country"],
+      "properties": {
+        "line1": { "type": "string" },
+        "line2": { "type": "string" },
+        "city": { "type": "string" },
+        "state": { "type": "string" },
+        "postal_code": { "type": "string" },
+        "country": { "type": "string", "pattern": "^[A-Z]{2}$" }
+      }
+    },
+    "contact": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "phone": { "type": "string" }
+      }
+    },
+    "quantity": {
+      "type": "object",
+      "required": ["value", "uom"],
+      "properties": {
+        "value": { "type": "number", "minimum": 0 },
+        "uom": { "type": "string" }
+      }
+    },
+    "packaging": {
+      "type": "object",
+      "required": ["type", "count"],
+      "properties": {
+        "type": { "type": "string" },
+        "count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "line_item": {
+      "type": "object",
+      "required": ["line_id", "description_long", "df_flag", "quantity", "unit_price_usd", "extended_value_usd", "net_weight_kg", "gross_weight_kg", "country_of_origin"],
+      "properties": {
+        "line_id": { "type": "string" },
+        "part_number": { "type": "string" },
+        "description_long": { "type": "string" },
+        "df_flag": { "type": "string", "enum": ["D", "F"] },
+        "hts_code": { "type": "string" },
+        "schedule_b_code": { "type": "string" },
+        "eccn": { "type": "string" },
+        "quantity": { "$ref": "#/definitions/quantity" },
+        "unit_price_usd": { "type": "number", "minimum": 0 },
+        "extended_value_usd": { "type": "number", "minimum": 0 },
+        "net_weight_kg": { "type": "number", "minimum": 0 },
+        "gross_weight_kg": { "type": "number", "minimum": 0 },
+        "country_of_origin": { "type": "string", "pattern": "^[A-Z]{2}$" },
+        "marks_and_numbers": { "type": "string" },
+        "packaging": { "$ref": "#/definitions/packaging" },
+        "metadata": {
+          "type": "object",
+          "properties": {
+            "images": {
+              "type": "array",
+              "items": { "type": "string", "format": "uri" }
+            },
+            "notes": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

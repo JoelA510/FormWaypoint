@@ -1,0 +1,39 @@
+{
+  "header": {
+    "shipper": "Acme Exports",
+    "consignee": "Global Imports",
+    "incoterm": "FOB",
+    "currency": "USD",
+    "reference": "PO-12345"
+  },
+  "lines": [
+    {
+      "partNumber": "W123",
+      "description": "Widget Assembly",
+      "quantity": 10,
+      "netWeightKg": 125.5,
+      "valueUsd": 1500,
+      "htsCode": "847150",
+      "countryOfOrigin": "US"
+    },
+    {
+      "partNumber": "G456",
+      "description": "Gadget Kit",
+      "quantity": 5,
+      "netWeightKg": 25,
+      "valueUsd": 750,
+      "htsCode": "902710",
+      "countryOfOrigin": "CN"
+    }
+  ],
+  "checksums": {
+    "quantity": 15,
+    "netWeightKg": 150.5,
+    "valueUsd": 2250
+  },
+  "meta": {
+    "sourceType": "expected",
+    "raw": {},
+    "normalization": {}
+  }
+}

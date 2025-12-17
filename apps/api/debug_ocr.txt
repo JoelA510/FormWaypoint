@@ -1,0 +1,212 @@
+  console.error
+    OCR Mapping Validation Failed: undefined
+
+    [0m [90m 101 |[39m         [36mreturn[39m [33mShipmentV1Schema[39m[33m.[39mparse(shipmentData)[33m;[39m
+     [90m 102 |[39m     } [36mcatch[39m (err) {
+    [31m[1m>[22m[39m[90m 103 |[39m         console[33m.[39merror([32m'OCR Mapping Validation Failed:'[39m[33m,[39m err[33m.[39merrors)[33m;[39m
+     [90m     |[39m                 [31m[1m^[22m[39m
+     [90m 104 |[39m         [36mthrow[39m [36mnew[39m [33mError[39m([32m`OCR Validation Failed: ${err.message}`[39m)[33m;[39m
+     [90m 105 |[39m     }
+     [90m 106 |[39m }[0m
+
+      at error (src/services/import/ocrMapper.js:103:17)
+      at Object.mapOcrToShipment (tests/ocr.test.js:34:24)
+
+  console.error
+    OCR Mapping Validation Failed: undefined
+
+    [0m [90m 101 |[39m         [36mreturn[39m [33mShipmentV1Schema[39m[33m.[39mparse(shipmentData)[33m;[39m
+     [90m 102 |[39m     } [36mcatch[39m (err) {
+    [31m[1m>[22m[39m[90m 103 |[39m         console[33m.[39merror([32m'OCR Mapping Validation Failed:'[39m[33m,[39m err[33m.[39merrors)[33m;[39m
+     [90m     |[39m                 [31m[1m^[22m[39m
+     [90m 104 |[39m         [36mthrow[39m [36mnew[39m [33mError[39m([32m`OCR Validation Failed: ${err.message}`[39m)[33m;[39m
+     [90m 105 |[39m     }
+     [90m 106 |[39m }[0m
+
+      at error (src/services/import/ocrMapper.js:103:17)
+      at Object.mapOcrToShipment (tests/ocr.test.js:58:24)
+
+  console.error
+    OCR Mapping Validation Failed: undefined
+
+    [0m [90m 101 |[39m         [36mreturn[39m [33mShipmentV1Schema[39m[33m.[39mparse(shipmentData)[33m;[39m
+     [90m 102 |[39m     } [36mcatch[39m (err) {
+    [31m[1m>[22m[39m[90m 103 |[39m         console[33m.[39merror([32m'OCR Mapping Validation Failed:'[39m[33m,[39m err[33m.[39merrors)[33m;[39m
+     [90m     |[39m                 [31m[1m^[22m[39m
+     [90m 104 |[39m         [36mthrow[39m [36mnew[39m [33mError[39m([32m`OCR Validation Failed: ${err.message}`[39m)[33m;[39m
+     [90m 105 |[39m     }
+     [90m 106 |[39m }[0m
+
+      at error (src/services/import/ocrMapper.js:103:17)
+      at Object.mapOcrToShipment (tests/ocr.test.js:68:24)
+
+FAIL tests/ocr.test.js
+  OCR Mapper
+    ├ù should map valid input to schema-conforming object (28 ms)
+    ├ù should apply defaults for missing fields (2 ms)
+    ├ù should generate valid IDs for new entities (2 ms)
+    ΓêÜ should throw if input is fatally invalid (missing header) (2 ms)
+
+  ΓùÅ OCR Mapper ΓÇ║ should map valid input to schema-conforming object
+
+    OCR Validation Failed: [
+      {
+        "expected": "string",
+        "code": "invalid_type",
+        "path": [
+          "lineItems",
+          0,
+          "shipmentId"
+        ],
+        "message": "Invalid input: expected string, received undefined"
+      },
+      {
+        "expected": "string",
+        "code": "invalid_type",
+        "path": [
+          "lineItems",
+          0,
+          "uom"
+        ],
+        "message": "Invalid input: expected string, received undefined"
+      },
+      {
+        "expected": "number",
+        "code": "invalid_type",
+        "path": [
+          "lineItems",
+          0,
+          "unitValue"
+        ],
+        "message": "Invalid input: expected number, received undefined"
+      },
+      {
+        "expected": "number",
+        "code": "invalid_type",
+        "path": [
+          "lineItems",
+          0,
+          "extendedValue"
+        ],
+        "message": "Invalid input: expected number, received undefined"
+      },
+      {
+        "expected": "string",
+        "code": "invalid_type",
+        "path": [
+          "lineItems",
+          0,
+          "htsCode"
+        ],
+        "message": "Invalid input: expected string, received undefined"
+      }
+    ]
+
+      102 |     } catch (err) {
+      103 |         console.error('OCR Mapping Validation Failed:', err.errors);
+    > 104 |         throw new Error(`OCR Validation Failed: ${err.message}`);
+          |               ^
+      105 |     }
+      106 | }
+      107 |
+
+      at mapOcrToShipment (src/services/import/ocrMapper.js:104:15)
+      at Object.mapOcrToShipment (tests/ocr.test.js:34:24)
+
+  ΓùÅ OCR Mapper ΓÇ║ should apply defaults for missing fields
+
+    OCR Validation Failed: [
+      {
+        "origin": "number",
+        "code": "too_small",
+        "minimum": 0,
+        "inclusive": false,
+        "path": [
+          "numPackages"
+        ],
+        "message": "Too small: expected number to be >0"
+      }
+    ]
+
+      102 |     } catch (err) {
+      103 |         console.error('OCR Mapping Validation Failed:', err.errors);
+    > 104 |         throw new Error(`OCR Validation Failed: ${err.message}`);
+          |               ^
+      105 |     }
+      106 | }
+      107 |
+
+      at mapOcrToShipment (src/services/import/ocrMapper.js:104:15)
+      at Object.mapOcrToShipment (tests/ocr.test.js:58:24)
+
+  ΓùÅ OCR Mapper ΓÇ║ should generate valid IDs for new entities
+
+    OCR Validation Failed: [
+      {
+        "expected": "string",
+        "code": "invalid_type",
+        "path": [
+          "lineItems",
+          0,
+          "shipmentId"
+        ],
+        "message": "Invalid input: expected string, received undefined"
+      },
+      {
+        "expected": "string",
+        "code": "invalid_type",
+        "path": [
+          "lineItems",
+          0,
+          "uom"
+        ],
+        "message": "Invalid input: expected string, received undefined"
+      },
+      {
+        "expected": "number",
+        "code": "invalid_type",
+        "path": [
+          "lineItems",
+          0,
+          "unitValue"
+        ],
+        "message": "Invalid input: expected number, received undefined"
+      },
+      {
+        "expected": "number",
+        "code": "invalid_type",
+        "path": [
+          "lineItems",
+          0,
+          "extendedValue"
+        ],
+        "message": "Invalid input: expected number, received undefined"
+      },
+      {
+        "expected": "string",
+        "code": "invalid_type",
+        "path": [
+          "lineItems",
+          0,
+          "htsCode"
+        ],
+        "message": "Invalid input: expected string, received undefined"
+      }
+    ]
+
+      102 |     } catch (err) {
+      103 |         console.error('OCR Mapping Validation Failed:', err.errors);
+    > 104 |         throw new Error(`OCR Validation Failed: ${err.message}`);
+          |               ^
+      105 |     }
+      106 | }
+      107 |
+
+      at mapOcrToShipment (src/services/import/ocrMapper.js:104:15)
+      at Object.mapOcrToShipment (tests/ocr.test.js:68:24)
+
+Test Suites: 1 failed, 1 total
+Tests:       3 failed, 1 passed, 4 total
+Snapshots:   0 total
+Time:        0.589 s, estimated 2 s
+Ran all test suites matching /tests\\ocr.test.js/i.

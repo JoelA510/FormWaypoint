@@ -1,0 +1,66 @@
+  console.error
+    File serving error: TypeError: Cannot read properties of undefined (reading 'toUTCString')
+        at SendStream.setHeader (C:\Users\joel.abraham\Shipping Doc Gen\Shipping-Doc-Gen\apps\api\node_modules\send\index.js:873:31)
+        at SendStream.send (C:\Users\joel.abraham\Shipping Doc Gen\Shipping-Doc-Gen\apps\api\node_modules\send\index.js:619:8)
+        at onstat (C:\Users\joel.abraham\Shipping Doc Gen\Shipping-Doc-Gen\apps\api\node_modules\send\index.js:724:10)
+        at Object.cb (C:\Users\joel.abraham\Shipping Doc Gen\Shipping-Doc-Gen\apps\api\tests\files_security.test.js:34:54)
+        at C:\Users\joel.abraham\Shipping Doc Gen\Shipping-Doc-Gen\apps\api\node_modules\jest-mock\build\index.js:397:39
+        at Object.<anonymous> (C:\Users\joel.abraham\Shipping Doc Gen\Shipping-Doc-Gen\apps\api\node_modules\jest-mock\build\index.js:404:13)
+        at Object.mockConstructor [as stat] (C:\Users\joel.abraham\Shipping Doc Gen\Shipping-Doc-Gen\apps\api\node_modules\jest-mock\build\index.js:148:19)
+        at SendStream.sendFile (C:\Users\joel.abraham\Shipping Doc Gen\Shipping-Doc-Gen\apps\api\node_modules\send\index.js:716:6)
+        at SendStream.pipe (C:\Users\joel.abraham\Shipping Doc Gen\Shipping-Doc-Gen\apps\api\node_modules\send\index.js:590:8)
+        at sendfile (C:\Users\joel.abraham\Shipping Doc Gen\Shipping-Doc-Gen\apps\api\node_modules\express\lib\response.js:1140:8)
+        at ServerResponse.sendFile (C:\Users\joel.abraham\Shipping Doc Gen\Shipping-Doc-Gen\apps\api\node_modules\express\lib\response.js:449:3)
+        at sendFile (C:\Users\joel.abraham\Shipping Doc Gen\Shipping-Doc-Gen\apps\api\src\routes\files.js:68:13)
+        at processTicksAndRejections (node:internal/process/task_queues:103:5)
+
+    [0m [90m 69 |[39m
+     [90m 70 |[39m     } [36mcatch[39m (error) {
+    [31m[1m>[22m[39m[90m 71 |[39m         console[33m.[39merror([32m'File serving error:'[39m[33m,[39m error)[33m;[39m
+     [90m    |[39m                 [31m[1m^[22m[39m
+     [90m 72 |[39m         res[33m.[39mstatus([35m500[39m)[33m.[39mjson({ error[33m:[39m [32m'Internal server error'[39m })[33m;[39m
+     [90m 73 |[39m     }
+     [90m 74 |[39m })[33m;[39m[0m
+
+      at error (src/routes/files.js:71:17)
+
+  console.warn
+    [Security] Unauthorized file access attempt by user intruder-999 for test-file.pdf
+
+    [0m [90m 53 |[39m         [36mif[39m ([33m![39misAuthorized) {
+     [90m 54 |[39m             [90m// Log attempt[39m
+    [31m[1m>[22m[39m[90m 55 |[39m             console[33m.[39mwarn([32m`[Security] Unauthorized file access attempt by user ${userId} for ${filename}`[39m)[33m;[39m
+     [90m    |[39m                     [31m[1m^[22m[39m
+     [90m 56 |[39m             [90m// Return 404 to prevent enumeration, or 403 if we want to be explicit. [39m
+     [90m 57 |[39m             [90m// 404 is safer for static assets.[39m
+     [90m 58 |[39m             [36mreturn[39m res[33m.[39mstatus([35m404[39m)[33m.[39mjson({ error[33m:[39m [32m'File not found or access denied'[39m })[33m;[39m[0m
+
+      at warn (src/routes/files.js:55:21)
+
+FAIL tests/files_security.test.js
+  GET /files/:filename Security Tests
+    ├ù should allow access to valid owner (ShipmentDocument) (51 ms)
+    ΓêÜ should deny access to unauthorized user (IDOR) (8 ms)
+
+  ΓùÅ GET /files/:filename Security Tests ΓÇ║ should allow access to valid owner (ShipmentDocument)
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 200
+    Received: 500
+
+      89 |             .set('x-mock-user-id', OWNER_ID);
+      90 |
+    > 91 |         expect(res.status).toBe(200);
+         |                            ^
+      92 |     });
+      93 |
+      94 |     it('should deny access to unauthorized user (IDOR)', async () => {
+
+      at Object.toBe (tests/files_security.test.js:91:28)
+
+Test Suites: 1 failed, 1 total
+Tests:       1 failed, 1 passed, 2 total
+Snapshots:   0 total
+Time:        0.636 s, estimated 1 s
+Ran all test suites matching /tests\\files_security.test.js/i.

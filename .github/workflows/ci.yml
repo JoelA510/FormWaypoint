@@ -1,0 +1,93 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [api, web, ingestion]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: |
+            apps/api/package-lock.json
+            apps/web/package-lock.json
+            services/ingestion/package-lock.json
+      
+      - name: Install dependencies
+        run: |
+          if [ "${{ matrix.service }}" = "api" ]; then
+            cd apps/api && npm ci
+          elif [ "${{ matrix.service }}" = "web" ]; then
+            cd apps/web && npm ci
+          else
+            cd services/ingestion && npm ci
+          fi
+      
+      - name: Run tests
+        run: |
+          if [ "${{ matrix.service }}" = "api" ]; then
+            cd apps/api && npm test
+          elif [ "${{ matrix.service }}" = "web" ]; then
+            cd apps/web && npm test -- --run
+          else
+            cd services/ingestion && npm test
+          fi
+      
+      - name: Security audit
+        run: |
+          if [ "${{ matrix.service }}" = "api" ]; then
+            cd apps/api && npm audit --audit-level=high || true
+          elif [ "${{ matrix.service }}" = "ingestion" ]; then
+            cd services/ingestion && npm audit --audit-level=high || true
+          fi
+        continue-on-error: true
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      
+      - name: Install web dependencies
+        run: cd apps/web && npm ci
+      
+      - name: Lint
+        run: cd apps/web && npm run lint
+        continue-on-error: true
+
+  build:
+    needs: [test, lint]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Build frontend
+        run: |
+          cd apps/web
+          npm ci
+          npm run build
+      
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: web-build
+          path: apps/web/build
+          retention-days: 7

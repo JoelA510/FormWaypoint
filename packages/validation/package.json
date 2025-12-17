@@ -1,0 +1,14 @@
+{
+    "name": "@formwaypoint/validation",
+    "version": "0.1.0",
+    "main": "index.ts",
+    "scripts": {
+        "test": "echo \"Error: no test specified\" && exit 1",
+        "lint": "echo \"Linting validation...\"",
+        "typecheck": "tsc --noEmit"
+    },
+    "dependencies": {},
+    "devDependencies": {
+        "typescript": "^5.0.0"
+    }
+}

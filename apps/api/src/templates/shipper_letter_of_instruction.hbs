@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <style>
+        body {
+            font-family: sans-serif;
+            font-size: 11px;
+        }
+
+        .title {
+            font-size: 18px;
+            font-weight: bold;
+            text-align: center;
+            margin-bottom: 20px;
+            border: 2px solid #000;
+            padding: 5px;
+        }
+
+        .section {
+            border: 1px solid #000;
+            padding: 5px;
+            margin-bottom: 10px;
+        }
+
+        .row {
+            display: flex;
+            gap: 10px;
+        }
+
+        .col {
+            flex: 1;
+        }
+
+        .label {
+            font-weight: bold;
+            font-size: 9px;
+            color: #555;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 10px;
+        }
+
+        th,
+        td {
+            border: 1px solid #ccc;
+            padding: 4px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="title">SHIPPER'S LETTER OF INSTRUCTION (SLI)</div>
+
+    <div class="row">
+        <div class="col section">
+            <div class="label">SHIPPER</div>
+            <div>{{shipment.shipper.name}}</div>
+            <div>{{shipment.shipper.addressLine1}}</div>
+            <div>{{shipment.shipper.city}}, {{shipment.shipper.stateOrProvince}} {{shipment.shipper.postalCode}}</div>
+            <div>Phone: {{shipment.shipper.phone}}</div>
+        </div>
+        <div class="col section">
+            <div class="label">DATE</div>
+            <div>{{date}}</div>
+            <div class="label" style="margin-top: 10px;">REFERENCE NO.</div>
+            <div>{{shipment.id}}</div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col section">
+            <div class="label">CONSIGNEE</div>
+            <div>{{shipment.consignee.name}}</div>
+            <div>{{shipment.consignee.addressLine1}}</div>
+            <div>{{shipment.consignee.city}}, {{shipment.consignee.stateOrProvince}} {{shipment.consignee.postalCode}}
+            </div>
+        </div>
+        <div class="col section">
+            <div class="label">FORWARDING AGENT</div>
+            <div>{{shipment.forwarder.name}}</div>
+            <div>{{shipment.forwarder.addressLine1}}</div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="label">SHIPPING DETAILS</div>
+        <div class="row">
+            <div class="col">
+                <span class="label">Carrier:</span> {{shipment.carrierCode}}
+            </div>
+            <div class="col">
+                <span class="label">Service:</span> {{shipment.serviceLevelCode}}
+            </div>
+            <div class="col">
+                <span class="label">Incoterm:</span> {{shipment.incoterm}}
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <table>
+            <thead>
+                <tr>
+                    <th>Marks & Numbers</th>
+                    <th>No. of Pkgs</th>
+                    <th>Description of Commodities</th>
+                    <th>Gross Weight (kg)</th>
+                    <th>Value ({{shipment.currency}})</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>{{shipment.trackingNumber}}</td>
+                    <td>{{shipment.numPackages}}</td>
+                    <td>
+                        {{#each shipment.lineItems}}
+                        <div>- {{this.description}} ({{this.quantity}} {{this.uom}})</div>
+                        {{/each}}
+                    </td>
+                    <td>{{shipment.totalWeightKg}}</td>
+                    <td>{{shipment.totalCustomsValue}}</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="section">
+        <div class="label">EXPORT CONTROL</div>
+        <div>Does this shipment contain dangerous goods?
+            <strong>{{#if shipment.hasDangerousGoods}}YES{{else}}NO{{/if}}</strong>
+        </div>
+        <div>EEI / AES ITN: {{shipment.aesItn}}</div>
+        <div style="margin-top: 5px; font-size: 10px;">
+            I hereby certify that the statements herein contained are true and correct and that I have read and complied
+            with the export regulations.
+            I authorize the forwarder named above to act as forwarding agent for export control and customs purposes.
+        </div>
+    </div>
+
+    <div class="row" style="margin-top: 20px;">
+        <div class="col">
+            <div style="border-top: 1px solid #000; width: 80%; padding-top: 5px;">Shipper's Signature</div>
+        </div>
+        <div class="col">
+            <div style="border-top: 1px solid #000; width: 80%; padding-top: 5px;">Date</div>
+        </div>
+    </div>
+</body>
+
+</html>
