@@ -1,6 +1,6 @@
 # Testing Guide
 
-This document describes how to run and write tests for the Shipping Doc Gen application.
+This document describes how to run and write tests for the FormWaypoint application.
 
 ## Test Stack
 
@@ -123,6 +123,7 @@ test('user can login', async ({ page }) => {
 ## CI/CD Integration
 
 Tests run automatically on:
+
 - Pull requests
 - Pushes to main
 - Pre-deployment

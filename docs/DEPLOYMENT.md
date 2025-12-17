@@ -2,7 +2,7 @@
 
 ## Overview
 
-This guide will help you deploy the Shipping Doc Gen application to Railway in under 10 minutes.
+This guide will help you deploy the FormWaypoint application to Railway in under 10 minutes.
 
 **Cost**: ~$5-10/month (includes free $5 credit)
 
@@ -18,7 +18,7 @@ This guide will help you deploy the Shipping Doc Gen application to Railway in u
 
 1. Go to [railway.app](https://railway.app)
 2. Click **"New Project"** → **"Deploy from GitHub repo"**
-3. Select `JoelA510/Shipping-Doc-Gen`
+3. Select `JoelA510/FormWaypoint`
 4. Railway will detect your services automatically
 
 ### 2. Configure Services
@@ -26,6 +26,7 @@ This guide will help you deploy the Shipping Doc Gen application to Railway in u
 Railway will create services for each Dockerfile. You need to configure:
 
 #### **API Service** (apps/api)
+
 ```bash
 # Environment Variables to set in Railway dashboard:
 PORT=3001
@@ -39,17 +40,20 @@ OCR_ENABLED=true
 ```
 
 #### **Web Service** (apps/web)
+
 ```bash
 # No environment variables needed
 # Railway will auto-assign a public URL
 ```
 
 #### **OCR Service** (services/ocr)
+
 ```bash
 # No special environment variables needed
 ```
 
 #### **Redis Service**
+
 1. Click **"New Service"** → **"Database"** → **"Add Redis"**
 2. Railway provisions this automatically
 3. Reference in API as `${{Redis.RAILWAY_PRIVATE_DOMAIN}}`
@@ -59,11 +63,13 @@ OCR_ENABLED=true
 For services that need public access:
 
 **API Service:**
+
 1. Go to service → Settings → Networking
 2. Click **"Generate Domain"**
 3. Copy the URL (e.g., `api-production-xxxx.up.railway.app`)
 
 **Web Service:**
+
 1. Go to service → Settings → Networking
 2. Click **"Generate Domain"**
 3. This is your app URL!
@@ -71,6 +77,7 @@ For services that need public access:
 ### 4. Update Web Environment
 
 Update the web service to point to your API:
+
 1. Edit API nginx.conf or add env var
 2. Set `VITE_API_URL` to your Railway API domain
 
@@ -159,6 +166,7 @@ VITE_SUPABASE_ANON_KEY=your-anon-key
 ## Monitoring
 
 **Railway Dashboard:**
+
 - View logs: Click service → Logs tab
 - Check metrics: CPU, Memory, Network
 - View deployments: Deployment history
@@ -166,16 +174,19 @@ VITE_SUPABASE_ANON_KEY=your-anon-key
 ## Troubleshooting
 
 ### Service won't start
+
 - Check logs in Railway dashboard
 - Verify environment variables are set
 - Ensure Dockerfile builds successfully
 
 ### Can't connect to Redis
+
 - Verify Redis service is running
 - Check `REDIS_HOST` uses `${{Redis.RAILWAY_PRIVATE_DOMAIN}}`
 - Ensure services are in same project
 
 ### Frontend can't reach API
+
 - Verify API has public domain
 - Update web environment with API URL
 - Check CORS settings in API
@@ -183,6 +194,7 @@ VITE_SUPABASE_ANON_KEY=your-anon-key
 ## Cost Optimization
 
 **Free Tier Usage:**
+
 - $5/month credit covers ~500 hours
 - Optimize by:
   - Reducing replica count
@@ -190,6 +202,7 @@ VITE_SUPABASE_ANON_KEY=your-anon-key
   - Monitoring usage in dashboard
 
 **Estimated Monthly Cost:**
+
 - Hobby plan: $5/month minimum
 - Typical usage: $5-10/month
 - Can set spending limits in settings
@@ -205,6 +218,7 @@ VITE_SUPABASE_ANON_KEY=your-anon-key
 ## Next Steps
 
 After deployment:
+
 1. Test all features in production
 2. Set up monitoring/alerts (Railway webhooks)
 3. Configure backups for Redis data
@@ -213,6 +227,6 @@ After deployment:
 
 ## Support
 
-- Railway Docs: https://docs.railway.app
-- Discord: https://discord.gg/railway
+- Railway Docs: <https://docs.railway.app>
+- Discord: <https://discord.gg/railway>
 - Your deployment is ready! 🚀
