@@ -1,8 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
-const { getCarrierGateway } = require('../services/carriers/carrierGateway');
+const prisma = require('../db');
 const CarrierFactory = require('../gateways/carriers/CarrierFactory');
 const { generateDocument } = require('../services/documents/generator');
 
@@ -69,7 +67,7 @@ router.post('/rates', async (req, res) => {
         // 4. Rate Shop
         const ratesPromises = carrierAccounts.map(async (account) => {
             try {
-                const gateway = await getCarrierGateway(account.id);
+                const gateway = await CarrierFactory.getGateway(account.id);
                 // internal gateways expect (shipment, lineItems)
                 const rates = await gateway.getRates(normalizedShipment, []);
                 return rates.map(r => ({ ...r, carrierAccountId: account.id, provider: account.provider }));
@@ -213,7 +211,7 @@ router.post('/:id/rates', async (req, res) => {
 
         const ratesPromises = carrierAccounts.map(async (account) => {
             try {
-                const gateway = await getCarrierGateway(account.id);
+                const gateway = await CarrierFactory.getGateway(account.id);
                 const rates = await gateway.getRates(shipment, shipment.lineItems);
                 // Tag rates with the account ID so we know which one to book with
                 return rates.map(r => ({ ...r, carrierAccountId: account.id }));
@@ -267,7 +265,7 @@ router.post('/:id/book', async (req, res) => {
             return res.status(403).json({ error: 'Access denied to carrier account' });
         }
 
-        const gateway = await getCarrierGateway(carrierAccountId);
+        const gateway = await CarrierFactory.getGateway(carrierAccountId);
 
         // 1. Book with Carrier
         const bookingResult = await gateway.bookShipment({

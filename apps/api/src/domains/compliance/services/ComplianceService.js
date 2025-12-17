@@ -1,6 +1,5 @@
 const BaseService = require('../../../shared/core/BaseService');
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../../../db');
 const Result = require('../../../shared/core/Result');
 
 // Mock Sanctions List (In Phase 19, this would be an external API or deeper DB)

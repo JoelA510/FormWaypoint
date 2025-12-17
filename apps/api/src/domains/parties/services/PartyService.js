@@ -1,6 +1,5 @@
 const BaseService = require('../../../shared/core/BaseService');
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../../../db');
 const { CreatePartySchema, UpdatePartySchema } = require('../dtos/partyDto');
 
 class PartyService extends BaseService {

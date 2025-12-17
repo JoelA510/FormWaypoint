@@ -1,6 +1,5 @@
 const BaseService = require('../../../shared/core/BaseService');
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../../../db');
 
 class ReportingService extends BaseService {
 
