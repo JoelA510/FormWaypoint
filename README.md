@@ -7,9 +7,11 @@ FormWaypoint is a shipping documentation automation platform that converts diver
 ## Monorepo Layout
 
 - `apps/web` – React 18 + Vite frontend for document upload, review, and export/booking management.
-- `apps/api` – Node.js/Express backend for orchestration, OCR, compliance checks, and ERP integration.
+- `apps/api` – Node.js/Express backend structured with **Domain-Driven Design (DDD)**.
+  - `apps/api/src/domains` - Core business logic (Parties, Products, Shipping, etc).
+  - `apps/api/src/shared` - Common utilities and middleware.
 - `apps/api/prisma` – Database schema and seed data.
-- `docs` – Project documentation and architecture notes.
+- `docs` – Project documentation.
 
 ## Features Implemented
 
