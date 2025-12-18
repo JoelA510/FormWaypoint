@@ -11,6 +11,9 @@ const authRouter = require('./routes/auth');
 const metricsRouter = require('./routes/metrics');
 const filesRouter = require('./routes/files');
 const configRouter = require('./routes/config');
+const carriersRouter = require('./routes/carriers');
+const notificationsRouter = require('./routes/notifications');
+const importRouter = require('./routes/import');
 
 const http = require('http');
 const { initSocket } = require('./services/socket');
@@ -71,9 +74,8 @@ app.use('/notifications', requireAuth, notificationsRouter);
 app.use('/carriers', requireAuth, carriersRouter);
 app.use('/forwarders', requireAuth, require('./domains/freight/routes/freightRoutes'));
 app.use('/erp', requireAuth, require('./domains/erp/routes/erpRoutes'));
-app.use('/compliance', requireAuth, require('./domains/compliance/routes/complianceRoutes'));
+
 app.use('/reports', requireAuth, require('./domains/reporting/routes/reportingRoutes'));
-app.use('/shipment-templates', requireAuth, require('./domains/templates/routes/templateRoutes'));
 app.use('/shipments', requireAuth, require('./domains/shipping/routes/shipmentRoutes'));
 app.use('/import', requireAuth, importRouter);
 app.use('/fleet', requireAuth, require('./routes/fleet'));

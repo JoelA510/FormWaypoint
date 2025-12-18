@@ -1,6 +1,10 @@
 import { useState } from 'react';
 import { api } from '../../services/api';
-import { ShieldCheck, ShieldAlert, Search, AlertOctagon, CheckCircle } from 'lucide-react';
+import { ShieldCheck, Search, AlertOctagon, CheckCircle } from 'lucide-react';
+import Button from '../ui/Button';
+import Card from '../ui/Card';
+import PageHeader from '../ui/PageHeader';
+import Badge from '../ui/Badge';
 
 export default function ComplianceScreeningPage() {
     const [form, setForm] = useState({ name: '', country: '', address: '' });
@@ -23,19 +27,19 @@ export default function ComplianceScreeningPage() {
 
     return (
         <div className="max-w-4xl mx-auto p-6 space-y-8">
-            <header>
-                <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-                    <ShieldCheck className="w-8 h-8 text-indigo-600" />
-                    Denied Party Screening
-                </h1>
-                <p className="text-slate-500 mt-1">
-                    Manually screen entities against global watchlists (OFAC, BIS, etc.) before doing business.
-                </p>
-            </header>
+            <PageHeader
+                title={
+                    <span className="flex items-center gap-2">
+                        <ShieldCheck className="w-8 h-8 text-indigo-600" />
+                        Denied Party Screening
+                    </span>
+                }
+                description="Manually screen entities against global watchlists (OFAC, BIS, etc.) before doing business."
+            />
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 {/* Screening Form */}
-                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 h-fit">
+                <Card className="h-fit">
                     <h2 className="text-lg font-semibold mb-4 text-slate-800">Entity Details</h2>
                     <form onSubmit={handleScreen} className="space-y-4">
                         <div>
@@ -69,15 +73,16 @@ export default function ComplianceScreeningPage() {
                                 placeholder="123 Export Blvd..."
                             />
                         </div>
-                        <button
+                        <Button
                             type="submit"
-                            disabled={loading}
-                            className="btn-primary w-full flex justify-center items-center gap-2 py-3"
+                            loading={loading}
+                            className="w-full flex justify-center items-center gap-2 py-3"
+                            icon={<Search className="w-4 h-4" />}
                         >
-                            {loading ? 'Screening...' : <><Search className="w-4 h-4" /> Screen Entity</>}
-                        </button>
+                            Screen Entity
+                        </Button>
                     </form>
-                </div>
+                </Card>
 
                 {/* Results Panel */}
                 <div>
@@ -89,9 +94,9 @@ export default function ComplianceScreeningPage() {
                     )}
 
                     {result && (
-                        <div className={`rounded-xl shadow-sm border p-6 animate-in fade-in slide-in-from-right-4 ${result.status === 'DENIED'
-                                ? 'bg-red-50 border-red-200'
-                                : 'bg-emerald-50 border-emerald-200'
+                        <Card className={`animate-in fade-in slide-in-from-right-4 ${result.status === 'DENIED'
+                            ? 'bg-red-50 border-red-200'
+                            : 'bg-emerald-50 border-emerald-200'
                             }`}>
                             <div className="flex items-center gap-4 mb-6">
                                 <div className={`p-3 rounded-full ${result.status === 'DENIED' ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'
@@ -117,9 +122,9 @@ export default function ComplianceScreeningPage() {
                                         <div key={i} className="bg-white/60 p-3 rounded-lg border border-red-100/50">
                                             <div className="flex justify-between items-start">
                                                 <span className="font-bold text-red-800">{hit.source}</span>
-                                                <span className="text-xs bg-red-200 text-red-800 px-2 py-0.5 rounded-full font-mono">
+                                                <Badge variant="error" className="font-mono">
                                                     Score: {(hit.score * 100).toFixed(0)}%
-                                                </span>
+                                                </Badge>
                                             </div>
                                             <p className="text-sm text-red-700 mt-1">Reason: {hit.reason}</p>
                                             <p className="text-xs text-red-500 mt-2 font-mono">Entity: {hit.entity}</p>
@@ -141,10 +146,11 @@ export default function ComplianceScreeningPage() {
                                     </ul>
                                 </div>
                             )}
-                        </div>
+                        </Card>
                     )}
                 </div>
             </div>
         </div>
     );
 }
+
