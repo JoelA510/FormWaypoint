@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api } from '../../services/api';
+import { useDebounce } from '../../hooks/useDebounce';
 import { Plus, Search, Edit2, Trash2, MapPin, Phone, Mail } from 'lucide-react';
 import PartyModal from './PartyModal'; // We'll create this next
 
@@ -7,18 +8,19 @@ export default function AddressBookPage() {
     const [parties, setParties] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
+    const debouncedSearchTerm = useDebounce(searchTerm, 500);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedParty, setSelectedParty] = useState(null);
 
     useEffect(() => {
         loadParties();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [searchTerm]);
+    }, [debouncedSearchTerm]);
 
     const loadParties = async () => {
         setIsLoading(true);
         try {
-            const result = await api.getParties({ search: searchTerm });
+            const result = await api.getParties({ search: debouncedSearchTerm });
             setParties(result.data);
         } catch (error) {
             console.error('Failed to load parties:', error);

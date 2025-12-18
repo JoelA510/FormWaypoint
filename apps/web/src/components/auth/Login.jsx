@@ -95,8 +95,17 @@ export default function Login({ onLogin }) {
                                         className="input-field pl-10 py-2.5 transition-all duration-200"
                                         placeholder="Enter your password"
                                         required
+                                        minLength={8}
                                     />
                                     <Lock className="w-5 h-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                </div>
+                                <div className="flex justify-between items-center mt-1">
+                                    <p className="text-xs text-slate-500">Min. 8 characters</p>
+                                    {!isRegistering && (
+                                        <button type="button" className="text-xs font-medium text-primary-600 hover:text-primary-700">
+                                            Forgot password?
+                                        </button>
+                                    )}
                                 </div>
                             </div>
 

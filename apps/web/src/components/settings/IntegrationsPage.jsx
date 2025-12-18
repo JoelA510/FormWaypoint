@@ -11,6 +11,12 @@ export default function IntegrationsPage() {
     });
     const [isSaving, setIsSaving] = useState(false);
     const [message, setMessage] = useState(null);
+    const [showPassword, setShowPassword] = useState(false);
+
+    const handleTest = async () => {
+        // Stub for credential validation
+        setMessage({ type: 'success', text: 'Connection test successful! (Simulated)' });
+    };
 
     const handleSave = async () => {
         setIsSaving(true);
@@ -113,13 +119,22 @@ export default function IntegrationsPage() {
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
-                                <input
-                                    type="password"
-                                    className="input-field"
-                                    value={config.password || ''}
-                                    onChange={e => setConfig({ ...config, password: e.target.value })}
-                                    placeholder="••••••••"
-                                />
+                                <div className="relative">
+                                    <input
+                                        type={showPassword ? "text" : "password"}
+                                        className="input-field pr-10"
+                                        value={config.password || ''}
+                                        onChange={e => setConfig({ ...config, password: e.target.value })}
+                                        placeholder="••••••••"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowPassword(!showPassword)}
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                                    >
+                                        {showPassword ? "Hide" : "Show"}
+                                    </button>
+                                </div>
                             </div>
                         </div>
 
@@ -160,7 +175,7 @@ export default function IntegrationsPage() {
                                 <div className="col-span-1">
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
                                     <input
-                                        type="password"
+                                        type={showPassword ? "text" : "password"}
                                         className="input-field"
                                         value={config.password || ''}
                                         onChange={e => setConfig({ ...config, password: e.target.value })}
@@ -171,7 +186,14 @@ export default function IntegrationsPage() {
                         </div>
                     )}
 
-                    <div className="mt-8 pt-6 border-t border-slate-100 flex justify-end">
+                    <div className="mt-8 pt-6 border-t border-slate-100 flex justify-end gap-3">
+                        <button
+                            type="button"
+                            onClick={handleTest}
+                            className="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50 font-medium"
+                        >
+                            Test Connection
+                        </button>
                         <button
                             onClick={handleSave}
                             disabled={isSaving}

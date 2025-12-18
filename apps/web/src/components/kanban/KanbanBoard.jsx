@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { useNavigate } from 'react-router-dom';
+import { API_URL } from '../../services/api';
 
 // Simple API wrapper (assumed existing or using fetch directly here for brevity)
 const fetchShipments = async () => {
     const token = localStorage.getItem('token');
-    const res = await fetch('http://localhost:3000/shipments?limit=100', {
+    const res = await fetch(`${API_URL}/shipments?limit=100`, {
         headers: { Authorization: `Bearer ${token}` }
     });
     return res.json();
@@ -13,7 +14,7 @@ const fetchShipments = async () => {
 
 const updateShipmentStatus = async (id, status) => {
     const token = localStorage.getItem('token');
-    await fetch(`http://localhost:3000/shipments/${id}`, {
+    await fetch(`${API_URL}/shipments/${id}`, {
         method: 'PUT',
         headers: {
             'Content-Type': 'application/json',
