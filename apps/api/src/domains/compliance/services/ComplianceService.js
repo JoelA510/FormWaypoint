@@ -94,6 +94,43 @@ class ComplianceService extends BaseService {
             return { status, results };
         });
     }
+
+    async screenAdHoc(partyDetails) {
+        return this.execute('screenAdHoc', async () => {
+            const { name, country } = partyDetails;
+
+            // Mock Check
+            const hits = [];
+
+            // 1. Check Name
+            const deniedNames = DENIED_PARTIES;
+            const nameMatch = deniedNames.find(dn => name.toLowerCase().includes(dn.toLowerCase()));
+            if (nameMatch) {
+                hits.push({
+                    source: 'OFAC SDN List',
+                    entity: nameMatch,
+                    score: 0.95,
+                    reason: 'Exact Name Match'
+                });
+            }
+
+            // 2. Check Country
+            if (ITN_REQUIRED_DESTINATIONS.includes(country)) {
+                hits.push({
+                    source: 'EAR Embargoed Destinations',
+                    entity: country,
+                    score: 1.0,
+                    reason: 'Embargoed Country'
+                });
+            }
+
+            return {
+                status: hits.length > 0 ? 'DENIED' : 'CLEAN',
+                hits,
+                screenedAt: new Date()
+            };
+        });
+    }
 }
 
 module.exports = new ComplianceService();

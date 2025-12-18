@@ -21,8 +21,17 @@ router.post('/sanctions/screen', (req, res) => {
         const validated = SanctionsScreenSchema.parse(req.body);
         return handleRequest(res, ComplianceService.screenParties(validated.shipmentId));
     } catch (e) {
+    } catch (e) {
         res.status(400).json({ error: e.errors || e.message });
     }
+});
+
+router.post('/sanctions/ad-hoc', (req, res) => {
+    // Basic body validation inline (or add to DTO later)
+    const { name, country } = req.body;
+    if (!name) return res.status(400).json({ error: 'Name is required' });
+
+    return handleRequest(res, ComplianceService.screenAdHoc({ name, country }));
 });
 
 module.exports = router;
