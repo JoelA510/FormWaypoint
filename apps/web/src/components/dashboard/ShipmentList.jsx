@@ -7,13 +7,19 @@ import HardwareStatus from '../common/HardwareStatus';
 
 // ... existing code ...
 
+import BulkActionToolbar from './BulkActionToolbar';
+
+// ... existing imports ...
+
 export default function ShipmentList() {
     const [shipments, setShipments] = useState([]);
+    const [selectedShipments, setSelectedShipments] = useState([]);
     const [loading, setLoading] = useState(true);
     const [importing, setImporting] = useState(false);
     const [activeTab, setActiveTab] = useState('draft'); // Default to Need Review
     const [searchQuery, setSearchQuery] = useState('');
     const navigate = useNavigate();
+
 
     // ... existing useEffect ...
 
@@ -45,7 +51,31 @@ export default function ShipmentList() {
         );
     });
 
-    // ... existing export/import handlers ...
+    const toggleSelect = (id) => {
+        if (selectedShipments.includes(id)) {
+            setSelectedShipments(selectedShipments.filter(s => s !== id));
+        } else {
+            setSelectedShipments([...selectedShipments, id]);
+        }
+    };
+
+    const handleBulkPrint = () => {
+        alert(`Printing labels for ${selectedShipments.length} shipments...`);
+        setSelectedShipments([]);
+    };
+
+    const handleBulkBook = () => {
+        alert(`Booking ${selectedShipments.length} shipments...`);
+        setSelectedShipments([]);
+    };
+
+    const handleBulkDelete = () => {
+        if (confirm(`Delete ${selectedShipments.length} shipments?`)) {
+            setShipments(shipments.filter(s => !selectedShipments.includes(s.id)));
+            setSelectedShipments([]);
+        }
+    };
+
 
     return (
         <div className="space-y-6">
@@ -120,6 +150,15 @@ export default function ShipmentList() {
                 </div>
             </div>
 
+            {/* Bulk Toolbar */}
+            <BulkActionToolbar
+                count={selectedShipments.length}
+                onClear={() => setSelectedShipments([])}
+                onPrint={handleBulkPrint}
+                onBook={handleBulkBook}
+                onDelete={handleBulkDelete}
+            />
+
             {/* Action Cards List */}
             <div className="space-y-4 min-h-[400px]">
                 {loading && (
@@ -146,15 +185,24 @@ export default function ShipmentList() {
                     const status = shipment.status || 'draft';
                     const config = STATUS_CONFIG[status] || STATUS_CONFIG.draft;
                     const StatusIcon = config.icon;
+                    const isSelected = selectedShipments.includes(shipment.id);
 
                     return (
                         <div
                             key={shipment.id}
-                            className={`group relative bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-200 p-5 border border-slate-200 ${config.border}`}
+                            className={`group relative bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-200 p-5 border ${isSelected ? 'border-primary-500 ring-1 ring-primary-500 bg-primary-50/10' : 'border-slate-200'} ${config.border}`}
                         >
                             <div className="flex items-center justify-between">
-                                {/* Left: Info */}
+                                {/* Left: Info + Checkbox */}
                                 <div className="flex items-start gap-4">
+                                    <div className="flex items-center h-full pt-1">
+                                        <input
+                                            type="checkbox"
+                                            checked={isSelected}
+                                            onChange={() => toggleSelect(shipment.id)}
+                                            className="w-5 h-5 rounded border-slate-300 text-primary-600 focus:ring-primary-200 cursor-pointer"
+                                        />
+                                    </div>
                                     <div className={`mt-1 p-2 rounded-lg ${config.bg} ${config.text}`}>
                                         <StatusIcon className="w-5 h-5" />
                                     </div>
@@ -208,6 +256,7 @@ export default function ShipmentList() {
                     );
                 })}
             </div>
+
         </div>
     );
 }
