@@ -13,6 +13,9 @@ const mockRulesApi = {
 
 export default function RoutingRulesPage() {
     const [isDemoMode, setIsDemoMode] = useState(false);
+    const [rules, setRules] = useState([]);
+    const [isSaving, setIsSaving] = useState(false);
+    const [message, setMessage] = useState(null);
 
     useEffect(() => {
         loadRules();
