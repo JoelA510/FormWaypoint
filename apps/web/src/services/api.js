@@ -314,6 +314,20 @@ export const api = {
         });
     },
 
+    // Generic Methods (Standardizing on these for modern components)
+    get: async (endpoint) => request(endpoint),
+    post: async (endpoint, data) => request(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    }),
+    put: async (endpoint, data) => request(endpoint, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    }),
+    delete: async (endpoint) => request(endpoint, { method: 'DELETE' }),
+
     // Utilities
     request: request
 };
