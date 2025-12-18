@@ -12,9 +12,7 @@ const mockRulesApi = {
 };
 
 export default function RoutingRulesPage() {
-    const [rules, setRules] = useState([]);
-    const [isSaving, setIsSaving] = useState(false);
-    const [message, setMessage] = useState(null);
+    const [isDemoMode, setIsDemoMode] = useState(false);
 
     useEffect(() => {
         loadRules();
@@ -22,25 +20,24 @@ export default function RoutingRulesPage() {
 
     const loadRules = async () => {
         try {
-            // Check if endpoint exists, otherwise fallback to mock for demo
-            try {
-                const data = await api.get('/rules');
-                setRules(data);
-            } catch (apiErr) {
-                console.warn('Rules API not found, using Mock data');
-                // Keep mock data for now if API fails (since backend might not have this route yet)
-                const mock = [
-                    { id: 1, name: 'Heavy Weight LTL', priority: 1, condition: { field: 'weight', op: 'gt', value: 150 }, action: { type: 'SET_CARRIER', value: 'FEDEX_FREIGHT' } },
-                    { id: 2, name: 'High Value Insurance', priority: 2, condition: { field: 'value', op: 'gt', value: 5000 }, action: { type: 'ADD_SERVICE', value: 'INSURANCE' } }
-                ];
-                setRules(mock);
-            }
-        } catch (e) { console.error(e); }
+            const data = await api.get('/rules');
+            setRules(data);
+            setIsDemoMode(false);
+        } catch (apiErr) {
+            console.warn('Rules API not found, falling back to demo mode');
+            setIsDemoMode(true);
+            const mock = [
+                { id: 1, name: 'Heavy Weight LTL', priority: 1, condition: { field: 'weight', op: 'gt', value: 150 }, action: { type: 'SET_CARRIER', value: 'FEDEX_FREIGHT' } },
+                { id: 2, name: 'High Value Insurance', priority: 2, condition: { field: 'value', op: 'gt', value: 5000 }, action: { type: 'ADD_SERVICE', value: 'INSURANCE' } }
+            ];
+            setRules(mock);
+            // Don't show an error message, but indicator is enough
+        }
     };
 
     const addRule = () => {
         setRules([...rules, {
-            id: Date.now(), // temp id
+            id: Date.now(),
             name: 'New Rule',
             priority: rules.length + 1,
             condition: { field: 'weight', op: 'gt', value: 0 },
@@ -77,11 +74,10 @@ export default function RoutingRulesPage() {
             setMessage({ type: 'success', text: 'Rules saved successfully.' });
         } catch (err) {
             console.error(err);
-            // Fallback success for demo if 404
-            if (err.response && err.response.status === 404) {
-                setMessage({ type: 'success', text: 'Rules saved (Mock Mode - API missing).' });
+            if (isDemoMode) {
+                setMessage({ type: 'success', text: 'Rules saved locally (Demo Mode).' });
             } else {
-                setMessage({ type: 'error', text: 'Failed to save rules.' });
+                setMessage({ type: 'error', text: 'Failed to save rules. ' + (err.message || 'Unknown error') });
             }
         } finally {
             setIsSaving(false);
@@ -92,10 +88,13 @@ export default function RoutingRulesPage() {
         <div className="max-w-5xl mx-auto p-6">
             <header className="flex justify-between items-center mb-8">
                 <div>
-                    <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-3">
-                        <Play className="w-8 h-8 text-indigo-600" />
-                        Routing Rules Engine
-                    </h1>
+                    <div className="flex items-center gap-3">
+                        <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-3">
+                            <Play className="w-8 h-8 text-indigo-600" />
+                            Routing Rules Engine
+                        </h1>
+                        {isDemoMode && <span className="bg-amber-100 text-amber-800 text-xs px-2 py-1 rounded-full font-medium">Demo Mode</span>}
+                    </div>
                     <p className="text-slate-500 mt-2">Define "If/Then" logic to automate carrier selection and shipping options.</p>
                 </div>
                 <button

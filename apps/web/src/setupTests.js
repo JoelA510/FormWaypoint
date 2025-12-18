@@ -1,7 +1,9 @@
 import '@testing-library/jest-dom';
 
+const MOCK_API_URL = 'http://localhost:3000';
+
 if (!import.meta.env.VITE_SUPABASE_URL) {
-  import.meta.env.VITE_SUPABASE_URL = 'http://localhost';
+  import.meta.env.VITE_SUPABASE_URL = MOCK_API_URL;
 }
 
 if (!import.meta.env.VITE_SUPABASE_ANON_KEY) {
