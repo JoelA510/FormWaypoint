@@ -1,6 +1,6 @@
 import { BarChart3, TrendingUp, TrendingDown, Minus, ArrowRight, ShieldCheck, Clock, DollarSign } from 'lucide-react';
 
-export default function CarrierScorecard({ data = [] }) {
+export default function CarrierScorecard({ data = [], dateRangeLabel = 'Last 30d' }) {
     if (!data || data.length === 0) return null;
 
     // Helper to determine badge color based on score
@@ -58,7 +58,7 @@ export default function CarrierScorecard({ data = [] }) {
                                     {carrier.trend === 'up' && <TrendingUp className="w-3 h-3 text-emerald-500" />}
                                     {carrier.trend === 'down' && <TrendingDown className="w-3 h-3 text-red-500" />}
                                     {carrier.trend === 'flat' && <Minus className="w-3 h-3 text-slate-400" />}
-                                    Last 30d
+                                    {dateRangeLabel}
                                 </span>
                             </div>
                         </div>

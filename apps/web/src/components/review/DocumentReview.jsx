@@ -321,12 +321,7 @@ export default function DocumentReview({ document, onBack, user, onGenerate, onS
                                 <Download className="w-4 h-4" />
                                 {isExporting ? 'Generating...' : 'Generate PDF'}
                             </button>
-                            <button
-                                onClick={() => setIsEditing(false)}
-                                className="btn-secondary flex items-center gap-2"
-                            >
-                                <X className="w-4 h-4" /> Stop Editing
-                            </button>
+
                             <button
                                 onClick={handleSave}
                                 disabled={isSaving}
@@ -334,6 +329,18 @@ export default function DocumentReview({ document, onBack, user, onGenerate, onS
                             >
                                 <Save className="w-4 h-4" />
                                 {isSaving ? 'Saving...' : 'Save Changes'}
+                            </button>
+                            <div className="h-6 w-px bg-slate-200 mx-1"></div>
+                            <button
+                                onClick={() => {
+                                    if (confirm('Discard unsaved changes?')) {
+                                        setDoc(document); // Revert to original prop
+                                        setIsEditing(false);
+                                    }
+                                }}
+                                className="text-slate-500 hover:text-red-600 text-sm font-medium px-2"
+                            >
+                                Discard
                             </button>
                         </>
                     ) : (

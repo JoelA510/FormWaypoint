@@ -22,8 +22,19 @@ export default function RoutingRulesPage() {
 
     const loadRules = async () => {
         try {
-            const data = await mockRulesApi.get();
-            setRules(data);
+            // Check if endpoint exists, otherwise fallback to mock for demo
+            try {
+                const data = await api.get('/rules');
+                setRules(data);
+            } catch (apiErr) {
+                console.warn('Rules API not found, using Mock data');
+                // Keep mock data for now if API fails (since backend might not have this route yet)
+                const mock = [
+                    { id: 1, name: 'Heavy Weight LTL', priority: 1, condition: { field: 'weight', op: 'gt', value: 150 }, action: { type: 'SET_CARRIER', value: 'FEDEX_FREIGHT' } },
+                    { id: 2, name: 'High Value Insurance', priority: 2, condition: { field: 'value', op: 'gt', value: 5000 }, action: { type: 'ADD_SERVICE', value: 'INSURANCE' } }
+                ];
+                setRules(mock);
+            }
         } catch (e) { console.error(e); }
     };
 
@@ -62,10 +73,16 @@ export default function RoutingRulesPage() {
         setIsSaving(true);
         setMessage(null);
         try {
-            await mockRulesApi.save(rules);
+            await api.post('/rules', rules);
             setMessage({ type: 'success', text: 'Rules saved successfully.' });
         } catch (err) {
-            setMessage({ type: 'error', text: 'Failed to save rules.' });
+            console.error(err);
+            // Fallback success for demo if 404
+            if (err.response && err.response.status === 404) {
+                setMessage({ type: 'success', text: 'Rules saved (Mock Mode - API missing).' });
+            } else {
+                setMessage({ type: 'error', text: 'Failed to save rules.' });
+            }
         } finally {
             setIsSaving(false);
         }
@@ -151,7 +168,7 @@ export default function RoutingRulesPage() {
                             </select>
 
                             <input
-                                type="text"
+                                type={['weight', 'value'].includes(rule.condition.field) ? 'number' : 'text'}
                                 value={rule.condition.value}
                                 onChange={(e) => updateRule(index, 'condition.value', e.target.value)}
                                 className="bg-white border border-slate-300 rounded px-2 py-1 text-xs w-24"

@@ -16,10 +16,14 @@ export default function IntegrationsPage() {
         setIsSaving(true);
         setMessage(null);
         try {
-            // Mock API call to save config
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            // Check if passwords are provided, otherwise don't send them (to avoid overwriting with empty)
+            const payload = { ...config };
+            if (!payload.password) delete payload.password;
+
+            await api.post('/erp/configs', payload);
             setMessage({ type: 'success', text: 'Integration settings saved successfully.' });
         } catch (err) {
+            console.error(err);
             setMessage({ type: 'error', text: 'Failed to save settings.' });
         } finally {
             setIsSaving(false);
@@ -97,17 +101,28 @@ export default function IntegrationsPage() {
                                     placeholder="https://jde-ais.example.com"
                                 />
                             </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Username</label>
-                                    <input type="text" className="input-field" placeholder="JDE User" />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
-                                    <input type="password" className="input-field" placeholder="••••••••" />
-                                </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Username</label>
+                                <input
+                                    type="text"
+                                    className="input-field"
+                                    value={config.username || ''}
+                                    onChange={e => setConfig({ ...config, username: e.target.value })}
+                                    placeholder="JDE User"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
+                                <input
+                                    type="password"
+                                    className="input-field"
+                                    value={config.password || ''}
+                                    onChange={e => setConfig({ ...config, password: e.target.value })}
+                                    placeholder="••••••••"
+                                />
                             </div>
                         </div>
+
                     )}
 
                     {config.activeAdapter === 'SAP' && (
@@ -134,11 +149,23 @@ export default function IntegrationsPage() {
                                 </div>
                                 <div className="col-span-1">
                                     <label className="block text-sm font-medium text-slate-700 mb-1">User</label>
-                                    <input type="text" className="input-field" placeholder="SAP User" />
+                                    <input
+                                        type="text"
+                                        className="input-field"
+                                        value={config.username || ''}
+                                        onChange={e => setConfig({ ...config, username: e.target.value })}
+                                        placeholder="SAP User"
+                                    />
                                 </div>
                                 <div className="col-span-1">
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
-                                    <input type="password" className="input-field" placeholder="••••••••" />
+                                    <input
+                                        type="password"
+                                        className="input-field"
+                                        value={config.password || ''}
+                                        onChange={e => setConfig({ ...config, password: e.target.value })}
+                                        placeholder="••••••••"
+                                    />
                                 </div>
                             </div>
                         </div>
@@ -165,6 +192,6 @@ export default function IntegrationsPage() {
                     </div>
                 </div>
             </div>
-        </div>
+        </div >
     );
 }

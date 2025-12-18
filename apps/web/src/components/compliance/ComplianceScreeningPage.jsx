@@ -11,15 +11,19 @@ export default function ComplianceScreeningPage() {
     const [result, setResult] = useState(null);
     const [loading, setLoading] = useState(false);
 
+    const [error, setError] = useState(null);
+
     const handleScreen = async (e) => {
         e.preventDefault();
         setLoading(true);
         setResult(null);
+        setError(null);
         try {
             const data = await api.post('/compliance/sanctions/ad-hoc', form);
             setResult(data);
         } catch (err) {
             console.error(err);
+            setError('Screening service unavailable. Please try again later.');
         } finally {
             setLoading(false);
         }
@@ -90,6 +94,16 @@ export default function ComplianceScreeningPage() {
                         <div className="bg-slate-50 border border-dashed border-slate-300 rounded-xl h-full min-h-[300px] flex flex-col items-center justify-center text-slate-400 p-8 text-center">
                             <ShieldCheck className="w-12 h-12 mb-3 opacity-20" />
                             <p>Enter entity details to check against consolidated denied party lists.</p>
+                        </div>
+                    )}
+
+                    {error && (
+                        <div className="p-4 bg-red-50 text-red-700 border border-red-200 rounded-lg flex items-center gap-3">
+                            <AlertOctagon className="w-6 h-6 shrink-0" />
+                            <div>
+                                <h3 className="font-bold">System Error</h3>
+                                <p className="text-sm">{error}</p>
+                            </div>
                         </div>
                     )}
 

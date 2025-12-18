@@ -25,7 +25,71 @@ export default function ShipmentList() {
     const navigate = useNavigate();
 
 
-    // ... existing useEffect ...
+
+    const STATUS_CONFIG = {
+        draft: { icon: FileJson, bg: 'bg-slate-100', text: 'text-slate-600', border: 'border-slate-200', action: 'Review' },
+        ready: { icon: Package, bg: 'bg-blue-100', text: 'text-blue-600', border: 'border-l-4 border-l-blue-500', action: 'Book' },
+        booked: { icon: CheckCircle, bg: 'bg-emerald-100', text: 'text-emerald-600', border: 'border-l-4 border-l-emerald-500', action: 'Track' },
+        exception: { icon: AlertTriangle, bg: 'bg-red-100', text: 'text-red-600', border: 'border-l-4 border-l-red-500', action: 'Resolve' }
+    };
+
+    const TABS = [
+        { label: 'Need Review', value: 'draft', icon: FileJson },
+        { label: 'Ready to Book', value: 'ready', icon: Package },
+        { label: 'Booked', value: 'booked', icon: Truck },
+        { label: 'Exceptions', value: 'exception', icon: AlertCircle }
+    ];
+
+    useEffect(() => {
+        fetchShipments();
+    }, []);
+
+    // Clear selection when changing tabs to prevent accidental bulk actions
+    useEffect(() => {
+        setSelectedShipments([]);
+    }, [activeTab]);
+
+    const fetchShipments = async () => {
+        setLoading(true);
+        try {
+            const data = await api.get('/shipments');
+            setShipments(data);
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleImportFile = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        setImporting(true);
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+            await api.post('/import/json', formData);
+            await fetchShipments(); // Refresh list
+        } catch (err) {
+            console.error('Import failed', err);
+            alert('Import failed');
+        } finally {
+            setImporting(false);
+            e.target.value = null; // Reset input
+        }
+    };
+
+    const handleExport = (id) => {
+        const s = shipments.find(item => item.id === id);
+        if (!s) return;
+        const blob = new Blob([JSON.stringify(s, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `shipment-${id}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
 
     const handleScan = (code) => {
         console.log('Scanned:', code);

@@ -11,13 +11,10 @@ L.Icon.Default.mergeOptions({
     shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
+import { api } from '../../services/api';
+
 const fetchShipments = async () => {
-    const token = localStorage.getItem('token');
-    // Using existing endpoint
-    const res = await fetch('http://localhost:3000/shipments?limit=100', {
-        headers: { Authorization: `Bearer ${token}` }
-    });
-    return res.json();
+    return api.get('/shipments?limit=100');
 };
 
 const SupplyChainMap = () => {
