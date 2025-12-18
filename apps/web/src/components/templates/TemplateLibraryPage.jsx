@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api } from '../../services/api';
-import { Plus, Search, Layers, Trash2 } from 'lucide-react';
+import { Plus, Search, Layers, Trash2, Sparkles, Star } from 'lucide-react';
 
 
 export default function TemplateLibraryPage() {
@@ -34,7 +34,7 @@ export default function TemplateLibraryPage() {
         alert("To create a template, please go to an existing Shipment and click 'Save as Template'.");
     };
 
-    const handleDelete = async () => {
+    const handleDelete = async (id) => {
         if (!window.confirm('Delete this template?')) return;
         try {
             // Need API method for deleting shipment template
@@ -49,6 +49,58 @@ export default function TemplateLibraryPage() {
             alert('Failed to delete template: ' + error.message);
         }
     };
+
+    const recommendedTemplates = templates.filter(t =>
+        (t.name.toLowerCase().includes('standard') || t.name.toLowerCase().includes('express'))
+    );
+
+    const otherTemplates = templates.filter(t => !recommendedTemplates.includes(t));
+
+    const TemplateCard = ({ template, isRecommended }) => (
+        <div className={`bg-white rounded-lg border shadow-sm hover:shadow-md transition-all p-5 relative
+            ${isRecommended ? 'border-indigo-200 ring-1 ring-indigo-100' : 'border-slate-200'}
+        `}>
+            {isRecommended && (
+                <div className="absolute -top-3 left-4 bg-indigo-100 text-indigo-700 text-xs font-semibold px-2 py-1 rounded-full flex items-center gap-1 border border-indigo-200">
+                    <Sparkles className="w-3 h-3" /> Recommended
+                </div>
+            )}
+            <div className="flex justify-between items-start mb-4 mt-1">
+                <div>
+                    <h3 className="font-semibold text-lg text-slate-900">{template.name}</h3>
+                    <div className="text-sm text-slate-500">{template.description || 'No description'}</div>
+                </div>
+                <div className="flex gap-2">
+                    <button onClick={() => handleDelete(template.id)} className="p-1 text-slate-400 hover:text-red-600 rounded">
+                        <Trash2 className="w-4 h-4" />
+                    </button>
+                </div>
+            </div>
+
+            <div className="space-y-2 text-sm text-slate-600 border-t border-slate-100 pt-3">
+                <div className="flex justify-between">
+                    <span className="text-slate-500">Shipper:</span>
+                    <span className="font-medium">{template.shipperId ? 'Set' : '-'}</span>
+                </div>
+                <div className="flex justify-between">
+                    <span className="text-slate-500">Consignee:</span>
+                    <span className="font-medium">{template.consigneeId ? 'Set' : '-'}</span>
+                </div>
+                <div className="flex justify-between">
+                    <span className="text-slate-500">Lines:</span>
+                    <span className="font-medium">
+                        {template.lineItems ? JSON.parse(template.lineItems).length : 0}
+                    </span>
+                </div>
+            </div>
+
+            <button className={`w-full mt-4 btn-secondary 
+                ${isRecommended ? 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100' : 'text-slate-600 hover:bg-slate-50'}
+            `}>
+                Use Template
+            </button>
+        </div>
+    );
 
     return (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -86,49 +138,26 @@ export default function TemplateLibraryPage() {
                     <p>No templates found.</p>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {templates.map(template => (
-                        <div key={template.id} className="bg-white rounded-lg border border-slate-200 shadow-sm hover:shadow-md transition-shadow p-5">
-                            <div className="flex justify-between items-start mb-4">
-                                <div>
-                                    <h3 className="font-semibold text-lg text-slate-900">{template.name}</h3>
-                                    <div className="text-sm text-slate-500">{template.description || 'No description'}</div>
-                                </div>
-                                <div className="flex gap-2">
-                                    {/* <button className="p-1 text-slate-400 hover:text-indigo-600 rounded">
-                                        <Edit2 className="w-4 h-4" />
-                                    </button> */}
-                                    <button onClick={() => handleDelete(template.id)} className="p-1 text-slate-400 hover:text-red-600 rounded">
-                                        <Trash2 className="w-4 h-4" />
-                                    </button>
-                                </div>
+                <div className="space-y-8">
+                    {/* Recommended Section (if any) */}
+                    {recommendedTemplates.length > 0 && !searchTerm && (
+                        <div className="space-y-4">
+                            <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+                                <Sparkles className="w-5 h-5 text-indigo-500" /> Recommended based on your activity
+                            </h2>
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                {recommendedTemplates.map(t => <TemplateCard key={t.id} template={t} isRecommended={true} />)}
                             </div>
-
-                            <div className="space-y-2 text-sm text-slate-600 border-t border-slate-100 pt-3">
-                                <div className="flex justify-between">
-                                    <span className="text-slate-500">Shipper:</span>
-                                    {/* We only have IDs, need to lookup or if template has snapshot? 
-                                        Schema says IDs. Ideally we expand or fetch party. 
-                                        For now just show ID or "Set" */}
-                                    <span className="font-medium">{template.shipperId ? 'Set' : '-'}</span>
-                                </div>
-                                <div className="flex justify-between">
-                                    <span className="text-slate-500">Consignee:</span>
-                                    <span className="font-medium">{template.consigneeId ? 'Set' : '-'}</span>
-                                </div>
-                                <div className="flex justify-between">
-                                    <span className="text-slate-500">Lines:</span>
-                                    <span className="font-medium">
-                                        {template.lineItems ? JSON.parse(template.lineItems).length : 0}
-                                    </span>
-                                </div>
-                            </div>
-
-                            <button className="w-full mt-4 btn-secondary text-indigo-600 border-indigo-200 hover:bg-indigo-50">
-                                Use Template
-                            </button>
                         </div>
-                    ))}
+                    )}
+
+                    {/* All Templates */}
+                    <div className="space-y-4">
+                        {(recommendedTemplates.length > 0 && !searchTerm) && <h2 className="text-lg font-semibold text-slate-800">All Templates</h2>}
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {(searchTerm ? templates : otherTemplates).map(t => <TemplateCard key={t.id} template={t} />)}
+                        </div>
+                    </div>
                 </div>
             )}
         </div>
