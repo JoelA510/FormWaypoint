@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Truck, Clock, CheckCircle, AlertTriangle } from 'lucide-react';
 import { api } from '../../services/api';
 
-export default function CarrierRatePanel({ shipmentId, shipmentStatus, onBook }) {
+export default function CarrierRatePanel({ shipmentId, shipmentStatus, onBook, onRateSelect }) {
     const [rates, setRates] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState(null);
@@ -15,6 +15,7 @@ export default function CarrierRatePanel({ shipmentId, shipmentStatus, onBook })
         try {
             const data = await api.getRates(shipmentId);
             setRates(data);
+            if (onRateSelect) onRateSelect(null); // Reset parent selection on new fetch
             if (data.length === 0) {
                 setError('No rates returned. Please check address and weights.');
             }
