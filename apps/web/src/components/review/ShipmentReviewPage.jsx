@@ -10,7 +10,45 @@ export default function ShipmentReviewPage({ user }) {
     const [document, setDocument] = useState(null);
     const [viewMode, setViewMode] = useState('internal'); // 'internal' | 'client'
 
-    // ... existing code ...
+
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const load = async () => {
+            try {
+                const data = await api.get(`/shipments/${id}`);
+                setDocument(data);
+            } catch (err) {
+                console.error(err);
+                alert('Failed to load shipment');
+                navigate('/import');
+            } finally {
+                setLoading(false);
+            }
+        };
+        load();
+    }, [id, navigate]);
+
+    const updateStatus = async (status) => {
+        const oldStatus = document.status;
+        // Optimistic update
+        setDocument(prev => ({ ...prev, status }));
+        try {
+            await api.updateShipmentStatus(id, status);
+        } catch (err) {
+            console.error(err);
+            alert('Failed to update status');
+            setDocument(prev => ({ ...prev, status: oldStatus }));
+        }
+    };
+
+    const handleSave = async (updatedDoc) => {
+        await api.updateShipment(id, updatedDoc);
+        setDocument(updatedDoc);
+    };
+
+    if (loading || !document) return <div className="flex h-screen items-center justify-center text-slate-400">Loading...</div>;
+
 
     return (
         <div className="flex flex-col h-screen">

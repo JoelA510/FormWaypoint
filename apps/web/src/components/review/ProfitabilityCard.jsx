@@ -10,7 +10,7 @@ export default function ProfitabilityCard({ cost = 0, revenue = 0, currency = 'U
     useEffect(() => {
         const r = parseFloat(localRevenue) || 0;
         const c = parseFloat(cost) || 0;
-        const m = r - c;
+        const m = Number((r - c).toFixed(2));
         const mp = r > 0 ? (m / r) * 100 : 0;
 
         setMargin(m);
