@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { api } from '../../services/api';
 import { BarChart3, FileText, AlertTriangle, ShieldCheck, Download, Calendar } from 'lucide-react';
+import CarrierScorecard from './CarrierScorecard';
 
 export default function ReportsPage() {
     const [dateRange, setDateRange] = useState('30'); // '7', '30', '90'
@@ -8,6 +9,7 @@ export default function ReportsPage() {
     const [shipmentStats, setShipmentStats] = useState(null);
     const [validationStats, setValidationStats] = useState(null);
     const [overrides, setOverrides] = useState([]);
+    const [scorecardData, setScorecardData] = useState([]);
 
     const [previousStats, setPreviousStats] = useState(null);
 
@@ -31,17 +33,19 @@ export default function ReportsPage() {
                 prevTo: prevTo.toISOString()
             };
 
-            const [shipments, validation, overridesList, prevShipments] = await Promise.all([
+            const [shipments, validation, overridesList, prevShipments, scorecard] = await Promise.all([
                 api.request(`/reports/shipments-summary?from=${query.from}&to=${query.to}`),
                 api.request(`/reports/validation-summary?from=${query.from}&to=${query.to}`),
                 api.request(`/reports/overrides?from=${query.from}&to=${query.to}`),
-                api.request(`/reports/shipments-summary?from=${query.prevFrom}&to=${query.prevTo}`)
+                api.request(`/reports/shipments-summary?from=${query.prevFrom}&to=${query.prevTo}`),
+                api.request(`/reports/carrier-scorecards?fromDate=${query.from}&toDate=${query.to}`)
             ]);
 
             setShipmentStats(shipments);
             setPreviousStats(prevShipments);
             setValidationStats(validation);
             setOverrides(overridesList);
+            setScorecardData(scorecard);
 
         } catch (err) {
             console.error('Failed to load reports:', err);
@@ -188,6 +192,9 @@ export default function ReportsPage() {
                             </div>
                         </div>
                     </div>
+
+                    {/* Details Scorecards */}
+                    <CarrierScorecard data={scorecardData} />
 
                     {/* Detailed Tables */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
