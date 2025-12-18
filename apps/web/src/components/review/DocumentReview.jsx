@@ -9,6 +9,7 @@ import CarrierRatePanel from './CarrierRatePanel';
 import ForwarderBookingPanel from './ForwarderBookingPanel';
 import AesPanel from './AesPanel';
 import SanctionsPanel from './SanctionsPanel';
+import ProfitabilityCard from './ProfitabilityCard';
 import FeatureGuard from '../common/FeatureGuard';
 
 export default function DocumentReview({ document, onBack, user, onGenerate, onSave: customSave, viewMode = 'internal' }) {
@@ -20,6 +21,21 @@ export default function DocumentReview({ document, onBack, user, onGenerate, onS
     const [newRefType, setNewRefType] = useState('PO');
     const [newRefValue, setNewRefValue] = useState('');
     const [selectedTemplate, setSelectedTemplate] = useState('sli');
+
+    const [selectedRateCost, setSelectedRateCost] = useState(0);
+
+    // Default revenue to the sum of line items value
+    const totalValue = (doc.lines || []).reduce((acc, line) => acc + (parseFloat(line.valueUsd) || 0), 0);
+    const [revenue, setRevenue] = useState(doc.header?.revenue || totalValue);
+
+    // Save revenue to doc header when it changes
+    const handleRevenueChange = (newVal) => {
+        setRevenue(newVal);
+        setDoc(prev => ({
+            ...prev,
+            header: { ...prev.header, revenue: newVal }
+        }));
+    };
 
     const { header, lines, meta } = doc;
     const validationErrors = meta.validation || [];
@@ -533,10 +549,16 @@ export default function DocumentReview({ document, onBack, user, onGenerate, onS
                         {/* Hide Panels in Client View */}
                         {doc.isShipment && viewMode === 'internal' && (
                             <>
+                                <ProfitabilityCard
+                                    cost={selectedRateCost}
+                                    revenue={revenue}
+                                    onRevenueChange={handleRevenueChange}
+                                />
                                 <FeatureGuard featureKey="CARRIER_INTEGRATION">
                                     <CarrierRatePanel
                                         shipmentId={doc.id}
                                         shipmentStatus={doc.status}
+                                        onRateSelect={(rate) => setSelectedRateCost(rate ? rate.totalCharge : 0)}
                                         onBook={(result) => {
                                             setDoc(prev => ({
                                                 ...prev,
