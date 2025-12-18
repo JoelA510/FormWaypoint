@@ -13,7 +13,6 @@ vi.mock('../services/api', () => ({
         setToken: vi.fn(),
         getComments: vi.fn().mockResolvedValue([]),
         addComment: vi.fn(),
-        addComment: vi.fn(),
         getHistory: vi.fn().mockResolvedValue([]),
         request: vi.fn().mockResolvedValue({ CARRIER_INTEGRATION: true, ERP_EXPORT: true, COMPLIANCE_ENHANCED: true }),
         get: vi.fn().mockResolvedValue([]),
@@ -173,7 +172,7 @@ describe('App Integration', () => {
             header: expect.objectContaining({ shipper: expect.objectContaining({ name: 'Updated Shipper' }) })
         })));
 
-        expect(screen.getByText('Document saved successfully')).toBeInTheDocument();
+        expect(screen.getByText('Changes saved successfully')).toBeInTheDocument();
     });
 
     it('allows exporting document', async () => {
@@ -197,9 +196,6 @@ describe('App Integration', () => {
 
         // Wait for review screen
         await waitFor(() => expect(screen.getByText(/Shipment Details/i)).toBeInTheDocument(), { timeout: 15000 });
-
-        // Exit edit mode
-        fireEvent.click(screen.getByText('Stop Editing'));
 
         // Click Export
         fireEvent.click(screen.getByText('Generate PDF'));
