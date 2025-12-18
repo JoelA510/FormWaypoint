@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { api } from '../../services/api';
 import { Loader2, Play, Download, Settings, FileText, RefreshCw, CheckCircle2, XCircle } from 'lucide-react';
+import SyncLogViewer from './SyncLogViewer';
 
 export default function ErpExportDashboard() {
     const [configs, setConfigs] = useState([]);
@@ -242,6 +243,9 @@ export default function ErpExportDashboard() {
                     </tbody>
                 </table>
             </div>
+
+            {/* Transaction Logs */}
+            <SyncLogViewer />
 
             {/* Run Job Modal - Kept mostly same but cleaner */}
             {showRunModal && (

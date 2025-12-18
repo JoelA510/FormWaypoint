@@ -20,6 +20,7 @@ import Login from './components/auth/Login';
 import { api } from './services/api';
 import { FeatureFlagProvider } from './context/FeatureFlagContext';
 import SettingsPage from './components/settings/SettingsPage';
+import IntegrationsPage from './components/settings/IntegrationsPage';
 
 const ProtectedRoute = ({ children, user, loading }) => {
     const location = useLocation();
@@ -287,6 +288,13 @@ function AppContent() {
                     <ProtectedRoute user={user} loading={loading}>
                         <Layout user={user} onLogout={handleLogout}>
                             <SettingsPage />
+                        </Layout>
+                    </ProtectedRoute>
+                } />
+                <Route path="/settings/integrations" element={
+                    <ProtectedRoute user={user} loading={loading}>
+                        <Layout user={user} onLogout={handleLogout}>
+                            <IntegrationsPage />
                         </Layout>
                     </ProtectedRoute>
                 } />
