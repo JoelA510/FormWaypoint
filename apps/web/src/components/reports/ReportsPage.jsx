@@ -9,26 +9,37 @@ export default function ReportsPage() {
     const [validationStats, setValidationStats] = useState(null);
     const [overrides, setOverrides] = useState([]);
 
+    const [previousStats, setPreviousStats] = useState(null);
+
     const loadData = async () => {
         setLoading(true);
         try {
-            // Calculate dates
+            const range = parseInt(dateRange);
             const to = new Date();
             const from = new Date();
-            from.setDate(from.getDate() - parseInt(dateRange));
+            from.setDate(from.getDate() - range);
+
+            // Previous Period
+            const prevTo = new Date(from);
+            const prevFrom = new Date(from);
+            prevFrom.setDate(prevFrom.getDate() - range);
 
             const query = {
                 from: from.toISOString(),
-                to: to.toISOString()
+                to: to.toISOString(),
+                prevFrom: prevFrom.toISOString(),
+                prevTo: prevTo.toISOString()
             };
 
-            const [shipments, validation, overridesList] = await Promise.all([
+            const [shipments, validation, overridesList, prevShipments] = await Promise.all([
                 api.request(`/reports/shipments-summary?from=${query.from}&to=${query.to}`),
                 api.request(`/reports/validation-summary?from=${query.from}&to=${query.to}`),
-                api.request(`/reports/overrides?from=${query.from}&to=${query.to}`)
+                api.request(`/reports/overrides?from=${query.from}&to=${query.to}`),
+                api.request(`/reports/shipments-summary?from=${query.prevFrom}&to=${query.prevTo}`)
             ]);
 
             setShipmentStats(shipments);
+            setPreviousStats(prevShipments);
             setValidationStats(validation);
             setOverrides(overridesList);
 
@@ -44,10 +55,22 @@ export default function ReportsPage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [dateRange]);
 
+    const calculateTrend = (current, previous) => {
+        if (!previous) return { val: 0, text: 'N/A' };
+        if (previous === 0) return { val: 100, text: '+100%' };
+        const diff = current - previous;
+        const pct = Math.round((diff / previous) * 100);
+        return {
+            val: pct,
+            text: `${pct > 0 ? '+' : ''}${pct}%`,
+            isPositive: pct > 0 // context dependent (good for sales, bad for errors)
+        };
+    };
+
     const handleDownload = () => {
         // Simple CSV export of overrides for now
         if (!overrides.length) return;
-
+        // ... (Download logic same as before)
         const headers = ['Shipment ID', 'ERP Order ID', 'Dismissed Codes', 'Updated At'];
         const rows = overrides.map(o => [
             o.shipmentId,
@@ -55,18 +78,25 @@ export default function ReportsPage() {
             (o.dismissedCodes || []).join('; '),
             new Date(o.updatedAt).toLocaleDateString()
         ]);
-
-        const csvContent = [
-            headers.join(','),
-            ...rows.map(row => row.map(cell => `"${cell || ''}"`).join(','))
-        ].join('\n');
-
+        const csvContent = [headers.join(','), ...rows.map(row => row.map(cell => `"${cell || ''}"`).join(','))].join('\n');
         const blob = new Blob([csvContent], { type: 'text/csv' });
-        const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url;
-        a.download = `overrides-report-${new Date().toISOString().split('T')[0]}.csv`;
+        a.href = window.URL.createObjectURL(blob);
+        a.download = `overrides-report.csv`;
         a.click();
+    };
+
+    const renderTrend = (current, previous, inverse = false) => {
+        const trend = calculateTrend(current, previous);
+        // If inverse is true, "Positive" (increase) is bad (red)
+        const isGood = inverse ? trend.val <= 0 : trend.val >= 0;
+        const color = isGood ? 'text-emerald-600 bg-emerald-50' : 'text-red-600 bg-red-50';
+
+        return (
+            <span className={`text-xs ml-2 px-1.5 py-0.5 rounded font-medium ${color}`}>
+                {trend.text}
+            </span>
+        );
     };
 
     return (
@@ -76,7 +106,7 @@ export default function ReportsPage() {
                     <h1 className="text-2xl font-bold text-slate-900">Reports & Analytics</h1>
                     <p className="text-slate-500">Operational visibility and compliance health</p>
                 </div>
-
+                {/* ... Controls (Same as before) ... */}
                 <div className="flex items-center gap-4">
                     <select
                         value={dateRange}
@@ -95,7 +125,6 @@ export default function ReportsPage() {
                     >
                         <Calendar className="w-5 h-5" />
                     </button>
-
                     <button
                         onClick={handleDownload}
                         className="btn-secondary flex items-center gap-2"
@@ -108,7 +137,7 @@ export default function ReportsPage() {
 
             {loading ? (
                 <div className="flex justify-center p-12">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+                    <Loader className="w-8 h-8 animate-spin text-primary-600" />
                 </div>
             ) : (
                 <>
@@ -120,7 +149,10 @@ export default function ReportsPage() {
                             </div>
                             <div>
                                 <p className="text-sm text-slate-500">Total Shipments</p>
-                                <p className="text-2xl font-bold text-slate-900">{shipmentStats?.total || 0}</p>
+                                <div className="flex items-baseline">
+                                    <p className="text-2xl font-bold text-slate-900">{shipmentStats?.total || 0}</p>
+                                    {renderTrend(shipmentStats?.total, previousStats?.total)}
+                                </div>
                             </div>
                         </div>
 
@@ -129,7 +161,7 @@ export default function ReportsPage() {
                                 <FileText className="w-6 h-6" />
                             </div>
                             <div>
-                                <p className="text-sm text-slate-500">Doc Types Generated</p>
+                                <p className="text-sm text-slate-500">Doc Types</p>
                                 <p className="text-2xl font-bold text-slate-900">{shipmentStats?.byDocType?.length || 0}</p>
                             </div>
                         </div>

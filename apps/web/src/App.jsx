@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate, Link } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { LogOut, Ship, Users, FileSpreadsheet, Package, BarChart3 } from 'lucide-react';
+import { LogOut, Ship, Users, FileSpreadsheet, Package, BarChart3, Map as MapIcon } from 'lucide-react';
 import ReportsPage from './components/reports/ReportsPage';
 import KanbanBoard from './components/kanban/KanbanBoard';
-import FleetMap from './components/map/FleetMap'; // Phase 2b
+import SupplyChainMap from './components/map/SupplyChainMap'; // Phase 3
 
 import DocumentReviewPage from './components/review/DocumentReviewPage';
 import ShipmentReviewPage from './components/review/ShipmentReviewPage';
@@ -49,32 +49,26 @@ const Layout = ({ user, onLogout, children }) => {
                             <h1 className="text-xl font-bold text-slate-900 tracking-tight">FormWaypoint</h1>
                         </Link>
 
-                        <nav className="hidden md:flex items-center space-x-4">
+                        <nav className="hidden md:flex items-center space-x-1">
                             <Link to="/" className="text-slate-600 hover:text-primary-600 font-medium px-3 py-2 rounded-md hover:bg-slate-50">Dashboard</Link>
                             <Link to="/import" className="text-slate-600 hover:text-primary-600 font-medium px-3 py-2 rounded-md hover:bg-slate-50 flex items-center gap-2">
                                 <FileSpreadsheet className="w-4 h-4" />
                                 Import
                             </Link>
-                            <Link to="/parties" className="text-slate-600 hover:text-primary-600 font-medium px-3 py-2 rounded-md hover:bg-slate-50 flex items-center gap-2">
-                                <Users className="w-4 h-4" />
-                                Address Book
-                            </Link>
-                            <Link to="/items" className="text-slate-600 hover:text-primary-600 font-medium px-3 py-2 rounded-md hover:bg-slate-50 flex items-center gap-2">
-                                <Package className="w-4 h-4" />
-                                Products
-                            </Link>
-                            <Link to="/templates" className="text-slate-600 hover:text-primary-600 font-medium px-3 py-2 rounded-md hover:bg-slate-50 flex items-center gap-2">
-                                <FileSpreadsheet className="w-4 h-4" />
-                                Templates
-                            </Link>
-                            <Link to="/reports" className="text-slate-600 hover:text-primary-600 font-medium px-3 py-2 rounded-md hover:bg-slate-50 flex items-center gap-2">
+                            <Link to="/kanban" className="text-slate-600 hover:text-primary-600 font-medium px-3 py-2 rounded-md hover:bg-slate-50 flex items-center gap-2">
                                 <BarChart3 className="w-4 h-4" />
-                                Reports
+                                Kanban
                             </Link>
-                            <Link to="/settings" className="text-slate-600 hover:text-primary-600 font-medium px-3 py-2 rounded-md hover:bg-slate-50 flex items-center gap-2">
-                                {/* Settings Icon placeholder or reuse generic */}
-                                Settings
+                            <Link to="/map" className="text-slate-600 hover:text-primary-600 font-medium px-3 py-2 rounded-md hover:bg-slate-50 flex items-center gap-2">
+                                <MapIcon className="w-4 h-4" />
+                                Map
                             </Link>
+                            <div className="h-6 w-px bg-slate-200 mx-2"></div>
+                            <Link to="/parties" className="text-slate-600 hover:text-primary-600 font-medium px-3 py-2 rounded-md hover:bg-slate-50"> Parties </Link>
+                            <Link to="/items" className="text-slate-600 hover:text-primary-600 font-medium px-3 py-2 rounded-md hover:bg-slate-50"> Products </Link>
+                            <Link to="/templates" className="text-slate-600 hover:text-primary-600 font-medium px-3 py-2 rounded-md hover:bg-slate-50"> Templates </Link>
+                            <Link to="/reports" className="text-slate-600 hover:text-primary-600 font-medium px-3 py-2 rounded-md hover:bg-slate-50"> Reports </Link>
+                            <Link to="/settings" className="text-slate-600 hover:text-primary-600 font-medium px-3 py-2 rounded-md hover:bg-slate-50"> Settings </Link>
                         </nav>
                     </div>
 
@@ -333,7 +327,7 @@ function AppContent() {
                                 exit={{ opacity: 0 }}
                                 transition={{ duration: 0.5 }}
                             >
-                                <FleetMap />
+                                <SupplyChainMap />
                             </motion.div>
                         </Layout>
                     </ProtectedRoute>

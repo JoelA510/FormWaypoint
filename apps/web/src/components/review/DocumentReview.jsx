@@ -133,6 +133,7 @@ export default function DocumentReview({ document, onBack, user, onGenerate, onS
     // Address Block Component
     const AddressBlock = ({ title, data, isEditing, onChange }) => {
         const [isSelectorOpen, setIsSelectorOpen] = useState(false);
+        const [isExpanded, setIsExpanded] = useState(false);
 
         const handleSelectParty = (party) => {
             onChange('name', party.name);
@@ -144,8 +145,10 @@ export default function DocumentReview({ document, onBack, user, onGenerate, onS
             onChange('country', party.countryCode);
             onChange('partyId', party.id);
             setIsSelectorOpen(false);
+            setIsExpanded(false); // Collapse after selection
         };
 
+        // If no data object, simple implementation
         if (!data || typeof data !== 'object') {
             return (
                 <div className="relative">
@@ -174,34 +177,87 @@ export default function DocumentReview({ document, onBack, user, onGenerate, onS
             );
         }
 
+        const isValidAddress = data.name && data.city && data.country;
+        // In "Global Edit Mode", we still want to collapse the valid addresses to reduce noise
+        // Show expanded if it's invalid OR if explicitly expanded
+        const showForm = isEditing && (isExpanded || !isValidAddress);
+
         return (
-            <div className="space-y-3 border border-slate-200 p-4 rounded-lg bg-slate-50/50 relative">
-                <div className="flex justify-between items-center">
-                    <h4 className="font-medium text-slate-700 text-sm flex items-center gap-2">
+            <div className={`space-y-3 border transition-colors rounded-lg relative ${showForm ? 'p-4 border-slate-200 bg-slate-50' : 'p-3 border-transparent hover:bg-slate-50'}`}>
+                <div className="flex justify-between items-start">
+                    <h4 className="font-medium text-slate-700 text-sm flex items-center gap-2 mb-1">
                         {title}
+                        {isEditing && !showForm && (
+                            <button
+                                onClick={() => setIsExpanded(true)}
+                                className="text-xs text-primary-600 hover:text-primary-700 font-normal ml-2 flex items-center gap-1"
+                            >
+                                <Edit2 className="w-3 h-3" /> Edit
+                            </button>
+                        )}
                     </h4>
-                    {isEditing && (
-                        <button
-                            onClick={() => setIsSelectorOpen(true)}
-                            className="text-xs flex items-center gap-1 text-primary-600 hover:text-primary-800 hover:bg-primary-50 px-2 py-1 rounded transition-colors"
-                        >
-                            <BookmarkPlus className="w-3 h-3" /> Address Book
-                        </button>
+
+                    {!showForm && isEditing && (
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => setIsSelectorOpen(true)}
+                                className="text-xs text-slate-500 hover:text-primary-600 underline"
+                            >
+                                Change
+                            </button>
+                        </div>
                     )}
                 </div>
-                <div className="space-y-3">
-                    <EditableField label="Name" value={data.name} isEditing={isEditing} onChange={(v) => onChange('name', v)} />
-                    <EditableField label="Address" value={data.address} isEditing={isEditing} onChange={(v) => onChange('address', v)} />
-                    <EditableField label="Address 2" value={data.address2} isEditing={isEditing} onChange={(v) => onChange('address2', v)} />
-                    <div className="grid grid-cols-2 gap-3">
-                        <EditableField label="City" value={data.city} isEditing={isEditing} onChange={(v) => onChange('city', v)} />
-                        <EditableField label="State" value={data.state} isEditing={isEditing} onChange={(v) => onChange('state', v)} />
+
+                {/* Summary Card View */}
+                {!showForm && (
+                    <div className="text-sm text-slate-900">
+                        <div className="font-medium">{data.name || 'No Name'}</div>
+                        <div className="text-slate-500 whitespace-pre-line">
+                            {data.address || ''} {data.address2 ? `\n${data.address2}` : ''}
+                            {data.address || data.address2 ? `\n` : ''}
+                            {data.city}{data.state ? `, ${data.state}` : ''} {data.zip}
+                            {data.country ? `\n${data.country}` : ''}
+                        </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
-                        <EditableField label="Zip" value={data.zip} isEditing={isEditing} onChange={(v) => onChange('zip', v)} />
-                        <EditableField label="Country" value={data.country} isEditing={isEditing} onChange={(v) => onChange('country', v)} />
-                    </div>
-                </div>
+                )}
+
+                {/* Edit Form View */}
+                {showForm && (
+                    <>
+                        <div className="space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
+                            <div className="flex justify-end gap-2 mb-2">
+                                <button
+                                    onClick={() => setIsSelectorOpen(true)}
+                                    className="text-xs flex items-center gap-1 text-slate-600 hover:text-primary-600 bg-white border border-slate-200 px-2 py-1 rounded shadow-sm"
+                                >
+                                    <BookmarkPlus className="w-3 h-3" /> Pick from Book
+                                </button>
+                                {isValidAddress && (
+                                    <button
+                                        onClick={() => setIsExpanded(false)}
+                                        className="text-xs flex items-center gap-1 text-slate-500 hover:text-slate-700"
+                                    >
+                                        <X className="w-3 h-3" /> Close
+                                    </button>
+                                )}
+                            </div>
+
+                            <EditableField label="Name" value={data.name} isEditing={true} onChange={(v) => onChange('name', v)} />
+                            <EditableField label="Address" value={data.address} isEditing={true} onChange={(v) => onChange('address', v)} />
+                            <EditableField label="Address 2" value={data.address2} isEditing={true} onChange={(v) => onChange('address2', v)} />
+                            <div className="grid grid-cols-2 gap-3">
+                                <EditableField label="City" value={data.city} isEditing={true} onChange={(v) => onChange('city', v)} />
+                                <EditableField label="State" value={data.state} isEditing={true} onChange={(v) => onChange('state', v)} />
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <EditableField label="Zip" value={data.zip} isEditing={true} onChange={(v) => onChange('zip', v)} />
+                                <EditableField label="Country" value={data.country} isEditing={true} onChange={(v) => onChange('country', v)} />
+                            </div>
+                        </div>
+                    </>
+                )}
+
                 <PartySelector
                     isOpen={isSelectorOpen}
                     onClose={() => setIsSelectorOpen(false)}
