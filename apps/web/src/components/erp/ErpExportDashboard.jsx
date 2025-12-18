@@ -15,6 +15,8 @@ export default function ErpExportDashboard() {
     const [fromDate, setFromDate] = useState('');
     const [toDate, setToDate] = useState('');
 
+    const [error, setError] = useState(null);
+
     useEffect(() => {
         loadData();
         // Poll for job updates every 5 seconds
@@ -25,6 +27,7 @@ export default function ErpExportDashboard() {
 
     const loadData = async () => {
         setLoading(true);
+        setError(null);
         await Promise.all([fetchConfigs(), fetchJobs()]);
         setLoading(false);
     };
@@ -36,6 +39,7 @@ export default function ErpExportDashboard() {
             if (data.length > 0 && !selectedConfigId) setSelectedConfigId(data[0].id);
         } catch (err) {
             console.error(err);
+            setError('Failed to load configurations.');
         }
     };
 
@@ -45,6 +49,7 @@ export default function ErpExportDashboard() {
             setJobs(data);
         } catch (err) {
             console.error(err);
+            // Don't override main error if configs failed, but maybe show a toast in future
         }
     };
 

@@ -13,9 +13,13 @@ vi.mock('../services/api', () => ({
         setToken: vi.fn(),
         getComments: vi.fn().mockResolvedValue([]),
         addComment: vi.fn(),
-        getHistory: vi.fn().mockResolvedValue([])
+        addComment: vi.fn(),
+        getHistory: vi.fn().mockResolvedValue([]),
+        request: vi.fn().mockResolvedValue({ CARRIER_INTEGRATION: true, ERP_EXPORT: true, COMPLIANCE_ENHANCED: true }),
+        get: vi.fn().mockResolvedValue([]),
+        post: vi.fn().mockResolvedValue({})
     },
-    API_URL: 'http://localhost:3000/api'
+    API_URL: import.meta.env.VITE_API_URL || 'http://localhost:3000/api'
 }));
 
 // Mock the Login component to avoid auth flow in tests
@@ -86,6 +90,8 @@ describe('App Integration', () => {
 
     afterEach(() => {
         vi.useRealTimers();
+        localStorage.clear();
+        vi.clearAllMocks();
     });
 
     const login = async () => {
@@ -127,7 +133,8 @@ describe('App Integration', () => {
         await login();
 
         // Trigger mock upload
-        fireEvent.click(screen.getByText('Mock Upload'));
+        const uploadBtn = await screen.findByText('Mock Upload', {}, { timeout: 5000 });
+        fireEvent.click(uploadBtn);
 
         await waitFor(() => expect(screen.getByText(/Shipment Details/i)).toBeInTheDocument(), { timeout: 15000 });
     });
@@ -148,7 +155,8 @@ describe('App Integration', () => {
         await login();
 
         // Trigger mock upload
-        fireEvent.click(screen.getByText('Mock Upload'));
+        const uploadBtn = await screen.findByText('Mock Upload', {}, { timeout: 5000 });
+        fireEvent.click(uploadBtn);
 
         // Wait for review screen
         await waitFor(() => expect(screen.getByText(/Shipment Details/i)).toBeInTheDocument(), { timeout: 15000 });
@@ -184,7 +192,8 @@ describe('App Integration', () => {
         await login();
 
         // Trigger mock upload
-        fireEvent.click(screen.getByText('Mock Upload'));
+        const uploadBtn = await screen.findByText('Mock Upload', {}, { timeout: 5000 });
+        fireEvent.click(uploadBtn);
 
         // Wait for review screen
         await waitFor(() => expect(screen.getByText(/Shipment Details/i)).toBeInTheDocument(), { timeout: 15000 });
