@@ -42,7 +42,7 @@ export default function Login({ onLogin }) {
                     <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary-600 text-white mb-4 shadow-lg shadow-primary-200">
                         <Ship className="w-8 h-8" />
                     </div>
-                    <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Shipping Doc Gen</h1>
+                    <h1 className="text-3xl font-bold text-slate-900 tracking-tight">FormWaypoint</h1>
                     <p className="text-slate-500 mt-2">Automate your shipping documentation workflow</p>
                 </div>
 
