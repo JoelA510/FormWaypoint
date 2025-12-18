@@ -113,6 +113,31 @@ export default function PickupScheduler({ onClose }) {
                 </div>
             </div>
 
+            {/* Quick Chips */}
+            <div className="flex gap-2 justify-start overflow-x-auto pb-1">
+                <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, windowStart: '09:00', windowEnd: '17:00' })}
+                    className="text-xs px-2 py-1 bg-slate-100 text-slate-600 rounded-full hover:bg-primary-50 hover:text-primary-600 transition-colors whitespace-nowrap"
+                >
+                    Standard (9-5)
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, windowStart: '08:00', windowEnd: '16:00' })}
+                    className="text-xs px-2 py-1 bg-slate-100 text-slate-600 rounded-full hover:bg-primary-50 hover:text-primary-600 transition-colors whitespace-nowrap"
+                >
+                    Early (8-4)
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, windowStart: '13:00', windowEnd: '17:00' })}
+                    className="text-xs px-2 py-1 bg-slate-100 text-slate-600 rounded-full hover:bg-primary-50 hover:text-primary-600 transition-colors whitespace-nowrap"
+                >
+                    PM Pick (1-5)
+                </button>
+            </div>
+
             <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Pickup Location</label>
                 <input
