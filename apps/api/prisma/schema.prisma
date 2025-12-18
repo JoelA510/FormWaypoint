@@ -798,6 +798,21 @@ model SensorReading {
   id            String   @id @default(uuid())
   shipmentId    String
   deviceId      String
+}
+
+// Epic 14: Rules Engine
+model Rule {
+  id        String   @id @default(uuid())
+  name      String
+  enabled   Boolean  @default(true)
+  priority  Int      @default(0)
+  
+  condition String   // JSON structure: { field, op, value }
+  action    String   // JSON structure: { type, value }
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
   timestamp     DateTime
   temperature   Float?
   humidity      Float?

@@ -55,8 +55,10 @@ export async function fetchFilteredTasks({
   }
 
   if (text) {
-    const escaped = text.replace(/,/g, '\\,');
-    query = query.or(`title.ilike.%${escaped}%,description.ilike.%${escaped}%`);
+    // Escape special characters for Supabase like/ilike syntax (%, _, \)
+    // And also escape commas because .or() uses comma as a separator
+    const sanitized = text.replace(/[\\%_]/g, '\\$&').replace(/,/g, '\\,');
+    query = query.or(`title.ilike.%${sanitized}%,description.ilike.%${sanitized}%`);
   }
 
   if (dateFrom) {
