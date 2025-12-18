@@ -19,6 +19,7 @@ import NotificationBell from './components/common/NotificationBell';
 import Login from './components/auth/Login';
 import { api } from './services/api';
 import { FeatureFlagProvider } from './context/FeatureFlagContext';
+import RoutingRulesPage from './components/rules/RoutingRulesPage';
 import SettingsPage from './components/settings/SettingsPage';
 import IntegrationsPage from './components/settings/IntegrationsPage';
 
@@ -69,6 +70,7 @@ const Layout = ({ user, onLogout, children }) => {
                             <Link to="/items" className="text-slate-600 hover:text-primary-600 font-medium px-3 py-2 rounded-md hover:bg-slate-50"> Products </Link>
                             <Link to="/templates" className="text-slate-600 hover:text-primary-600 font-medium px-3 py-2 rounded-md hover:bg-slate-50"> Templates </Link>
                             <Link to="/reports" className="text-slate-600 hover:text-primary-600 font-medium px-3 py-2 rounded-md hover:bg-slate-50"> Reports </Link>
+                            <Link to="/rules" className="text-slate-600 hover:text-primary-600 font-medium px-3 py-2 rounded-md hover:bg-slate-50"> Rules </Link>
                             <Link to="/settings" className="text-slate-600 hover:text-primary-600 font-medium px-3 py-2 rounded-md hover:bg-slate-50"> Settings </Link>
                         </nav>
                     </div>
@@ -281,6 +283,13 @@ function AppContent() {
                             >
                                 <ReportsPage />
                             </motion.div>
+                        </Layout>
+                    </ProtectedRoute>
+                } />
+                <Route path="/rules" element={
+                    <ProtectedRoute user={user} loading={loading}>
+                        <Layout user={user} onLogout={handleLogout}>
+                            <RoutingRulesPage />
                         </Layout>
                     </ProtectedRoute>
                 } />
