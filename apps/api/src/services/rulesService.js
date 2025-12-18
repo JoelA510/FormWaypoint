@@ -1,70 +1,56 @@
 const RuleEngine = require('../shared/rules/RuleEngine');
+const prisma = require('../../db');
 
 /**
  * Service to manage routing rules persistence.
- * Currently uses in-memory storage, but would map to a DB in production.
+ * Now using Prisma (SQLite/Postgres) instead of in-memory storage.
  */
 class RulesService {
-    constructor() {
-        this.rules = [
-            {
-                id: 'RULE-001',
-                name: 'Heavy Weight Ground',
-                enabled: true,
-                priority: 10,
-                condition: {
-                    field: 'packages.0.weight.value',
-                    op: 'gt',
-                    value: 150
-                },
-                action: {
-                    type: 'SET_CARRIER',
-                    value: 'FEDEX_FREIGHT'
-                }
-            },
-            {
-                id: 'RULE-002',
-                name: 'High Value Insurance',
-                enabled: true,
-                priority: 20,
-                condition: {
-                    field: 'financials.value',
-                    op: 'gt',
-                    value: 5000
-                },
-                action: {
-                    type: 'ADD_INSURANCE',
-                    value: true
-                }
-            }
-        ];
-    }
 
     async getAllRules() {
-        return this.rules.sort((a, b) => b.priority - a.priority);
+        const rules = await prisma.rule.findMany({
+            orderBy: { priority: 'desc' }
+        });
+
+        // Parse JSON fields
+        return rules.map(this._parseRule);
     }
 
-    async createRule(rule) {
-        const newRule = {
-            id: `RULE-${Date.now()}`,
-            enabled: true,
-            createdAt: new Date(),
-            ...rule
-        };
-        this.rules.push(newRule);
-        return newRule;
+    async createRule(data) {
+        const { condition, action, ...rest } = data;
+
+        const rule = await prisma.rule.create({
+            data: {
+                ...rest,
+                // Ensure defaults
+                priority: rest.priority ?? 0,
+                enabled: rest.enabled ?? true,
+                // Serialize JSON fields
+                condition: JSON.stringify(condition),
+                action: JSON.stringify(action)
+            }
+        });
+
+        return this._parseRule(rule);
     }
 
     async updateRule(id, updates) {
-        const index = this.rules.findIndex(r => r.id === id);
-        if (index === -1) throw new Error('Rule not found');
+        const { condition, action, ...rest } = updates;
 
-        this.rules[index] = { ...this.rules[index], ...updates };
-        return this.rules[index];
+        const data = { ...rest };
+        if (condition) data.condition = JSON.stringify(condition);
+        if (action) data.action = JSON.stringify(action);
+
+        const rule = await prisma.rule.update({
+            where: { id },
+            data
+        });
+
+        return this._parseRule(rule);
     }
 
     async deleteRule(id) {
-        this.rules = this.rules.filter(r => r.id !== id);
+        await prisma.rule.delete({ where: { id } });
         return true;
     }
 
@@ -72,8 +58,21 @@ class RulesService {
      * Run all enabled rules against a shipment context
      */
     async evaluateShipment(shipment) {
-        const activeRules = this.rules.filter(r => r.enabled).sort((a, b) => b.priority - a.priority);
+        const rawRules = await prisma.rule.findMany({
+            where: { enabled: true },
+            orderBy: { priority: 'desc' }
+        });
+
+        const activeRules = rawRules.map(this._parseRule);
         return RuleEngine.evaluate(activeRules, shipment);
+    }
+
+    _parseRule(rule) {
+        return {
+            ...rule,
+            condition: typeof rule.condition === 'string' ? JSON.parse(rule.condition) : rule.condition,
+            action: typeof rule.action === 'string' ? JSON.parse(rule.action) : rule.action
+        };
     }
 }
 

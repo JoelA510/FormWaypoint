@@ -28,11 +28,14 @@ class ProductService extends BaseService {
         return this.execute('listProducts', async () => {
             const { search } = query;
             const where = {};
-            if (search) {
-                where.OR = [
-                    { sku: { contains: search } },
-                    { description: { contains: search } }
-                ];
+            if (search && typeof search === 'string') {
+                const term = search.trim();
+                if (term) {
+                    where.OR = [
+                        { sku: { contains: term } },
+                        { description: { contains: term } }
+                    ];
+                }
             }
             return prisma.item.findMany({ where, take: 50 });
         });

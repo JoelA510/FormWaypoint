@@ -4,35 +4,60 @@
  * @param {Promise} servicePromise - The service method execution promise
  * @param {Object} options - { successStatus, errorStatus }
  */
+const Result = require('../core/Result');
+const logger = require('../../utils/logger');
+
+/**
+ * Standardized request handler for Service Result pattern.
+ * @param {Object} res - Express response object
+ * @param {Promise} servicePromise - The service method execution promise
+ * @param {Object} options - { successStatus, errorStatus }
+ */
 const handleRequest = async (res, servicePromise, options = {}) => {
     const successStatus = options.successStatus || 200;
-    const defaultErrorStatus = options.errorStatus || 500; // conservative default
+    const defaultErrorStatus = options.errorStatus || 500;
 
     try {
         const result = await servicePromise;
 
-        if (result && typeof result.isSuccess !== 'boolean') {
-            // Fallback for non-Result returns (if any)
-            return res.status(successStatus).json(result);
+        // Check if it's our standard Result result
+        if (result && typeof result.isSuccess === 'boolean') {
+            if (result.isSuccess) {
+                return res.status(successStatus).json(result.getValue());
+            } else {
+                const error = result.error;
+                // Prefer explicit status code from Result or Error object
+                let status = result.statusCode || (error && error.statusCode) || 400;
+
+                // Fallback heuristic if no code is present
+                if (!result.statusCode && !error?.statusCode && typeof error === 'string') {
+                    const msg = error.toLowerCase();
+                    if (msg.includes('not found')) status = 404;
+                    else if (msg.includes('unauthorized') || msg.includes('token')) status = 401;
+                    else if (msg.includes('forbidden')) status = 403;
+                    else status = defaultErrorStatus;
+                }
+
+                return res.status(status).json({
+                    success: false,
+                    error: typeof error === 'string' ? error : (error.message || 'Unknown error')
+                });
+            }
         }
 
-        if (result.isSuccess) {
-            res.status(successStatus).json(result.getValue());
-        } else {
-            const errorMsg = result.getError();
-            let status = defaultErrorStatus;
+        // Handling plain object returns (legacy support)
+        return res.status(successStatus).json(result);
 
-            // Simple heuristic for status codes based on error message
-            // In a real app, Result might carry an error code enum
-            if (errorMsg.toLowerCase().includes('not found')) status = 404;
-            else if (errorMsg.toLowerCase().includes('invalid')) status = 400;
-            else if (errorMsg.toLowerCase().includes('unauthorized')) status = 401;
-
-            res.status(status).json({ error: errorMsg });
-        }
     } catch (err) {
-        console.error('Unhandled Route Error:', err);
-        res.status(500).json({ error: 'Internal Server Error' });
+        logger.error(`[RequestHandler] Uncaught error:`, err);
+
+        const status = err.statusCode || 500;
+        const message = status === 500 ? 'Internal Server Error' : err.message;
+
+        return res.status(status).json({
+            success: false,
+            error: message
+        });
     }
 };
 

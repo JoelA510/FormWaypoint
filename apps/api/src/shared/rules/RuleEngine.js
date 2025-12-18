@@ -49,8 +49,8 @@ class RuleEngine {
         const value = this.getValue(context, condition.field);
 
         switch (condition.op) {
-            case 'eq': return value == condition.value;
-            case 'neq': return value != condition.value;
+            case 'eq': return value === condition.value;
+            case 'neq': return value !== condition.value;
             case 'gt': return value > condition.value;
             case 'lt': return value < condition.value;
             case 'in': return Array.isArray(condition.value) && condition.value.includes(value);

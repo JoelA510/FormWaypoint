@@ -3,15 +3,25 @@ const nodemailer = require('nodemailer');
 const config = require('../config');
 
 // Email configuration
-const transporter = nodemailer.createTransporter({
+const transporter = nodemailer.createTransport({
     host: config.email.host,
     port: config.email.port,
-    secure: false, // Use TLS
+    secure: config.email.port === 465, // True for 465, false for 587
     auth: {
         user: config.email.user,
         pass: config.email.pass
     }
 });
+
+const escapeHtml = (text) => {
+    if (!text) return '';
+    return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+};
 
 // Email templates
 const templates = {
@@ -20,8 +30,8 @@ const templates = {
         text: `${data.userName} commented: ${data.commentText}\n\nView document: ${data.documentUrl}`,
         html: `
             <h2>New Comment</h2>
-            <p><strong>${data.userName}</strong> commented on <strong>${data.documentName}</strong>:</p>
-            <p>${data.commentText}</p>
+            <p><strong>${escapeHtml(data.userName)}</strong> commented on <strong>${escapeHtml(data.documentName)}</strong>:</p>
+            <p>${escapeHtml(data.commentText)}</p>
             <p><a href="${data.documentUrl}">View Document</a></p>
         `
     }),
@@ -31,8 +41,8 @@ const templates = {
         text: `${data.userName} mentioned you: ${data.commentText}\n\nView document: ${data.documentUrl}`,
         html: `
             <h2>You Were Mentioned</h2>
-            <p><strong>${data.userName}</strong> mentioned you in a comment:</p>
-            <p>${data.commentText}</p>
+            <p><strong>${escapeHtml(data.userName)}</strong> mentioned you in a comment:</p>
+            <p>${escapeHtml(data.commentText)}</p>
             <p><a href="${data.documentUrl}">View Document</a></p>
         `
     }),
@@ -42,7 +52,7 @@ const templates = {
         text: `You have been assigned to work on ${data.documentName}.\n\nView document: ${data.documentUrl}`,
         html: `
             <h2>New Assignment</h2>
-            <p>You have been assigned to work on <strong>${data.documentName}</strong>.</p>
+            <p>You have been assigned to work on <strong>${escapeHtml(data.documentName)}</strong>.</p>
             <p><a href="${data.documentUrl}">View Document</a></p>
         `
     }),
@@ -52,7 +62,7 @@ const templates = {
         text: `${data.documentName} has finished processing.\n\nView document: ${data.documentUrl}`,
         html: `
             <h2>Processing Complete</h2>
-            <p><strong>${data.documentName}</strong> has finished processing.</p>
+            <p><strong>${escapeHtml(data.documentName)}</strong> has finished processing.</p>
             <p><a href="${data.documentUrl}">View Document</a></p>
         `
     })
@@ -67,7 +77,7 @@ const templates = {
 async function sendEmail(to, type, data) {
     if (!to || !process.env.SMTP_USER) {
         console.log('[Email] Skipping email send (no recipient or SMTP not configured)');
-        return false;
+        return { success: false, error: 'Misconfigured' };
     }
 
     try {
@@ -85,10 +95,11 @@ async function sendEmail(to, type, data) {
         });
 
         console.log(`[Email] Sent ${type} email to ${to}`);
-        return true;
+        return { success: true };
     } catch (error) {
         console.error('[Email] Send error:', error);
-        return false;
+        // Throwing error allows upstream to handle/retry if needed
+        throw error;
     }
 }
 

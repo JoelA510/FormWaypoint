@@ -36,11 +36,26 @@ function parseAddress(rawString) {
     parts.shift();
 
     // 4. Identify Country (usually last)
-    // If the last part is a known country, extract it
-    const knownCountries = ['USA', 'United States', 'Australia', 'United Kingdom', 'GB', 'UK', 'Canada', 'Japan', 'China'];
+    // Expanded country list
+    const knownCountries = [
+        'USA', 'United States', 'US',
+        'Australia', 'AU',
+        'United Kingdom', 'Great Britain', 'GB', 'UK',
+        'Canada', 'CA',
+        'Japan', 'JP',
+        'China', 'CN',
+        'Germany', 'DE',
+        'France', 'FR',
+        'Mexico', 'MX',
+        'Brazil', 'BR',
+        'India', 'IN'
+    ];
+
     if (parts.length > 0) {
-        const last = parts[parts.length - 1];
-        if (knownCountries.some(c => last.toLowerCase().includes(c.toLowerCase()))) {
+        const last = parts[parts.length - 1].trim();
+        // Check case insensitive
+        const matchedCountry = knownCountries.find(c => last.toLowerCase() === c.toLowerCase() || last.toLowerCase().endsWith(" " + c.toLowerCase()));
+        if (matchedCountry) {
             result.country = parts.pop();
         }
     }
@@ -50,17 +65,34 @@ function parseAddress(rawString) {
 
     // Helper to parse City State Zip
     const parseCityStateZip = (str) => {
-        // US Format: "Pleasanton CA 94588" or "Pleasanton, CA 94588"
-        // AU Format: "Bankstown Aerodrome NSW 2198"
+        // US Format: "City ST 12345"
+        // International: "City Region POSTCODE"
 
-        // Regex for US/AU: Capture (City) (State) (Zip)
-        // State is usually 2-3 uppercase letters. Zip is 4-5 digits.
-        // Look for State + Zip at the end
-        const match = str.match(/^(.*?)\s+([A-Z]{2,3})\s+(\d{4,5})$/);
-        if (match) {
+        // Regex try 1: US/AU style (State Zip)
+        // Group 1: City (greedy)
+        // Group 2: State (2-3 letters)
+        // Group 3: Zip (5 digits or 4 digits)
+        let match = str.match(/^(.*?)\s+([A-Za-z]{2,3})\s+(\d{4,9}(-\d{4})?)$/);
+
+        if (!match) {
+            // Regex try 2: Global/Alphanumeric zip (e.g. Canada K1A 0B1, UK SW1A 1AA)
+            // State might be missing or longer. 
+            // Look for alphanumeric zip at end with length 3-8
+            match = str.match(/^(.*?)\s+([A-Za-z0-9\s]{3,10})$/);
+            // This is loose, it effectively grabs last token as Zip, rest as City/State
+            if (match) {
+                // Heuristic: Is the first part city? 
+                // We'll return City as match[1], Zip as match[2], State as '' (or infer later)
+                return {
+                    city: match[1].trim(),
+                    state: '',
+                    zip: match[2].trim()
+                };
+            }
+        } else {
             return {
                 city: match[1].trim(),
-                state: match[2],
+                state: match[2].toUpperCase(),
                 zip: match[3]
             };
         }
@@ -73,7 +105,7 @@ function parseAddress(rawString) {
         const csz = parseCityStateZip(parts[i]);
         if (csz) {
             result.city = csz.city;
-            result.state = csz.state;
+            if (csz.state) result.state = csz.state;
             result.zip = csz.zip;
             parts.splice(i, 1); // Remove this part
             foundCSZ = true;
@@ -93,11 +125,15 @@ function parseAddress(rawString) {
     if (!result.country && result.state) {
         const usStates = ['AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY'];
         const auStates = ['NSW', 'VIC', 'QLD', 'WA', 'SA', 'TAS', 'ACT', 'NT'];
+        const caStates = ['AB', 'BC', 'MB', 'NB', 'NL', 'NS', 'NT', 'NU', 'ON', 'PE', 'QC', 'SK', 'YT'];
 
-        if (usStates.includes(result.state.toUpperCase())) {
+        const stateUpper = result.state.toUpperCase();
+        if (usStates.includes(stateUpper)) {
             result.country = 'United States';
-        } else if (auStates.includes(result.state.toUpperCase())) {
+        } else if (auStates.includes(stateUpper)) {
             result.country = 'Australia';
+        } else if (caStates.includes(stateUpper)) {
+            result.country = 'Canada';
         }
     }
 
