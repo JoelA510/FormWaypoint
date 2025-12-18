@@ -11,7 +11,7 @@ import AesPanel from './AesPanel';
 import SanctionsPanel from './SanctionsPanel';
 import FeatureGuard from '../common/FeatureGuard';
 
-export default function DocumentReview({ document, onBack, user, onGenerate, onSave: customSave }) {
+export default function DocumentReview({ document, onBack, user, onGenerate, onSave: customSave, viewMode = 'internal' }) {
     const [doc, setDoc] = useState(document);
     const [isEditing, setIsEditing] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
@@ -283,6 +283,7 @@ export default function DocumentReview({ document, onBack, user, onGenerate, onS
                 </div>
 
                 <div className="flex items-center gap-3">
+                    {/* Hide edit buttons if in Client View (optional, but good practice) */}
                     {isEditing ? (
                         <>
                             <select
@@ -452,7 +453,8 @@ export default function DocumentReview({ document, onBack, user, onGenerate, onS
                                             <th className="px-4 py-3">Description</th>
                                             <th className="px-4 py-3 text-right">Qty</th>
                                             <th className="px-4 py-3 text-right">Weight (kg)</th>
-                                            <th className="px-4 py-3 text-right">Value</th>
+                                            {/* Hide Value column in Client View */}
+                                            {viewMode === 'internal' && <th className="px-4 py-3 text-right">Value</th>}
                                             <th className="px-4 py-3">HTS Code</th>
                                             <th className="px-4 py-3">Origin</th>
                                             <th className="px-4 py-3">DG Info</th>
@@ -470,9 +472,12 @@ export default function DocumentReview({ document, onBack, user, onGenerate, onS
                                                 <td className="p-4 text-right">
                                                     <EditableField value={line.netWeightKg} isEditing={isEditing} type="number" onChange={(val) => handleLineChange(i, 'netWeightKg', val)} />
                                                 </td>
-                                                <td className="p-4 text-right">
-                                                    <EditableField value={line.valueUsd} isEditing={isEditing} type="number" onChange={(val) => handleLineChange(i, 'valueUsd', val)} />
-                                                </td>
+                                                {/* Hide Value column in Client View */}
+                                                {viewMode === 'internal' && (
+                                                    <td className="p-4 text-right">
+                                                        <EditableField value={line.valueUsd} isEditing={isEditing} type="number" onChange={(val) => handleLineChange(i, 'valueUsd', val)} />
+                                                    </td>
+                                                )}
                                                 <td className="p-4">
                                                     <EditableField value={line.htsCode} isEditing={isEditing} onChange={(val) => handleLineChange(i, 'htsCode', val)} />
                                                 </td>
@@ -525,7 +530,8 @@ export default function DocumentReview({ document, onBack, user, onGenerate, onS
                     </div>
 
                     <div className="space-y-6">
-                        {doc.isShipment && (
+                        {/* Hide Panels in Client View */}
+                        {doc.isShipment && viewMode === 'internal' && (
                             <>
                                 <FeatureGuard featureKey="CARRIER_INTEGRATION">
                                     <CarrierRatePanel
@@ -559,7 +565,7 @@ export default function DocumentReview({ document, onBack, user, onGenerate, onS
                                 </FeatureGuard>
                             </>
                         )}
-                        <Comments documentId={doc.id} user={user} />
+                        <Comments documentId={doc.id} user={user} viewMode={viewMode} />
                         <History documentId={!doc.isShipment ? doc.id : undefined} shipmentId={doc.isShipment ? doc.id : undefined} />
                     </div>
                 </div>
