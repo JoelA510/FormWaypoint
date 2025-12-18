@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api } from '../../services/api';
+import { useDebounce } from '../../hooks/useDebounce';
 import { Plus, Search, Package, Edit2, Trash2 } from 'lucide-react';
 import ProductModal from './ProductModal';
 
@@ -7,18 +8,19 @@ export default function ProductLibraryPage() {
     const [items, setItems] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
+    const debouncedSearchTerm = useDebounce(searchTerm, 500);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedItem, setSelectedItem] = useState(null);
 
     useEffect(() => {
         loadItems();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [searchTerm]);
+    }, [debouncedSearchTerm]);
 
     const loadItems = async () => {
         setIsLoading(true);
         try {
-            const result = await api.getItems({ search: searchTerm });
+            const result = await api.getItems({ search: debouncedSearchTerm });
             setItems(result.data);
         } catch (error) {
             console.error('Failed to load items:', error);

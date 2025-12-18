@@ -3,6 +3,8 @@ import { motion } from 'framer-motion';
 import { FileSpreadsheet, CheckCircle, AlertOctagon, FileText, ScanLine } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
+import { API_URL } from '../../services/api';
+
 export default function ImportPage() {
     const navigate = useNavigate();
     const [status, setStatus] = useState('idle'); // idle, uploading, success, error
@@ -19,7 +21,7 @@ export default function ImportPage() {
             formData.append('file', file);
 
             const token = localStorage.getItem('token');
-            const endpoint = importMethod === 'csv' ? 'http://localhost:3001/import/csv' : 'http://localhost:3001/import/ocr';
+            const endpoint = importMethod === 'csv' ? `${API_URL}/import/csv` : `${API_URL}/import/ocr`;
 
             const res = await fetch(endpoint, {
                 method: 'POST',

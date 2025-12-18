@@ -104,7 +104,8 @@ export default function ProductModal({ item, isOpen, onClose, onSave }) {
                         <div>
                             <label className="block text-sm font-medium text-slate-700 mb-1">Origin (ISO)</label>
                             <input
-                                value={formData.eccn}
+                                name="countryOfOrigin"
+                                value={formData.countryOfOrigin}
                                 onChange={handleChange}
                                 className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-200 outline-none"
                             />

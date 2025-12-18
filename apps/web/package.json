@@ -13,11 +13,14 @@
     "typecheck": "echo \"No typecheck configured for web\""
   },
   "dependencies": {
+    "@hello-pangea/dnd": "^18.0.1",
     "@supabase/supabase-js": "^2.45.4",
     "framer-motion": "^10.16.4",
+    "leaflet": "^1.9.4",
     "lucide-react": "^0.292.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-leaflet": "^5.0.0",
     "react-router-dom": "^7.9.6",
     "react-signature-canvas": "^1.1.0-alpha.2",
     "react-window": "^1.8.11",

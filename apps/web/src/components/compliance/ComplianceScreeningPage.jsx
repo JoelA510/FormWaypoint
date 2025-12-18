@@ -83,8 +83,13 @@ export default function ComplianceScreeningPage() {
                             className="w-full flex justify-center items-center gap-2 py-3"
                             icon={<Search className="w-4 h-4" />}
                         >
-                            Screen Entity
+                            {loading ? 'Screening...' : 'Screen Entity'}
                         </Button>
+                        {loading && (
+                            <p className="text-center text-sm text-slate-500 animate-pulse">
+                                Querying global watchlists (OFAC, BIS, EU)...
+                            </p>
+                        )}
                     </form>
                 </Card>
 

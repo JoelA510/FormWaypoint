@@ -20,7 +20,7 @@ export default function Dashboard() {
                 <div className="mb-8 text-center max-w-2xl mx-auto">
                     <h2 className="text-3xl font-bold text-slate-900 mb-2">Upload Shipping Documents</h2>
                     <p className="text-slate-500 text-lg">
-                        Drag and drop your files (PDF, CSV, Excel) to automatically extract data and create a new shipment.
+                        Drag and drop your files (PDF, CSV, Excel) to automatically extract data and create a new shipment. (Max 10MB)
                     </p>
                 </div>
 
