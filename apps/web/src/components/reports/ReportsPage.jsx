@@ -2,6 +2,9 @@ import { useState, useEffect } from 'react';
 import { api } from '../../services/api';
 import { BarChart3, FileText, AlertTriangle, ShieldCheck, Download, Calendar } from 'lucide-react';
 import CarrierScorecard from './CarrierScorecard';
+import Button from '../ui/Button';
+import Card from '../ui/Card';
+import PageHeader from '../ui/PageHeader';
 
 export default function ReportsPage() {
     const [dateRange, setDateRange] = useState('30'); // '7', '30', '90'
@@ -105,39 +108,38 @@ export default function ReportsPage() {
 
     return (
         <div className="p-6 space-y-6 max-w-7xl mx-auto">
-            <div className="flex justify-between items-center">
-                <div>
-                    <h1 className="text-2xl font-bold text-slate-900">Reports & Analytics</h1>
-                    <p className="text-slate-500">Operational visibility and compliance health</p>
-                </div>
-                {/* ... Controls (Same as before) ... */}
-                <div className="flex items-center gap-4">
-                    <select
-                        value={dateRange}
-                        onChange={(e) => setDateRange(e.target.value)}
-                        className="input-field"
-                    >
-                        <option value="7">Last 7 Days</option>
-                        <option value="30">Last 30 Days</option>
-                        <option value="90">Last 90 Days</option>
-                    </select>
+            <PageHeader
+                title="Reports & Analytics"
+                description="Operational visibility and compliance health"
+                actions={
+                    <div className="flex items-center gap-4">
+                        <select
+                            value={dateRange}
+                            onChange={(e) => setDateRange(e.target.value)}
+                            className="input-field"
+                        >
+                            <option value="7">Last 7 Days</option>
+                            <option value="30">Last 30 Days</option>
+                            <option value="90">Last 90 Days</option>
+                        </select>
 
-                    <button
-                        onClick={loadData}
-                        className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg"
-                        title="Refresh"
-                    >
-                        <Calendar className="w-5 h-5" />
-                    </button>
-                    <button
-                        onClick={handleDownload}
-                        className="btn-secondary flex items-center gap-2"
-                        disabled={!overrides.length}
-                    >
-                        <Download className="w-4 h-4" /> Export Overrides
-                    </button>
-                </div>
-            </div>
+                        <Button
+                            variant="secondary"
+                            onClick={loadData}
+                            icon={<Calendar className="w-5 h-5" />}
+                            title="Refresh"
+                        />
+                        <Button
+                            variant="secondary"
+                            onClick={handleDownload}
+                            disabled={!overrides.length}
+                            icon={<Download className="w-4 h-4" />}
+                        >
+                            Export Overrides
+                        </Button>
+                    </div>
+                }
+            />
 
             {loading ? (
                 <div className="flex justify-center p-12">
@@ -147,7 +149,7 @@ export default function ReportsPage() {
                 <>
                     {/* Summary Cards */}
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                        <div className="card p-4 flex items-center gap-4">
+                        <Card padding="p-4" className="flex items-center gap-4">
                             <div className="p-3 bg-blue-100 text-blue-600 rounded-lg">
                                 <BarChart3 className="w-6 h-6" />
                             </div>
@@ -158,9 +160,9 @@ export default function ReportsPage() {
                                     {renderTrend(shipmentStats?.total, previousStats?.total)}
                                 </div>
                             </div>
-                        </div>
+                        </Card>
 
-                        <div className="card p-4 flex items-center gap-4">
+                        <Card padding="p-4" className="flex items-center gap-4">
                             <div className="p-3 bg-purple-100 text-purple-600 rounded-lg">
                                 <FileText className="w-6 h-6" />
                             </div>
@@ -168,9 +170,9 @@ export default function ReportsPage() {
                                 <p className="text-sm text-slate-500">Doc Types</p>
                                 <p className="text-2xl font-bold text-slate-900">{shipmentStats?.byDocType?.length || 0}</p>
                             </div>
-                        </div>
+                        </Card>
 
-                        <div className="card p-4 flex items-center gap-4">
+                        <Card padding="p-4" className="flex items-center gap-4">
                             <div className="p-3 bg-amber-100 text-amber-600 rounded-lg">
                                 <AlertTriangle className="w-6 h-6" />
                             </div>
@@ -180,9 +182,9 @@ export default function ReportsPage() {
                                     {validationStats?.activeIssues?.reduce((acc, curr) => acc + curr.count, 0) || 0}
                                 </p>
                             </div>
-                        </div>
+                        </Card>
 
-                        <div className="card p-4 flex items-center gap-4">
+                        <Card padding="p-4" className="flex items-center gap-4">
                             <div className="p-3 bg-emerald-100 text-emerald-600 rounded-lg">
                                 <ShieldCheck className="w-6 h-6" />
                             </div>
@@ -190,7 +192,7 @@ export default function ReportsPage() {
                                 <p className="text-sm text-slate-500">Overrides</p>
                                 <p className="text-2xl font-bold text-slate-900">{validationStats?.totalDismissedOverrides || 0}</p>
                             </div>
-                        </div>
+                        </Card>
                     </div>
 
                     {/* Details Scorecards */}
@@ -199,7 +201,7 @@ export default function ReportsPage() {
                     {/* Detailed Tables */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         {/* Shipments by Destination */}
-                        <div className="card">
+                        <Card>
                             <h3 className="text-lg font-semibold mb-4">Top Destinations</h3>
                             <div className="overflow-x-auto">
                                 <table className="w-full text-sm text-left">
@@ -222,10 +224,10 @@ export default function ReportsPage() {
                                     </tbody>
                                 </table>
                             </div>
-                        </div>
+                        </Card>
 
                         {/* Common Validation Issues */}
-                        <div className="card">
+                        <Card>
                             <h3 className="text-lg font-semibold mb-4">Common Validation Issues</h3>
                             <div className="overflow-x-auto">
                                 <table className="w-full text-sm text-left">
@@ -250,11 +252,11 @@ export default function ReportsPage() {
                                     </tbody>
                                 </table>
                             </div>
-                        </div>
+                        </Card>
                     </div>
 
                     {/* Overrides List */}
-                    <div className="card">
+                    <Card>
                         <h3 className="text-lg font-semibold mb-4">Recent Overrides</h3>
                         <div className="overflow-x-auto">
                             <table className="w-full text-sm text-left">
@@ -289,7 +291,7 @@ export default function ReportsPage() {
                                 </tbody>
                             </table>
                         </div>
-                    </div>
+                    </Card>
 
                 </>
             )}

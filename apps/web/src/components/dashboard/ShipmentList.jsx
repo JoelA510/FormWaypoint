@@ -8,6 +8,10 @@ import HardwareStatus from '../common/HardwareStatus';
 // ... existing code ...
 
 import BulkActionToolbar from './BulkActionToolbar';
+import Button from '../ui/Button';
+import Card from '../ui/Card';
+import Badge from '../ui/Badge';
+import PageHeader from '../ui/PageHeader';
 
 // ... existing imports ...
 
@@ -80,34 +84,37 @@ export default function ShipmentList() {
     return (
         <div className="space-y-6">
             {/* Header Area */}
-            <header className="flex justify-between items-center">
-                <div>
-                    <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Work Queue</h1>
-                    <p className="text-slate-500 text-sm">Prioritize and process active shipments.</p>
-                </div>
-                <div className="flex gap-3 items-center">
-                    <HardwareStatus />
-                    <div className="h-6 w-px bg-slate-200 mx-1"></div>
-                    <input
-                        type="file"
-                        id="json-import-input"
-                        accept=".json"
-                        className="hidden"
-                        onChange={handleImportFile}
-                    />
-                    <button
-                        onClick={() => document.getElementById('json-import-input').click()}
-                        disabled={importing}
-                        className="btn-secondary text-sm flex items-center gap-2"
-                    >
-                        {importing ? <Loader className="w-4 h-4 animate-spin" /> : <ArrowUpFromLine className="w-4 h-4" />}
-                        Import
-                    </button>
-                    <Link to="/import" className="btn-primary flex items-center gap-2 shadow-lg shadow-primary-500/20 hover:shadow-primary-500/40 transition-shadow">
-                        <span className="text-lg leading-none">+</span> New Shipment
-                    </Link>
-                </div>
-            </header>
+            <PageHeader
+                title="Work Queue"
+                description="Prioritize and process active shipments."
+                actions={
+                    <>
+                        <HardwareStatus />
+                        <div className="h-6 w-px bg-slate-200 mx-1"></div>
+                        <input
+                            type="file"
+                            id="json-import-input"
+                            accept=".json"
+                            className="hidden"
+                            onChange={handleImportFile}
+                        />
+                        <Button
+                            variant="secondary"
+                            size="sm"
+                            loading={importing}
+                            icon={<ArrowUpFromLine className="w-4 h-4" />}
+                            onClick={() => document.getElementById('json-import-input').click()}
+                        >
+                            Import
+                        </Button>
+                        <Link to="/import">
+                            <Button className="shadow-lg shadow-primary-500/20 hover:shadow-primary-500/40">
+                                <span className="text-lg leading-none mr-2">+</span> New Shipment
+                            </Button>
+                        </Link>
+                    </>
+                }
+            />
 
             {/* Scanner / Search Bar */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
@@ -188,9 +195,10 @@ export default function ShipmentList() {
                     const isSelected = selectedShipments.includes(shipment.id);
 
                     return (
-                        <div
+                        <Card
                             key={shipment.id}
-                            className={`group relative bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-200 p-5 border ${isSelected ? 'border-primary-500 ring-1 ring-primary-500 bg-primary-50/10' : 'border-slate-200'} ${config.border}`}
+                            padding="p-5"
+                            className={`group relative hover:shadow-md transition-all duration-200 ${isSelected ? 'border-primary-500 ring-1 ring-primary-500 bg-primary-50/10' : ''} ${config.border}`}
                         >
                             <div className="flex items-center justify-between">
                                 {/* Left: Info + Checkbox */}
@@ -211,9 +219,9 @@ export default function ShipmentList() {
                                             <h3 className="font-semibold text-slate-900">
                                                 {shipment.consignee?.name || 'Unknown User'}
                                             </h3>
-                                            <span className="text-xs font-mono text-slate-400 bg-slate-100 px-1.5 rounded">
+                                            <Badge variant="neutral" className="font-mono">
                                                 #{shipment.id.substring(0, 8)}
-                                            </span>
+                                            </Badge>
                                         </div>
                                         <div className="flex items-center gap-4 text-sm text-slate-600">
                                             <span className="flex items-center gap-1.5">
@@ -232,13 +240,14 @@ export default function ShipmentList() {
 
                                 {/* Right: Actions */}
                                 <div className="flex items-center gap-3">
-                                    <Link
-                                        to={`/shipments/${shipment.id}`}
-                                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors 
-                                            ${status === 'exception' ? 'bg-red-600 text-white hover:bg-red-700 shadow-red-200' : 'bg-slate-900 text-white hover:bg-slate-800 shadow-slate-200'} shadow-sm`}
-                                    >
-                                        {config.action}
-                                        <ArrowRight className="w-4 h-4" />
+                                    <Link to={`/shipments/${shipment.id}`}>
+                                        <Button
+                                            size="sm"
+                                            className={status === 'exception' ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}
+                                        >
+                                            {config.action}
+                                            <ArrowRight className="w-4 h-4 ml-2" />
+                                        </Button>
                                     </Link>
 
                                     <div className="h-8 w-px bg-slate-200 mx-1"></div>
@@ -252,7 +261,7 @@ export default function ShipmentList() {
                                     </button>
                                 </div>
                             </div>
-                        </div>
+                        </Card>
                     );
                 })}
             </div>
