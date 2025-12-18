@@ -1,132 +1,51 @@
 import { useState, useEffect } from 'react';
 import { api } from '../../services/api';
-import { FileJson, Loader, Eye, ArrowUpFromLine, AlertCircle, CheckCircle, Truck, Package, Archive, AlertTriangle, ArrowRight, Calendar } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { FileJson, Loader, Eye, ArrowUpFromLine, AlertCircle, CheckCircle, Truck, Package, Archive, AlertTriangle, ArrowRight, Calendar, Search } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import ScannerInput from '../common/ScannerInput';
+import HardwareStatus from '../common/HardwareStatus';
 
-const TABS = [
-    { label: 'Need Review', value: 'draft', icon: AlertCircle },
-    { label: 'Ready to Book', value: 'ready_to_book', icon: CheckCircle },
-    { label: 'Booked', value: 'booked', icon: Package },
-    { label: 'In Transit', value: 'in_transit', icon: Truck },
-    { label: 'Exceptions', value: 'exception', icon: AlertCircle },
-    { label: 'All', value: undefined, icon: Archive }
-];
-
-const STATUS_CONFIG = {
-    draft: {
-        action: 'Review & Validate',
-        variant: 'primary',
-        bg: 'bg-slate-100',
-        text: 'text-slate-700',
-        border: 'border-l-4 border-l-slate-400',
-        icon: AlertCircle
-    },
-    ready_to_book: {
-        action: 'Book Shipment',
-        variant: 'success',
-        bg: 'bg-green-50',
-        text: 'text-green-700',
-        border: 'border-l-4 border-l-green-500',
-        icon: CheckCircle
-    },
-    booked: {
-        action: 'Track / Print',
-        variant: 'info',
-        bg: 'bg-blue-50',
-        text: 'text-blue-700',
-        border: 'border-l-4 border-l-blue-500',
-        icon: Package
-    },
-    in_transit: {
-        action: 'Track Status',
-        variant: 'info',
-        bg: 'bg-indigo-50',
-        text: 'text-indigo-700',
-        border: 'border-l-4 border-l-indigo-500',
-        icon: Truck
-    },
-    exception: {
-        action: 'Resolve Issue',
-        variant: 'critical',
-        bg: 'bg-red-50',
-        text: 'text-red-700',
-        border: 'border-l-4 border-l-red-500',
-        icon: AlertTriangle
-    }
-};
+// ... existing code ...
 
 export default function ShipmentList() {
     const [shipments, setShipments] = useState([]);
     const [loading, setLoading] = useState(true);
     const [importing, setImporting] = useState(false);
     const [activeTab, setActiveTab] = useState('draft'); // Default to Need Review
+    const [searchQuery, setSearchQuery] = useState('');
+    const navigate = useNavigate();
 
-    useEffect(() => {
-        const fetchList = async () => {
-            setLoading(true);
-            try {
-                const params = { limit: 20 };
-                if (activeTab) params.status = activeTab;
+    // ... existing useEffect ...
 
-                const data = await api.getShipments(params);
-                setShipments(data.data || []);
-            } catch (err) {
-                console.error(err);
-            } finally {
-                setLoading(false);
+    const handleScan = (code) => {
+        console.log('Scanned:', code);
+        setSearchQuery(code);
+
+        // Optimistic navigation if it looks like an ID
+        // (Assuming IDs are UUIDs or strict format, here blindly checking length)
+        if (code.length > 8) {
+            // We could try to find it in the current list first
+            const found = shipments.find(s => s.id === code || s.trackingNumber === code);
+            if (found) {
+                navigate(`/shipments/${found.id}`);
+                return;
             }
-        };
-        fetchList();
-    }, [activeTab]);
-
-    const handleExport = async (id) => {
-        try {
-            const blob = await api.exportShipment(id);
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `shipment-${id}.json`;
-            a.click();
-        } catch (err) {
-            alert('Export failed');
         }
+        // Otherwise just filter the list (handled by UI filtering below)
     };
 
-    const handleImportClick = () => {
-        document.getElementById('json-import-input').click();
-    };
+    // Filter shipments based on search
+    const filteredShipments = shipments.filter(s => {
+        if (!searchQuery) return true;
+        const q = searchQuery.toLowerCase();
+        return (
+            s.id.toLowerCase().includes(q) ||
+            (s.consignee?.name || '').toLowerCase().includes(q) ||
+            (s.trackingNumber || '').toLowerCase().includes(q)
+        );
+    });
 
-    const handleImportFile = async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-
-        setImporting(true);
-        const reader = new FileReader();
-        reader.onload = async (event) => {
-            try {
-                const json = JSON.parse(event.target.result);
-                await api.importShipment(json);
-                alert('Shipment imported successfully!');
-                window.location.reload();
-            } catch (err) {
-                alert('Import failed: ' + err.message);
-            } finally {
-                setImporting(false);
-            }
-        };
-        reader.readAsText(file);
-    };
-
-    const getNextAction = (status) => {
-        switch (status) {
-            case 'draft': return { label: 'Review & Validate', color: 'text-primary-600' };
-            case 'ready_to_book': return { label: 'Book Shipment', color: 'text-green-600' };
-            case 'booked': return { label: 'Track / Print', color: 'text-blue-600' };
-            case 'in_transit': return { label: 'Track Status', color: 'text-blue-600' };
-            case 'exception': return { label: 'Resolve Issue', color: 'text-red-600' };
-            default: return { label: 'View Details', color: 'text-slate-500' };
-        }
-    };
+    // ... existing export/import handlers ...
 
     return (
         <div className="space-y-6">
@@ -136,7 +55,9 @@ export default function ShipmentList() {
                     <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Work Queue</h1>
                     <p className="text-slate-500 text-sm">Prioritize and process active shipments.</p>
                 </div>
-                <div className="flex gap-3">
+                <div className="flex gap-3 items-center">
+                    <HardwareStatus />
+                    <div className="h-6 w-px bg-slate-200 mx-1"></div>
                     <input
                         type="file"
                         id="json-import-input"
@@ -157,6 +78,23 @@ export default function ShipmentList() {
                     </Link>
                 </div>
             </header>
+
+            {/* Scanner / Search Bar */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                <div className="md:col-span-2">
+                    <ScannerInput onScan={handleScan} label="Quick Scan (Waybill / Tracking)" />
+                </div>
+                <div className="flex items-end">
+                    {searchQuery && (
+                        <button
+                            onClick={() => setSearchQuery('')}
+                            className="text-sm text-slate-500 hover:text-slate-700 underline mb-2"
+                        >
+                            Clear Search: "{searchQuery}"
+                        </button>
+                    )}
+                </div>
+            </div>
 
             {/* Tabs */}
             <div className="border-b border-slate-200">
@@ -190,17 +128,21 @@ export default function ShipmentList() {
                     </div>
                 )}
 
-                {!loading && shipments.length === 0 && (
+                {!loading && filteredShipments.length === 0 && (
                     <div className="flex flex-col items-center justify-center py-20 bg-slate-50 rounded-2xl border border-dashed border-slate-300 text-center">
                         <div className="bg-white p-4 rounded-full shadow-sm mb-4">
                             <Archive className="w-8 h-8 text-slate-400" />
                         </div>
-                        <h3 className="text-lg font-medium text-slate-900">No shipments found</h3>
-                        <p className="text-slate-500 max-w-sm mt-1">There are no shipments in this queue. Create a new one or change the filter.</p>
+                        <h3 className="text-lg font-medium text-slate-900">
+                            {searchQuery ? 'No matches found' : 'No shipments found'}
+                        </h3>
+                        <p className="text-slate-500 max-w-sm mt-1">
+                            {searchQuery ? `We couldn't find anything matching "${searchQuery}".` : 'There are no shipments in this queue. Create a new one or change the filter.'}
+                        </p>
                     </div>
                 )}
 
-                {!loading && shipments.map(shipment => {
+                {!loading && filteredShipments.map(shipment => {
                     const status = shipment.status || 'draft';
                     const config = STATUS_CONFIG[status] || STATUS_CONFIG.draft;
                     const StatusIcon = config.icon;
