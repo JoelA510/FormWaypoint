@@ -1,17 +1,21 @@
 {
-    "name": "formwaypoint-monorepo",
+    "name": "form-waypoint-monorepo",
     "private": true,
-    "repository": {
-        "type": "git",
-        "url": "git+https://github.com/JoelA510/FormWaypoint.git"
+    "scripts": {
+        "build": "turbo run build",
+        "dev": "turbo run dev",
+        "lint": "turbo run lint",
+        "types": "turbo run types",
+        "test": "turbo run test"
     },
+    "devDependencies": {
+        "turbo": "latest",
+        "prettier": "latest",
+        "typescript": "^5.7.0"
+    },
+    "packageManager": "npm@10.8.2",
     "workspaces": [
         "apps/*",
         "packages/*"
-    ],
-    "scripts": {
-        "test": "npm run test --workspaces",
-        "lint": "npm run lint --workspaces",
-        "typecheck": "npm run typecheck --workspaces"
-    }
+    ]
 }

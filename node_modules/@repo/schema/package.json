@@ -1,0 +1,20 @@
+{
+    "name": "@repo/schema",
+    "version": "0.0.0",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": "./src/index.ts"
+    },
+    "scripts": {
+        "build": "tsc",
+        "dev": "tsc --watch",
+        "lint": "eslint src/**"
+    },
+    "dependencies": {
+        "zod": "^3.23.0"
+    },
+    "devDependencies": {
+        "typescript": "^5.7.0"
+    }
+}
