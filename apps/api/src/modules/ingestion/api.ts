@@ -1,58 +1,65 @@
-import { Hono } from 'hono'
-import { zValidator } from '@hono/zod-validator'
-import { z } from 'zod'
-import { ShipmentSchema } from '@repo/schema'
+import { Hono } from 'hono';
+import { z } from 'zod';
+import { zValidator } from '@hono/zod-validator';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { Queue } from 'bullmq';
 
-// Define the response schema for RPC typing
-const IngestResponse = z.object({
-    success: z.boolean(),
-    confidence: z.number(),
-    shipment: ShipmentSchema.optional()
-})
+// Mock env vars for now - user should configure
+const S3_BUCKET = process.env.S3_BUCKET || 'formwaypoint-uploads';
+const S3_REGION = process.env.S3_REGION || 'us-east-1';
 
-const app = new Hono()
+const s3 = new S3Client({ region: S3_REGION });
+const ingestionQueue = new Queue('ingestion-queue', {
+    connection: {
+        host: process.env.REDIS_HOST || 'localhost',
+        port: parseInt(process.env.REDIS_PORT || '6379'),
+    }
+});
 
-// Define route with validator for RPC
-const route = app.post(
-    '/',
-    //   zValidator('form', z.object({
-    //     file: z.any() // Mocking file input for now
-    //   })),
-    async (c) => {
-        // Mock Logic
-        const mockShipment: z.infer<typeof ShipmentSchema> = {
-            shipper: {
-                name: "Mega Corp",
-                addressLine1: "123 Industrial Pkwy",
-                city: "Chicago",
-                stateOrProvince: "IL",
-                postalCode: "60601",
-                countryCode: "US"
-            },
-            consignee: {
-                name: "Euro Imports",
-                addressLine1: "10 Downing St",
-                city: "London",
-                countryCode: "GB",
-                postalCode: "SW1A 2AA"
-            },
-            originCountry: "US",
-            destinationCountry: "GB",
-            totalWeightKg: 500.5,
-            numPackages: 24,
-            incoterm: "FOB",
-            currency: "USD",
-            status: "draft",
-            // totalCustomsValue: 12000.00 // needs to matching schema used
-            // createdByUserId: "user_123"
-        } as any; // Casting for mock simplicity against strict Prisma types
+export const ingestionRouter = new Hono()
+    .post(
+        '/upload-url',
+        zValidator(
+            'json',
+            z.object({
+                filename: z.string(),
+                contentType: z.string(),
+            })
+        ),
+        async (c) => {
+            const { filename, contentType } = c.req.valid('json');
+            const key = `uploads/${crypto.randomUUID()}-${filename}`;
 
-        return c.json({
-            success: true,
-            confidence: 0.98,
-            shipment: mockShipment
-        })
-    })
+            const command = new PutObjectCommand({
+                Bucket: S3_BUCKET,
+                Key: key,
+                ContentType: contentType,
+            });
 
-export const ingestionRouter = route
-export type IngestionRoute = typeof route
+            const url = await getSignedUrl(s3, command, { expiresIn: 3600 });
+
+            return c.json({ url, key });
+        }
+    )
+    .post(
+        '/trigger',
+        zValidator(
+            'json',
+            z.object({
+                key: z.string(),
+                shipmentId: z.string().optional(),
+            })
+        ),
+        async (c) => {
+            const { key, shipmentId } = c.req.valid('json');
+
+            const job = await ingestionQueue.add('process-document', {
+                key,
+                shipmentId,
+                bucket: S3_BUCKET
+            });
+
+            return c.json({ jobId: job.id, message: 'Ingestion started' });
+        }
+    );
