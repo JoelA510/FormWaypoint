@@ -23,7 +23,7 @@ const app = express();
 const server = http.createServer(app);
 
 // Initialize Socket.io
-initSocket(server);
+// Socket.io initialized in startup block or by importer
 
 // Security middleware
 app.use(helmet());
@@ -92,9 +92,15 @@ const errorHandler = require('./middleware/errorHandler');
 app.use(errorHandler);
 
 if (require.main === module) {
+    // Initialize Socket.io only when running directly
+    initSocket(server);
+
     server.listen(port, () => {
         console.log(`API listening at http://localhost:${port}`);
     });
 }
+
+// Attach server for tests that might need it
+app.server = server;
 
 module.exports = app;
