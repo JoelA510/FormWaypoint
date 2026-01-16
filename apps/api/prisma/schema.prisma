@@ -1,0 +1,648 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+generator zod {
+  provider = "zod-prisma-types"
+  output   = "../../../packages/schema/src/generated/zod" 
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  username  String   @unique
+  password  String
+  email     String?
+  role      String   @default("user")
+  
+  // Notification preferences
+  notifyOnComment    Boolean @default(true)
+  notifyOnMention    Boolean @default(true)
+  notifyOnAssignment Boolean @default(true)
+  notifyOnCompletion Boolean @default(false)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  comments      Comment[]
+  auditLogs     AuditLog[]
+  templates     DocumentTemplate[]
+  notifications Notification[]
+  carrierAccounts CarrierAccount[]
+  forwarderProfiles ForwarderProfile[]
+  erpExportConfigs ErpExportConfig[]
+
+  documents     Document[]
+  savedViews    SavedView[]
+}
+
+model Document {
+  id         String   @id @default(uuid())
+  filename   String
+  status     String   @default("pending") // pending, processing, completed, failed
+  header     String?  // JSON string
+  lines      String?  // JSON string
+  checksums  String?  // JSON string
+  references String?  // JSON string
+  meta       String?  // JSON string
+  error      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relations
+  linkedFrom        DocumentLink[] @relation("TargetDoc")
+  linkedTo          DocumentLink[] @relation("SourceDoc")
+  
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  
+  tags       String?  // JSON string
+  
+  versions   DocumentVersion[]
+
+  comments      Comment[]
+  auditLogs     AuditLog[]
+  notifications Notification[]
+  shipments     Shipment[]
+}
+
+model Comment {
+  id         String   @id @default(uuid())
+  text       String
+  userId     String
+  documentId String?
+  shipmentId String?
+  createdAt  DateTime @default(now())
+
+  user     User      @relation(fields: [userId], references: [id])
+  document Document? @relation(fields: [documentId], references: [id])
+  shipment Shipment? @relation(fields: [shipmentId], references: [id])
+
+  @@index([userId])
+  @@index([documentId])
+  @@index([shipmentId])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  action     String
+  userId     String?
+  documentId String?
+  shipmentId String?
+  details    String?  // JSON string
+  timestamp  DateTime @default(now())
+
+  user     User?     @relation(fields: [userId], references: [id])
+  document Document? @relation(fields: [documentId], references: [id])
+  shipment Shipment? @relation(fields: [shipmentId], references: [id])
+
+  @@index([userId])
+  @@index([shipmentId])
+  @@index([documentId])
+}
+
+model DocumentTemplate {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  userId      String
+  header      String   // JSON
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model Notification {
+  id         String   @id @default(uuid())
+  userId     String
+  type       String   // comment, mention, assignment, completion
+  documentId String?
+  message    String
+  read       Boolean  @default(false)
+  sentEmail  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  
+  user     User      @relation(fields: [userId], references: [id])
+  document Document? @relation(fields: [documentId], references: [id])
+
+  @@index([userId])
+}
+
+model CarrierAccount {
+  id            String   @id @default(uuid())
+  userId        String
+  provider      String   // "mock", "fedex", "ups"
+  description   String?
+  accountNumber String
+  credentials   String   // JSON
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  shipments     Shipment[]
+  manifests     Manifest[]
+  
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model ShipmentCarrierMeta {
+  id                String   @id @default(uuid())
+  shipmentId        String   @unique
+  
+  carrierCode       String?
+  serviceLevelCode  String?
+  
+  rateQuoteJson     String? // JSON
+  bookingResponseJson String? // JSON
+  
+  labelDocumentId   String?
+  trackingNumber    String?
+  bookedAt          DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  shipment          Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+}
+
+model ForwarderProfile {
+  id                    String   @id @default(uuid())
+  userId                String
+  name                  String
+  emailToJson           String   // JSON
+  emailCcJson           String   // JSON
+  emailSubjectTemplate  String
+  emailBodyTemplate     String
+  dataBundleFormat      String
+  attachmentTypesJson   String   // JSON
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+  @@index([userId])
+}
+
+model ErpExportConfig {
+  id              String   @id @default(uuid())
+  userId          String
+  name            String
+  targetType      String
+  format          String
+  destination     String
+  schedule        String?
+  httpMethod      String?
+  httpHeadersJson String?
+  
+  updatedAt       DateTime @updatedAt
+  createdAt       DateTime @default(now())
+  
+  user User @relation(fields: [userId], references: [id])
+  jobs ErpExportJob[]
+  @@index([userId])
+}
+
+model ErpExportJob {
+  id                String   @id @default(uuid())
+  configId          String
+  status            String
+  fromDate          DateTime
+  toDate            DateTime
+  filtersJson       String?
+  resultSummaryJson String?
+  errorMessage      String?
+  runAt             DateTime?
+  
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  config ErpExportConfig @relation(fields: [configId], references: [id])
+  @@index([configId])
+}
+
+model SanctionsCheckResult {
+  id           String   @id @default(uuid())
+  shipmentId   String
+  status       String
+  responseJson String?
+  
+  createdAt    DateTime @default(now())
+  
+  shipment Shipment @relation(fields: [shipmentId], references: [id])
+  @@index([shipmentId])
+}
+
+model Shipment {
+  id                String   @id @default(uuid())
+  schemaVersion     String   @default("shipment.v1")
+  
+  erpOrderId        String?
+  erpShipmentId     String?
+
+  shipperId         String
+  consigneeId       String
+  forwarderId       String?
+  brokerId          String?
+
+  shipper           Party    @relation("ShipmentShipper", fields: [shipperId], references: [id])
+  consignee         Party    @relation("ShipmentConsignee", fields: [consigneeId], references: [id])
+  forwarder         Party?   @relation("ShipmentForwarder", fields: [forwarderId], references: [id])
+  broker            Party?   @relation("ShipmentBroker", fields: [brokerId], references: [id])
+
+  incoterm          String
+  currency          String
+  totalCustomsValue Float
+
+  totalWeightKg     Float
+  numPackages       Int
+
+  originCountry     String
+  destinationCountry String
+  carrierCode       String?
+  serviceLevelCode  String?
+  trackingNumber    String?
+  
+  carrierAccountId  String?
+  carrierAccount    CarrierAccount? @relation(fields: [carrierAccountId], references: [id])
+
+  aesRequired      Boolean   @default(false)
+  aesItn           String?
+  aesExemptionCode String?
+  sanctionsChecks  SanctionsCheckResult[]
+
+  assignedTo      String?
+
+  driverId          String?
+  driver            Driver?   @relation(fields: [driverId], references: [id])
+  dueDate         DateTime?
+
+  status            String   @default("draft")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  createdByUserId   String
+  
+  meta              String? // JSON
+
+  lineItems         ShipmentLineItem[]
+  documents         ShipmentDocument[]
+  auditLogs         AuditLog[]
+  comments          Comment[]
+
+  packages          Package[]
+  manifestId        String?
+  manifest          Manifest? @relation(fields: [manifestId], references: [id])
+  isReturn          Boolean   @default(false)
+  stopOrder         Int?
+
+  shipperSnapshot   String? // JSON
+  consigneeSnapshot String? // JSON
+  forwarderSnapshot String? // JSON
+  brokerSnapshot    String? // JSON
+  
+  sourceDocumentId  String?
+  sourceDocument    Document? @relation(fields: [sourceDocumentId], references: [id])
+  
+  carrierMeta       ShipmentCarrierMeta?
+
+  spotQuotes      SpotQuote[]
+  dockAppointment DockAppointment?
+  sensorReadings  SensorReading[]
+
+  @@index([sourceDocumentId])
+  @@index([createdByUserId])
+  @@index([status])
+  @@index([shipperId])
+  @@index([consigneeId])
+  @@index([carrierAccountId])
+}
+
+model ShipmentLineItem {
+  id                String   @id @default(uuid())
+  shipmentId        String
+  
+  sku               String?
+  description       String
+  quantity          Float
+  uom               String
+  
+  unitValue         Float
+  extendedValue     Float
+
+  netWeightKg       Float
+  grossWeightKg     Float?
+
+  htsCode           String
+  countryOfOrigin   String
+  eccn              String?
+
+  isDangerousGoods  Boolean?
+  dgUnNumber        String?
+  dgHazardClass     String?
+  dgPackingGroup    String?
+
+  shipment          Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@index([shipmentId])
+}
+
+model Party {
+  id              String   @id @default(uuid())
+  name            String
+  
+  addressLine1    String
+  addressLine2    String?
+  city            String
+  stateOrProvince String?
+  postalCode      String
+  countryCode     String
+
+  lat             Float?
+  lng             Float?
+
+  contactName     String?
+  phone           String?
+  email           String?
+  
+  taxIdOrEori     String?
+
+  isAddressBookEntry Boolean @default(false)
+  createdByUserId    String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  shipmentsAsShipper    Shipment[] @relation("ShipmentShipper")
+  shipmentsAsConsignee  Shipment[] @relation("ShipmentConsignee")
+  shipmentsAsForwarder  Shipment[] @relation("ShipmentForwarder")
+  shipmentsAsBroker     Shipment[] @relation("ShipmentBroker")
+  
+  creditLimit     Float?
+  currentBalance  Float?
+  creditRating    String?
+
+  @@index([createdByUserId])
+}
+
+model ShipmentDocument {
+  id          String   @id @default(uuid())
+  shipmentId  String
+  
+  type        String
+  format      String
+  
+  label       String
+  storageKey  String
+  
+  createdAt   DateTime @default(now())
+
+  shipment    Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  
+  @@index([shipmentId])
+}
+
+model Item {
+  id              String   @id @default(uuid())
+  sku             String   @unique
+  description     String
+  htsCode         String?
+  countryOfOrigin String?
+  eccn            String?
+  
+  defaultUnitValue Float?
+  defaultNetWeightKg Float?
+  uom             String?
+  
+  defaultIsDangerousGoods Boolean?
+  defaultDgUnNumber       String?
+  defaultDgHazardClass    String?
+  defaultDgPackingGroup   String?
+
+  parentBoms      BillOfMaterials[] @relation("BomParent")
+  childBoms       BillOfMaterials[] @relation("BomChild")
+  
+  quantityOnHand          Int      @default(0)
+  binLocation             String?
+
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  maintenanceEvents MaintenanceEvent[]
+
+  @@index([createdByUserId])
+}
+
+model Driver {
+  id              String   @id @default(uuid())
+  name            String
+  type            String   @default("employee")
+  licenseNumber   String?
+  phone           String?
+  email           String?
+  avatar          String?
+  
+  status          String   @default("active")
+  
+  currentLat      Float?
+  currentLng      Float?
+  lastLocationAt  DateTime?
+
+  vehicleId       String?
+  vehicle         Vehicle? @relation(fields: [vehicleId], references: [id])
+  
+  shipments       Shipment[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Vehicle {
+  id              String   @id @default(uuid())
+  name            String
+  licensePlate    String
+  make            String?
+  model           String?
+  type            String
+  capacityKg      Float?
+  status          String   @default("active")
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  drivers         Driver[]
+  maintenanceEvents MaintenanceEvent[]
+}
+
+model DocumentVersion {
+  id          String   @id @default(uuid())
+  documentId  String
+  version     Int
+  header      String?
+  lines       String?
+  
+  createdAt   DateTime @default(now())
+  createdByUserId String?
+
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  
+  @@index([documentId])
+}
+
+model Package {
+  id              String   @id @default(uuid())
+  shipmentId      String
+  trackingNumber  String?
+  weightKg        Float
+  dimLength       Float?
+  dimWidth        Float?
+  dimHeight       Float?
+  dimUnit         String?
+  type            String?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  shipment        Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  
+  @@index([shipmentId])
+}
+
+model Manifest {
+  id                String   @id @default(uuid())
+  carrierAccountId  String
+  submissionId      String?
+  documentUrl       String?
+  status            String   @default("pending")
+  
+  createdAt         DateTime @default(now())
+  closedAt          DateTime?
+  
+  shipments         Shipment[]
+  carrierAccount    CarrierAccount @relation(fields: [carrierAccountId], references: [id])
+  
+  @@index([carrierAccountId])
+}
+
+model MaintenanceEvent {
+  id          String   @id @default(uuid())
+  vehicleId   String?
+  vehicle     Vehicle? @relation(fields: [vehicleId], references: [id])
+  itemId      String?
+  item        Item? @relation(fields: [itemId], references: [id])
+  
+  type        String
+  cost        Float
+  odometer    Int?
+  notes       String?
+  date        DateTime @default(now())
+}
+
+model DocumentLink {
+  id            String   @id @default(uuid())
+  sourceId      String
+  targetId      String
+  type          String
+  confidence    Float    @default(1.0)
+  createdAt     DateTime @default(now())
+  
+  source        Document @relation("SourceDoc", fields: [sourceId], references: [id], onDelete: Cascade)
+  target        Document @relation("TargetDoc", fields: [targetId], references: [id], onDelete: Cascade)
+  
+  @@index([sourceId])
+  @@index([targetId])
+}
+
+model SavedView {
+  id            String   @id @default(uuid())
+  userId        String
+  name          String
+  query         String
+  isPublic      Boolean  @default(false)
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  user          User     @relation(fields: [userId], references: [id])
+  
+  @@index([userId])
+}
+
+model BillOfMaterials {
+  id            String   @id @default(uuid())
+  parentItemId  String
+  childItemId   String
+  quantity      Int
+  
+  parentItem    Item     @relation("BomParent", fields: [parentItemId], references: [id])
+  childItem     Item     @relation("BomChild", fields: [childItemId], references: [id])
+  
+  @@unique([parentItemId, childItemId])
+}
+
+model DockAppointment {
+  id            String   @id @default(uuid())
+  startTime     DateTime
+  endTime       DateTime
+  doorId        String
+  carrierName   String?
+  status        String
+  
+  shipmentId    String?  @unique
+  shipment      Shipment? @relation(fields: [shipmentId], references: [id])
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model SpotQuote {
+  id            String   @id @default(uuid())
+  shipmentId    String
+  carrierName   String
+  amount        Float
+  currency      String
+  validUntil    DateTime?
+  source        String
+  status        String
+  
+  shipment      Shipment @relation(fields: [shipmentId], references: [id])
+  
+  createdAt     DateTime @default(now())
+}
+
+model SensorReading {
+  id            String   @id @default(uuid())
+  shipmentId    String
+  deviceId      String
+  timestamp     DateTime
+  temperature   Float?
+  humidity      Float?
+  battery       Float?
+  location      String?
+
+  shipment      Shipment @relation(fields: [shipmentId], references: [id])
+  
+  createdAt     DateTime @default(now())
+  
+  @@index([shipmentId])
+}
+
+model rule {
+  id        String   @id @default(uuid())
+  name      String
+  enabled   Boolean  @default(true)
+  priority  Int      @default(0)
+  
+  condition String
+  action    String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
