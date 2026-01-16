@@ -6,19 +6,22 @@
         "dev": "tsx watch src/index.ts",
         "build": "tsc",
         "start": "node dist/index.js",
-        "test": "vitest"
+        "test": "vitest",
+        "generate": "prisma generate"
     },
     "dependencies": {
-        "hono": "^4.0.0",
         "@hono/node-server": "^1.0.0",
         "@hono/zod-validator": "^0.2.0",
         "@repo/schema": "*",
+        "hono": "^4.0.0",
         "zod": "^3.23.0"
     },
     "devDependencies": {
+        "@prisma/client": "^5.22.0",
+        "@types/node": "^22.0.0",
+        "prisma": "^5.22.0",
         "tsx": "^4.0.0",
         "typescript": "^5.7.0",
-        "@types/node": "^22.0.0",
         "vitest": "^1.0.0"
     }
 }

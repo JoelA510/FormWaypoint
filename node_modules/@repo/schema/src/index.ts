@@ -1,4 +1,7 @@
 import { z } from "zod";
+export * from "./validation";
+// Export generated Zod schemas from Prisma
+// export * from "./generated/zod";
 
 // --- Enums ---
 export const ShipmentStatusEnum = z.enum(["draft", "ready_to_book", "booked", "in_transit", "exception", "closed"]);
