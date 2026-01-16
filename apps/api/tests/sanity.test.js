@@ -8,24 +8,36 @@ jest.mock('../src/config', () => ({
     carriers: { fedexUrl: 'http://fedex' }
 }));
 
-// Mock redis
 jest.mock('../src/services/redis', () => ({
     connection: { on: jest.fn() }
 }));
 
-// Mock queue
 jest.mock('../src/queue', () => ({
+    createJob: jest.fn(),
+    getJob: jest.fn(),
+    addJob: jest.fn(),
+    ingestionQueue: {
+        getJobCounts: jest.fn().mockResolvedValue({ waiting: 0 })
+    },
     prisma: {
         $connect: jest.fn(),
         $disconnect: jest.fn()
     }
 }));
 
-// Mock nodemailer
 jest.mock('nodemailer', () => ({
     createTransporter: jest.fn().mockReturnValue({
         sendMail: jest.fn().mockResolvedValue(true)
     })
+}));
+
+jest.mock('../src/services/storage', () => ({
+    saveFile: jest.fn(),
+    getFilePath: jest.fn()
+}));
+
+jest.mock('../src/services/generator', () => ({
+    generatePDF: jest.fn()
 }));
 
 describe('Sanity Check', () => {

@@ -9,12 +9,16 @@ Key changes include modularizing the monolithic `api.js` service, hardening the 
 
 - **Refactor (`apps/web`)**: Split `api.js` into 9 modular services under `src/services/modules/`.
 - **Feature (`apps/web`)**: Added `ErrorBoundary.jsx` to catch React render errors.
-- **Fix (`apps/api`)**: Corrected `socket.js` config import path that was causing server crashes.
+- **Fix (`apps/api`)**:
+  - Corrected `socket.js` config import path that was causing server crashes.
+  - Fixed `socket.js` using `jwtSecret` instead of `authSecret`.
+  - Refactored `src/index.js` to defer Socket.io init, improving testability.
+  - Helper: Added `socket.io-client` to api devDependencies.
 - **Docs**:
   - Archived legacy reports to `docs/archive/`.
   - Merged `TESTING.md` into `docs/architecture/security-qa-guardrails.md`.
   - Created `docs/operations/ENGINEERING_KNOWLEDGE.md`.
-- **Test**: Added `socket_integration.test.js` (currently disabled/failing, pending mock fix).
+- **Test**: Added `socket_integration.test.js` (Verify: PASS).
 
 ## Verification
 

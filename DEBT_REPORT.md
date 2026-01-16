@@ -9,7 +9,8 @@
 
 ## 2. Correctness & Logic Risks
 
-* **Socket Tests**: The newly added `socket_integration.test.js` is failing, and `sanity.test.js` is unstable. Needs deep dive into Jest mocking of `socket.io`.
+* **API Import Instability**: `sanity.test.js` and `integration.test.js` crash on `require('../src/index')`. Likely a side-effect in route imports.
+* **Socket Tests**: `socket_integration.test.js` **PASSED** after fixing config and dependencies.
 
 ## 3. Maintainability
 
@@ -23,11 +24,13 @@
 
 ### Completed (2026-01-16)
 
-- [x] Archive old code review reports (`docs/archive`).
+* [x] Archive old code review reports (`docs/archive`).
+
 * [x] Refactor `api.js` into modular services (`apps/web/src/services/modules`).
 * [x] Add Error Boundaries to React App (`components/ErrorBoundary.jsx`).
 * [x] Merge `docs/TESTING.md` into `docs/architecture/security-qa-guardrails.md`.
 
 ### Next Actions
 
-- [ ] Fix Socket.io Unit/Integration Tests.
+* [x] Fix Socket.io Unit/Integration Tests (Fixed logic, `socket_integration` passes).
+* [ ] Fix `sanity.test.js` / API Import crash.

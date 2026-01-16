@@ -20,7 +20,7 @@ exports.initSocket = (server) => {
         }
 
         try {
-            const decoded = jwt.verify(token, config.jwtSecret);
+            const decoded = jwt.verify(token, config.authSecret);
             socket.user = decoded;
             next();
         } catch (err) {
