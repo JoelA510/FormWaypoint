@@ -2,50 +2,25 @@
 trigger: always_on
 ---
 
-# Architecture & Feature-Sliced Design (FSD) Rules
+# Architecture (FormWaypoint 2026)
 
-## Directory Structure
+## Monorepo Structure
 
-We follow a modified Feature-Sliced Design (FSD) enabling Agents to reason about "Domains" in isolation.
+### 1. pps/api (Backend)
+- **Hono**: RPC-style API.
+- **Modules**: src/modules/{domain}.
 
-### 1. `src/features/{domain}`
+### 2. pps/web (Frontend)
+- **Vite + React 19**.
+- **Features**: src/features/{domain}.
+- **Routes**: src/routes (TanStack Router).
 
-Contains **Business Logic** and **Domain Components**.
-
-- **Structure**:
-  - `components/`: React components specific to this feature.
-  - `hooks/`: Custom hooks for this feature's state/logic.
-  - `services/`: API calls and data transformation for this domain.
-  - `index.js`: (Optional) Public API of the feature.
-
-### 2. `src/shared`
-
-Contains **Reusable** code with **NO Business Logic**.
-
-- `ui/`: Dumb components (Buttons, Inputs, Modals) and Layouts.
-- `lib/`: Pure functions (Date Math, Formatting), strictly typed and tested.
-  - **Date Engine**: `src/shared/lib/date-engine` is the Single Source of Truth for date calculations.
-
-### 3. `src/app`
-
-Contains **Global Wiring**.
-
-- Providers, Router, Store configuration, Global Styles, and Core Configuration.
+### 3. packages/schema (Shared)
+- **Zod Schemas**: Single source of truth.
+- **Types**: Exported TypeScript types inferred from Zod.
 
 ## Critical Constraints
 
-1. **Dependency Direction**:
-   - `features` can import from `shared`.
-   - `features` can import from _other_ `features` (pragmatic relaxation of strict FSD).
-   - `shared` **CANNOT** import from `features`.
-
-2. **No Direct API Calls in Components**:
-   - UI components must use **Hooks** (`useTaskQuery`) or **Services**.
-   - Never write `supabase.from(...)` inside a `.jsx` file.
-
-3. **Date Logic Safety**:
-   - **Never** perform raw date math (e.g., `date.setDate(date.getDate() + 5)`).
-   - **Always** use `src/shared/lib/date-engine`.
-
-4. **Strict Typing (JSDoc)**:
-   - All new functions in `services` and `lib` must have JSDoc `@param` and `@returns`.
+1. **No Shared State**: pps/web cannot import from pps/api. They share packages/schema.
+2. **Type Safety**: Backend changes must break Frontend build if schema mismatches.
+3. **Validation**: All inputs must be validated by Zod schemas from @repo/schema.
