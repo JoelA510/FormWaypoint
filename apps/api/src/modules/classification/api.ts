@@ -3,7 +3,17 @@ import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
 import { hybridSearch } from './search';
 
+import { syncHtsCodes } from './seeder';
+
 export const classificationRouter = new Hono()
+    .post('/seed', async (c) => {
+        try {
+            const result = await syncHtsCodes();
+            return c.json(result);
+        } catch (e) {
+            return c.json({ error: 'Seeding failed' }, 500);
+        }
+    })
     .get(
         '/search',
         zValidator(
