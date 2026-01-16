@@ -29,10 +29,6 @@ build/
 # Storage
 storage/
 
-# Logs
-logs/
-*.log
-
 # Docker
 .dockerignore
 
@@ -44,7 +40,6 @@ playwright/.cache/
 # Training Docs
 training_docs/
 venv/
-.agent/
 match_files.ps1
 *.db
 *.sqlite
