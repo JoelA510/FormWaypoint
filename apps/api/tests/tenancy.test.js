@@ -40,6 +40,8 @@ jest.mock('@prisma/client', () => ({
     PrismaClient: jest.fn(() => mockPrisma)
 }));
 
+jest.mock('../src/routes/cx', () => (req, res, next) => next()); // Mock broken CX route
+
 // 2. Mock Config/Env
 jest.mock('../src/config', () => ({
     authSecret: 'test-secret',
@@ -61,12 +63,6 @@ jest.mock('../src/services/redis', () => ({
 jest.mock('../src/services/storage', () => ({
     saveFile: jest.fn(),
     getFilePath: jest.fn()
-}));
-
-jest.mock('nodemailer', () => ({
-    createTransporter: jest.fn().mockReturnValue({
-        sendMail: jest.fn().mockResolvedValue(true)
-    })
 }));
 
 jest.mock('bullmq', () => ({

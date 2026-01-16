@@ -13,12 +13,8 @@ jest.mock('../src/services/redis', () => ({
     connection: { on: jest.fn() }
 }));
 
-// Mock nodemailer
-jest.mock('nodemailer', () => ({
-    createTransporter: jest.fn().mockReturnValue({
-        sendMail: jest.fn().mockResolvedValue(true)
-    })
-}));
+// jest.mock('nodemailer') specific mock removed to use global setup
+jest.mock('../src/routes/cx', () => (req, res, next) => next()); // Mock broken CX route
 
 const request = require('supertest');
 

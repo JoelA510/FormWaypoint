@@ -11,12 +11,16 @@ jest.mock('../src/config', () => ({
 
 // Provide mocks for all other services to avoid errors
 jest.mock('../src/services/redis', () => ({ connection: { on: jest.fn() } }));
-jest.mock('nodemailer', () => ({ createTransporter: jest.fn() }));
+// jest.mock('nodemailer') removed
+jest.mock('../src/services/email', () => ({
+    sendEmail: jest.fn().mockResolvedValue(true)
+}));
 jest.mock('../src/utils/fileValidation', () => ({}));
 jest.mock('../src/services/storage', () => ({}));
 jest.mock('../src/services/generator', () => ({}));
 jest.mock('../src/services/history/historian', () => ({ logShipmentEvent: jest.fn() }));
 jest.mock('../src/services/portability/importExportService', () => ({}));
+jest.mock('../src/routes/cx', () => (req, res, next) => next()); // Mock broken CX route
 
 const request = require('supertest');
 

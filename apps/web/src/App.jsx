@@ -46,9 +46,7 @@ const Layout = ({ user, onLogout, children }) => {
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex justify-between items-center">
                     <div className="flex items-center gap-8">
                         <Link to="/" className="flex items-center gap-3">
-                            <div className="bg-primary-600 p-2 rounded-lg">
-                                <Ship className="w-6 h-6 text-white" />
-                            </div>
+                            <img src="/logo.png" alt="FormWaypoint Logo" className="h-10 w-auto" />
                             <h1 className="text-xl font-bold text-slate-900 tracking-tight">FormWaypoint</h1>
                         </Link>
 
