@@ -10,16 +10,17 @@
         "generate": "prisma generate"
     },
     "dependencies": {
+        "@aws-sdk/client-s3": "^3.971.0",
         "@hono/node-server": "^1.0.0",
         "@hono/zod-validator": "^0.2.0",
-        "@repo/schema": "*",
+        "@repo/schema": "workspace:*",
         "hono": "^4.0.0",
         "zod": "^3.23.0"
     },
     "devDependencies": {
-        "@prisma/client": "^5.22.0",
+        "@prisma/client": "7.2.0",
         "@types/node": "^22.0.0",
-        "prisma": "^5.22.0",
+        "prisma": "7.2.0",
         "tsx": "^4.0.0",
         "typescript": "^5.7.0",
         "vitest": "^1.0.0"
