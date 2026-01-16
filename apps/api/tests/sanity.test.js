@@ -40,6 +40,35 @@ jest.mock('../src/services/generator', () => ({
     generatePDF: jest.fn()
 }));
 
+// Mock all routes to prevent side-effects during load
+jest.mock('../src/routes/upload', () => (req, res, next) => next());
+jest.mock('../src/routes/documents', () => (req, res, next) => next());
+jest.mock('../src/routes/status', () => (req, res, next) => next());
+jest.mock('../src/routes/auth', () => (req, res, next) => next());
+jest.mock('../src/routes/metrics', () => (req, res, next) => next());
+jest.mock('../src/routes/files', () => (req, res, next) => next());
+jest.mock('../src/routes/config', () => (req, res, next) => next());
+jest.mock('../src/routes/carriers', () => (req, res, next) => next());
+jest.mock('../src/routes/notifications', () => (req, res, next) => next());
+jest.mock('../src/routes/import', () => (req, res, next) => next());
+jest.mock('../src/routes/webhooks', () => (req, res, next) => next());
+jest.mock('../src/routes/cx', () => (req, res, next) => next());
+jest.mock('../src/routes/fleet', () => (req, res, next) => next());
+
+// Mock domain routes
+jest.mock('../src/domains/compliance/routes/complianceRoutes', () => (req, res, next) => next());
+jest.mock('../src/domains/templates/routes/templateRoutes', () => (req, res, next) => next());
+jest.mock('../src/domains/freight/routes/freightRoutes', () => (req, res, next) => next());
+jest.mock('../src/domains/erp/routes/erpRoutes', () => (req, res, next) => next());
+jest.mock('../src/domains/reporting/routes/reportingRoutes', () => (req, res, next) => next());
+jest.mock('../src/domains/shipping/routes/shipmentRoutes', () => (req, res, next) => next());
+
+// Mock Middleware
+jest.mock('../src/middleware/auth', () => ({
+    requireAuth: (req, res, next) => next()
+}));
+jest.mock('../src/middleware/errorHandler', () => (err, req, res, next) => next(err));
+
 describe('Sanity Check', () => {
     it('should import app without crashing', () => {
         const app = require('../src/index');

@@ -1,0 +1,28 @@
+FAIL tests/lifecycle.test.js
+  ΓùÅ Test suite failed to run
+
+    Cannot find module '../services/cx/digitalSignatureService' from 'src/routes/cx.js'
+
+    Require stack:
+      src/routes/cx.js
+      src/index.js
+      tests/lifecycle.test.js
+
+       5 | const logger = require('../utils/logger');
+       6 | const SmsNotificationService = require('../services/cx/smsNotificationService');
+    >  7 | const DigitalSignatureService = require('../services/cx/digitalSignatureService');
+         |                                 ^
+       8 |
+       9 | const smsService = new SmsNotificationService();
+      10 | const signService = new DigitalSignatureService();
+
+      at Resolver._throwModNotFoundError (node_modules/jest-resolve/build/resolver.js:427:11)
+      at Object.require (src/routes/cx.js:7:33)
+      at Object.require (src/index.js:65:16)
+      at Object.require (tests/lifecycle.test.js:53:13)
+
+Test Suites: 1 failed, 1 total
+Tests:       0 total
+Snapshots:   0 total
+Time:        2.39 s
+Ran all test suites matching /tests\\lifecycle.test.js/i.

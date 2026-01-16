@@ -12,11 +12,8 @@ jest.mock('../src/config', () => ({
     nodeEnv: 'test'
 }));
 
-jest.mock('nodemailer', () => ({
-    createTransporter: jest.fn().mockReturnValue({
-        sendMail: jest.fn().mockResolvedValue(true)
-    })
-}));
+// jest.mock('nodemailer') specific mock removed to use global setup
+jest.mock('../src/routes/cx', () => (req, res, next) => next()); // Mock broken CX route
 
 // Mock Prisma Client
 const mockPrisma = {

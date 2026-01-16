@@ -1,5 +1,7 @@
 # FormWaypoint
 
+![FormWaypoint Logo](docs/assets/logo.png)
+
 FormWaypoint is a shipping documentation automation platform that converts diverse Commercial Invoices & Packing Lists (CIPL) into canonical shipment data and produces compliant SLI/BOL outputs.
 
 **Current Status:** Phase 3 Completed (Integrations & Advanced Compliance)
