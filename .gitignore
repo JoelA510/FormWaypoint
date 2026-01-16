@@ -1,53 +1,8 @@
-# Add .env to gitignore
-.env
-
-# Node
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Testing
-coverage/
-.nyc_output/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
+node_modules
+dist
+.turbo
 .DS_Store
-Thumbs.db
-
-# Build
-dist/
-build/
-*.tgz
-
-# Storage
-storage/
-
-# Logs
-logs/
-*.log
-
-# Docker
-.dockerignore
-
-# Playwright
-test-results/
-playwright-report/
-playwright/.cache/
-
-# Training Docs
-training_docs/
-venv/
-.agent/
-match_files.ps1
-*.db
-*.sqlite
-
-# Generated Output
-/Output/*
+.env
+coverage
+legacy/node_modules
+legacy/venv
