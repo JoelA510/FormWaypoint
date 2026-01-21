@@ -68,7 +68,7 @@ def process_documents():
 
     print(f"Processing {len(jde_files)} JDE files...")
     for f in jde_files:
-        # Extract ID from filename: R5542305_ORT0001_15801341_PDF.pdf -> 15801341
+        # Extract ID from filename: R5542305_REF0001_15801341_PDF.pdf -> 15801341
         match = re.search(r"_(\d+)_PDF", f)
         if match:
             shipment_id = match.group(1)

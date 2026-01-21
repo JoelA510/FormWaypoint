@@ -34,7 +34,7 @@ if __name__ == "__main__":
     base_dir = r"c:\Users\joel.abraham\Shipping Doc Gen\Shipping-Doc-Gen\training_docs"
     
     # 1. Extract text from a JDE file to find potential IDs
-    jde_file = os.path.join(base_dir, "JDE Output", "R5542305_ORT0001_15801341_PDF.pdf")
+    jde_file = os.path.join(base_dir, "JDE Output", "R5542305_REF0001_15801341_PDF.pdf")
     print(f"--- Extracting from JDE File: {jde_file} ---")
     jde_text = extract_text(jde_file)
     print(jde_text[:1000]) # Print first 1000 chars
