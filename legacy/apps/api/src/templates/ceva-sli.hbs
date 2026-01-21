@@ -106,7 +106,13 @@
 </head>
 
 <body>
-    <div class="header-bar">CEVA LOGISTICS</div>
+    <div class="header-bar">
+        {{#if header.forwarder.name}}
+        {{header.forwarder.name}}
+        {{else}}
+        {{header.forwarder}}
+        {{/if}}
+    </div>
     <div class="form-title">SHIPPER'S LETTER OF INSTRUCTIONS</div>
 
     <!-- Row 1: Date and Quote -->
@@ -154,10 +160,15 @@
         <div class="field large-field">
             <span class="field-label">4. INTERMEDIATE CONSIGNEE (Complete name and address)</span>
             <div class="field-value">
-                CEVA Logistics<br>
-                15350 Vickery Drive<br>
-                Houston, TX 77032 USA<br>
-                FMC NO. 021430F
+                {{#if header.forwarder.name}}
+                {{header.forwarder.name}}<br>
+                {{header.forwarder.address}}{{#if header.forwarder.address2}}, {{header.forwarder.address2}}{{/if}}<br>
+                {{header.forwarder.city}}, {{header.forwarder.state}} {{header.forwarder.zip}}<br>
+                {{header.forwarder.country}}
+                {{#if header.forwarder.fmcNumber}}<br>FMC NO. {{header.forwarder.fmcNumber}}{{/if}}
+                {{else}}
+                {{header.forwarder}}
+                {{/if}}
             </div>
         </div>
         <div class="field small-field">

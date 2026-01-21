@@ -1,9 +1,7 @@
 const TEMPLATE_MAP = {
     'sli': 'sli',
-    'nippon': 'nippon-sli',
-    'nippon-sli': 'nippon-sli',
-    'ceva': 'ceva-sli',
-    'ceva-sli': 'ceva-sli',
+    'forwarder_sli_v1': 'nippon-sli',
+    'forwarder_sli_v2': 'ceva-sli',
     'dhl': 'dhl-invoice',
     'dhl-invoice': 'dhl-invoice',
     'bol': 'generic-bol',

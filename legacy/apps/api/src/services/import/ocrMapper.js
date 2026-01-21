@@ -26,6 +26,8 @@ function mapOcrToShipment(ocrResult) {
 
     const { header, lines } = ocrResult;
     const shipmentId = crypto.randomUUID();
+    const originCountry = header.originCountry || DEFAULT_ORIGIN_COUNTRY;
+    const destinationCountry = header.destinationCountry || DEFAULT_DEST_COUNTRY;
 
     // Map Lines
     const shipmentLines = lines.map(line => ({
@@ -38,7 +40,7 @@ function mapOcrToShipment(ocrResult) {
         extendedValue: line.valueUsd || 0,
         netWeightKg: line.netWeightKg || 0,
         htsCode: line.htsCode || '000000',
-        countryOfOrigin: line.countryOfOrigin || DEFAULT_ORIGIN_COUNTRY,
+        countryOfOrigin: line.countryOfOrigin || originCountry,
         sku: line.partNumber
     }));
 
@@ -53,8 +55,8 @@ function mapOcrToShipment(ocrResult) {
         schemaVersion: 'shipment.v1',
         incoterm: header.incoterm || DEFAULT_INCOTERM,
         currency: header.currency || DEFAULT_CURRENCY,
-        originCountry: DEFAULT_ORIGIN_COUNTRY,
-        destinationCountry: DEFAULT_DEST_COUNTRY,
+        originCountry,
+        destinationCountry,
         erpOrderId: header.reference,
 
         shipper: {
@@ -63,7 +65,7 @@ function mapOcrToShipment(ocrResult) {
             addressLine1: 'Unknown Address',
             city: 'Unknown City',
             postalCode: '00000',
-            countryCode: DEFAULT_ORIGIN_COUNTRY
+            countryCode: originCountry
         },
         consignee: {
             id: crypto.randomUUID(),
@@ -71,7 +73,7 @@ function mapOcrToShipment(ocrResult) {
             addressLine1: 'Unknown Address',
             city: 'Unknown City',
             postalCode: '00000',
-            countryCode: DEFAULT_DEST_COUNTRY
+            countryCode: destinationCountry
         },
 
         // Aggregates

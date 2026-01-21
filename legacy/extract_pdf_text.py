@@ -30,7 +30,7 @@ def analyze_files(directory, keywords=None):
     return results
 
 if __name__ == "__main__":
-    # Test with a few JDE files and Nippon Express files
+    # Test with a few JDE files and forwarder sample files
     base_dir = r"c:\Users\joel.abraham\Shipping Doc Gen\Shipping-Doc-Gen\training_docs"
     
     # 1. Extract text from a JDE file to find potential IDs
@@ -39,8 +39,8 @@ if __name__ == "__main__":
     jde_text = extract_text(jde_file)
     print(jde_text[:1000]) # Print first 1000 chars
     
-    # 2. Extract text from a Nippon Express file
-    neu_file = os.path.join(base_dir, "Nippon Express", "Scans", "NEU-51042563.pdf")
+    # 2. Extract text from a forwarder sample file
+    neu_file = os.path.join(base_dir, "Forwarder Samples", "Scans", "NEU-51042563.pdf")
     print(f"\n--- Extracting from NEU File: {neu_file} ---")
     neu_text = extract_text(neu_file)
     print(neu_text[:1000])
