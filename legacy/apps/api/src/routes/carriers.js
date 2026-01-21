@@ -11,6 +11,7 @@ const { generateDocument } = require('../services/documents/generator');
 const crypto = require('crypto');
 const { connection: redis } = require('../services/redis');
 const logger = require('../utils/logger');
+const { encryptSecret, decryptSecret } = require('../utils/encryption');
 
 // ...
 
@@ -114,19 +115,28 @@ router.post('/connect', async (req, res) => {
         }
 
         // 2. Save Account
+        const encryptedCredentials = encryptSecret(JSON.stringify(credentials));
+        const encryptedAccountNumber = encryptSecret(accountNumber);
+
         const account = await prisma.carrierAccount.create({
             data: {
                 userId: userId || req.user?.id,
                 provider: provider.toLowerCase(),
-                accountNumber,
-                credentials: JSON.stringify(credentials),
+                accountNumber: encryptedAccountNumber,
+                credentials: encryptedCredentials,
                 description,
                 isActive: true
             }
         });
 
         logger.info(`Carrier account connected: ${provider} (${account.id})`);
-        res.json(account);
+        res.json({
+            id: account.id,
+            provider: account.provider,
+            description: account.description,
+            accountNumber: decryptSecret(account.accountNumber),
+            isActive: account.isActive
+        });
 
     } catch (error) {
         logger.error(`Connection error: ${error.message}`);
@@ -153,7 +163,7 @@ router.get('/', async (req, res) => {
         id: a.id,
         provider: a.provider,
         description: a.description,
-        accountNumber: a.accountNumber,
+        accountNumber: decryptSecret(a.accountNumber),
         isActive: a.isActive
     }));
 

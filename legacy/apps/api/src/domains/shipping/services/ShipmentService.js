@@ -55,7 +55,47 @@ class ShipmentService extends BaseService {
                     skip,
                     take: parseInt(limit),
                     orderBy: { createdAt: 'desc' },
-                    include: { shipper: true, consignee: true }
+                    select: {
+                        id: true,
+                        status: true,
+                        createdAt: true,
+                        updatedAt: true,
+                        incoterm: true,
+                        currency: true,
+                        originCountry: true,
+                        destinationCountry: true,
+                        totalWeightKg: true,
+                        numPackages: true,
+                        trackingNumber: true,
+                        carrierCode: true,
+                        serviceLevelCode: true,
+                        shipperId: true,
+                        consigneeId: true,
+                        shipper: {
+                            select: {
+                                id: true,
+                                name: true,
+                                addressLine1: true,
+                                addressLine2: true,
+                                city: true,
+                                stateOrProvince: true,
+                                postalCode: true,
+                                countryCode: true
+                            }
+                        },
+                        consignee: {
+                            select: {
+                                id: true,
+                                name: true,
+                                addressLine1: true,
+                                addressLine2: true,
+                                city: true,
+                                stateOrProvince: true,
+                                postalCode: true,
+                                countryCode: true
+                            }
+                        }
+                    }
                 }),
                 prisma.shipment.count({ where })
             ]);
