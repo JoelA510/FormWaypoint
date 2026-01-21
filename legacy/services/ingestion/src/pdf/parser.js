@@ -32,9 +32,15 @@ function parseHeader(textBlock) {
     const lower = line.toLowerCase();
 
     // --- SHIPPER (Top Left) ---
-    // Usually starts with "Omron" and is NOT "Sold To" or "Consigned To"
+    // Usually starts with the shipper name and is NOT "Sold To" or "Consigned To"
     // It ends when we hit "SOLD TO" or "DATE" or other labels
-    if (i < 10 && line.includes('Omron') && !lower.includes('sold to') && !lower.includes('consigned to') && !header.shipper) {
+    if (
+      i < 10
+      && !lower.includes('sold to')
+      && !lower.includes('consigned to')
+      && !lower.includes('invoice')
+      && !header.shipper
+    ) {
       header.shipper = line;
       // Look ahead for address lines
       for (let j = 1; j < 6; j++) {
