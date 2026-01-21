@@ -1,9 +1,7 @@
 const TEMPLATE_MAP = {
     'sli': 'sli',
-    'nippon': 'nippon-sli',
-    'nippon-sli': 'nippon-sli',
-    'ceva': 'ceva-sli',
-    'ceva-sli': 'ceva-sli',
+    'forwarder_sli_v1': 'forwarder-sli-v1',
+    'forwarder_sli_v2': 'forwarder-sli-v2',
     'dhl': 'dhl-invoice',
     'dhl-invoice': 'dhl-invoice',
     'bol': 'generic-bol',
@@ -22,6 +20,8 @@ const TEMPLATE_MAP = {
 
 const TEMPLATE_DEFAULTS = {
     'sli': { format: 'A4' },
+    'forwarder-sli-v1': { format: 'A4' },
+    'forwarder-sli-v2': { format: 'A4' },
     'fedex-bol': { format: 'Letter' },
     'ups-bol': { format: 'Letter' },
     'usps-label': { format: 'A6', width: '4in', height: '6in' },

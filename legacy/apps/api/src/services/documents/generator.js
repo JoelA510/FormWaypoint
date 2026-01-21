@@ -1,22 +1,72 @@
-const puppeteer = require('puppeteer');
 const handlebars = require('handlebars');
 const fs = require('fs').promises;
 const path = require('path');
-const { v4: uuidv4 } = require('uuid');
 const { buildInvoiceViewModel, buildPackingListViewModel } = require('./viewModels');
 const { PrismaClient } = require('@prisma/client');
+const { getBrowser } = require('../browser');
 
 const prisma = new PrismaClient(); // Or inject via DI
 
 // Cache compiled templates
 const templateCache = {};
+const ALLOWED_TEMPLATE_HELPERS = new Set(['if', 'each', 'unless', 'eq']);
+
+handlebars.registerHelper('eq', (a, b) => a === b);
+
+function assertTemplateSafe(templateContent, templateName) {
+    const ast = handlebars.parse(templateContent);
+    const violations = [];
+
+    const visit = (node) => {
+        if (!node || typeof node !== 'object') return;
+
+        if (node.type === 'PartialStatement' || node.type === 'PartialBlockStatement') {
+            violations.push(`Partials are not allowed (found in ${templateName}).`);
+        }
+
+        if (node.type === 'MustacheStatement' || node.type === 'BlockStatement' || node.type === 'SubExpression') {
+            if (node.type === 'MustacheStatement' && node.escaped === false) {
+                violations.push(`Unescaped output is not allowed (found in ${templateName}).`);
+            }
+
+            if (node.params && node.params.length > 0) {
+                const helperName = node.path?.original;
+                if (helperName && !ALLOWED_TEMPLATE_HELPERS.has(helperName)) {
+                    violations.push(`Helper "${helperName}" is not allowed in ${templateName}.`);
+                }
+            }
+        }
+
+        for (const key of Object.keys(node)) {
+            if (key === 'loc') continue;
+            const value = node[key];
+            if (Array.isArray(value)) {
+                value.forEach(visit);
+            } else if (value && typeof value === 'object') {
+                visit(value);
+            }
+        }
+    };
+
+    visit(ast);
+
+    if (violations.length) {
+        throw new Error(`Unsafe template content detected: ${violations.join(' ')}`);
+    }
+}
 
 async function getTemplate(templateName) {
     if (templateCache[templateName]) return templateCache[templateName];
 
     const templatePath = path.join(__dirname, '../../templates', `${templateName}.hbs`);
     const templateContent = await fs.readFile(templatePath, 'utf8');
-    const compiled = handlebars.compile(templateContent);
+    assertTemplateSafe(templateContent, templateName);
+    const compiled = handlebars.compile(templateContent, {
+        strict: true,
+        noEscape: false,
+        knownHelpersOnly: true,
+        knownHelpers: Object.fromEntries([...ALLOWED_TEMPLATE_HELPERS].map((helper) => [helper, true]))
+    });
     templateCache[templateName] = compiled;
     return compiled;
 }
@@ -62,13 +112,11 @@ async function generateDocument(shipmentId, type, options = {}) {
     const html = template(viewModel);
 
     // 4. Generate PDF via Puppeteer
-    const browser = await puppeteer.launch({
-        args: ['--no-sandbox', '--disable-setuid-sandbox'], // Docker/Serverless friendly
-        headless: 'new'
-    });
+    const browser = await getBrowser();
 
+    let page;
     try {
-        const page = await browser.newPage();
+        page = await browser.newPage();
         await page.setContent(html, { waitUntil: 'networkidle0' });
 
         // Define storage path
@@ -112,7 +160,9 @@ async function generateDocument(shipmentId, type, options = {}) {
         };
 
     } finally {
-        await browser.close();
+        if (page) {
+            await page.close();
+        }
     }
 }
 
