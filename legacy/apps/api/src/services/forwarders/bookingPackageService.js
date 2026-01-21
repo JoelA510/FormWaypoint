@@ -2,6 +2,7 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient(); // In a real app, reuse the client instance
 const fs = require('fs'); // For templates or loading assets later
 const handlebars = require('handlebars'); // Assuming this or similar is available, or use template literals
+const { validateHandlebarsTemplate } = require('../../utils/handlebarsSecurity');
 
 /**
  * Service to generate booking packages for freight forwarders.
@@ -53,7 +54,8 @@ class BookingPackageService {
         // Simple mustache-style replacement or use Handlebars
         const compile = (template, data) => {
             if (!template) return '';
-            const t = handlebars.compile(template);
+            validateHandlebarsTemplate(template);
+            const t = handlebars.compile(template, { strict: true });
             return t(data);
         };
 

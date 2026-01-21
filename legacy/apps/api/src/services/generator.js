@@ -3,6 +3,7 @@ const handlebars = require('handlebars');
 const fs = require('fs');
 const path = require('path');
 const logger = require('../utils/logger');
+const { validateHandlebarsTemplate } = require('../utils/handlebarsSecurity');
 
 const { TEMPLATE_DEFAULTS } = require('../config/templates');
 
@@ -24,7 +25,8 @@ async function generatePDF(data, templateName = 'sli') {
             return a === b;
         });
 
-        const template = handlebars.compile(templateHtml);
+        validateHandlebarsTemplate(templateHtml);
+        const template = handlebars.compile(templateHtml, { strict: true });
 
         // Add current date if not present
         const context = {

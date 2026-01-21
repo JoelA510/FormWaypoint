@@ -103,9 +103,42 @@ router.get('/driver/manifest', async (req, res) => {
             driverId: driverId,
             status: { in: ['ready_to_book', 'dispatched', 'in_transit'] }
         },
-        include: {
-            shipper: true,
-            consignee: true
+        select: {
+            id: true,
+            status: true,
+            dueDate: true,
+            originCountry: true,
+            destinationCountry: true,
+            totalWeightKg: true,
+            numPackages: true,
+            shipper: {
+                select: {
+                    id: true,
+                    name: true,
+                    addressLine1: true,
+                    addressLine2: true,
+                    city: true,
+                    stateOrProvince: true,
+                    postalCode: true,
+                    countryCode: true,
+                    contactName: true,
+                    phone: true
+                }
+            },
+            consignee: {
+                select: {
+                    id: true,
+                    name: true,
+                    addressLine1: true,
+                    addressLine2: true,
+                    city: true,
+                    stateOrProvince: true,
+                    postalCode: true,
+                    countryCode: true,
+                    contactName: true,
+                    phone: true
+                }
+            }
         },
         orderBy: {
             dueDate: 'asc'

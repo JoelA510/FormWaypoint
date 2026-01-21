@@ -3,6 +3,7 @@ const router = express.Router();
 const prisma = require('../db');
 const CarrierFactory = require('../gateways/carriers/CarrierFactory');
 const { generateDocument } = require('../services/documents/generator');
+const { encryptValue, decryptValue } = require('../services/security/encryptionService');
 
 /**
  * GET /api/shipments/:id/rates
@@ -113,20 +114,30 @@ router.post('/connect', async (req, res) => {
             return res.status(400).json({ error: 'Invalid credentials. Carrier rejected the connection.' });
         }
 
+        const serializedCredentials = typeof credentials === 'string'
+            ? credentials
+            : JSON.stringify(credentials || {});
+
         // 2. Save Account
         const account = await prisma.carrierAccount.create({
             data: {
                 userId: userId || req.user?.id,
                 provider: provider.toLowerCase(),
-                accountNumber,
-                credentials: JSON.stringify(credentials),
+                accountNumber: encryptValue(accountNumber),
+                credentials: encryptValue(serializedCredentials),
                 description,
                 isActive: true
             }
         });
 
         logger.info(`Carrier account connected: ${provider} (${account.id})`);
-        res.json(account);
+        res.json({
+            id: account.id,
+            provider: account.provider,
+            description: account.description,
+            accountNumber: decryptValue(account.accountNumber),
+            isActive: account.isActive
+        });
 
     } catch (error) {
         logger.error(`Connection error: ${error.message}`);
@@ -153,7 +164,7 @@ router.get('/', async (req, res) => {
         id: a.id,
         provider: a.provider,
         description: a.description,
-        accountNumber: a.accountNumber,
+        accountNumber: decryptValue(a.accountNumber),
         isActive: a.isActive
     }));
 

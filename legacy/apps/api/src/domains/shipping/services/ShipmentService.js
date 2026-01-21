@@ -55,7 +55,48 @@ class ShipmentService extends BaseService {
                     skip,
                     take: parseInt(limit),
                     orderBy: { createdAt: 'desc' },
-                    include: { shipper: true, consignee: true }
+                    select: {
+                        id: true,
+                        status: true,
+                        createdAt: true,
+                        updatedAt: true,
+                        incoterm: true,
+                        currency: true,
+                        totalCustomsValue: true,
+                        totalWeightKg: true,
+                        numPackages: true,
+                        originCountry: true,
+                        destinationCountry: true,
+                        carrierCode: true,
+                        serviceLevelCode: true,
+                        trackingNumber: true,
+                        erpOrderId: true,
+                        erpShipmentId: true,
+                        shipper: {
+                            select: {
+                                id: true,
+                                name: true,
+                                addressLine1: true,
+                                addressLine2: true,
+                                city: true,
+                                stateOrProvince: true,
+                                postalCode: true,
+                                countryCode: true
+                            }
+                        },
+                        consignee: {
+                            select: {
+                                id: true,
+                                name: true,
+                                addressLine1: true,
+                                addressLine2: true,
+                                city: true,
+                                stateOrProvince: true,
+                                postalCode: true,
+                                countryCode: true
+                            }
+                        }
+                    }
                 }),
                 prisma.shipment.count({ where })
             ]);
