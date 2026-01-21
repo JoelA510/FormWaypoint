@@ -1,10 +1,9 @@
-const puppeteer = require('puppeteer');
-const handlebars = require('handlebars');
+const { getBrowser } = require('../browser');
 const fs = require('fs').promises;
 const path = require('path');
-const { v4: uuidv4 } = require('uuid');
 const { buildInvoiceViewModel, buildPackingListViewModel } = require('./viewModels');
 const { PrismaClient } = require('@prisma/client');
+const { compileSafeTemplate, renderSafeTemplate } = require('../../utils/templateSecurity');
 
 const prisma = new PrismaClient(); // Or inject via DI
 
@@ -16,7 +15,7 @@ async function getTemplate(templateName) {
 
     const templatePath = path.join(__dirname, '../../templates', `${templateName}.hbs`);
     const templateContent = await fs.readFile(templatePath, 'utf8');
-    const compiled = handlebars.compile(templateContent);
+    const compiled = compileSafeTemplate(templateContent);
     templateCache[templateName] = compiled;
     return compiled;
 }
@@ -59,16 +58,13 @@ async function generateDocument(shipmentId, type, options = {}) {
 
     // 3. Render HTML
     const template = await getTemplate(templateName);
-    const html = template(viewModel);
+    const html = renderSafeTemplate(template, viewModel);
 
     // 4. Generate PDF via Puppeteer
-    const browser = await puppeteer.launch({
-        args: ['--no-sandbox', '--disable-setuid-sandbox'], // Docker/Serverless friendly
-        headless: 'new'
-    });
+    const browser = await getBrowser();
 
+    const page = await browser.newPage();
     try {
-        const page = await browser.newPage();
         await page.setContent(html, { waitUntil: 'networkidle0' });
 
         // Define storage path
@@ -112,7 +108,7 @@ async function generateDocument(shipmentId, type, options = {}) {
         };
 
     } finally {
-        await browser.close();
+        await page.close();
     }
 }
 

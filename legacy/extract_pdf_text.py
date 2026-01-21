@@ -30,7 +30,7 @@ def analyze_files(directory, keywords=None):
     return results
 
 if __name__ == "__main__":
-    # Test with a few JDE files and Nippon Express files
+    # Test with a few JDE files and Forwarder A files
     base_dir = r"c:\Users\joel.abraham\Shipping Doc Gen\Shipping-Doc-Gen\training_docs"
     
     # 1. Extract text from a JDE file to find potential IDs
@@ -39,14 +39,14 @@ if __name__ == "__main__":
     jde_text = extract_text(jde_file)
     print(jde_text[:1000]) # Print first 1000 chars
     
-    # 2. Extract text from a Nippon Express file
-    neu_file = os.path.join(base_dir, "Nippon Express", "Scans", "NEU-51042563.pdf")
-    print(f"\n--- Extracting from NEU File: {neu_file} ---")
+    # 2. Extract text from a Forwarder A file
+    neu_file = os.path.join(base_dir, "Forwarder A", "Scans", "FWD-A-51042563.pdf")
+    print(f"\n--- Extracting from Forwarder File: {neu_file} ---")
     neu_text = extract_text(neu_file)
     print(neu_text[:1000])
 
-    # 3. Search for JDE ID in NEU file
+    # 3. Search for JDE ID in Forwarder file
     if "15801341" in neu_text:
-        print("\nMATCH FOUND: 15801341 found in NEU file!")
+        print("\nMATCH FOUND: 15801341 found in Forwarder file!")
     else:
-        print("\nNo direct match found in this NEU file.")
+        print("\nNo direct match found in this Forwarder file.")

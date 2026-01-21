@@ -9,8 +9,8 @@ from pypdf import PdfReader
 BASE_DIR = r"c:\Users\joel.abraham\Shipping Doc Gen\Shipping-Doc-Gen\training_docs"
 OUTPUT_DIR = os.path.join(BASE_DIR, "grouped")
 JDE_DIR = os.path.join(BASE_DIR, "JDE Output")
-NEU_DIR = os.path.join(BASE_DIR, "Nippon Express")
-CEVA_DIR = os.path.join(BASE_DIR, "Ceva")
+FORWARDER_A_DIR = os.path.join(BASE_DIR, "Forwarder A")
+FORWARDER_B_DIR = os.path.join(BASE_DIR, "Forwarder B")
 
 # Initialize OCR reader
 reader = easyocr.Reader(['en'])
@@ -87,10 +87,10 @@ def process_documents():
 
     print(f"Found {len(jde_map)} unique Shipment IDs.")
 
-    # 2. Process Carrier Files (Nippon Express)
+    # 2. Process Carrier Files (Forwarder A)
     # We'll walk through the directory
-    print("Processing Nippon Express files (this may take a while)...")
-    for root, dirs, files in os.walk(NEU_DIR):
+    print("Processing Forwarder A files (this may take a while)...")
+    for root, dirs, files in os.walk(FORWARDER_A_DIR):
         for file in files:
             if file.lower().endswith(".pdf"):
                 file_path = os.path.join(root, file)
@@ -107,7 +107,7 @@ def process_documents():
                         
                         # Copy and rename
                         group_path = os.path.join(OUTPUT_DIR, shipment_id)
-                        dst = os.path.join(group_path, f"NEU_{shipment_id}.pdf") # Or append if multiple?
+                        dst = os.path.join(group_path, f"FWD_A_{shipment_id}.pdf") # Or append if multiple?
                         
                         # Handle duplicates
                         if os.path.exists(dst):

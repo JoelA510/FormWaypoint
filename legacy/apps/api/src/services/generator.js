@@ -1,8 +1,8 @@
 const { getBrowser } = require('./browser');
-const handlebars = require('handlebars');
 const fs = require('fs');
 const path = require('path');
 const logger = require('../utils/logger');
+const { compileSafeTemplate, renderSafeTemplate } = require('../utils/templateSecurity');
 
 const { TEMPLATE_DEFAULTS } = require('../config/templates');
 
@@ -19,12 +19,7 @@ async function generatePDF(data, templateName = 'sli') {
         logger.info('Loading template', { templateName, templatePath });
         const templateHtml = fs.readFileSync(templatePath, 'utf8');
 
-        // Register Handlebars helpers
-        handlebars.registerHelper('eq', function (a, b) {
-            return a === b;
-        });
-
-        const template = handlebars.compile(templateHtml);
+        const template = compileSafeTemplate(templateHtml);
 
         // Add current date if not present
         const context = {
@@ -33,7 +28,7 @@ async function generatePDF(data, templateName = 'sli') {
         };
 
         // console.log('[Generator] Rendering template with context'); // Reduce noise
-        const html = template(context);
+        const html = renderSafeTemplate(template, context);
 
         // Get singleton browser
         const browser = await getBrowser();

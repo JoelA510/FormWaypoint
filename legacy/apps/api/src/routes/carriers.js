@@ -11,10 +11,31 @@ const { generateDocument } = require('../services/documents/generator');
 const crypto = require('crypto');
 const { connection: redis } = require('../services/redis');
 const logger = require('../utils/logger');
+const { encryptValue, decryptValue } = require('../utils/encryption');
 
 // ...
 
 const LBS_TO_KG = 0.453592;
+
+const maskAccountNumber = (value) => {
+    if (!value) return null;
+    const compact = value.replace(/\s+/g, '');
+    if (compact.length <= 4) return compact;
+    return `${'*'.repeat(compact.length - 4)}${compact.slice(-4)}`;
+};
+
+const safeDecrypt = (value, accountId, fieldName) => {
+    try {
+        return decryptValue(value);
+    } catch (error) {
+        logger.warn('Failed to decrypt carrier account field.', {
+            accountId,
+            fieldName,
+            error: error.message
+        });
+        return null;
+    }
+};
 
 /**
  * POST /api/carriers/rates
@@ -118,8 +139,8 @@ router.post('/connect', async (req, res) => {
             data: {
                 userId: userId || req.user?.id,
                 provider: provider.toLowerCase(),
-                accountNumber,
-                credentials: JSON.stringify(credentials),
+                accountNumber: encryptValue(accountNumber),
+                credentials: encryptValue(JSON.stringify(credentials)),
                 description,
                 isActive: true
             }
@@ -149,13 +170,16 @@ router.get('/', async (req, res) => {
     });
 
     // Don't return full credentials
-    const sanitized = accounts.map(a => ({
-        id: a.id,
-        provider: a.provider,
-        description: a.description,
-        accountNumber: a.accountNumber,
-        isActive: a.isActive
-    }));
+    const sanitized = accounts.map(a => {
+        const decryptedAccountNumber = safeDecrypt(a.accountNumber, a.id, 'accountNumber');
+        return {
+            id: a.id,
+            provider: a.provider,
+            description: a.description,
+            accountNumber: maskAccountNumber(decryptedAccountNumber),
+            isActive: a.isActive
+        };
+    });
 
     res.json(sanitized);
 });
