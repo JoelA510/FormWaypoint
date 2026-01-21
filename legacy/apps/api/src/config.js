@@ -7,7 +7,8 @@ function validateEnv() {
     // List of required variables for ALL environments (except test if we want to be loose there)
     const required = [
         'AUTH_SECRET',
-        'STORAGE_PATH'
+        'STORAGE_PATH',
+        'CARRIER_ACCOUNT_ENCRYPTION_KEY'
     ];
 
     // Variables required if features are enabled (logic could be more complex)
