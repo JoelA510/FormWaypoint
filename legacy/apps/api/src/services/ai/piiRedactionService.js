@@ -6,7 +6,7 @@ class PiiRedactionService {
             EMAIL: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g,
             PHONE: /(\+\d{1,2}\s?)?1?-?\.?\s?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/g,
             SSN: /\b\d{3}-\d{2}-\d{4}\b/g,
-            CREDIT_CARD: /\b(?:\d{4}[ -]?){3}\d{4}\b/g,
+            CREDIT_CARD: /\b\d{4}(?:[ -]?\d{4}){3}\b/g,
         };
     }
 

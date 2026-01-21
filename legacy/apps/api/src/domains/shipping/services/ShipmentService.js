@@ -49,13 +49,34 @@ class ShipmentService extends BaseService {
             const where = {};
             if (status) where.status = status;
 
+            const shipmentSelect = {
+                id: true,
+                erpOrderId: true,
+                erpShipmentId: true,
+                incoterm: true,
+                currency: true,
+                totalCustomsValue: true,
+                totalWeightKg: true,
+                numPackages: true,
+                originCountry: true,
+                destinationCountry: true,
+                carrierCode: true,
+                serviceLevelCode: true,
+                trackingNumber: true,
+                status: true,
+                createdAt: true,
+                updatedAt: true,
+                shipper: { select: { id: true, name: true } },
+                consignee: { select: { id: true, name: true } }
+            };
+
             const [data, total] = await Promise.all([
                 prisma.shipment.findMany({
                     where,
                     skip,
                     take: parseInt(limit),
                     orderBy: { createdAt: 'desc' },
-                    include: { shipper: true, consignee: true }
+                    select: shipmentSelect
                 }),
                 prisma.shipment.count({ where })
             ]);
