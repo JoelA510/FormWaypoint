@@ -21,9 +21,17 @@ class ExportBuilder {
                     lte: toDate
                 }
             },
-            include: {
-                shipmentCarrierMeta: true,
-                lineItems: true
+            select: {
+                id: true,
+                erpOrderId: true,
+                erpShipmentId: true,
+                carrierCode: true,
+                serviceLevelCode: true,
+                trackingNumber: true,
+                destinationCountry: true,
+                createdAt: true,
+                updatedAt: true,
+                status: true
             }
         });
 

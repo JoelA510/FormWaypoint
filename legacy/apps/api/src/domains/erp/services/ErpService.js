@@ -27,7 +27,8 @@ class ErpService extends BaseService {
             // Find shipments to export (mock logic: last 24h)
             const shipments = await prisma.shipment.findMany({
                 where: { updatedAt: { gte: new Date(Date.now() - 86400000) } },
-                take: 50
+                take: 50,
+                select: { id: true }
             });
 
             // "Export" happen logic (Mock)

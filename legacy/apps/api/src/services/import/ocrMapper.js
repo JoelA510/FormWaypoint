@@ -47,14 +47,17 @@ function mapOcrToShipment(ocrResult) {
     const aggWeight = ocrResult.checksums?.netWeightKg || lines.reduce((acc, line) => acc + (line.netWeightKg || 0), 0);
     const aggQty = ocrResult.checksums?.quantity || lines.reduce((acc, line) => acc + (line.quantity || 0), 0);
 
+    const originCountry = header.originCountry || header.origin || DEFAULT_ORIGIN_COUNTRY;
+    const destinationCountry = header.destinationCountry || header.destination || DEFAULT_DEST_COUNTRY;
+
     // Map Header
     const shipmentData = {
         id: shipmentId,
         schemaVersion: 'shipment.v1',
         incoterm: header.incoterm || DEFAULT_INCOTERM,
         currency: header.currency || DEFAULT_CURRENCY,
-        originCountry: DEFAULT_ORIGIN_COUNTRY,
-        destinationCountry: DEFAULT_DEST_COUNTRY,
+        originCountry,
+        destinationCountry,
         erpOrderId: header.reference,
 
         shipper: {
@@ -63,7 +66,7 @@ function mapOcrToShipment(ocrResult) {
             addressLine1: 'Unknown Address',
             city: 'Unknown City',
             postalCode: '00000',
-            countryCode: DEFAULT_ORIGIN_COUNTRY
+            countryCode: originCountry
         },
         consignee: {
             id: crypto.randomUUID(),
@@ -71,7 +74,7 @@ function mapOcrToShipment(ocrResult) {
             addressLine1: 'Unknown Address',
             city: 'Unknown City',
             postalCode: '00000',
-            countryCode: DEFAULT_DEST_COUNTRY
+            countryCode: destinationCountry
         },
 
         // Aggregates

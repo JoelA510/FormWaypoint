@@ -3,6 +3,7 @@ const router = express.Router();
 const prisma = require('../db');
 const CarrierFactory = require('../gateways/carriers/CarrierFactory');
 const { generateDocument } = require('../services/documents/generator');
+const { encryptString, decryptString } = require('../services/security/fieldEncryption');
 
 /**
  * GET /api/shipments/:id/rates
@@ -118,8 +119,8 @@ router.post('/connect', async (req, res) => {
             data: {
                 userId: userId || req.user?.id,
                 provider: provider.toLowerCase(),
-                accountNumber,
-                credentials: JSON.stringify(credentials),
+                accountNumber: encryptString(accountNumber),
+                credentials: encryptString(JSON.stringify(credentials)),
                 description,
                 isActive: true
             }
@@ -139,25 +140,30 @@ router.post('/connect', async (req, res) => {
  * List connected accounts for user.
  */
 router.get('/', async (req, res) => {
-    const userId = req.user?.id || req.query.userId;
-    if (!userId) {
-        return res.status(400).json({ error: 'Missing userId' });
+    try {
+        const userId = req.user?.id || req.query.userId;
+        if (!userId) {
+            return res.status(400).json({ error: 'Missing userId' });
+        }
+
+        const accounts = await prisma.carrierAccount.findMany({
+            where: { userId }
+        });
+
+        // Don't return full credentials
+        const sanitized = accounts.map(a => ({
+            id: a.id,
+            provider: a.provider,
+            description: a.description,
+            accountNumber: decryptString(a.accountNumber),
+            isActive: a.isActive
+        }));
+
+        res.json(sanitized);
+    } catch (error) {
+        logger.error('Failed to load carrier accounts', { error: error.message });
+        res.status(500).json({ error: 'Failed to load carrier accounts' });
     }
-
-    const accounts = await prisma.carrierAccount.findMany({
-        where: { userId }
-    });
-
-    // Don't return full credentials
-    const sanitized = accounts.map(a => ({
-        id: a.id,
-        provider: a.provider,
-        description: a.description,
-        accountNumber: a.accountNumber,
-        isActive: a.isActive
-    }));
-
-    res.json(sanitized);
 });
 
 router.post('/:id/rates', async (req, res) => {

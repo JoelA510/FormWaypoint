@@ -4,7 +4,7 @@
 Deliver a consistent export pipeline that transforms canonical shipment records into carrier-ready documents and structured downloads without duplicating business rules across services.
 
 ## Components
-- **Template Registry**: Versioned JSON definitions for each carrier (NCBFAA SLI, NMFTA BOL, VICS BOL, CEVA, DB Schenker, Kuehne+Nagel, Nippon Express) including field mappings, conditional logic, and layout metadata.
+- **Template Registry**: Versioned JSON definitions for each carrier (NCBFAA SLI, NMFTA BOL, VICS BOL, regional forwarders) including field mappings, conditional logic, and layout metadata.
 - **Renderer Service**: Node.js or worker process that consumes canonical JSON plus template ID to render HTML via Handlebars/React server components, then converts to PDF with Playwright.
 - **Structured Exporters**: Shared utilities to generate CSV, XLSX, and Markdown representations with deterministic column order and checksum rows.
 - **Validation Hooks**: Rule engine confirming HTS format, ECCN/licensing requirements, Incoterm alignment, and totals reconciliation before export.

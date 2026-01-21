@@ -1,22 +1,88 @@
-const puppeteer = require('puppeteer');
 const handlebars = require('handlebars');
 const fs = require('fs').promises;
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const { buildInvoiceViewModel, buildPackingListViewModel } = require('./viewModels');
 const { PrismaClient } = require('@prisma/client');
+const { getBrowser } = require('../browser');
 
 const prisma = new PrismaClient(); // Or inject via DI
 
 // Cache compiled templates
 const templateCache = {};
 
+const SAFE_BLOCK_HELPERS = new Set(['if', 'each']);
+const SAFE_INLINE_HELPERS = new Set(['eq']);
+
+function validateTemplateAst(node, templateName) {
+    if (!node) return;
+
+    switch (node.type) {
+        case 'Program':
+            node.body.forEach(child => validateTemplateAst(child, templateName));
+            return;
+        case 'MustacheStatement': {
+            if (node.escaped === false) {
+                throw new Error(`Unsafe unescaped output in template "${templateName}"`);
+            }
+
+            const helperName = node.path?.original;
+            const hasParams = (node.params && node.params.length > 0) || (node.hash && node.hash.pairs.length > 0);
+            if (hasParams && helperName && !SAFE_INLINE_HELPERS.has(helperName)) {
+                throw new Error(`Disallowed helper "${helperName}" in template "${templateName}"`);
+            }
+
+            node.params?.forEach(param => validateTemplateAst(param, templateName));
+            node.hash?.pairs?.forEach(pair => validateTemplateAst(pair.value, templateName));
+            return;
+        }
+        case 'BlockStatement': {
+            const helperName = node.path?.original;
+            if (helperName && !SAFE_BLOCK_HELPERS.has(helperName)) {
+                throw new Error(`Disallowed block helper "${helperName}" in template "${templateName}"`);
+            }
+
+            node.params?.forEach(param => validateTemplateAst(param, templateName));
+            node.hash?.pairs?.forEach(pair => validateTemplateAst(pair.value, templateName));
+            validateTemplateAst(node.program, templateName);
+            if (node.inverse) validateTemplateAst(node.inverse, templateName);
+            return;
+        }
+        case 'SubExpression': {
+            const helperName = node.path?.original;
+            if (helperName && !SAFE_INLINE_HELPERS.has(helperName)) {
+                throw new Error(`Disallowed subexpression helper "${helperName}" in template "${templateName}"`);
+            }
+
+            node.params?.forEach(param => validateTemplateAst(param, templateName));
+            node.hash?.pairs?.forEach(pair => validateTemplateAst(pair.value, templateName));
+            return;
+        }
+        case 'PartialStatement':
+        case 'PartialBlockStatement':
+        case 'Decorator':
+        case 'DecoratorBlock':
+            throw new Error(`Disallowed template construct "${node.type}" in template "${templateName}"`);
+        default:
+            return;
+    }
+}
+
+function ensureTemplateSafe(templateContent, templateName) {
+    const ast = handlebars.parse(templateContent);
+    validateTemplateAst(ast, templateName);
+}
+
 async function getTemplate(templateName) {
     if (templateCache[templateName]) return templateCache[templateName];
 
     const templatePath = path.join(__dirname, '../../templates', `${templateName}.hbs`);
     const templateContent = await fs.readFile(templatePath, 'utf8');
-    const compiled = handlebars.compile(templateContent);
+    ensureTemplateSafe(templateContent, templateName);
+    const compiled = handlebars.compile(templateContent, {
+        noEscape: false,
+        strict: true
+    });
     templateCache[templateName] = compiled;
     return compiled;
 }
@@ -62,13 +128,10 @@ async function generateDocument(shipmentId, type, options = {}) {
     const html = template(viewModel);
 
     // 4. Generate PDF via Puppeteer
-    const browser = await puppeteer.launch({
-        args: ['--no-sandbox', '--disable-setuid-sandbox'], // Docker/Serverless friendly
-        headless: 'new'
-    });
-
+    const browser = await getBrowser();
+    let page;
     try {
-        const page = await browser.newPage();
+        page = await browser.newPage();
         await page.setContent(html, { waitUntil: 'networkidle0' });
 
         // Define storage path
@@ -112,7 +175,9 @@ async function generateDocument(shipmentId, type, options = {}) {
         };
 
     } finally {
-        await browser.close();
+        if (page) {
+            await page.close();
+        }
     }
 }
 
