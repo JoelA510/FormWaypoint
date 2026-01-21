@@ -124,7 +124,9 @@
 
 <body>
     <div class="logo-section">
-        <div class="logo">NIPPON EXPRESS USA, INC.</div>
+        <div class="logo">
+            {{#if forwarder.name}}{{forwarder.name}}{{else}}{{#if header.forwarder.name}}{{header.forwarder.name}}{{else}}{{header.forwarder}}{{/if}}{{/if}}
+        </div>
     </div>
     <div class="form-title">SHIPPER'S LETTER OF INSTRUCTION</div>
 
@@ -281,8 +283,23 @@
         <div class="field large-field">
             <span class="field-label">5a. FORWARDING AGENT</span>
             <div class="field-value">
-                <strong>NIPPON EXPRESS USA, INC.</strong><br>
-                Nippon Express USA, Inc.
+                {{#if forwarder.name}}
+                <strong>{{forwarder.name}}</strong><br>
+                {{forwarder.name}}<br>
+                {{forwarder.address}}{{#if forwarder.address2}}, {{forwarder.address2}}{{/if}}<br>
+                {{forwarder.city}}, {{forwarder.state}} {{forwarder.zip}}<br>
+                {{forwarder.country}}
+                {{else}}
+                {{#if header.forwarder.name}}
+                <strong>{{header.forwarder.name}}</strong><br>
+                {{header.forwarder.name}}<br>
+                {{header.forwarder.address}}{{#if header.forwarder.address2}}, {{header.forwarder.address2}}{{/if}}<br>
+                {{header.forwarder.city}}, {{header.forwarder.state}} {{header.forwarder.zip}}<br>
+                {{header.forwarder.country}}
+                {{else}}
+                {{header.forwarder}}
+                {{/if}}
+                {{/if}}
             </div>
         </div>
         <div class="field small-field">

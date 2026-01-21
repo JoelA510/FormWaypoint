@@ -1,5 +1,6 @@
 const prisma = require('../../db');
 const FedExAdapter = require('./adapters/FedExAdapter');
+const { decryptString } = require('../../services/security/fieldEncryption');
 // const UPSAdapter = require('./adapters/UPSAdapter');
 
 class CarrierFactory {
@@ -20,7 +21,8 @@ class CarrierFactory {
 
         if (!account) throw new Error(`Carrier Account ${carrierAccountId} not found`);
 
-        const credentials = JSON.parse(account.credentials || '{}');
+        const decryptedCredentials = decryptString(account.credentials);
+        const credentials = JSON.parse(decryptedCredentials || '{}');
 
         switch (account.provider.toLowerCase()) {
             case 'fedex':
