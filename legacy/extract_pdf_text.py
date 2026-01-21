@@ -40,8 +40,13 @@ if __name__ == "__main__":
     print(jde_text[:1000]) # Print first 1000 chars
     
     # 2. Extract text from a Forwarder A file
+<<<<<<< HEAD
     neu_file = os.path.join(base_dir, "Forwarder A", "Scans", "FWD-A-51042563.pdf")
     print(f"\n--- Extracting from Forwarder File: {neu_file} ---")
+=======
+    neu_file = os.path.join(base_dir, "Forwarder A", "Scans", "NEU-51042563.pdf")
+    print(f"\n--- Extracting from NEU File: {neu_file} ---")
+>>>>>>> origin/codex/perform-security-and-compliance-audit-msne36
     neu_text = extract_text(neu_file)
     print(neu_text[:1000])
 

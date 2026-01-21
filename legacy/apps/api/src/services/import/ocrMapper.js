@@ -50,6 +50,9 @@ function mapOcrToShipment(ocrResult) {
     const aggWeight = ocrResult.checksums?.netWeightKg || lines.reduce((acc, line) => acc + (line.netWeightKg || 0), 0);
     const aggQty = ocrResult.checksums?.quantity || lines.reduce((acc, line) => acc + (line.quantity || 0), 0);
 
+    const originCountry = header.originCountry || header.origin || DEFAULT_ORIGIN_COUNTRY;
+    const destinationCountry = header.destinationCountry || header.destination || DEFAULT_DEST_COUNTRY;
+
     // Map Header
     const shipmentData = {
         id: shipmentId,

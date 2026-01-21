@@ -48,11 +48,23 @@
         }
 
         .small-field {
+<<<<<<< HEAD
             flex: 0.5;
         }
 
         .large-field {
             flex: 2;
+=======
+            flex: 0.4;
+        }
+
+        .medium-field {
+            flex: 0.7;
+        }
+
+        .large-field {
+            flex: 1.5;
+>>>>>>> origin/codex/perform-security-and-compliance-audit-msne36
         }
 
         .checkbox {
@@ -95,18 +107,40 @@
         }
 
         .header-bar {
+<<<<<<< HEAD
             background: #E8571D;
+=======
+            background: #003087;
+>>>>>>> origin/codex/perform-security-and-compliance-audit-msne36
             color: white;
             padding: 5px;
             text-align: center;
             font-weight: bold;
             margin-bottom: 5px;
         }
+<<<<<<< HEAD
+=======
+
+        .logo-section {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+
+        .logo {
+            font-size: 16px;
+            font-weight: bold;
+            color: #003087;
+        }
+>>>>>>> origin/codex/perform-security-and-compliance-audit-msne36
     </style>
 </head>
 
 <body>
+<<<<<<< HEAD
     <div class="header-bar">
+<<<<<<<< HEAD:legacy/apps/api/src/templates/forwarder-sli-v2.hbs
         {{#if header.forwarder.name}}
         {{header.forwarder.name}}
         {{else}}
@@ -116,6 +150,9 @@
         {{header.forwarder}}
         {{/if}}
         {{/if}}
+========
+        {{#if forwarder.name}}{{forwarder.name}}{{else}}{{#if header.forwarder.name}}{{header.forwarder.name}}{{else}}{{header.forwarder}}{{/if}}{{/if}}
+>>>>>>>> origin/codex/perform-security-and-compliance-audit-msne36:legacy/apps/api/src/templates/forwarder-sli-v1.hbs
     </div>
     <div class="form-title">SHIPPER'S LETTER OF INSTRUCTIONS</div>
 
@@ -135,6 +172,32 @@
     <div class="row">
         <div class="field large-field">
             <span class="field-label">1. U.S. PRINCIPLE PARTY IN INTEREST (Name and address including zip code)</span>
+=======
+    <div class="logo-section">
+        <div class="logo">
+<<<<<<<< HEAD:legacy/apps/api/src/templates/forwarder-sli-v1.hbs
+            {{#if header.forwarder.name}}
+            {{header.forwarder.name}}
+            {{else}}
+            {{#if forwarder.name}}
+            {{forwarder.name}}
+            {{else}}
+            {{header.forwarder}}
+            {{/if}}
+            {{/if}}
+========
+            {{#if forwarder.name}}{{forwarder.name}}{{else}}{{#if header.forwarder.name}}{{header.forwarder.name}}{{else}}{{header.forwarder}}{{/if}}{{/if}}
+>>>>>>>> origin/codex/perform-security-and-compliance-audit-msne36:legacy/apps/api/src/templates/forwarder-sli-v2.hbs
+        </div>
+    </div>
+    <div class="form-title">SHIPPER'S LETTER OF INSTRUCTION</div>
+
+    <!-- Row 1: USPPI -->
+    <div class="row">
+        <div class="field large-field">
+            <span class="field-label">1a. U.S. PRINCIPAL PARTY IN INTEREST (USPPI) (Complete name / address / contact
+                name & tel.)</span>
+>>>>>>> origin/codex/perform-security-and-compliance-audit-msne36
             <div class="field-value">
                 {{#if header.shipper.name}}
                 {{header.shipper.name}}<br>
@@ -147,6 +210,7 @@
             </div>
         </div>
         <div class="field small-field">
+<<<<<<< HEAD
             <span class="field-label">2. USPPI EIN (IRS) NO. OR ID NO.</span>
             <span class="field-value"></span>
         </div>
@@ -154,32 +218,71 @@
             <span class="field-label">3. PARTIES TO TRANSACTION</span>
             <div class="field-value">
                 <span class="checkbox"></span> RELATED<br>
+=======
+            <span class="field-label">2. DATE OF EXPORTATION</span>
+            <span class="field-value">{{date}}</span>
+        </div>
+        <div class="field small-field">
+            <span class="field-label">3. TRANSPORTATION REFERENCE NO.</span>
+            <span class="field-value"></span>
+        </div>
+    </div>
+
+    <!-- Row 2: USPPI ID and Parties -->
+    <div class="row">
+        <div class="field">
+            <span class="field-label">1b. USPPI (IRS) NO. or ID NO.</span>
+            <span class="field-value"></span>
+        </div>
+        <div class="field">
+            <span class="field-label">1c. PARTIES TO TRANSACTION CHECK APPLICABLE BOX</span>
+            <div class="field-value">
+                <span class="checkbox"></span> RELATED
+>>>>>>> origin/codex/perform-security-and-compliance-audit-msne36
                 <span class="checkbox checked"></span> NON-RELATED
             </div>
         </div>
     </div>
 
+<<<<<<< HEAD
     <!-- Row 3: Intermediate Consignee -->
     <div class="row">
         <div class="field large-field">
             <span class="field-label">4. INTERMEDIATE CONSIGNEE (Complete name and address)</span>
             <div class="field-value">
+<<<<<<<< HEAD:legacy/apps/api/src/templates/forwarder-sli-v2.hbs
                 {{#if header.forwarder.name}}
                 {{header.forwarder.name}}<br>
                 {{header.forwarder.address}}{{#if header.forwarder.address2}}, {{header.forwarder.address2}}{{/if}}<br>
                 {{header.forwarder.city}}, {{header.forwarder.state}} {{header.forwarder.zip}}<br>
                 {{header.forwarder.country}}
                 {{else}}
+========
+>>>>>>>> origin/codex/perform-security-and-compliance-audit-msne36:legacy/apps/api/src/templates/forwarder-sli-v1.hbs
                 {{#if forwarder.name}}
                 {{forwarder.name}}<br>
                 {{forwarder.address}}{{#if forwarder.address2}}, {{forwarder.address2}}{{/if}}<br>
                 {{forwarder.city}}, {{forwarder.state}} {{forwarder.zip}}<br>
                 {{forwarder.country}}
+<<<<<<<< HEAD:legacy/apps/api/src/templates/forwarder-sli-v2.hbs
+========
+                {{#if forwarder.fmcNumber}}<br>FMC NO. {{forwarder.fmcNumber}}{{/if}}
+                {{else}}
+                {{#if header.forwarder.name}}
+                {{header.forwarder.name}}<br>
+                {{header.forwarder.address}}{{#if header.forwarder.address2}}, {{header.forwarder.address2}}{{/if}}<br>
+                {{header.forwarder.city}}, {{header.forwarder.state}} {{header.forwarder.zip}}<br>
+                {{header.forwarder.country}}
+                {{#if header.forwarder.fmcNumber}}<br>FMC NO. {{header.forwarder.fmcNumber}}{{/if}}
+>>>>>>>> origin/codex/perform-security-and-compliance-audit-msne36:legacy/apps/api/src/templates/forwarder-sli-v1.hbs
                 {{else}}
                 {{header.forwarder}}
                 {{/if}}
                 {{/if}}
+<<<<<<<< HEAD:legacy/apps/api/src/templates/forwarder-sli-v2.hbs
                 {{#if header.forwarder.fmcNumber}}<br>FMC NO. {{header.forwarder.fmcNumber}}{{/if}}
+========
+>>>>>>>> origin/codex/perform-security-and-compliance-audit-msne36:legacy/apps/api/src/templates/forwarder-sli-v1.hbs
             </div>
         </div>
         <div class="field small-field">
@@ -191,12 +294,51 @@
                 <span class="checkbox"></span> OTHER/UNKNOWN
             </div>
         </div>
+=======
+    <!-- Row 3: Service Options -->
+    <div class="row">
+        <div class="field small-field">
+            <span class="field-label">INSURANCE:</span>
+            <div class="field-value">
+                <span class="checkbox"></span> YES Insured Amount: _______<br>
+                <span class="checkbox checked"></span> NO
+            </div>
+        </div>
+        <div class="field small-field">
+            <span class="field-label">FREIGHT CHARGES:</span>
+            <div class="field-value">
+                <span class="checkbox checked"></span> PREPAID<br>
+                <span class="checkbox"></span> COLLECT
+            </div>
+        </div>
+        <div class="field small-field">
+            <span class="field-label">JETPAK SERVICE:</span>
+            <div class="field-value">
+                <span class="checkbox"></span> YES<br>
+                <span class="checkbox checked"></span> NO
+            </div>
+        </div>
+        <div class="field small-field">
+            <span class="field-label">QUOTATION#:</span>
+            <span class="field-value"></span>
+        </div>
+        <div class="field small-field">
+            <span class="field-label">SERVICE LEVEL:</span>
+            <span class="field-value"></span>
+        </div>
+>>>>>>> origin/codex/perform-security-and-compliance-audit-msne36
     </div>
 
     <!-- Row 4: Ultimate Consignee -->
     <div class="row">
+<<<<<<< HEAD
         <div class="field">
             <span class="field-label">6. ULTIMATE CONSIGNEE (Complete name and address)</span>
+=======
+        <div class="field large-field">
+            <span class="field-label">4a. ULTIMATE CONSIGNEE (Complete name / address and contact name & tel., if
+                available)</span>
+>>>>>>> origin/codex/perform-security-and-compliance-audit-msne36
             <div class="field-value">
                 {{#if header.consignee.name}}
                 {{header.consignee.name}}<br>
@@ -208,6 +350,7 @@
                 {{/if}}
             </div>
         </div>
+<<<<<<< HEAD
     </div>
 
     <!-- Row 5: Reference Fields -->
@@ -242,6 +385,200 @@
         </div>
         <div class="field small-field">
             <span class="field-label">12. ROUTED EXPORT TRANSACTION</span>
+=======
+        <div class="field small-field">
+            <span class="field-label">TERM:</span>
+            <div class="field-value">
+                <span class="checkbox"></span> DOOR TO DOOR<br>
+                <span class="checkbox"></span> PORT TO PORT<br>
+                <span class="checkbox"></span> DOOR TO PORT<br>
+                <span class="checkbox"></span> PORT TO DOOR<br>
+                <span class="checkbox"></span> PORT TO CFS<br>
+                <span class="checkbox"></span> CFS TO PORT<br>
+                <span class="checkbox"></span> CFS TO CFS
+            </div>
+        </div>
+    </div>
+
+    <!-- Row 5: Consignee Type -->
+    <div class="row">
+        <div class="field">
+            <span class="field-label">4b. ULTIMATE CONSIGNEE TYPE</span>
+            <div class="field-value">
+                <span class="checkbox"></span> DIRECT CONSUMER
+                <span class="checkbox checked"></span> RESELLER
+                <span class="checkbox"></span> GOVERNMENT ENTITY
+                <span class="checkbox"></span> OTHERS/UNKNOWN: _______
+            </div>
+        </div>
+    </div>
+
+    <!-- Row 6: Intermediate Consignee -->
+    <div class="row">
+        <div class="field">
+            <span class="field-label">4c. INTERMEDIATE CONSIGNEE (Complete name / address and contact name & tel., if
+                available)</span>
+            <span class="field-value"></span>
+        </div>
+    </div>
+
+    <!-- Row 7: Incoterm -->
+    <div class="row">
+        <div class="field">
+            <span class="field-label">INCOTERM:</span>
+            <div class="field-value">
+                <span class="checkbox {{#if (eq header.incoterm 'CIF')}}checked{{/if}}"></span> CIF
+                <span class="checkbox {{#if (eq header.incoterm 'CIP')}}checked{{/if}}"></span> CIP
+                <span class="checkbox {{#if (eq header.incoterm 'CFR')}}checked{{/if}}"></span> CFR
+                <span class="checkbox {{#if (eq header.incoterm 'CPT')}}checked{{/if}}"></span> CPT
+                <span class="checkbox {{#if (eq header.incoterm 'DAP')}}checked{{/if}}"></span> DAP
+                <span class="checkbox {{#if (eq header.incoterm 'DDP')}}checked{{/if}}"></span> DDP<br>
+                <span class="checkbox {{#if (eq header.incoterm 'DPU')}}checked{{/if}}"></span> DPU
+                <span class="checkbox {{#if (eq header.incoterm 'EXW')}}checked{{/if}}"></span> EXW
+                <span class="checkbox {{#if (eq header.incoterm 'FAS')}}checked{{/if}}"></span> FAS
+                <span class="checkbox {{#if (eq header.incoterm 'FCP')}}checked{{/if}}"></span> FCP
+                <span class="checkbox {{#if (eq header.incoterm 'FOB')}}checked{{/if}}"></span> FOB
+                <span class="checkbox"></span> Other<br>
+                NAMED PLACE/PORT: _______________________
+            </div>
+        </div>
+    </div>
+
+    <!-- Row 8: Forwarding Agent -->
+    <div class="row">
+        <div class="field large-field">
+            <span class="field-label">5a. FORWARDING AGENT</span>
+            <div class="field-value">
+<<<<<<<< HEAD:legacy/apps/api/src/templates/forwarder-sli-v1.hbs
+                {{#if header.forwarder.name}}
+                <strong>{{header.forwarder.name}}</strong><br>
+                {{header.forwarder.address}}{{#if header.forwarder.address2}}, {{header.forwarder.address2}}{{/if}}<br>
+                {{header.forwarder.city}}, {{header.forwarder.state}} {{header.forwarder.zip}}<br>
+                {{header.forwarder.country}}
+                {{else}}
+                {{#if forwarder.name}}
+                <strong>{{forwarder.name}}</strong><br>
+========
+                {{#if forwarder.name}}
+                <strong>{{forwarder.name}}</strong><br>
+                {{forwarder.name}}<br>
+>>>>>>>> origin/codex/perform-security-and-compliance-audit-msne36:legacy/apps/api/src/templates/forwarder-sli-v2.hbs
+                {{forwarder.address}}{{#if forwarder.address2}}, {{forwarder.address2}}{{/if}}<br>
+                {{forwarder.city}}, {{forwarder.state}} {{forwarder.zip}}<br>
+                {{forwarder.country}}
+                {{else}}
+<<<<<<<< HEAD:legacy/apps/api/src/templates/forwarder-sli-v1.hbs
+========
+                {{#if header.forwarder.name}}
+                <strong>{{header.forwarder.name}}</strong><br>
+                {{header.forwarder.name}}<br>
+                {{header.forwarder.address}}{{#if header.forwarder.address2}}, {{header.forwarder.address2}}{{/if}}<br>
+                {{header.forwarder.city}}, {{header.forwarder.state}} {{header.forwarder.zip}}<br>
+                {{header.forwarder.country}}
+                {{else}}
+>>>>>>>> origin/codex/perform-security-and-compliance-audit-msne36:legacy/apps/api/src/templates/forwarder-sli-v2.hbs
+                {{header.forwarder}}
+                {{/if}}
+                {{/if}}
+            </div>
+        </div>
+        <div class="field small-field">
+            <span class="field-label">5b. FORWARDING AGENT'S EIN (IRS) NO.</span>
+            <span class="field-value"></span>
+        </div>
+    </div>
+
+    <!-- Row 9: Origin and Destination -->
+    <div class="row">
+        <div class="field">
+            <span class="field-label">6. POINT OF ORIGIN OR FTZ NO.</span>
+            <span class="field-value">{{#if header.shipper.state}}{{header.shipper.city}},
+                {{header.shipper.state}}{{/if}}</span>
+        </div>
+        <div class="field">
+            <span class="field-label">7. COUNTRY OF ULTIMATE DESTINATION</span>
+            <span class="field-value">{{#if header.consignee.country}}{{header.consignee.country}}{{/if}}</span>
+        </div>
+        <div class="field small-field">
+            <span class="field-label">8. LOADING PIER (Vessel only)</span>
+            <span class="field-value"></span>
+        </div>
+    </div>
+
+    <!-- Row 10: Mode and Carrier -->
+    <div class="row">
+        <div class="field">
+            <span class="field-label">9. MODE OF TRANSPORTATION</span>
+            <div class="field-value">
+                <span class="checkbox"></span> AIR
+                <span class="checkbox"></span> OCEAN
+                <span class="checkbox"></span> TRUCK
+                <span class="checkbox"></span> RAIL
+            </div>
+        </div>
+        <div class="field">
+            <span class="field-label">10. CARRIER IDENTIFICATION CODE</span>
+            <span class="field-value"></span>
+        </div>
+        <div class="field">
+            <span class="field-label">11. SHIPMENT REFERENCE NO.</span>
+            <span class="field-value">
+                {{#each references}}{{value}} {{/each}}
+            </span>
+        </div>
+    </div>
+
+    <!-- Row 11: Export Details -->
+    <div class="row">
+        <div class="field">
+            <span class="field-label">12. EXPORTING CARRIER</span>
+            <span class="field-value"></span>
+        </div>
+        <div class="field">
+            <span class="field-label">13. PORT OF EXPORT</span>
+            <span class="field-value"></span>
+        </div>
+        <div class="field small-field">
+            <span class="field-label">14. ENTRY NUMBER</span>
+            <span class="field-value"></span>
+        </div>
+    </div>
+
+    <!-- Row 12: Bond, Hazmat, Port -->
+    <div class="row">
+        <div class="field">
+            <span class="field-label">15. IN BOND NUMBER</span>
+            <span class="field-value"></span>
+        </div>
+        <div class="field">
+            <span class="field-label">16. HAZARDOUS MATERIALS</span>
+            <div class="field-value">
+                <span class="checkbox"></span> YES
+                <span class="checkbox checked"></span> NO
+            </div>
+        </div>
+        <div class="field">
+            <span class="field-label">17. PORT OF UNLOADING (Vessel and Air Only)</span>
+            <span class="field-value"></span>
+        </div>
+    </div>
+
+    <!-- Row 13: Container and Case Mark -->
+    <div class="row">
+        <div class="field">
+            <span class="field-label">18. CONTAINERIZED (Vessel Only)</span>
+            <div class="field-value">
+                <span class="checkbox"></span> YES
+                <span class="checkbox"></span> NO
+            </div>
+        </div>
+        <div class="field">
+            <span class="field-label">19. CASE MARK (Required for Ocean JP Shpts)</span>
+            <span class="field-value"></span>
+        </div>
+        <div class="field">
+            <span class="field-label">20. ROUTED EXPORT TRANSACTION</span>
+>>>>>>> origin/codex/perform-security-and-compliance-audit-msne36
             <div class="field-value">
                 <span class="checkbox"></span> YES
                 <span class="checkbox checked"></span> NO
@@ -249,6 +586,7 @@
         </div>
     </div>
 
+<<<<<<< HEAD
     <!-- Row 7: Insurance and Declared Value -->
     <div class="row">
         <div class="field">
@@ -330,22 +668,50 @@
                 <th>21. SHIPPING WEIGHT (kilograms)</th>
                 <th>22. VALUE (U.S. dollar, omit cents)</th>
                 <th>23. PIECES & DIMENSIONS (L x W x H in inches)</th>
+=======
+    <!-- Commodity Table -->
+    <div class="field">
+        <span class="field-label">21. SCHEDULE B DESCRIPTION OF COMMODITIES (Use columns 22 to 32)</span>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>22. D/F</th>
+                <th>23. SCHEDULE B NUMBER / US HTS CODE (Must be 10-digits)</th>
+                <th>24. QUANTITY</th>
+                <th>25. SHIPPING WEIGHT (kg)</th>
+                <th>26. VALUE (USD)</th>
+                <th>27. VIN / PRODUCT NO. / VEHICLE TITLE NO.</th>
+                <th>28. LICENSE NO. OR LICENSE EXCEPTION</th>
+                <th>29. ECCN</th>
+>>>>>>> origin/codex/perform-security-and-compliance-audit-msne36
             </tr>
         </thead>
         <tbody>
             {{#each lines}}
             <tr>
                 <td>D</td>
+<<<<<<< HEAD
                 <td>{{htsCode}}<br>{{description}}<br>Part#: {{partNumber}}</td>
                 <td class="text-right">{{quantity}}</td>
                 <td class="text-right">{{netWeightKg}}</td>
                 <td class="text-right">{{valueUsd}}</td>
+=======
+                <td>{{htsCode}}<br><small>{{description}}</small><br><small>Part#: {{partNumber}}</small></td>
+                <td class="text-right">{{quantity}}</td>
+                <td class="text-right">{{netWeightKg}}</td>
+                <td class="text-right">{{valueUsd}}</td>
+                <td>{{partNumber}}</td>
+                <td></td>
+>>>>>>> origin/codex/perform-security-and-compliance-audit-msne36
                 <td></td>
             </tr>
             {{/each}}
         </tbody>
     </table>
 
+<<<<<<< HEAD
     <!-- Documents Section -->
     <div class="row" style="margin-top: 10px;">
         <div class="field">
@@ -380,6 +746,15 @@
             <span class="field-label">28. DULY AUTHORIZED OFFICER OR EMPLOYEE</span>
             <div class="field-value" style="margin-top: 20px; border-top: 1px solid #000;">
                 Signature Line
+=======
+    <!-- Authorization Section -->
+    <div class="row" style="margin-top: 10px;">
+        <div class="field">
+            <span class="field-label">I hereby certify that all information is true and correct, and all necessary
+                documents are attached</span>
+            <div class="field-value" style="margin-top: 30px; border-top: 1px solid #000;">
+                Signature / Title / Date
+>>>>>>> origin/codex/perform-security-and-compliance-audit-msne36
             </div>
         </div>
     </div>

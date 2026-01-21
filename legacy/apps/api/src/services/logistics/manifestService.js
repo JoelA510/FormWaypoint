@@ -18,6 +18,9 @@ class ManifestService {
                     gte: new Date(date),
                     lt: new Date(new Date(date).setDate(new Date(date).getDate() + 1))
                 }
+            },
+            select: {
+                id: true
             }
         });
 

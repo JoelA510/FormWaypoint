@@ -1,7 +1,13 @@
 const TEMPLATE_MAP = {
     'sli': 'sli',
     'forwarder_sli_v1': 'forwarder-sli-v1',
+<<<<<<< HEAD
     'forwarder_sli_v2': 'forwarder-sli-v2',
+=======
+    'forwarder-sli-v1': 'forwarder-sli-v1',
+    'forwarder_sli_v2': 'forwarder-sli-v2',
+    'forwarder-sli-v2': 'forwarder-sli-v2',
+>>>>>>> origin/codex/perform-security-and-compliance-audit-msne36
     'dhl': 'dhl-invoice',
     'dhl-invoice': 'dhl-invoice',
     'bol': 'generic-bol',
