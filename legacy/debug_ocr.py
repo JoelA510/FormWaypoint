@@ -17,7 +17,11 @@ def ocr_pdf(pdf_path):
         return f"Error: {e}"
 
 if __name__ == "__main__":
+<<<<<<< HEAD
     path = r"c:\Users\joel.abraham\Shipping Doc Gen\Shipping-Doc-Gen\training_docs\Forwarder A\Scans\FWD-A-51042563.pdf"
+=======
+    path = r"c:\Users\joel.abraham\Shipping Doc Gen\Shipping-Doc-Gen\training_docs\Forwarder A\Scans\NEU-51042563.pdf"
+>>>>>>> origin/codex/perform-security-and-compliance-audit-msne36
     print(f"OCRing {path}...")
     text = ocr_pdf(path)
     print("--- OCR OUTPUT ---")
