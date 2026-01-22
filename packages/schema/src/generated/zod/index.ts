@@ -97,6 +97,10 @@ export const DocumentScalarFieldEnumSchema = z.enum(['id','shipmentId','filename
 
 export const UserScalarFieldEnumSchema = z.enum(['id','username','password','role','createdAt','updatedAt']);
 
+export const ErpExportConfigScalarFieldEnumSchema = z.enum(['id','destination','httpHeadersJson','endpointUrl','userId','createdAt']);
+
+export const ErpExportJobScalarFieldEnumSchema = z.enum(['id','configId','status','fromDate','toDate','resultSummaryJson','createdAt']);
+
 export const SortOrderSchema = z.enum(['asc','desc']);
 
 export const NullableJsonNullValueInputSchema = z.enum(['DbNull','JsonNull',]).transform((value) => value === 'JsonNull' ? Prisma.JsonNull : value === 'DbNull' ? Prisma.DbNull : value);
@@ -291,6 +295,37 @@ export const UserSchema = z.object({
 })
 
 export type User = z.infer<typeof UserSchema>
+
+/////////////////////////////////////////
+// ERP EXPORT CONFIG SCHEMA
+/////////////////////////////////////////
+
+export const ErpExportConfigSchema = z.object({
+  id: z.string().uuid(),
+  destination: z.string(),
+  httpHeadersJson: z.string().nullable(),
+  endpointUrl: z.string(),
+  userId: z.string(),
+  createdAt: z.coerce.date(),
+})
+
+export type ErpExportConfig = z.infer<typeof ErpExportConfigSchema>
+
+/////////////////////////////////////////
+// ERP EXPORT JOB SCHEMA
+/////////////////////////////////////////
+
+export const ErpExportJobSchema = z.object({
+  id: z.string().uuid(),
+  configId: z.string(),
+  status: z.string(),
+  fromDate: z.coerce.date(),
+  toDate: z.coerce.date(),
+  resultSummaryJson: z.string().nullable(),
+  createdAt: z.coerce.date(),
+})
+
+export type ErpExportJob = z.infer<typeof ErpExportJobSchema>
 
 /////////////////////////////////////////
 // SELECT & INCLUDE
@@ -493,6 +528,31 @@ export const UserSelectSchema: z.ZodType<Prisma.UserSelect> = z.object({
   role: z.boolean().optional(),
   createdAt: z.boolean().optional(),
   updatedAt: z.boolean().optional(),
+}).strict()
+
+// ERP EXPORT CONFIG
+//------------------------------------------------------
+
+export const ErpExportConfigSelectSchema: z.ZodType<Prisma.ErpExportConfigSelect> = z.object({
+  id: z.boolean().optional(),
+  destination: z.boolean().optional(),
+  httpHeadersJson: z.boolean().optional(),
+  endpointUrl: z.boolean().optional(),
+  userId: z.boolean().optional(),
+  createdAt: z.boolean().optional(),
+}).strict()
+
+// ERP EXPORT JOB
+//------------------------------------------------------
+
+export const ErpExportJobSelectSchema: z.ZodType<Prisma.ErpExportJobSelect> = z.object({
+  id: z.boolean().optional(),
+  configId: z.boolean().optional(),
+  status: z.boolean().optional(),
+  fromDate: z.boolean().optional(),
+  toDate: z.boolean().optional(),
+  resultSummaryJson: z.boolean().optional(),
+  createdAt: z.boolean().optional(),
 }).strict()
 
 
@@ -1307,6 +1367,131 @@ export const UserScalarWhereWithAggregatesInputSchema: z.ZodType<Prisma.UserScal
   role: z.union([ z.lazy(() => StringWithAggregatesFilterSchema), z.string() ]).optional(),
   createdAt: z.union([ z.lazy(() => DateTimeWithAggregatesFilterSchema), z.coerce.date() ]).optional(),
   updatedAt: z.union([ z.lazy(() => DateTimeWithAggregatesFilterSchema), z.coerce.date() ]).optional(),
+}).strict();
+
+export const ErpExportConfigWhereInputSchema: z.ZodType<Prisma.ErpExportConfigWhereInput> = z.object({
+  AND: z.union([ z.lazy(() => ErpExportConfigWhereInputSchema), z.lazy(() => ErpExportConfigWhereInputSchema).array() ]).optional(),
+  OR: z.lazy(() => ErpExportConfigWhereInputSchema).array().optional(),
+  NOT: z.union([ z.lazy(() => ErpExportConfigWhereInputSchema), z.lazy(() => ErpExportConfigWhereInputSchema).array() ]).optional(),
+  id: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  destination: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  httpHeadersJson: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  endpointUrl: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  userId: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  createdAt: z.union([ z.lazy(() => DateTimeFilterSchema), z.coerce.date() ]).optional(),
+}).strict();
+
+export const ErpExportConfigOrderByWithRelationInputSchema: z.ZodType<Prisma.ErpExportConfigOrderByWithRelationInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  destination: z.lazy(() => SortOrderSchema).optional(),
+  httpHeadersJson: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  endpointUrl: z.lazy(() => SortOrderSchema).optional(),
+  userId: z.lazy(() => SortOrderSchema).optional(),
+  createdAt: z.lazy(() => SortOrderSchema).optional(),
+}).strict();
+
+export const ErpExportConfigWhereUniqueInputSchema: z.ZodType<Prisma.ErpExportConfigWhereUniqueInput> = z.object({
+  id: z.uuid(),
+})
+.and(z.object({
+  id: z.uuid().optional(),
+  AND: z.union([ z.lazy(() => ErpExportConfigWhereInputSchema), z.lazy(() => ErpExportConfigWhereInputSchema).array() ]).optional(),
+  OR: z.lazy(() => ErpExportConfigWhereInputSchema).array().optional(),
+  NOT: z.union([ z.lazy(() => ErpExportConfigWhereInputSchema), z.lazy(() => ErpExportConfigWhereInputSchema).array() ]).optional(),
+  destination: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  httpHeadersJson: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  endpointUrl: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  userId: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  createdAt: z.union([ z.lazy(() => DateTimeFilterSchema), z.coerce.date() ]).optional(),
+}).strict());
+
+export const ErpExportConfigOrderByWithAggregationInputSchema: z.ZodType<Prisma.ErpExportConfigOrderByWithAggregationInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  destination: z.lazy(() => SortOrderSchema).optional(),
+  httpHeadersJson: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  endpointUrl: z.lazy(() => SortOrderSchema).optional(),
+  userId: z.lazy(() => SortOrderSchema).optional(),
+  createdAt: z.lazy(() => SortOrderSchema).optional(),
+  _count: z.lazy(() => ErpExportConfigCountOrderByAggregateInputSchema).optional(),
+  _max: z.lazy(() => ErpExportConfigMaxOrderByAggregateInputSchema).optional(),
+  _min: z.lazy(() => ErpExportConfigMinOrderByAggregateInputSchema).optional(),
+}).strict();
+
+export const ErpExportConfigScalarWhereWithAggregatesInputSchema: z.ZodType<Prisma.ErpExportConfigScalarWhereWithAggregatesInput> = z.object({
+  AND: z.union([ z.lazy(() => ErpExportConfigScalarWhereWithAggregatesInputSchema), z.lazy(() => ErpExportConfigScalarWhereWithAggregatesInputSchema).array() ]).optional(),
+  OR: z.lazy(() => ErpExportConfigScalarWhereWithAggregatesInputSchema).array().optional(),
+  NOT: z.union([ z.lazy(() => ErpExportConfigScalarWhereWithAggregatesInputSchema), z.lazy(() => ErpExportConfigScalarWhereWithAggregatesInputSchema).array() ]).optional(),
+  id: z.union([ z.lazy(() => StringWithAggregatesFilterSchema), z.string() ]).optional(),
+  destination: z.union([ z.lazy(() => StringWithAggregatesFilterSchema), z.string() ]).optional(),
+  httpHeadersJson: z.union([ z.lazy(() => StringNullableWithAggregatesFilterSchema), z.string() ]).optional().nullable(),
+  endpointUrl: z.union([ z.lazy(() => StringWithAggregatesFilterSchema), z.string() ]).optional(),
+  userId: z.union([ z.lazy(() => StringWithAggregatesFilterSchema), z.string() ]).optional(),
+  createdAt: z.union([ z.lazy(() => DateTimeWithAggregatesFilterSchema), z.coerce.date() ]).optional(),
+}).strict();
+
+export const ErpExportJobWhereInputSchema: z.ZodType<Prisma.ErpExportJobWhereInput> = z.object({
+  AND: z.union([ z.lazy(() => ErpExportJobWhereInputSchema), z.lazy(() => ErpExportJobWhereInputSchema).array() ]).optional(),
+  OR: z.lazy(() => ErpExportJobWhereInputSchema).array().optional(),
+  NOT: z.union([ z.lazy(() => ErpExportJobWhereInputSchema), z.lazy(() => ErpExportJobWhereInputSchema).array() ]).optional(),
+  id: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  configId: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  status: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  fromDate: z.union([ z.lazy(() => DateTimeFilterSchema), z.coerce.date() ]).optional(),
+  toDate: z.union([ z.lazy(() => DateTimeFilterSchema), z.coerce.date() ]).optional(),
+  resultSummaryJson: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  createdAt: z.union([ z.lazy(() => DateTimeFilterSchema), z.coerce.date() ]).optional(),
+}).strict();
+
+export const ErpExportJobOrderByWithRelationInputSchema: z.ZodType<Prisma.ErpExportJobOrderByWithRelationInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  configId: z.lazy(() => SortOrderSchema).optional(),
+  status: z.lazy(() => SortOrderSchema).optional(),
+  fromDate: z.lazy(() => SortOrderSchema).optional(),
+  toDate: z.lazy(() => SortOrderSchema).optional(),
+  resultSummaryJson: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  createdAt: z.lazy(() => SortOrderSchema).optional(),
+}).strict();
+
+export const ErpExportJobWhereUniqueInputSchema: z.ZodType<Prisma.ErpExportJobWhereUniqueInput> = z.object({
+  id: z.uuid(),
+})
+.and(z.object({
+  id: z.uuid().optional(),
+  AND: z.union([ z.lazy(() => ErpExportJobWhereInputSchema), z.lazy(() => ErpExportJobWhereInputSchema).array() ]).optional(),
+  OR: z.lazy(() => ErpExportJobWhereInputSchema).array().optional(),
+  NOT: z.union([ z.lazy(() => ErpExportJobWhereInputSchema), z.lazy(() => ErpExportJobWhereInputSchema).array() ]).optional(),
+  configId: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  status: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  fromDate: z.union([ z.lazy(() => DateTimeFilterSchema), z.coerce.date() ]).optional(),
+  toDate: z.union([ z.lazy(() => DateTimeFilterSchema), z.coerce.date() ]).optional(),
+  resultSummaryJson: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  createdAt: z.union([ z.lazy(() => DateTimeFilterSchema), z.coerce.date() ]).optional(),
+}).strict());
+
+export const ErpExportJobOrderByWithAggregationInputSchema: z.ZodType<Prisma.ErpExportJobOrderByWithAggregationInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  configId: z.lazy(() => SortOrderSchema).optional(),
+  status: z.lazy(() => SortOrderSchema).optional(),
+  fromDate: z.lazy(() => SortOrderSchema).optional(),
+  toDate: z.lazy(() => SortOrderSchema).optional(),
+  resultSummaryJson: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  createdAt: z.lazy(() => SortOrderSchema).optional(),
+  _count: z.lazy(() => ErpExportJobCountOrderByAggregateInputSchema).optional(),
+  _max: z.lazy(() => ErpExportJobMaxOrderByAggregateInputSchema).optional(),
+  _min: z.lazy(() => ErpExportJobMinOrderByAggregateInputSchema).optional(),
+}).strict();
+
+export const ErpExportJobScalarWhereWithAggregatesInputSchema: z.ZodType<Prisma.ErpExportJobScalarWhereWithAggregatesInput> = z.object({
+  AND: z.union([ z.lazy(() => ErpExportJobScalarWhereWithAggregatesInputSchema), z.lazy(() => ErpExportJobScalarWhereWithAggregatesInputSchema).array() ]).optional(),
+  OR: z.lazy(() => ErpExportJobScalarWhereWithAggregatesInputSchema).array().optional(),
+  NOT: z.union([ z.lazy(() => ErpExportJobScalarWhereWithAggregatesInputSchema), z.lazy(() => ErpExportJobScalarWhereWithAggregatesInputSchema).array() ]).optional(),
+  id: z.union([ z.lazy(() => StringWithAggregatesFilterSchema), z.string() ]).optional(),
+  configId: z.union([ z.lazy(() => StringWithAggregatesFilterSchema), z.string() ]).optional(),
+  status: z.union([ z.lazy(() => StringWithAggregatesFilterSchema), z.string() ]).optional(),
+  fromDate: z.union([ z.lazy(() => DateTimeWithAggregatesFilterSchema), z.coerce.date() ]).optional(),
+  toDate: z.union([ z.lazy(() => DateTimeWithAggregatesFilterSchema), z.coerce.date() ]).optional(),
+  resultSummaryJson: z.union([ z.lazy(() => StringNullableWithAggregatesFilterSchema), z.string() ]).optional().nullable(),
+  createdAt: z.union([ z.lazy(() => DateTimeWithAggregatesFilterSchema), z.coerce.date() ]).optional(),
 }).strict();
 
 export const PartyCreateInputSchema: z.ZodType<Prisma.PartyCreateInput> = z.object({
@@ -2172,6 +2357,139 @@ export const UserUncheckedUpdateManyInputSchema: z.ZodType<Prisma.UserUncheckedU
   updatedAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
 }).strict();
 
+export const ErpExportConfigCreateInputSchema: z.ZodType<Prisma.ErpExportConfigCreateInput> = z.object({
+  id: z.uuid().optional(),
+  destination: z.string(),
+  httpHeadersJson: z.string().optional().nullable(),
+  endpointUrl: z.string(),
+  userId: z.string(),
+  createdAt: z.coerce.date().optional(),
+}).strict();
+
+export const ErpExportConfigUncheckedCreateInputSchema: z.ZodType<Prisma.ErpExportConfigUncheckedCreateInput> = z.object({
+  id: z.uuid().optional(),
+  destination: z.string(),
+  httpHeadersJson: z.string().optional().nullable(),
+  endpointUrl: z.string(),
+  userId: z.string(),
+  createdAt: z.coerce.date().optional(),
+}).strict();
+
+export const ErpExportConfigUpdateInputSchema: z.ZodType<Prisma.ErpExportConfigUpdateInput> = z.object({
+  id: z.union([ z.uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  destination: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  httpHeadersJson: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  endpointUrl: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  userId: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  createdAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+}).strict();
+
+export const ErpExportConfigUncheckedUpdateInputSchema: z.ZodType<Prisma.ErpExportConfigUncheckedUpdateInput> = z.object({
+  id: z.union([ z.uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  destination: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  httpHeadersJson: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  endpointUrl: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  userId: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  createdAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+}).strict();
+
+export const ErpExportConfigCreateManyInputSchema: z.ZodType<Prisma.ErpExportConfigCreateManyInput> = z.object({
+  id: z.uuid().optional(),
+  destination: z.string(),
+  httpHeadersJson: z.string().optional().nullable(),
+  endpointUrl: z.string(),
+  userId: z.string(),
+  createdAt: z.coerce.date().optional(),
+}).strict();
+
+export const ErpExportConfigUpdateManyMutationInputSchema: z.ZodType<Prisma.ErpExportConfigUpdateManyMutationInput> = z.object({
+  id: z.union([ z.uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  destination: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  httpHeadersJson: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  endpointUrl: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  userId: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  createdAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+}).strict();
+
+export const ErpExportConfigUncheckedUpdateManyInputSchema: z.ZodType<Prisma.ErpExportConfigUncheckedUpdateManyInput> = z.object({
+  id: z.union([ z.uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  destination: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  httpHeadersJson: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  endpointUrl: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  userId: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  createdAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+}).strict();
+
+export const ErpExportJobCreateInputSchema: z.ZodType<Prisma.ErpExportJobCreateInput> = z.object({
+  id: z.uuid().optional(),
+  configId: z.string(),
+  status: z.string(),
+  fromDate: z.coerce.date(),
+  toDate: z.coerce.date(),
+  resultSummaryJson: z.string().optional().nullable(),
+  createdAt: z.coerce.date().optional(),
+}).strict();
+
+export const ErpExportJobUncheckedCreateInputSchema: z.ZodType<Prisma.ErpExportJobUncheckedCreateInput> = z.object({
+  id: z.uuid().optional(),
+  configId: z.string(),
+  status: z.string(),
+  fromDate: z.coerce.date(),
+  toDate: z.coerce.date(),
+  resultSummaryJson: z.string().optional().nullable(),
+  createdAt: z.coerce.date().optional(),
+}).strict();
+
+export const ErpExportJobUpdateInputSchema: z.ZodType<Prisma.ErpExportJobUpdateInput> = z.object({
+  id: z.union([ z.uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  configId: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  status: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  fromDate: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  toDate: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  resultSummaryJson: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  createdAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+}).strict();
+
+export const ErpExportJobUncheckedUpdateInputSchema: z.ZodType<Prisma.ErpExportJobUncheckedUpdateInput> = z.object({
+  id: z.union([ z.uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  configId: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  status: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  fromDate: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  toDate: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  resultSummaryJson: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  createdAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+}).strict();
+
+export const ErpExportJobCreateManyInputSchema: z.ZodType<Prisma.ErpExportJobCreateManyInput> = z.object({
+  id: z.uuid().optional(),
+  configId: z.string(),
+  status: z.string(),
+  fromDate: z.coerce.date(),
+  toDate: z.coerce.date(),
+  resultSummaryJson: z.string().optional().nullable(),
+  createdAt: z.coerce.date().optional(),
+}).strict();
+
+export const ErpExportJobUpdateManyMutationInputSchema: z.ZodType<Prisma.ErpExportJobUpdateManyMutationInput> = z.object({
+  id: z.union([ z.uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  configId: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  status: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  fromDate: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  toDate: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  resultSummaryJson: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  createdAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+}).strict();
+
+export const ErpExportJobUncheckedUpdateManyInputSchema: z.ZodType<Prisma.ErpExportJobUncheckedUpdateManyInput> = z.object({
+  id: z.union([ z.uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  configId: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  status: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  fromDate: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  toDate: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  resultSummaryJson: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  createdAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+}).strict();
+
 export const StringFilterSchema: z.ZodType<Prisma.StringFilter> = z.object({
   equals: z.string().optional(),
   in: z.string().array().optional(),
@@ -2831,6 +3149,63 @@ export const UserMinOrderByAggregateInputSchema: z.ZodType<Prisma.UserMinOrderBy
   role: z.lazy(() => SortOrderSchema).optional(),
   createdAt: z.lazy(() => SortOrderSchema).optional(),
   updatedAt: z.lazy(() => SortOrderSchema).optional(),
+}).strict();
+
+export const ErpExportConfigCountOrderByAggregateInputSchema: z.ZodType<Prisma.ErpExportConfigCountOrderByAggregateInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  destination: z.lazy(() => SortOrderSchema).optional(),
+  httpHeadersJson: z.lazy(() => SortOrderSchema).optional(),
+  endpointUrl: z.lazy(() => SortOrderSchema).optional(),
+  userId: z.lazy(() => SortOrderSchema).optional(),
+  createdAt: z.lazy(() => SortOrderSchema).optional(),
+}).strict();
+
+export const ErpExportConfigMaxOrderByAggregateInputSchema: z.ZodType<Prisma.ErpExportConfigMaxOrderByAggregateInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  destination: z.lazy(() => SortOrderSchema).optional(),
+  httpHeadersJson: z.lazy(() => SortOrderSchema).optional(),
+  endpointUrl: z.lazy(() => SortOrderSchema).optional(),
+  userId: z.lazy(() => SortOrderSchema).optional(),
+  createdAt: z.lazy(() => SortOrderSchema).optional(),
+}).strict();
+
+export const ErpExportConfigMinOrderByAggregateInputSchema: z.ZodType<Prisma.ErpExportConfigMinOrderByAggregateInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  destination: z.lazy(() => SortOrderSchema).optional(),
+  httpHeadersJson: z.lazy(() => SortOrderSchema).optional(),
+  endpointUrl: z.lazy(() => SortOrderSchema).optional(),
+  userId: z.lazy(() => SortOrderSchema).optional(),
+  createdAt: z.lazy(() => SortOrderSchema).optional(),
+}).strict();
+
+export const ErpExportJobCountOrderByAggregateInputSchema: z.ZodType<Prisma.ErpExportJobCountOrderByAggregateInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  configId: z.lazy(() => SortOrderSchema).optional(),
+  status: z.lazy(() => SortOrderSchema).optional(),
+  fromDate: z.lazy(() => SortOrderSchema).optional(),
+  toDate: z.lazy(() => SortOrderSchema).optional(),
+  resultSummaryJson: z.lazy(() => SortOrderSchema).optional(),
+  createdAt: z.lazy(() => SortOrderSchema).optional(),
+}).strict();
+
+export const ErpExportJobMaxOrderByAggregateInputSchema: z.ZodType<Prisma.ErpExportJobMaxOrderByAggregateInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  configId: z.lazy(() => SortOrderSchema).optional(),
+  status: z.lazy(() => SortOrderSchema).optional(),
+  fromDate: z.lazy(() => SortOrderSchema).optional(),
+  toDate: z.lazy(() => SortOrderSchema).optional(),
+  resultSummaryJson: z.lazy(() => SortOrderSchema).optional(),
+  createdAt: z.lazy(() => SortOrderSchema).optional(),
+}).strict();
+
+export const ErpExportJobMinOrderByAggregateInputSchema: z.ZodType<Prisma.ErpExportJobMinOrderByAggregateInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  configId: z.lazy(() => SortOrderSchema).optional(),
+  status: z.lazy(() => SortOrderSchema).optional(),
+  fromDate: z.lazy(() => SortOrderSchema).optional(),
+  toDate: z.lazy(() => SortOrderSchema).optional(),
+  resultSummaryJson: z.lazy(() => SortOrderSchema).optional(),
+  createdAt: z.lazy(() => SortOrderSchema).optional(),
 }).strict();
 
 export const ShipmentCreateNestedManyWithoutShipperInputSchema: z.ZodType<Prisma.ShipmentCreateNestedManyWithoutShipperInput> = z.object({
@@ -4464,6 +4839,120 @@ export const UserFindUniqueOrThrowArgsSchema: z.ZodType<Prisma.UserFindUniqueOrT
   where: UserWhereUniqueInputSchema, 
 }).strict();
 
+export const ErpExportConfigFindFirstArgsSchema: z.ZodType<Prisma.ErpExportConfigFindFirstArgs> = z.object({
+  select: ErpExportConfigSelectSchema.optional(),
+  where: ErpExportConfigWhereInputSchema.optional(), 
+  orderBy: z.union([ ErpExportConfigOrderByWithRelationInputSchema.array(), ErpExportConfigOrderByWithRelationInputSchema ]).optional(),
+  cursor: ErpExportConfigWhereUniqueInputSchema.optional(), 
+  take: z.number().optional(),
+  skip: z.number().optional(),
+  distinct: z.union([ ErpExportConfigScalarFieldEnumSchema, ErpExportConfigScalarFieldEnumSchema.array() ]).optional(),
+}).strict();
+
+export const ErpExportConfigFindFirstOrThrowArgsSchema: z.ZodType<Prisma.ErpExportConfigFindFirstOrThrowArgs> = z.object({
+  select: ErpExportConfigSelectSchema.optional(),
+  where: ErpExportConfigWhereInputSchema.optional(), 
+  orderBy: z.union([ ErpExportConfigOrderByWithRelationInputSchema.array(), ErpExportConfigOrderByWithRelationInputSchema ]).optional(),
+  cursor: ErpExportConfigWhereUniqueInputSchema.optional(), 
+  take: z.number().optional(),
+  skip: z.number().optional(),
+  distinct: z.union([ ErpExportConfigScalarFieldEnumSchema, ErpExportConfigScalarFieldEnumSchema.array() ]).optional(),
+}).strict();
+
+export const ErpExportConfigFindManyArgsSchema: z.ZodType<Prisma.ErpExportConfigFindManyArgs> = z.object({
+  select: ErpExportConfigSelectSchema.optional(),
+  where: ErpExportConfigWhereInputSchema.optional(), 
+  orderBy: z.union([ ErpExportConfigOrderByWithRelationInputSchema.array(), ErpExportConfigOrderByWithRelationInputSchema ]).optional(),
+  cursor: ErpExportConfigWhereUniqueInputSchema.optional(), 
+  take: z.number().optional(),
+  skip: z.number().optional(),
+  distinct: z.union([ ErpExportConfigScalarFieldEnumSchema, ErpExportConfigScalarFieldEnumSchema.array() ]).optional(),
+}).strict();
+
+export const ErpExportConfigAggregateArgsSchema: z.ZodType<Prisma.ErpExportConfigAggregateArgs> = z.object({
+  where: ErpExportConfigWhereInputSchema.optional(), 
+  orderBy: z.union([ ErpExportConfigOrderByWithRelationInputSchema.array(), ErpExportConfigOrderByWithRelationInputSchema ]).optional(),
+  cursor: ErpExportConfigWhereUniqueInputSchema.optional(), 
+  take: z.number().optional(),
+  skip: z.number().optional(),
+}).strict();
+
+export const ErpExportConfigGroupByArgsSchema: z.ZodType<Prisma.ErpExportConfigGroupByArgs> = z.object({
+  where: ErpExportConfigWhereInputSchema.optional(), 
+  orderBy: z.union([ ErpExportConfigOrderByWithAggregationInputSchema.array(), ErpExportConfigOrderByWithAggregationInputSchema ]).optional(),
+  by: ErpExportConfigScalarFieldEnumSchema.array(), 
+  having: ErpExportConfigScalarWhereWithAggregatesInputSchema.optional(), 
+  take: z.number().optional(),
+  skip: z.number().optional(),
+}).strict();
+
+export const ErpExportConfigFindUniqueArgsSchema: z.ZodType<Prisma.ErpExportConfigFindUniqueArgs> = z.object({
+  select: ErpExportConfigSelectSchema.optional(),
+  where: ErpExportConfigWhereUniqueInputSchema, 
+}).strict();
+
+export const ErpExportConfigFindUniqueOrThrowArgsSchema: z.ZodType<Prisma.ErpExportConfigFindUniqueOrThrowArgs> = z.object({
+  select: ErpExportConfigSelectSchema.optional(),
+  where: ErpExportConfigWhereUniqueInputSchema, 
+}).strict();
+
+export const ErpExportJobFindFirstArgsSchema: z.ZodType<Prisma.ErpExportJobFindFirstArgs> = z.object({
+  select: ErpExportJobSelectSchema.optional(),
+  where: ErpExportJobWhereInputSchema.optional(), 
+  orderBy: z.union([ ErpExportJobOrderByWithRelationInputSchema.array(), ErpExportJobOrderByWithRelationInputSchema ]).optional(),
+  cursor: ErpExportJobWhereUniqueInputSchema.optional(), 
+  take: z.number().optional(),
+  skip: z.number().optional(),
+  distinct: z.union([ ErpExportJobScalarFieldEnumSchema, ErpExportJobScalarFieldEnumSchema.array() ]).optional(),
+}).strict();
+
+export const ErpExportJobFindFirstOrThrowArgsSchema: z.ZodType<Prisma.ErpExportJobFindFirstOrThrowArgs> = z.object({
+  select: ErpExportJobSelectSchema.optional(),
+  where: ErpExportJobWhereInputSchema.optional(), 
+  orderBy: z.union([ ErpExportJobOrderByWithRelationInputSchema.array(), ErpExportJobOrderByWithRelationInputSchema ]).optional(),
+  cursor: ErpExportJobWhereUniqueInputSchema.optional(), 
+  take: z.number().optional(),
+  skip: z.number().optional(),
+  distinct: z.union([ ErpExportJobScalarFieldEnumSchema, ErpExportJobScalarFieldEnumSchema.array() ]).optional(),
+}).strict();
+
+export const ErpExportJobFindManyArgsSchema: z.ZodType<Prisma.ErpExportJobFindManyArgs> = z.object({
+  select: ErpExportJobSelectSchema.optional(),
+  where: ErpExportJobWhereInputSchema.optional(), 
+  orderBy: z.union([ ErpExportJobOrderByWithRelationInputSchema.array(), ErpExportJobOrderByWithRelationInputSchema ]).optional(),
+  cursor: ErpExportJobWhereUniqueInputSchema.optional(), 
+  take: z.number().optional(),
+  skip: z.number().optional(),
+  distinct: z.union([ ErpExportJobScalarFieldEnumSchema, ErpExportJobScalarFieldEnumSchema.array() ]).optional(),
+}).strict();
+
+export const ErpExportJobAggregateArgsSchema: z.ZodType<Prisma.ErpExportJobAggregateArgs> = z.object({
+  where: ErpExportJobWhereInputSchema.optional(), 
+  orderBy: z.union([ ErpExportJobOrderByWithRelationInputSchema.array(), ErpExportJobOrderByWithRelationInputSchema ]).optional(),
+  cursor: ErpExportJobWhereUniqueInputSchema.optional(), 
+  take: z.number().optional(),
+  skip: z.number().optional(),
+}).strict();
+
+export const ErpExportJobGroupByArgsSchema: z.ZodType<Prisma.ErpExportJobGroupByArgs> = z.object({
+  where: ErpExportJobWhereInputSchema.optional(), 
+  orderBy: z.union([ ErpExportJobOrderByWithAggregationInputSchema.array(), ErpExportJobOrderByWithAggregationInputSchema ]).optional(),
+  by: ErpExportJobScalarFieldEnumSchema.array(), 
+  having: ErpExportJobScalarWhereWithAggregatesInputSchema.optional(), 
+  take: z.number().optional(),
+  skip: z.number().optional(),
+}).strict();
+
+export const ErpExportJobFindUniqueArgsSchema: z.ZodType<Prisma.ErpExportJobFindUniqueArgs> = z.object({
+  select: ErpExportJobSelectSchema.optional(),
+  where: ErpExportJobWhereUniqueInputSchema, 
+}).strict();
+
+export const ErpExportJobFindUniqueOrThrowArgsSchema: z.ZodType<Prisma.ErpExportJobFindUniqueOrThrowArgs> = z.object({
+  select: ErpExportJobSelectSchema.optional(),
+  where: ErpExportJobWhereUniqueInputSchema, 
+}).strict();
+
 export const PartyCreateArgsSchema: z.ZodType<Prisma.PartyCreateArgs> = z.object({
   select: PartySelectSchema.optional(),
   include: PartyIncludeSchema.optional(),
@@ -4973,5 +5462,105 @@ export const UserUpdateManyAndReturnArgsSchema: z.ZodType<Prisma.UserUpdateManyA
 
 export const UserDeleteManyArgsSchema: z.ZodType<Prisma.UserDeleteManyArgs> = z.object({
   where: UserWhereInputSchema.optional(), 
+  limit: z.number().optional(),
+}).strict();
+
+export const ErpExportConfigCreateArgsSchema: z.ZodType<Prisma.ErpExportConfigCreateArgs> = z.object({
+  select: ErpExportConfigSelectSchema.optional(),
+  data: z.union([ ErpExportConfigCreateInputSchema, ErpExportConfigUncheckedCreateInputSchema ]),
+}).strict();
+
+export const ErpExportConfigUpsertArgsSchema: z.ZodType<Prisma.ErpExportConfigUpsertArgs> = z.object({
+  select: ErpExportConfigSelectSchema.optional(),
+  where: ErpExportConfigWhereUniqueInputSchema, 
+  create: z.union([ ErpExportConfigCreateInputSchema, ErpExportConfigUncheckedCreateInputSchema ]),
+  update: z.union([ ErpExportConfigUpdateInputSchema, ErpExportConfigUncheckedUpdateInputSchema ]),
+}).strict();
+
+export const ErpExportConfigCreateManyArgsSchema: z.ZodType<Prisma.ErpExportConfigCreateManyArgs> = z.object({
+  data: z.union([ ErpExportConfigCreateManyInputSchema, ErpExportConfigCreateManyInputSchema.array() ]),
+  skipDuplicates: z.boolean().optional(),
+}).strict();
+
+export const ErpExportConfigCreateManyAndReturnArgsSchema: z.ZodType<Prisma.ErpExportConfigCreateManyAndReturnArgs> = z.object({
+  data: z.union([ ErpExportConfigCreateManyInputSchema, ErpExportConfigCreateManyInputSchema.array() ]),
+  skipDuplicates: z.boolean().optional(),
+}).strict();
+
+export const ErpExportConfigDeleteArgsSchema: z.ZodType<Prisma.ErpExportConfigDeleteArgs> = z.object({
+  select: ErpExportConfigSelectSchema.optional(),
+  where: ErpExportConfigWhereUniqueInputSchema, 
+}).strict();
+
+export const ErpExportConfigUpdateArgsSchema: z.ZodType<Prisma.ErpExportConfigUpdateArgs> = z.object({
+  select: ErpExportConfigSelectSchema.optional(),
+  data: z.union([ ErpExportConfigUpdateInputSchema, ErpExportConfigUncheckedUpdateInputSchema ]),
+  where: ErpExportConfigWhereUniqueInputSchema, 
+}).strict();
+
+export const ErpExportConfigUpdateManyArgsSchema: z.ZodType<Prisma.ErpExportConfigUpdateManyArgs> = z.object({
+  data: z.union([ ErpExportConfigUpdateManyMutationInputSchema, ErpExportConfigUncheckedUpdateManyInputSchema ]),
+  where: ErpExportConfigWhereInputSchema.optional(), 
+  limit: z.number().optional(),
+}).strict();
+
+export const ErpExportConfigUpdateManyAndReturnArgsSchema: z.ZodType<Prisma.ErpExportConfigUpdateManyAndReturnArgs> = z.object({
+  data: z.union([ ErpExportConfigUpdateManyMutationInputSchema, ErpExportConfigUncheckedUpdateManyInputSchema ]),
+  where: ErpExportConfigWhereInputSchema.optional(), 
+  limit: z.number().optional(),
+}).strict();
+
+export const ErpExportConfigDeleteManyArgsSchema: z.ZodType<Prisma.ErpExportConfigDeleteManyArgs> = z.object({
+  where: ErpExportConfigWhereInputSchema.optional(), 
+  limit: z.number().optional(),
+}).strict();
+
+export const ErpExportJobCreateArgsSchema: z.ZodType<Prisma.ErpExportJobCreateArgs> = z.object({
+  select: ErpExportJobSelectSchema.optional(),
+  data: z.union([ ErpExportJobCreateInputSchema, ErpExportJobUncheckedCreateInputSchema ]),
+}).strict();
+
+export const ErpExportJobUpsertArgsSchema: z.ZodType<Prisma.ErpExportJobUpsertArgs> = z.object({
+  select: ErpExportJobSelectSchema.optional(),
+  where: ErpExportJobWhereUniqueInputSchema, 
+  create: z.union([ ErpExportJobCreateInputSchema, ErpExportJobUncheckedCreateInputSchema ]),
+  update: z.union([ ErpExportJobUpdateInputSchema, ErpExportJobUncheckedUpdateInputSchema ]),
+}).strict();
+
+export const ErpExportJobCreateManyArgsSchema: z.ZodType<Prisma.ErpExportJobCreateManyArgs> = z.object({
+  data: z.union([ ErpExportJobCreateManyInputSchema, ErpExportJobCreateManyInputSchema.array() ]),
+  skipDuplicates: z.boolean().optional(),
+}).strict();
+
+export const ErpExportJobCreateManyAndReturnArgsSchema: z.ZodType<Prisma.ErpExportJobCreateManyAndReturnArgs> = z.object({
+  data: z.union([ ErpExportJobCreateManyInputSchema, ErpExportJobCreateManyInputSchema.array() ]),
+  skipDuplicates: z.boolean().optional(),
+}).strict();
+
+export const ErpExportJobDeleteArgsSchema: z.ZodType<Prisma.ErpExportJobDeleteArgs> = z.object({
+  select: ErpExportJobSelectSchema.optional(),
+  where: ErpExportJobWhereUniqueInputSchema, 
+}).strict();
+
+export const ErpExportJobUpdateArgsSchema: z.ZodType<Prisma.ErpExportJobUpdateArgs> = z.object({
+  select: ErpExportJobSelectSchema.optional(),
+  data: z.union([ ErpExportJobUpdateInputSchema, ErpExportJobUncheckedUpdateInputSchema ]),
+  where: ErpExportJobWhereUniqueInputSchema, 
+}).strict();
+
+export const ErpExportJobUpdateManyArgsSchema: z.ZodType<Prisma.ErpExportJobUpdateManyArgs> = z.object({
+  data: z.union([ ErpExportJobUpdateManyMutationInputSchema, ErpExportJobUncheckedUpdateManyInputSchema ]),
+  where: ErpExportJobWhereInputSchema.optional(), 
+  limit: z.number().optional(),
+}).strict();
+
+export const ErpExportJobUpdateManyAndReturnArgsSchema: z.ZodType<Prisma.ErpExportJobUpdateManyAndReturnArgs> = z.object({
+  data: z.union([ ErpExportJobUpdateManyMutationInputSchema, ErpExportJobUncheckedUpdateManyInputSchema ]),
+  where: ErpExportJobWhereInputSchema.optional(), 
+  limit: z.number().optional(),
+}).strict();
+
+export const ErpExportJobDeleteManyArgsSchema: z.ZodType<Prisma.ErpExportJobDeleteManyArgs> = z.object({
+  where: ErpExportJobWhereInputSchema.optional(), 
   limit: z.number().optional(),
 }).strict();

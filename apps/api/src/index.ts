@@ -10,6 +10,10 @@ import { importRouter } from './modules/import/api'
 import { productsRouter } from './modules/products/api'
 import { complianceRouter } from './modules/compliance/api'
 import { templatesRouter } from './modules/templates/api'
+import { authRouter } from './modules/auth/api'
+import { storageRouter } from './modules/storage/api'
+import { erpRouter } from './modules/erp/api'
+import { reportingRouter } from './modules/reporting/api'
 
 const app = new Hono()
 
@@ -29,6 +33,10 @@ const routes = app
     .route('/products', productsRouter)
     .route('/compliance', complianceRouter)
     .route('/templates', templatesRouter)
+    .route('/auth', authRouter)
+    .route('/storage', storageRouter)
+    .route('/erp', erpRouter)
+    .route('/reporting', reportingRouter)
 
 export type AppType = typeof routes
 
