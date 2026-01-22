@@ -135,3 +135,38 @@ model SanctionsCheckResult {
   
   checkDate DateTime @default(now())
 }
+
+model ShipmentTemplate {
+  id          String  @id @default(uuid())
+  name        String
+  description String?
+  
+  // Preset Data
+  incoterm      String?
+  originCountry String?
+  destinationCountry String?
+  
+  // JSON Blobs for complex structures
+  shipperId String?
+  consigneeId String?
+  lineItemsJson String? // Default line items
+  
+  userId String
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Document {
+  id          String  @id @default(uuid())
+  shipmentId  String
+  
+  filename    String
+  type        String // e.g. application/pdf
+  status      String // pending, completed, failed
+  storageKey  String // S3 key or local path
+  
+  meta        String? // JSON metadata
+  
+  createdAt DateTime @default(now())
+}
