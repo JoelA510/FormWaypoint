@@ -1,6 +1,6 @@
 # UI Implementation Gameplan: FormWaypoint Feature Rollout
 
-**Target Agents:** Gemini 3 Pro (High Reasoning), Claude 3.5 Sonnet (Thinking)
+**Target Agents:** Gemini 3 Pro (High) & Claude Opus 4.5 (Thinking)
 **Context:** The backend migration ("Operation Legacy Zero") is complete. All domain logic resides in `apps/api/src/modules`. The frontend (`apps/web`) is scaffolded but lacks domain features.
 
 ---
