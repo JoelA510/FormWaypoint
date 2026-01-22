@@ -5,9 +5,9 @@ import { client } from '../utils/client'
 // Ideally we import the Shipment type from @repo/schema or inferred from API
 // import type { Shipment } from '@repo/schema'
 
-export const Route = createFileRoute('/shipments')({
+export const Route = createFileRoute('/shipments' as any)({
     component: ShipmentReviewPage,
-})
+} as any)
 
 function ShipmentReviewPage() {
     const { data, isLoading, error } = useQuery({
