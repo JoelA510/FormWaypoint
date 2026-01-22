@@ -7,6 +7,7 @@ import { shipmentRouter } from './modules/shipments/api'
 import { partiesRouter } from './modules/parties/api'
 import { freightRouter } from './modules/freight/api'
 import { importRouter } from './modules/import/api'
+import { productsRouter } from './modules/products/api'
 
 const app = new Hono()
 
@@ -23,6 +24,7 @@ const routes = app
     .route('/parties', partiesRouter)
     .route('/freight', freightRouter)
     .route('/import', importRouter)
+    .route('/products', productsRouter)
 
 export type AppType = typeof routes
 
