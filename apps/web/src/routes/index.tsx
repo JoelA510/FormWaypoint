@@ -16,12 +16,9 @@ function Index() {
     const mutation = useMutation({
         mutationFn: async (_fileToUpload: File) => {
             // Hono RPC call
-            const res = await client.ingest.$post({
-                form: {
-                    // file: fileToUpload 
-                }
-            })
-            return await res.json()
+            // TODO: Implement S3 Upload Flow (Get URL -> Upload -> Trigger)
+            // const res = await client.ingest.$post({ ... })
+            return {} as any;
         }
     })
 
