@@ -17,8 +17,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.IngestResponseSchema = exports.DocumentSchema = exports.ShipmentSchema = exports.LineItemSchema = exports.PartySchema = exports.DocumentStatusEnum = exports.ShipmentStatusEnum = void 0;
 const zod_1 = require("zod");
 __exportStar(require("./validation"), exports);
-// Export generated Zod schemas from Prisma
-// export * from "./generated/zod";
+__exportStar(require("./generated/zod"), exports);
+__exportStar(require("@prisma/client"), exports);
 // --- Enums ---
 exports.ShipmentStatusEnum = zod_1.z.enum(["draft", "ready_to_book", "booked", "in_transit", "exception", "closed"]);
 exports.DocumentStatusEnum = zod_1.z.enum(["pending", "processing", "completed", "failed"]);

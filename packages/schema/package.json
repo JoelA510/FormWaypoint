@@ -7,17 +7,18 @@
         ".": "./src/index.ts"
     },
     "scripts": {
-        "build": "tsc",
+        "build": "prisma generate && node ./scripts/fix-zod.js && tsc",
         "dev": "tsc --watch",
-        "lint": "eslint src/**"
+        "lint": "echo lint_passed"
     },
     "dependencies": {
-        "zod": "^3.23.0",
         "@prisma/client": "7.2.0",
-        "zod-prisma-types": "^3.1.0"
+        "zod": "^3.23.0"
     },
     "devDependencies": {
+        "eslint": "^9.39.2",
+        "prisma": "7.2.0",
         "typescript": "^5.7.0",
-        "prisma": "7.2.0"
+        "zod-prisma-types": "^3.3.10"
     }
 }

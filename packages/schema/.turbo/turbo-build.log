@@ -1,4 +1,17 @@
 
-> @repo/schema@0.0.0 build
-> tsc
+> @repo/schema@0.0.0 build C:\Users\joel.abraham\FormWaypoint\FormWaypoint\packages\schema
+> prisma generate && node ./scripts/fix-zod.js && tsc
 
+Loaded Prisma config from prisma.config.ts.
+
+Prisma schema loaded from prisma\schema.prisma.
+
+✔ Generated Prisma Client (v7.2.0) to .\..\..\node_modules\.pnpm\@prisma+client@7.2.0_prisma@7.2.0_@types+react@18.3.27_react-dom@19.2.3_react@19.2.3__react@1_taw4abepq4jhsfltxirsfhcmt4\node_modules\@prisma\client in 42ms
+
+✔ Generated Zod Prisma Types to .\src\generated\zod in 27ms
+
+Start by importing your Prisma Client (See: https://pris.ly/d/importing-client)
+
+Tip: Need your database queries to be 1000x faster? Accelerate offers you that and more: https://pris.ly/tip-2-accelerate
+
+Successfully patched z.uuid() to z.string().uuid() in generated Zod file.
