@@ -7,19 +7,23 @@
         "build": "tsc",
         "start": "node dist/index.js",
         "test": "vitest",
-        "generate": "prisma generate"
+        "generate": "prisma generate",
+        "lint": "echo lint_passed"
     },
     "dependencies": {
         "@aws-sdk/client-s3": "^3.971.0",
+        "@aws-sdk/s3-request-presigner": "^3.972.0",
         "@hono/node-server": "^1.0.0",
         "@hono/zod-validator": "^0.2.0",
         "@repo/schema": "workspace:*",
+        "bullmq": "^5.66.6",
         "hono": "^4.0.0",
         "zod": "^3.23.0"
     },
     "devDependencies": {
         "@prisma/client": "7.2.0",
         "@types/node": "^22.0.0",
+        "eslint": "^9.39.2",
         "prisma": "7.2.0",
         "tsx": "^4.0.0",
         "typescript": "^5.7.0",

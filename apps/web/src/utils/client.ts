@@ -1,5 +1,5 @@
 import { hc } from 'hono/client'
-import type { AppType } from '../../../apps/api/src/index' // In monorepo, we might need a better path or types package export
+import type { AppType } from 'api'
 
 // Best practice: Export AppType from a shared package OR import via relative path if workspaces configured
 // Since 'apps/web' consumes 'apps/api' types via workspace, we should import from 'apps/api' or define it.
