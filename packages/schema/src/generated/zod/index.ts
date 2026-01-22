@@ -1,10 +1,75 @@
 import { z } from 'zod';
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 
 /////////////////////////////////////////
 // HELPER FUNCTIONS
 /////////////////////////////////////////
 
+// JSON
+//------------------------------------------------------
+
+export type NullableJsonInput = Prisma.JsonValue | null | 'JsonNull' | 'DbNull' | Prisma.NullTypes.DbNull | Prisma.NullTypes.JsonNull;
+
+export const transformJsonNull = (v?: NullableJsonInput) => {
+  if (!v || v === 'DbNull') return Prisma.NullTypes.DbNull;
+  if (v === 'JsonNull') return Prisma.NullTypes.JsonNull;
+  return v;
+};
+
+export const JsonValueSchema: z.ZodType<Prisma.JsonValue> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.literal(null),
+    z.record(z.string(), z.lazy(() => JsonValueSchema.optional())),
+    z.array(z.lazy(() => JsonValueSchema)),
+  ])
+);
+
+export type JsonValueType = z.infer<typeof JsonValueSchema>;
+
+export const NullableJsonValue = z
+  .union([JsonValueSchema, z.literal('DbNull'), z.literal('JsonNull')])
+  .nullable()
+  .transform((v) => transformJsonNull(v));
+
+export type NullableJsonValueType = z.infer<typeof NullableJsonValue>;
+
+export const InputJsonValueSchema: z.ZodType<Prisma.InputJsonValue> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.object({ toJSON: z.any() }),
+    z.record(z.string(), z.lazy(() => z.union([InputJsonValueSchema, z.literal(null)]))),
+    z.array(z.lazy(() => z.union([InputJsonValueSchema, z.literal(null)]))),
+  ])
+);
+
+export type InputJsonValueType = z.infer<typeof InputJsonValueSchema>;
+
+// DECIMAL
+//------------------------------------------------------
+
+export const DecimalJsLikeSchema: z.ZodType<Prisma.DecimalJsLike> = z.object({
+  d: z.array(z.number()),
+  e: z.number(),
+  s: z.number(),
+  toFixed: z.any(),
+})
+
+export const DECIMAL_STRING_REGEX = /^(?:-?Infinity|NaN|-?(?:0[bB][01]+(?:\.[01]+)?(?:[pP][-+]?\d+)?|0[oO][0-7]+(?:\.[0-7]+)?(?:[pP][-+]?\d+)?|0[xX][\da-fA-F]+(?:\.[\da-fA-F]+)?(?:[pP][-+]?\d+)?|(?:\d+|\d*\.\d+)(?:[eE][-+]?\d+)?))$/;
+
+export const isValidDecimalInput =
+  (v?: null | string | number | Prisma.DecimalJsLike): v is string | number | Prisma.DecimalJsLike => {
+    if (v === undefined || v === null) return false;
+    return (
+      (typeof v === 'object' && 'd' in v && 'e' in v && 's' in v && 'toFixed' in v) ||
+      (typeof v === 'string' && DECIMAL_STRING_REGEX.test(v)) ||
+      typeof v === 'number'
+    )
+  };
 
 /////////////////////////////////////////
 // ENUMS
@@ -12,14 +77,48 @@ import type { Prisma } from '@prisma/client';
 
 export const TransactionIsolationLevelSchema = z.enum(['ReadUncommitted','ReadCommitted','RepeatableRead','Serializable']);
 
-export const ShipmentScalarFieldEnumSchema = z.enum(['id']);
+export const PartyScalarFieldEnumSchema = z.enum(['id','name','address','city','country','contactName','phone','email','taxIdOrEori','isAddressBookEntry','createdByUserId']);
+
+export const ShipmentScalarFieldEnumSchema = z.enum(['id','shipperId','consigneeId','shipperSnapshot','consigneeSnapshot','incoterm','currency','totalValue','totalWeight','numPackages','originCountry','destinationCountry','status','trackingNumber','createdAt','updatedAt']);
+
+export const CarrierAccountScalarFieldEnumSchema = z.enum(['id','provider','credentials','accountNumber','description','isActive','userId','createdAt','updatedAt']);
+
+export const ShipmentCarrierMetaScalarFieldEnumSchema = z.enum(['id','shipmentId','rateQuoteJson','bookingResponseJson','labelUrl','carrierCode','serviceLevelCode','trackingNumber','bookedAt']);
+
+export const ForwarderProfileScalarFieldEnumSchema = z.enum(['id','name','emailToJson','emailSubjectTemplate','dataBundleFormat','userId']);
 
 export const SortOrderSchema = z.enum(['asc','desc']);
 
+export const NullableJsonNullValueInputSchema = z.enum(['DbNull','JsonNull',]).transform((value) => value === 'JsonNull' ? Prisma.JsonNull : value === 'DbNull' ? Prisma.DbNull : value);
+
 export const QueryModeSchema = z.enum(['default','insensitive']);
+
+export const NullsOrderSchema = z.enum(['first','last']);
+
+export const JsonNullValueFilterSchema = z.enum(['DbNull','JsonNull','AnyNull',]).transform((value) => value === 'JsonNull' ? Prisma.JsonNull : value === 'DbNull' ? Prisma.DbNull : value === 'AnyNull' ? Prisma.AnyNull : value);
 /////////////////////////////////////////
 // MODELS
 /////////////////////////////////////////
+
+/////////////////////////////////////////
+// PARTY SCHEMA
+/////////////////////////////////////////
+
+export const PartySchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  address: z.string().nullable(),
+  city: z.string().nullable(),
+  country: z.string().nullable(),
+  contactName: z.string().nullable(),
+  phone: z.string().nullable(),
+  email: z.string().nullable(),
+  taxIdOrEori: z.string().nullable(),
+  isAddressBookEntry: z.boolean(),
+  createdByUserId: z.string().nullable(),
+})
+
+export type Party = z.infer<typeof PartySchema>
 
 /////////////////////////////////////////
 // SHIPMENT SCHEMA
@@ -27,19 +126,206 @@ export const QueryModeSchema = z.enum(['default','insensitive']);
 
 export const ShipmentSchema = z.object({
   id: z.string().uuid(),
+  shipperId: z.string().nullable(),
+  consigneeId: z.string().nullable(),
+  shipperSnapshot: JsonValueSchema.nullable(),
+  consigneeSnapshot: JsonValueSchema.nullable(),
+  incoterm: z.string().nullable(),
+  currency: z.string().nullable(),
+  totalValue: z.instanceof(Prisma.Decimal, { message: "Field 'totalValue' must be a Decimal. Location: ['Models', 'Shipment']"}).nullable(),
+  totalWeight: z.number().nullable(),
+  numPackages: z.number().int().nullable(),
+  originCountry: z.string().nullable(),
+  destinationCountry: z.string().nullable(),
+  status: z.string(),
+  trackingNumber: z.string().nullable(),
+  createdAt: z.coerce.date(),
+  updatedAt: z.coerce.date(),
 })
 
 export type Shipment = z.infer<typeof ShipmentSchema>
 
 /////////////////////////////////////////
+// CARRIER ACCOUNT SCHEMA
+/////////////////////////////////////////
+
+export const CarrierAccountSchema = z.object({
+  id: z.string().uuid(),
+  provider: z.string(),
+  credentials: z.string(),
+  accountNumber: z.string().nullable(),
+  description: z.string().nullable(),
+  isActive: z.boolean(),
+  userId: z.string(),
+  createdAt: z.coerce.date(),
+  updatedAt: z.coerce.date(),
+})
+
+export type CarrierAccount = z.infer<typeof CarrierAccountSchema>
+
+/////////////////////////////////////////
+// SHIPMENT CARRIER META SCHEMA
+/////////////////////////////////////////
+
+export const ShipmentCarrierMetaSchema = z.object({
+  id: z.string().uuid(),
+  shipmentId: z.string(),
+  rateQuoteJson: z.string().nullable(),
+  bookingResponseJson: z.string().nullable(),
+  labelUrl: z.string().nullable(),
+  carrierCode: z.string().nullable(),
+  serviceLevelCode: z.string().nullable(),
+  trackingNumber: z.string().nullable(),
+  bookedAt: z.coerce.date().nullable(),
+})
+
+export type ShipmentCarrierMeta = z.infer<typeof ShipmentCarrierMetaSchema>
+
+/////////////////////////////////////////
+// FORWARDER PROFILE SCHEMA
+/////////////////////////////////////////
+
+export const ForwarderProfileSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  emailToJson: z.string(),
+  emailSubjectTemplate: z.string(),
+  dataBundleFormat: z.string(),
+  userId: z.string(),
+})
+
+export type ForwarderProfile = z.infer<typeof ForwarderProfileSchema>
+
+/////////////////////////////////////////
 // SELECT & INCLUDE
 /////////////////////////////////////////
+
+// PARTY
+//------------------------------------------------------
+
+export const PartyIncludeSchema: z.ZodType<Prisma.PartyInclude> = z.object({
+  shipmentsAsShipper: z.union([z.boolean(),z.lazy(() => ShipmentFindManyArgsSchema)]).optional(),
+  shipmentsAsConsignee: z.union([z.boolean(),z.lazy(() => ShipmentFindManyArgsSchema)]).optional(),
+  _count: z.union([z.boolean(),z.lazy(() => PartyCountOutputTypeArgsSchema)]).optional(),
+}).strict();
+
+export const PartyArgsSchema: z.ZodType<Prisma.PartyDefaultArgs> = z.object({
+  select: z.lazy(() => PartySelectSchema).optional(),
+  include: z.lazy(() => PartyIncludeSchema).optional(),
+}).strict();
+
+export const PartyCountOutputTypeArgsSchema: z.ZodType<Prisma.PartyCountOutputTypeDefaultArgs> = z.object({
+  select: z.lazy(() => PartyCountOutputTypeSelectSchema).nullish(),
+}).strict();
+
+export const PartyCountOutputTypeSelectSchema: z.ZodType<Prisma.PartyCountOutputTypeSelect> = z.object({
+  shipmentsAsShipper: z.boolean().optional(),
+  shipmentsAsConsignee: z.boolean().optional(),
+}).strict();
+
+export const PartySelectSchema: z.ZodType<Prisma.PartySelect> = z.object({
+  id: z.boolean().optional(),
+  name: z.boolean().optional(),
+  address: z.boolean().optional(),
+  city: z.boolean().optional(),
+  country: z.boolean().optional(),
+  contactName: z.boolean().optional(),
+  phone: z.boolean().optional(),
+  email: z.boolean().optional(),
+  taxIdOrEori: z.boolean().optional(),
+  isAddressBookEntry: z.boolean().optional(),
+  createdByUserId: z.boolean().optional(),
+  shipmentsAsShipper: z.union([z.boolean(),z.lazy(() => ShipmentFindManyArgsSchema)]).optional(),
+  shipmentsAsConsignee: z.union([z.boolean(),z.lazy(() => ShipmentFindManyArgsSchema)]).optional(),
+  _count: z.union([z.boolean(),z.lazy(() => PartyCountOutputTypeArgsSchema)]).optional(),
+}).strict()
 
 // SHIPMENT
 //------------------------------------------------------
 
+export const ShipmentIncludeSchema: z.ZodType<Prisma.ShipmentInclude> = z.object({
+  shipper: z.union([z.boolean(),z.lazy(() => PartyArgsSchema)]).optional(),
+  consignee: z.union([z.boolean(),z.lazy(() => PartyArgsSchema)]).optional(),
+  carrierMeta: z.union([z.boolean(),z.lazy(() => ShipmentCarrierMetaArgsSchema)]).optional(),
+}).strict();
+
+export const ShipmentArgsSchema: z.ZodType<Prisma.ShipmentDefaultArgs> = z.object({
+  select: z.lazy(() => ShipmentSelectSchema).optional(),
+  include: z.lazy(() => ShipmentIncludeSchema).optional(),
+}).strict();
+
 export const ShipmentSelectSchema: z.ZodType<Prisma.ShipmentSelect> = z.object({
   id: z.boolean().optional(),
+  shipperId: z.boolean().optional(),
+  consigneeId: z.boolean().optional(),
+  shipperSnapshot: z.boolean().optional(),
+  consigneeSnapshot: z.boolean().optional(),
+  incoterm: z.boolean().optional(),
+  currency: z.boolean().optional(),
+  totalValue: z.boolean().optional(),
+  totalWeight: z.boolean().optional(),
+  numPackages: z.boolean().optional(),
+  originCountry: z.boolean().optional(),
+  destinationCountry: z.boolean().optional(),
+  status: z.boolean().optional(),
+  trackingNumber: z.boolean().optional(),
+  createdAt: z.boolean().optional(),
+  updatedAt: z.boolean().optional(),
+  shipper: z.union([z.boolean(),z.lazy(() => PartyArgsSchema)]).optional(),
+  consignee: z.union([z.boolean(),z.lazy(() => PartyArgsSchema)]).optional(),
+  carrierMeta: z.union([z.boolean(),z.lazy(() => ShipmentCarrierMetaArgsSchema)]).optional(),
+}).strict()
+
+// CARRIER ACCOUNT
+//------------------------------------------------------
+
+export const CarrierAccountSelectSchema: z.ZodType<Prisma.CarrierAccountSelect> = z.object({
+  id: z.boolean().optional(),
+  provider: z.boolean().optional(),
+  credentials: z.boolean().optional(),
+  accountNumber: z.boolean().optional(),
+  description: z.boolean().optional(),
+  isActive: z.boolean().optional(),
+  userId: z.boolean().optional(),
+  createdAt: z.boolean().optional(),
+  updatedAt: z.boolean().optional(),
+}).strict()
+
+// SHIPMENT CARRIER META
+//------------------------------------------------------
+
+export const ShipmentCarrierMetaIncludeSchema: z.ZodType<Prisma.ShipmentCarrierMetaInclude> = z.object({
+  shipment: z.union([z.boolean(),z.lazy(() => ShipmentArgsSchema)]).optional(),
+}).strict();
+
+export const ShipmentCarrierMetaArgsSchema: z.ZodType<Prisma.ShipmentCarrierMetaDefaultArgs> = z.object({
+  select: z.lazy(() => ShipmentCarrierMetaSelectSchema).optional(),
+  include: z.lazy(() => ShipmentCarrierMetaIncludeSchema).optional(),
+}).strict();
+
+export const ShipmentCarrierMetaSelectSchema: z.ZodType<Prisma.ShipmentCarrierMetaSelect> = z.object({
+  id: z.boolean().optional(),
+  shipmentId: z.boolean().optional(),
+  rateQuoteJson: z.boolean().optional(),
+  bookingResponseJson: z.boolean().optional(),
+  labelUrl: z.boolean().optional(),
+  carrierCode: z.boolean().optional(),
+  serviceLevelCode: z.boolean().optional(),
+  trackingNumber: z.boolean().optional(),
+  bookedAt: z.boolean().optional(),
+  shipment: z.union([z.boolean(),z.lazy(() => ShipmentArgsSchema)]).optional(),
+}).strict()
+
+// FORWARDER PROFILE
+//------------------------------------------------------
+
+export const ForwarderProfileSelectSchema: z.ZodType<Prisma.ForwarderProfileSelect> = z.object({
+  id: z.boolean().optional(),
+  name: z.boolean().optional(),
+  emailToJson: z.boolean().optional(),
+  emailSubjectTemplate: z.boolean().optional(),
+  dataBundleFormat: z.boolean().optional(),
+  userId: z.boolean().optional(),
 }).strict()
 
 
@@ -47,15 +333,142 @@ export const ShipmentSelectSchema: z.ZodType<Prisma.ShipmentSelect> = z.object({
 // INPUT TYPES
 /////////////////////////////////////////
 
+export const PartyWhereInputSchema: z.ZodType<Prisma.PartyWhereInput> = z.object({
+  AND: z.union([ z.lazy(() => PartyWhereInputSchema), z.lazy(() => PartyWhereInputSchema).array() ]).optional(),
+  OR: z.lazy(() => PartyWhereInputSchema).array().optional(),
+  NOT: z.union([ z.lazy(() => PartyWhereInputSchema), z.lazy(() => PartyWhereInputSchema).array() ]).optional(),
+  id: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  name: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  address: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  city: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  country: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  contactName: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  phone: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  email: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  taxIdOrEori: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  isAddressBookEntry: z.union([ z.lazy(() => BoolFilterSchema), z.boolean() ]).optional(),
+  createdByUserId: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  shipmentsAsShipper: z.lazy(() => ShipmentListRelationFilterSchema).optional(),
+  shipmentsAsConsignee: z.lazy(() => ShipmentListRelationFilterSchema).optional(),
+}).strict();
+
+export const PartyOrderByWithRelationInputSchema: z.ZodType<Prisma.PartyOrderByWithRelationInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  name: z.lazy(() => SortOrderSchema).optional(),
+  address: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  city: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  country: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  contactName: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  phone: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  email: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  taxIdOrEori: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  isAddressBookEntry: z.lazy(() => SortOrderSchema).optional(),
+  createdByUserId: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  shipmentsAsShipper: z.lazy(() => ShipmentOrderByRelationAggregateInputSchema).optional(),
+  shipmentsAsConsignee: z.lazy(() => ShipmentOrderByRelationAggregateInputSchema).optional(),
+}).strict();
+
+export const PartyWhereUniqueInputSchema: z.ZodType<Prisma.PartyWhereUniqueInput> = z.object({
+  id: z.string().uuid(),
+})
+.and(z.object({
+  id: z.string().uuid().optional(),
+  AND: z.union([ z.lazy(() => PartyWhereInputSchema), z.lazy(() => PartyWhereInputSchema).array() ]).optional(),
+  OR: z.lazy(() => PartyWhereInputSchema).array().optional(),
+  NOT: z.union([ z.lazy(() => PartyWhereInputSchema), z.lazy(() => PartyWhereInputSchema).array() ]).optional(),
+  name: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  address: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  city: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  country: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  contactName: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  phone: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  email: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  taxIdOrEori: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  isAddressBookEntry: z.union([ z.lazy(() => BoolFilterSchema), z.boolean() ]).optional(),
+  createdByUserId: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  shipmentsAsShipper: z.lazy(() => ShipmentListRelationFilterSchema).optional(),
+  shipmentsAsConsignee: z.lazy(() => ShipmentListRelationFilterSchema).optional(),
+}).strict());
+
+export const PartyOrderByWithAggregationInputSchema: z.ZodType<Prisma.PartyOrderByWithAggregationInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  name: z.lazy(() => SortOrderSchema).optional(),
+  address: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  city: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  country: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  contactName: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  phone: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  email: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  taxIdOrEori: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  isAddressBookEntry: z.lazy(() => SortOrderSchema).optional(),
+  createdByUserId: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  _count: z.lazy(() => PartyCountOrderByAggregateInputSchema).optional(),
+  _max: z.lazy(() => PartyMaxOrderByAggregateInputSchema).optional(),
+  _min: z.lazy(() => PartyMinOrderByAggregateInputSchema).optional(),
+}).strict();
+
+export const PartyScalarWhereWithAggregatesInputSchema: z.ZodType<Prisma.PartyScalarWhereWithAggregatesInput> = z.object({
+  AND: z.union([ z.lazy(() => PartyScalarWhereWithAggregatesInputSchema), z.lazy(() => PartyScalarWhereWithAggregatesInputSchema).array() ]).optional(),
+  OR: z.lazy(() => PartyScalarWhereWithAggregatesInputSchema).array().optional(),
+  NOT: z.union([ z.lazy(() => PartyScalarWhereWithAggregatesInputSchema), z.lazy(() => PartyScalarWhereWithAggregatesInputSchema).array() ]).optional(),
+  id: z.union([ z.lazy(() => StringWithAggregatesFilterSchema), z.string() ]).optional(),
+  name: z.union([ z.lazy(() => StringWithAggregatesFilterSchema), z.string() ]).optional(),
+  address: z.union([ z.lazy(() => StringNullableWithAggregatesFilterSchema), z.string() ]).optional().nullable(),
+  city: z.union([ z.lazy(() => StringNullableWithAggregatesFilterSchema), z.string() ]).optional().nullable(),
+  country: z.union([ z.lazy(() => StringNullableWithAggregatesFilterSchema), z.string() ]).optional().nullable(),
+  contactName: z.union([ z.lazy(() => StringNullableWithAggregatesFilterSchema), z.string() ]).optional().nullable(),
+  phone: z.union([ z.lazy(() => StringNullableWithAggregatesFilterSchema), z.string() ]).optional().nullable(),
+  email: z.union([ z.lazy(() => StringNullableWithAggregatesFilterSchema), z.string() ]).optional().nullable(),
+  taxIdOrEori: z.union([ z.lazy(() => StringNullableWithAggregatesFilterSchema), z.string() ]).optional().nullable(),
+  isAddressBookEntry: z.union([ z.lazy(() => BoolWithAggregatesFilterSchema), z.boolean() ]).optional(),
+  createdByUserId: z.union([ z.lazy(() => StringNullableWithAggregatesFilterSchema), z.string() ]).optional().nullable(),
+}).strict();
+
 export const ShipmentWhereInputSchema: z.ZodType<Prisma.ShipmentWhereInput> = z.object({
   AND: z.union([ z.lazy(() => ShipmentWhereInputSchema), z.lazy(() => ShipmentWhereInputSchema).array() ]).optional(),
   OR: z.lazy(() => ShipmentWhereInputSchema).array().optional(),
   NOT: z.union([ z.lazy(() => ShipmentWhereInputSchema), z.lazy(() => ShipmentWhereInputSchema).array() ]).optional(),
   id: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  shipperId: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  consigneeId: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  shipperSnapshot: z.lazy(() => JsonNullableFilterSchema).optional(),
+  consigneeSnapshot: z.lazy(() => JsonNullableFilterSchema).optional(),
+  incoterm: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  currency: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  totalValue: z.union([ z.lazy(() => DecimalNullableFilterSchema), z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }) ]).optional().nullable(),
+  totalWeight: z.union([ z.lazy(() => FloatNullableFilterSchema), z.number() ]).optional().nullable(),
+  numPackages: z.union([ z.lazy(() => IntNullableFilterSchema), z.number() ]).optional().nullable(),
+  originCountry: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  destinationCountry: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  status: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  trackingNumber: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  createdAt: z.union([ z.lazy(() => DateTimeFilterSchema), z.coerce.date() ]).optional(),
+  updatedAt: z.union([ z.lazy(() => DateTimeFilterSchema), z.coerce.date() ]).optional(),
+  shipper: z.union([ z.lazy(() => PartyNullableScalarRelationFilterSchema), z.lazy(() => PartyWhereInputSchema) ]).optional().nullable(),
+  consignee: z.union([ z.lazy(() => PartyNullableScalarRelationFilterSchema), z.lazy(() => PartyWhereInputSchema) ]).optional().nullable(),
+  carrierMeta: z.union([ z.lazy(() => ShipmentCarrierMetaNullableScalarRelationFilterSchema), z.lazy(() => ShipmentCarrierMetaWhereInputSchema) ]).optional().nullable(),
 }).strict();
 
 export const ShipmentOrderByWithRelationInputSchema: z.ZodType<Prisma.ShipmentOrderByWithRelationInput> = z.object({
   id: z.lazy(() => SortOrderSchema).optional(),
+  shipperId: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  consigneeId: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  shipperSnapshot: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  consigneeSnapshot: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  incoterm: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  currency: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  totalValue: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  totalWeight: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  numPackages: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  originCountry: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  destinationCountry: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  status: z.lazy(() => SortOrderSchema).optional(),
+  trackingNumber: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  createdAt: z.lazy(() => SortOrderSchema).optional(),
+  updatedAt: z.lazy(() => SortOrderSchema).optional(),
+  shipper: z.lazy(() => PartyOrderByWithRelationInputSchema).optional(),
+  consignee: z.lazy(() => PartyOrderByWithRelationInputSchema).optional(),
+  carrierMeta: z.lazy(() => ShipmentCarrierMetaOrderByWithRelationInputSchema).optional(),
 }).strict();
 
 export const ShipmentWhereUniqueInputSchema: z.ZodType<Prisma.ShipmentWhereUniqueInput> = z.object({
@@ -66,13 +479,48 @@ export const ShipmentWhereUniqueInputSchema: z.ZodType<Prisma.ShipmentWhereUniqu
   AND: z.union([ z.lazy(() => ShipmentWhereInputSchema), z.lazy(() => ShipmentWhereInputSchema).array() ]).optional(),
   OR: z.lazy(() => ShipmentWhereInputSchema).array().optional(),
   NOT: z.union([ z.lazy(() => ShipmentWhereInputSchema), z.lazy(() => ShipmentWhereInputSchema).array() ]).optional(),
+  shipperId: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  consigneeId: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  shipperSnapshot: z.lazy(() => JsonNullableFilterSchema).optional(),
+  consigneeSnapshot: z.lazy(() => JsonNullableFilterSchema).optional(),
+  incoterm: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  currency: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  totalValue: z.union([ z.lazy(() => DecimalNullableFilterSchema), z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }) ]).optional().nullable(),
+  totalWeight: z.union([ z.lazy(() => FloatNullableFilterSchema), z.number() ]).optional().nullable(),
+  numPackages: z.union([ z.lazy(() => IntNullableFilterSchema), z.number().int() ]).optional().nullable(),
+  originCountry: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  destinationCountry: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  status: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  trackingNumber: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  createdAt: z.union([ z.lazy(() => DateTimeFilterSchema), z.coerce.date() ]).optional(),
+  updatedAt: z.union([ z.lazy(() => DateTimeFilterSchema), z.coerce.date() ]).optional(),
+  shipper: z.union([ z.lazy(() => PartyNullableScalarRelationFilterSchema), z.lazy(() => PartyWhereInputSchema) ]).optional().nullable(),
+  consignee: z.union([ z.lazy(() => PartyNullableScalarRelationFilterSchema), z.lazy(() => PartyWhereInputSchema) ]).optional().nullable(),
+  carrierMeta: z.union([ z.lazy(() => ShipmentCarrierMetaNullableScalarRelationFilterSchema), z.lazy(() => ShipmentCarrierMetaWhereInputSchema) ]).optional().nullable(),
 }).strict());
 
 export const ShipmentOrderByWithAggregationInputSchema: z.ZodType<Prisma.ShipmentOrderByWithAggregationInput> = z.object({
   id: z.lazy(() => SortOrderSchema).optional(),
+  shipperId: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  consigneeId: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  shipperSnapshot: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  consigneeSnapshot: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  incoterm: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  currency: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  totalValue: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  totalWeight: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  numPackages: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  originCountry: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  destinationCountry: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  status: z.lazy(() => SortOrderSchema).optional(),
+  trackingNumber: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  createdAt: z.lazy(() => SortOrderSchema).optional(),
+  updatedAt: z.lazy(() => SortOrderSchema).optional(),
   _count: z.lazy(() => ShipmentCountOrderByAggregateInputSchema).optional(),
+  _avg: z.lazy(() => ShipmentAvgOrderByAggregateInputSchema).optional(),
   _max: z.lazy(() => ShipmentMaxOrderByAggregateInputSchema).optional(),
   _min: z.lazy(() => ShipmentMinOrderByAggregateInputSchema).optional(),
+  _sum: z.lazy(() => ShipmentSumOrderByAggregateInputSchema).optional(),
 }).strict();
 
 export const ShipmentScalarWhereWithAggregatesInputSchema: z.ZodType<Prisma.ShipmentScalarWhereWithAggregatesInput> = z.object({
@@ -80,34 +528,714 @@ export const ShipmentScalarWhereWithAggregatesInputSchema: z.ZodType<Prisma.Ship
   OR: z.lazy(() => ShipmentScalarWhereWithAggregatesInputSchema).array().optional(),
   NOT: z.union([ z.lazy(() => ShipmentScalarWhereWithAggregatesInputSchema), z.lazy(() => ShipmentScalarWhereWithAggregatesInputSchema).array() ]).optional(),
   id: z.union([ z.lazy(() => StringWithAggregatesFilterSchema), z.string() ]).optional(),
+  shipperId: z.union([ z.lazy(() => StringNullableWithAggregatesFilterSchema), z.string() ]).optional().nullable(),
+  consigneeId: z.union([ z.lazy(() => StringNullableWithAggregatesFilterSchema), z.string() ]).optional().nullable(),
+  shipperSnapshot: z.lazy(() => JsonNullableWithAggregatesFilterSchema).optional(),
+  consigneeSnapshot: z.lazy(() => JsonNullableWithAggregatesFilterSchema).optional(),
+  incoterm: z.union([ z.lazy(() => StringNullableWithAggregatesFilterSchema), z.string() ]).optional().nullable(),
+  currency: z.union([ z.lazy(() => StringNullableWithAggregatesFilterSchema), z.string() ]).optional().nullable(),
+  totalValue: z.union([ z.lazy(() => DecimalNullableWithAggregatesFilterSchema), z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }) ]).optional().nullable(),
+  totalWeight: z.union([ z.lazy(() => FloatNullableWithAggregatesFilterSchema), z.number() ]).optional().nullable(),
+  numPackages: z.union([ z.lazy(() => IntNullableWithAggregatesFilterSchema), z.number() ]).optional().nullable(),
+  originCountry: z.union([ z.lazy(() => StringNullableWithAggregatesFilterSchema), z.string() ]).optional().nullable(),
+  destinationCountry: z.union([ z.lazy(() => StringNullableWithAggregatesFilterSchema), z.string() ]).optional().nullable(),
+  status: z.union([ z.lazy(() => StringWithAggregatesFilterSchema), z.string() ]).optional(),
+  trackingNumber: z.union([ z.lazy(() => StringNullableWithAggregatesFilterSchema), z.string() ]).optional().nullable(),
+  createdAt: z.union([ z.lazy(() => DateTimeWithAggregatesFilterSchema), z.coerce.date() ]).optional(),
+  updatedAt: z.union([ z.lazy(() => DateTimeWithAggregatesFilterSchema), z.coerce.date() ]).optional(),
+}).strict();
+
+export const CarrierAccountWhereInputSchema: z.ZodType<Prisma.CarrierAccountWhereInput> = z.object({
+  AND: z.union([ z.lazy(() => CarrierAccountWhereInputSchema), z.lazy(() => CarrierAccountWhereInputSchema).array() ]).optional(),
+  OR: z.lazy(() => CarrierAccountWhereInputSchema).array().optional(),
+  NOT: z.union([ z.lazy(() => CarrierAccountWhereInputSchema), z.lazy(() => CarrierAccountWhereInputSchema).array() ]).optional(),
+  id: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  provider: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  credentials: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  accountNumber: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  description: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  isActive: z.union([ z.lazy(() => BoolFilterSchema), z.boolean() ]).optional(),
+  userId: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  createdAt: z.union([ z.lazy(() => DateTimeFilterSchema), z.coerce.date() ]).optional(),
+  updatedAt: z.union([ z.lazy(() => DateTimeFilterSchema), z.coerce.date() ]).optional(),
+}).strict();
+
+export const CarrierAccountOrderByWithRelationInputSchema: z.ZodType<Prisma.CarrierAccountOrderByWithRelationInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  provider: z.lazy(() => SortOrderSchema).optional(),
+  credentials: z.lazy(() => SortOrderSchema).optional(),
+  accountNumber: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  description: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  isActive: z.lazy(() => SortOrderSchema).optional(),
+  userId: z.lazy(() => SortOrderSchema).optional(),
+  createdAt: z.lazy(() => SortOrderSchema).optional(),
+  updatedAt: z.lazy(() => SortOrderSchema).optional(),
+}).strict();
+
+export const CarrierAccountWhereUniqueInputSchema: z.ZodType<Prisma.CarrierAccountWhereUniqueInput> = z.object({
+  id: z.string().uuid(),
+})
+.and(z.object({
+  id: z.string().uuid().optional(),
+  AND: z.union([ z.lazy(() => CarrierAccountWhereInputSchema), z.lazy(() => CarrierAccountWhereInputSchema).array() ]).optional(),
+  OR: z.lazy(() => CarrierAccountWhereInputSchema).array().optional(),
+  NOT: z.union([ z.lazy(() => CarrierAccountWhereInputSchema), z.lazy(() => CarrierAccountWhereInputSchema).array() ]).optional(),
+  provider: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  credentials: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  accountNumber: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  description: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  isActive: z.union([ z.lazy(() => BoolFilterSchema), z.boolean() ]).optional(),
+  userId: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  createdAt: z.union([ z.lazy(() => DateTimeFilterSchema), z.coerce.date() ]).optional(),
+  updatedAt: z.union([ z.lazy(() => DateTimeFilterSchema), z.coerce.date() ]).optional(),
+}).strict());
+
+export const CarrierAccountOrderByWithAggregationInputSchema: z.ZodType<Prisma.CarrierAccountOrderByWithAggregationInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  provider: z.lazy(() => SortOrderSchema).optional(),
+  credentials: z.lazy(() => SortOrderSchema).optional(),
+  accountNumber: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  description: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  isActive: z.lazy(() => SortOrderSchema).optional(),
+  userId: z.lazy(() => SortOrderSchema).optional(),
+  createdAt: z.lazy(() => SortOrderSchema).optional(),
+  updatedAt: z.lazy(() => SortOrderSchema).optional(),
+  _count: z.lazy(() => CarrierAccountCountOrderByAggregateInputSchema).optional(),
+  _max: z.lazy(() => CarrierAccountMaxOrderByAggregateInputSchema).optional(),
+  _min: z.lazy(() => CarrierAccountMinOrderByAggregateInputSchema).optional(),
+}).strict();
+
+export const CarrierAccountScalarWhereWithAggregatesInputSchema: z.ZodType<Prisma.CarrierAccountScalarWhereWithAggregatesInput> = z.object({
+  AND: z.union([ z.lazy(() => CarrierAccountScalarWhereWithAggregatesInputSchema), z.lazy(() => CarrierAccountScalarWhereWithAggregatesInputSchema).array() ]).optional(),
+  OR: z.lazy(() => CarrierAccountScalarWhereWithAggregatesInputSchema).array().optional(),
+  NOT: z.union([ z.lazy(() => CarrierAccountScalarWhereWithAggregatesInputSchema), z.lazy(() => CarrierAccountScalarWhereWithAggregatesInputSchema).array() ]).optional(),
+  id: z.union([ z.lazy(() => StringWithAggregatesFilterSchema), z.string() ]).optional(),
+  provider: z.union([ z.lazy(() => StringWithAggregatesFilterSchema), z.string() ]).optional(),
+  credentials: z.union([ z.lazy(() => StringWithAggregatesFilterSchema), z.string() ]).optional(),
+  accountNumber: z.union([ z.lazy(() => StringNullableWithAggregatesFilterSchema), z.string() ]).optional().nullable(),
+  description: z.union([ z.lazy(() => StringNullableWithAggregatesFilterSchema), z.string() ]).optional().nullable(),
+  isActive: z.union([ z.lazy(() => BoolWithAggregatesFilterSchema), z.boolean() ]).optional(),
+  userId: z.union([ z.lazy(() => StringWithAggregatesFilterSchema), z.string() ]).optional(),
+  createdAt: z.union([ z.lazy(() => DateTimeWithAggregatesFilterSchema), z.coerce.date() ]).optional(),
+  updatedAt: z.union([ z.lazy(() => DateTimeWithAggregatesFilterSchema), z.coerce.date() ]).optional(),
+}).strict();
+
+export const ShipmentCarrierMetaWhereInputSchema: z.ZodType<Prisma.ShipmentCarrierMetaWhereInput> = z.object({
+  AND: z.union([ z.lazy(() => ShipmentCarrierMetaWhereInputSchema), z.lazy(() => ShipmentCarrierMetaWhereInputSchema).array() ]).optional(),
+  OR: z.lazy(() => ShipmentCarrierMetaWhereInputSchema).array().optional(),
+  NOT: z.union([ z.lazy(() => ShipmentCarrierMetaWhereInputSchema), z.lazy(() => ShipmentCarrierMetaWhereInputSchema).array() ]).optional(),
+  id: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  shipmentId: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  rateQuoteJson: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  bookingResponseJson: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  labelUrl: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  carrierCode: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  serviceLevelCode: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  trackingNumber: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  bookedAt: z.union([ z.lazy(() => DateTimeNullableFilterSchema), z.coerce.date() ]).optional().nullable(),
+  shipment: z.union([ z.lazy(() => ShipmentScalarRelationFilterSchema), z.lazy(() => ShipmentWhereInputSchema) ]).optional(),
+}).strict();
+
+export const ShipmentCarrierMetaOrderByWithRelationInputSchema: z.ZodType<Prisma.ShipmentCarrierMetaOrderByWithRelationInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  shipmentId: z.lazy(() => SortOrderSchema).optional(),
+  rateQuoteJson: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  bookingResponseJson: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  labelUrl: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  carrierCode: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  serviceLevelCode: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  trackingNumber: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  bookedAt: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  shipment: z.lazy(() => ShipmentOrderByWithRelationInputSchema).optional(),
+}).strict();
+
+export const ShipmentCarrierMetaWhereUniqueInputSchema: z.ZodType<Prisma.ShipmentCarrierMetaWhereUniqueInput> = z.union([
+  z.object({
+    id: z.string().uuid(),
+    shipmentId: z.string(),
+  }),
+  z.object({
+    id: z.string().uuid(),
+  }),
+  z.object({
+    shipmentId: z.string(),
+  }),
+])
+.and(z.object({
+  id: z.string().uuid().optional(),
+  shipmentId: z.string().optional(),
+  AND: z.union([ z.lazy(() => ShipmentCarrierMetaWhereInputSchema), z.lazy(() => ShipmentCarrierMetaWhereInputSchema).array() ]).optional(),
+  OR: z.lazy(() => ShipmentCarrierMetaWhereInputSchema).array().optional(),
+  NOT: z.union([ z.lazy(() => ShipmentCarrierMetaWhereInputSchema), z.lazy(() => ShipmentCarrierMetaWhereInputSchema).array() ]).optional(),
+  rateQuoteJson: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  bookingResponseJson: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  labelUrl: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  carrierCode: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  serviceLevelCode: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  trackingNumber: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  bookedAt: z.union([ z.lazy(() => DateTimeNullableFilterSchema), z.coerce.date() ]).optional().nullable(),
+  shipment: z.union([ z.lazy(() => ShipmentScalarRelationFilterSchema), z.lazy(() => ShipmentWhereInputSchema) ]).optional(),
+}).strict());
+
+export const ShipmentCarrierMetaOrderByWithAggregationInputSchema: z.ZodType<Prisma.ShipmentCarrierMetaOrderByWithAggregationInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  shipmentId: z.lazy(() => SortOrderSchema).optional(),
+  rateQuoteJson: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  bookingResponseJson: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  labelUrl: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  carrierCode: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  serviceLevelCode: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  trackingNumber: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  bookedAt: z.union([ z.lazy(() => SortOrderSchema), z.lazy(() => SortOrderInputSchema) ]).optional(),
+  _count: z.lazy(() => ShipmentCarrierMetaCountOrderByAggregateInputSchema).optional(),
+  _max: z.lazy(() => ShipmentCarrierMetaMaxOrderByAggregateInputSchema).optional(),
+  _min: z.lazy(() => ShipmentCarrierMetaMinOrderByAggregateInputSchema).optional(),
+}).strict();
+
+export const ShipmentCarrierMetaScalarWhereWithAggregatesInputSchema: z.ZodType<Prisma.ShipmentCarrierMetaScalarWhereWithAggregatesInput> = z.object({
+  AND: z.union([ z.lazy(() => ShipmentCarrierMetaScalarWhereWithAggregatesInputSchema), z.lazy(() => ShipmentCarrierMetaScalarWhereWithAggregatesInputSchema).array() ]).optional(),
+  OR: z.lazy(() => ShipmentCarrierMetaScalarWhereWithAggregatesInputSchema).array().optional(),
+  NOT: z.union([ z.lazy(() => ShipmentCarrierMetaScalarWhereWithAggregatesInputSchema), z.lazy(() => ShipmentCarrierMetaScalarWhereWithAggregatesInputSchema).array() ]).optional(),
+  id: z.union([ z.lazy(() => StringWithAggregatesFilterSchema), z.string() ]).optional(),
+  shipmentId: z.union([ z.lazy(() => StringWithAggregatesFilterSchema), z.string() ]).optional(),
+  rateQuoteJson: z.union([ z.lazy(() => StringNullableWithAggregatesFilterSchema), z.string() ]).optional().nullable(),
+  bookingResponseJson: z.union([ z.lazy(() => StringNullableWithAggregatesFilterSchema), z.string() ]).optional().nullable(),
+  labelUrl: z.union([ z.lazy(() => StringNullableWithAggregatesFilterSchema), z.string() ]).optional().nullable(),
+  carrierCode: z.union([ z.lazy(() => StringNullableWithAggregatesFilterSchema), z.string() ]).optional().nullable(),
+  serviceLevelCode: z.union([ z.lazy(() => StringNullableWithAggregatesFilterSchema), z.string() ]).optional().nullable(),
+  trackingNumber: z.union([ z.lazy(() => StringNullableWithAggregatesFilterSchema), z.string() ]).optional().nullable(),
+  bookedAt: z.union([ z.lazy(() => DateTimeNullableWithAggregatesFilterSchema), z.coerce.date() ]).optional().nullable(),
+}).strict();
+
+export const ForwarderProfileWhereInputSchema: z.ZodType<Prisma.ForwarderProfileWhereInput> = z.object({
+  AND: z.union([ z.lazy(() => ForwarderProfileWhereInputSchema), z.lazy(() => ForwarderProfileWhereInputSchema).array() ]).optional(),
+  OR: z.lazy(() => ForwarderProfileWhereInputSchema).array().optional(),
+  NOT: z.union([ z.lazy(() => ForwarderProfileWhereInputSchema), z.lazy(() => ForwarderProfileWhereInputSchema).array() ]).optional(),
+  id: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  name: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  emailToJson: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  emailSubjectTemplate: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  dataBundleFormat: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  userId: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+}).strict();
+
+export const ForwarderProfileOrderByWithRelationInputSchema: z.ZodType<Prisma.ForwarderProfileOrderByWithRelationInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  name: z.lazy(() => SortOrderSchema).optional(),
+  emailToJson: z.lazy(() => SortOrderSchema).optional(),
+  emailSubjectTemplate: z.lazy(() => SortOrderSchema).optional(),
+  dataBundleFormat: z.lazy(() => SortOrderSchema).optional(),
+  userId: z.lazy(() => SortOrderSchema).optional(),
+}).strict();
+
+export const ForwarderProfileWhereUniqueInputSchema: z.ZodType<Prisma.ForwarderProfileWhereUniqueInput> = z.object({
+  id: z.string().uuid(),
+})
+.and(z.object({
+  id: z.string().uuid().optional(),
+  AND: z.union([ z.lazy(() => ForwarderProfileWhereInputSchema), z.lazy(() => ForwarderProfileWhereInputSchema).array() ]).optional(),
+  OR: z.lazy(() => ForwarderProfileWhereInputSchema).array().optional(),
+  NOT: z.union([ z.lazy(() => ForwarderProfileWhereInputSchema), z.lazy(() => ForwarderProfileWhereInputSchema).array() ]).optional(),
+  name: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  emailToJson: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  emailSubjectTemplate: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  dataBundleFormat: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  userId: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+}).strict());
+
+export const ForwarderProfileOrderByWithAggregationInputSchema: z.ZodType<Prisma.ForwarderProfileOrderByWithAggregationInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  name: z.lazy(() => SortOrderSchema).optional(),
+  emailToJson: z.lazy(() => SortOrderSchema).optional(),
+  emailSubjectTemplate: z.lazy(() => SortOrderSchema).optional(),
+  dataBundleFormat: z.lazy(() => SortOrderSchema).optional(),
+  userId: z.lazy(() => SortOrderSchema).optional(),
+  _count: z.lazy(() => ForwarderProfileCountOrderByAggregateInputSchema).optional(),
+  _max: z.lazy(() => ForwarderProfileMaxOrderByAggregateInputSchema).optional(),
+  _min: z.lazy(() => ForwarderProfileMinOrderByAggregateInputSchema).optional(),
+}).strict();
+
+export const ForwarderProfileScalarWhereWithAggregatesInputSchema: z.ZodType<Prisma.ForwarderProfileScalarWhereWithAggregatesInput> = z.object({
+  AND: z.union([ z.lazy(() => ForwarderProfileScalarWhereWithAggregatesInputSchema), z.lazy(() => ForwarderProfileScalarWhereWithAggregatesInputSchema).array() ]).optional(),
+  OR: z.lazy(() => ForwarderProfileScalarWhereWithAggregatesInputSchema).array().optional(),
+  NOT: z.union([ z.lazy(() => ForwarderProfileScalarWhereWithAggregatesInputSchema), z.lazy(() => ForwarderProfileScalarWhereWithAggregatesInputSchema).array() ]).optional(),
+  id: z.union([ z.lazy(() => StringWithAggregatesFilterSchema), z.string() ]).optional(),
+  name: z.union([ z.lazy(() => StringWithAggregatesFilterSchema), z.string() ]).optional(),
+  emailToJson: z.union([ z.lazy(() => StringWithAggregatesFilterSchema), z.string() ]).optional(),
+  emailSubjectTemplate: z.union([ z.lazy(() => StringWithAggregatesFilterSchema), z.string() ]).optional(),
+  dataBundleFormat: z.union([ z.lazy(() => StringWithAggregatesFilterSchema), z.string() ]).optional(),
+  userId: z.union([ z.lazy(() => StringWithAggregatesFilterSchema), z.string() ]).optional(),
+}).strict();
+
+export const PartyCreateInputSchema: z.ZodType<Prisma.PartyCreateInput> = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string(),
+  address: z.string().optional().nullable(),
+  city: z.string().optional().nullable(),
+  country: z.string().optional().nullable(),
+  contactName: z.string().optional().nullable(),
+  phone: z.string().optional().nullable(),
+  email: z.string().optional().nullable(),
+  taxIdOrEori: z.string().optional().nullable(),
+  isAddressBookEntry: z.boolean().optional(),
+  createdByUserId: z.string().optional().nullable(),
+  shipmentsAsShipper: z.lazy(() => ShipmentCreateNestedManyWithoutShipperInputSchema).optional(),
+  shipmentsAsConsignee: z.lazy(() => ShipmentCreateNestedManyWithoutConsigneeInputSchema).optional(),
+}).strict();
+
+export const PartyUncheckedCreateInputSchema: z.ZodType<Prisma.PartyUncheckedCreateInput> = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string(),
+  address: z.string().optional().nullable(),
+  city: z.string().optional().nullable(),
+  country: z.string().optional().nullable(),
+  contactName: z.string().optional().nullable(),
+  phone: z.string().optional().nullable(),
+  email: z.string().optional().nullable(),
+  taxIdOrEori: z.string().optional().nullable(),
+  isAddressBookEntry: z.boolean().optional(),
+  createdByUserId: z.string().optional().nullable(),
+  shipmentsAsShipper: z.lazy(() => ShipmentUncheckedCreateNestedManyWithoutShipperInputSchema).optional(),
+  shipmentsAsConsignee: z.lazy(() => ShipmentUncheckedCreateNestedManyWithoutConsigneeInputSchema).optional(),
+}).strict();
+
+export const PartyUpdateInputSchema: z.ZodType<Prisma.PartyUpdateInput> = z.object({
+  id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  name: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  address: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  city: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  country: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  contactName: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  phone: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  email: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  taxIdOrEori: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  isAddressBookEntry: z.union([ z.boolean(),z.lazy(() => BoolFieldUpdateOperationsInputSchema) ]).optional(),
+  createdByUserId: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  shipmentsAsShipper: z.lazy(() => ShipmentUpdateManyWithoutShipperNestedInputSchema).optional(),
+  shipmentsAsConsignee: z.lazy(() => ShipmentUpdateManyWithoutConsigneeNestedInputSchema).optional(),
+}).strict();
+
+export const PartyUncheckedUpdateInputSchema: z.ZodType<Prisma.PartyUncheckedUpdateInput> = z.object({
+  id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  name: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  address: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  city: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  country: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  contactName: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  phone: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  email: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  taxIdOrEori: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  isAddressBookEntry: z.union([ z.boolean(),z.lazy(() => BoolFieldUpdateOperationsInputSchema) ]).optional(),
+  createdByUserId: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  shipmentsAsShipper: z.lazy(() => ShipmentUncheckedUpdateManyWithoutShipperNestedInputSchema).optional(),
+  shipmentsAsConsignee: z.lazy(() => ShipmentUncheckedUpdateManyWithoutConsigneeNestedInputSchema).optional(),
+}).strict();
+
+export const PartyCreateManyInputSchema: z.ZodType<Prisma.PartyCreateManyInput> = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string(),
+  address: z.string().optional().nullable(),
+  city: z.string().optional().nullable(),
+  country: z.string().optional().nullable(),
+  contactName: z.string().optional().nullable(),
+  phone: z.string().optional().nullable(),
+  email: z.string().optional().nullable(),
+  taxIdOrEori: z.string().optional().nullable(),
+  isAddressBookEntry: z.boolean().optional(),
+  createdByUserId: z.string().optional().nullable(),
+}).strict();
+
+export const PartyUpdateManyMutationInputSchema: z.ZodType<Prisma.PartyUpdateManyMutationInput> = z.object({
+  id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  name: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  address: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  city: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  country: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  contactName: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  phone: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  email: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  taxIdOrEori: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  isAddressBookEntry: z.union([ z.boolean(),z.lazy(() => BoolFieldUpdateOperationsInputSchema) ]).optional(),
+  createdByUserId: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+}).strict();
+
+export const PartyUncheckedUpdateManyInputSchema: z.ZodType<Prisma.PartyUncheckedUpdateManyInput> = z.object({
+  id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  name: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  address: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  city: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  country: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  contactName: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  phone: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  email: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  taxIdOrEori: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  isAddressBookEntry: z.union([ z.boolean(),z.lazy(() => BoolFieldUpdateOperationsInputSchema) ]).optional(),
+  createdByUserId: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
 }).strict();
 
 export const ShipmentCreateInputSchema: z.ZodType<Prisma.ShipmentCreateInput> = z.object({
   id: z.string().uuid().optional(),
+  shipperSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  consigneeSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  incoterm: z.string().optional().nullable(),
+  currency: z.string().optional().nullable(),
+  totalValue: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional().nullable(),
+  totalWeight: z.number().optional().nullable(),
+  numPackages: z.number().int().optional().nullable(),
+  originCountry: z.string().optional().nullable(),
+  destinationCountry: z.string().optional().nullable(),
+  status: z.string().optional(),
+  trackingNumber: z.string().optional().nullable(),
+  createdAt: z.coerce.date().optional(),
+  updatedAt: z.coerce.date().optional(),
+  shipper: z.lazy(() => PartyCreateNestedOneWithoutShipmentsAsShipperInputSchema).optional(),
+  consignee: z.lazy(() => PartyCreateNestedOneWithoutShipmentsAsConsigneeInputSchema).optional(),
+  carrierMeta: z.lazy(() => ShipmentCarrierMetaCreateNestedOneWithoutShipmentInputSchema).optional(),
 }).strict();
 
 export const ShipmentUncheckedCreateInputSchema: z.ZodType<Prisma.ShipmentUncheckedCreateInput> = z.object({
   id: z.string().uuid().optional(),
+  shipperId: z.string().optional().nullable(),
+  consigneeId: z.string().optional().nullable(),
+  shipperSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  consigneeSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  incoterm: z.string().optional().nullable(),
+  currency: z.string().optional().nullable(),
+  totalValue: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional().nullable(),
+  totalWeight: z.number().optional().nullable(),
+  numPackages: z.number().int().optional().nullable(),
+  originCountry: z.string().optional().nullable(),
+  destinationCountry: z.string().optional().nullable(),
+  status: z.string().optional(),
+  trackingNumber: z.string().optional().nullable(),
+  createdAt: z.coerce.date().optional(),
+  updatedAt: z.coerce.date().optional(),
+  carrierMeta: z.lazy(() => ShipmentCarrierMetaUncheckedCreateNestedOneWithoutShipmentInputSchema).optional(),
 }).strict();
 
 export const ShipmentUpdateInputSchema: z.ZodType<Prisma.ShipmentUpdateInput> = z.object({
   id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  shipperSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  consigneeSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  incoterm: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  currency: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  totalValue: z.union([ z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }),z.lazy(() => NullableDecimalFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  totalWeight: z.union([ z.number(),z.lazy(() => NullableFloatFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  numPackages: z.union([ z.number().int(),z.lazy(() => NullableIntFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  originCountry: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  destinationCountry: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  status: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  trackingNumber: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  createdAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  updatedAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  shipper: z.lazy(() => PartyUpdateOneWithoutShipmentsAsShipperNestedInputSchema).optional(),
+  consignee: z.lazy(() => PartyUpdateOneWithoutShipmentsAsConsigneeNestedInputSchema).optional(),
+  carrierMeta: z.lazy(() => ShipmentCarrierMetaUpdateOneWithoutShipmentNestedInputSchema).optional(),
 }).strict();
 
 export const ShipmentUncheckedUpdateInputSchema: z.ZodType<Prisma.ShipmentUncheckedUpdateInput> = z.object({
   id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  shipperId: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  consigneeId: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  shipperSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  consigneeSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  incoterm: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  currency: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  totalValue: z.union([ z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }),z.lazy(() => NullableDecimalFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  totalWeight: z.union([ z.number(),z.lazy(() => NullableFloatFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  numPackages: z.union([ z.number().int(),z.lazy(() => NullableIntFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  originCountry: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  destinationCountry: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  status: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  trackingNumber: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  createdAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  updatedAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  carrierMeta: z.lazy(() => ShipmentCarrierMetaUncheckedUpdateOneWithoutShipmentNestedInputSchema).optional(),
 }).strict();
 
 export const ShipmentCreateManyInputSchema: z.ZodType<Prisma.ShipmentCreateManyInput> = z.object({
   id: z.string().uuid().optional(),
+  shipperId: z.string().optional().nullable(),
+  consigneeId: z.string().optional().nullable(),
+  shipperSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  consigneeSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  incoterm: z.string().optional().nullable(),
+  currency: z.string().optional().nullable(),
+  totalValue: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional().nullable(),
+  totalWeight: z.number().optional().nullable(),
+  numPackages: z.number().int().optional().nullable(),
+  originCountry: z.string().optional().nullable(),
+  destinationCountry: z.string().optional().nullable(),
+  status: z.string().optional(),
+  trackingNumber: z.string().optional().nullable(),
+  createdAt: z.coerce.date().optional(),
+  updatedAt: z.coerce.date().optional(),
 }).strict();
 
 export const ShipmentUpdateManyMutationInputSchema: z.ZodType<Prisma.ShipmentUpdateManyMutationInput> = z.object({
   id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  shipperSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  consigneeSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  incoterm: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  currency: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  totalValue: z.union([ z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }),z.lazy(() => NullableDecimalFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  totalWeight: z.union([ z.number(),z.lazy(() => NullableFloatFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  numPackages: z.union([ z.number().int(),z.lazy(() => NullableIntFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  originCountry: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  destinationCountry: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  status: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  trackingNumber: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  createdAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  updatedAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
 }).strict();
 
 export const ShipmentUncheckedUpdateManyInputSchema: z.ZodType<Prisma.ShipmentUncheckedUpdateManyInput> = z.object({
   id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  shipperId: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  consigneeId: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  shipperSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  consigneeSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  incoterm: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  currency: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  totalValue: z.union([ z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }),z.lazy(() => NullableDecimalFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  totalWeight: z.union([ z.number(),z.lazy(() => NullableFloatFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  numPackages: z.union([ z.number().int(),z.lazy(() => NullableIntFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  originCountry: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  destinationCountry: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  status: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  trackingNumber: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  createdAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  updatedAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+}).strict();
+
+export const CarrierAccountCreateInputSchema: z.ZodType<Prisma.CarrierAccountCreateInput> = z.object({
+  id: z.string().uuid().optional(),
+  provider: z.string(),
+  credentials: z.string(),
+  accountNumber: z.string().optional().nullable(),
+  description: z.string().optional().nullable(),
+  isActive: z.boolean().optional(),
+  userId: z.string(),
+  createdAt: z.coerce.date().optional(),
+  updatedAt: z.coerce.date().optional(),
+}).strict();
+
+export const CarrierAccountUncheckedCreateInputSchema: z.ZodType<Prisma.CarrierAccountUncheckedCreateInput> = z.object({
+  id: z.string().uuid().optional(),
+  provider: z.string(),
+  credentials: z.string(),
+  accountNumber: z.string().optional().nullable(),
+  description: z.string().optional().nullable(),
+  isActive: z.boolean().optional(),
+  userId: z.string(),
+  createdAt: z.coerce.date().optional(),
+  updatedAt: z.coerce.date().optional(),
+}).strict();
+
+export const CarrierAccountUpdateInputSchema: z.ZodType<Prisma.CarrierAccountUpdateInput> = z.object({
+  id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  provider: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  credentials: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  accountNumber: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  description: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  isActive: z.union([ z.boolean(),z.lazy(() => BoolFieldUpdateOperationsInputSchema) ]).optional(),
+  userId: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  createdAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  updatedAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+}).strict();
+
+export const CarrierAccountUncheckedUpdateInputSchema: z.ZodType<Prisma.CarrierAccountUncheckedUpdateInput> = z.object({
+  id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  provider: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  credentials: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  accountNumber: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  description: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  isActive: z.union([ z.boolean(),z.lazy(() => BoolFieldUpdateOperationsInputSchema) ]).optional(),
+  userId: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  createdAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  updatedAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+}).strict();
+
+export const CarrierAccountCreateManyInputSchema: z.ZodType<Prisma.CarrierAccountCreateManyInput> = z.object({
+  id: z.string().uuid().optional(),
+  provider: z.string(),
+  credentials: z.string(),
+  accountNumber: z.string().optional().nullable(),
+  description: z.string().optional().nullable(),
+  isActive: z.boolean().optional(),
+  userId: z.string(),
+  createdAt: z.coerce.date().optional(),
+  updatedAt: z.coerce.date().optional(),
+}).strict();
+
+export const CarrierAccountUpdateManyMutationInputSchema: z.ZodType<Prisma.CarrierAccountUpdateManyMutationInput> = z.object({
+  id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  provider: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  credentials: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  accountNumber: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  description: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  isActive: z.union([ z.boolean(),z.lazy(() => BoolFieldUpdateOperationsInputSchema) ]).optional(),
+  userId: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  createdAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  updatedAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+}).strict();
+
+export const CarrierAccountUncheckedUpdateManyInputSchema: z.ZodType<Prisma.CarrierAccountUncheckedUpdateManyInput> = z.object({
+  id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  provider: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  credentials: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  accountNumber: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  description: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  isActive: z.union([ z.boolean(),z.lazy(() => BoolFieldUpdateOperationsInputSchema) ]).optional(),
+  userId: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  createdAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  updatedAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+}).strict();
+
+export const ShipmentCarrierMetaCreateInputSchema: z.ZodType<Prisma.ShipmentCarrierMetaCreateInput> = z.object({
+  id: z.string().uuid().optional(),
+  rateQuoteJson: z.string().optional().nullable(),
+  bookingResponseJson: z.string().optional().nullable(),
+  labelUrl: z.string().optional().nullable(),
+  carrierCode: z.string().optional().nullable(),
+  serviceLevelCode: z.string().optional().nullable(),
+  trackingNumber: z.string().optional().nullable(),
+  bookedAt: z.coerce.date().optional().nullable(),
+  shipment: z.lazy(() => ShipmentCreateNestedOneWithoutCarrierMetaInputSchema),
+}).strict();
+
+export const ShipmentCarrierMetaUncheckedCreateInputSchema: z.ZodType<Prisma.ShipmentCarrierMetaUncheckedCreateInput> = z.object({
+  id: z.string().uuid().optional(),
+  shipmentId: z.string(),
+  rateQuoteJson: z.string().optional().nullable(),
+  bookingResponseJson: z.string().optional().nullable(),
+  labelUrl: z.string().optional().nullable(),
+  carrierCode: z.string().optional().nullable(),
+  serviceLevelCode: z.string().optional().nullable(),
+  trackingNumber: z.string().optional().nullable(),
+  bookedAt: z.coerce.date().optional().nullable(),
+}).strict();
+
+export const ShipmentCarrierMetaUpdateInputSchema: z.ZodType<Prisma.ShipmentCarrierMetaUpdateInput> = z.object({
+  id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  rateQuoteJson: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  bookingResponseJson: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  labelUrl: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  carrierCode: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  serviceLevelCode: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  trackingNumber: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  bookedAt: z.union([ z.coerce.date(),z.lazy(() => NullableDateTimeFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  shipment: z.lazy(() => ShipmentUpdateOneRequiredWithoutCarrierMetaNestedInputSchema).optional(),
+}).strict();
+
+export const ShipmentCarrierMetaUncheckedUpdateInputSchema: z.ZodType<Prisma.ShipmentCarrierMetaUncheckedUpdateInput> = z.object({
+  id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  shipmentId: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  rateQuoteJson: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  bookingResponseJson: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  labelUrl: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  carrierCode: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  serviceLevelCode: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  trackingNumber: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  bookedAt: z.union([ z.coerce.date(),z.lazy(() => NullableDateTimeFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+}).strict();
+
+export const ShipmentCarrierMetaCreateManyInputSchema: z.ZodType<Prisma.ShipmentCarrierMetaCreateManyInput> = z.object({
+  id: z.string().uuid().optional(),
+  shipmentId: z.string(),
+  rateQuoteJson: z.string().optional().nullable(),
+  bookingResponseJson: z.string().optional().nullable(),
+  labelUrl: z.string().optional().nullable(),
+  carrierCode: z.string().optional().nullable(),
+  serviceLevelCode: z.string().optional().nullable(),
+  trackingNumber: z.string().optional().nullable(),
+  bookedAt: z.coerce.date().optional().nullable(),
+}).strict();
+
+export const ShipmentCarrierMetaUpdateManyMutationInputSchema: z.ZodType<Prisma.ShipmentCarrierMetaUpdateManyMutationInput> = z.object({
+  id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  rateQuoteJson: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  bookingResponseJson: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  labelUrl: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  carrierCode: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  serviceLevelCode: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  trackingNumber: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  bookedAt: z.union([ z.coerce.date(),z.lazy(() => NullableDateTimeFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+}).strict();
+
+export const ShipmentCarrierMetaUncheckedUpdateManyInputSchema: z.ZodType<Prisma.ShipmentCarrierMetaUncheckedUpdateManyInput> = z.object({
+  id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  shipmentId: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  rateQuoteJson: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  bookingResponseJson: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  labelUrl: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  carrierCode: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  serviceLevelCode: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  trackingNumber: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  bookedAt: z.union([ z.coerce.date(),z.lazy(() => NullableDateTimeFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+}).strict();
+
+export const ForwarderProfileCreateInputSchema: z.ZodType<Prisma.ForwarderProfileCreateInput> = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string(),
+  emailToJson: z.string(),
+  emailSubjectTemplate: z.string(),
+  dataBundleFormat: z.string(),
+  userId: z.string(),
+}).strict();
+
+export const ForwarderProfileUncheckedCreateInputSchema: z.ZodType<Prisma.ForwarderProfileUncheckedCreateInput> = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string(),
+  emailToJson: z.string(),
+  emailSubjectTemplate: z.string(),
+  dataBundleFormat: z.string(),
+  userId: z.string(),
+}).strict();
+
+export const ForwarderProfileUpdateInputSchema: z.ZodType<Prisma.ForwarderProfileUpdateInput> = z.object({
+  id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  name: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  emailToJson: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  emailSubjectTemplate: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  dataBundleFormat: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  userId: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+}).strict();
+
+export const ForwarderProfileUncheckedUpdateInputSchema: z.ZodType<Prisma.ForwarderProfileUncheckedUpdateInput> = z.object({
+  id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  name: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  emailToJson: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  emailSubjectTemplate: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  dataBundleFormat: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  userId: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+}).strict();
+
+export const ForwarderProfileCreateManyInputSchema: z.ZodType<Prisma.ForwarderProfileCreateManyInput> = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string(),
+  emailToJson: z.string(),
+  emailSubjectTemplate: z.string(),
+  dataBundleFormat: z.string(),
+  userId: z.string(),
+}).strict();
+
+export const ForwarderProfileUpdateManyMutationInputSchema: z.ZodType<Prisma.ForwarderProfileUpdateManyMutationInput> = z.object({
+  id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  name: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  emailToJson: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  emailSubjectTemplate: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  dataBundleFormat: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  userId: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+}).strict();
+
+export const ForwarderProfileUncheckedUpdateManyInputSchema: z.ZodType<Prisma.ForwarderProfileUncheckedUpdateManyInput> = z.object({
+  id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  name: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  emailToJson: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  emailSubjectTemplate: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  dataBundleFormat: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  userId: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
 }).strict();
 
 export const StringFilterSchema: z.ZodType<Prisma.StringFilter> = z.object({
@@ -125,16 +1253,81 @@ export const StringFilterSchema: z.ZodType<Prisma.StringFilter> = z.object({
   not: z.union([ z.string(),z.lazy(() => NestedStringFilterSchema) ]).optional(),
 }).strict();
 
-export const ShipmentCountOrderByAggregateInputSchema: z.ZodType<Prisma.ShipmentCountOrderByAggregateInput> = z.object({
-  id: z.lazy(() => SortOrderSchema).optional(),
+export const StringNullableFilterSchema: z.ZodType<Prisma.StringNullableFilter> = z.object({
+  equals: z.string().optional().nullable(),
+  in: z.string().array().optional().nullable(),
+  notIn: z.string().array().optional().nullable(),
+  lt: z.string().optional(),
+  lte: z.string().optional(),
+  gt: z.string().optional(),
+  gte: z.string().optional(),
+  contains: z.string().optional(),
+  startsWith: z.string().optional(),
+  endsWith: z.string().optional(),
+  mode: z.lazy(() => QueryModeSchema).optional(),
+  not: z.union([ z.string(),z.lazy(() => NestedStringNullableFilterSchema) ]).optional().nullable(),
 }).strict();
 
-export const ShipmentMaxOrderByAggregateInputSchema: z.ZodType<Prisma.ShipmentMaxOrderByAggregateInput> = z.object({
-  id: z.lazy(() => SortOrderSchema).optional(),
+export const BoolFilterSchema: z.ZodType<Prisma.BoolFilter> = z.object({
+  equals: z.boolean().optional(),
+  not: z.union([ z.boolean(),z.lazy(() => NestedBoolFilterSchema) ]).optional(),
 }).strict();
 
-export const ShipmentMinOrderByAggregateInputSchema: z.ZodType<Prisma.ShipmentMinOrderByAggregateInput> = z.object({
+export const ShipmentListRelationFilterSchema: z.ZodType<Prisma.ShipmentListRelationFilter> = z.object({
+  every: z.lazy(() => ShipmentWhereInputSchema).optional(),
+  some: z.lazy(() => ShipmentWhereInputSchema).optional(),
+  none: z.lazy(() => ShipmentWhereInputSchema).optional(),
+}).strict();
+
+export const SortOrderInputSchema: z.ZodType<Prisma.SortOrderInput> = z.object({
+  sort: z.lazy(() => SortOrderSchema),
+  nulls: z.lazy(() => NullsOrderSchema).optional(),
+}).strict();
+
+export const ShipmentOrderByRelationAggregateInputSchema: z.ZodType<Prisma.ShipmentOrderByRelationAggregateInput> = z.object({
+  _count: z.lazy(() => SortOrderSchema).optional(),
+}).strict();
+
+export const PartyCountOrderByAggregateInputSchema: z.ZodType<Prisma.PartyCountOrderByAggregateInput> = z.object({
   id: z.lazy(() => SortOrderSchema).optional(),
+  name: z.lazy(() => SortOrderSchema).optional(),
+  address: z.lazy(() => SortOrderSchema).optional(),
+  city: z.lazy(() => SortOrderSchema).optional(),
+  country: z.lazy(() => SortOrderSchema).optional(),
+  contactName: z.lazy(() => SortOrderSchema).optional(),
+  phone: z.lazy(() => SortOrderSchema).optional(),
+  email: z.lazy(() => SortOrderSchema).optional(),
+  taxIdOrEori: z.lazy(() => SortOrderSchema).optional(),
+  isAddressBookEntry: z.lazy(() => SortOrderSchema).optional(),
+  createdByUserId: z.lazy(() => SortOrderSchema).optional(),
+}).strict();
+
+export const PartyMaxOrderByAggregateInputSchema: z.ZodType<Prisma.PartyMaxOrderByAggregateInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  name: z.lazy(() => SortOrderSchema).optional(),
+  address: z.lazy(() => SortOrderSchema).optional(),
+  city: z.lazy(() => SortOrderSchema).optional(),
+  country: z.lazy(() => SortOrderSchema).optional(),
+  contactName: z.lazy(() => SortOrderSchema).optional(),
+  phone: z.lazy(() => SortOrderSchema).optional(),
+  email: z.lazy(() => SortOrderSchema).optional(),
+  taxIdOrEori: z.lazy(() => SortOrderSchema).optional(),
+  isAddressBookEntry: z.lazy(() => SortOrderSchema).optional(),
+  createdByUserId: z.lazy(() => SortOrderSchema).optional(),
+}).strict();
+
+export const PartyMinOrderByAggregateInputSchema: z.ZodType<Prisma.PartyMinOrderByAggregateInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  name: z.lazy(() => SortOrderSchema).optional(),
+  address: z.lazy(() => SortOrderSchema).optional(),
+  city: z.lazy(() => SortOrderSchema).optional(),
+  country: z.lazy(() => SortOrderSchema).optional(),
+  contactName: z.lazy(() => SortOrderSchema).optional(),
+  phone: z.lazy(() => SortOrderSchema).optional(),
+  email: z.lazy(() => SortOrderSchema).optional(),
+  taxIdOrEori: z.lazy(() => SortOrderSchema).optional(),
+  isAddressBookEntry: z.lazy(() => SortOrderSchema).optional(),
+  createdByUserId: z.lazy(() => SortOrderSchema).optional(),
 }).strict();
 
 export const StringWithAggregatesFilterSchema: z.ZodType<Prisma.StringWithAggregatesFilter> = z.object({
@@ -155,8 +1348,583 @@ export const StringWithAggregatesFilterSchema: z.ZodType<Prisma.StringWithAggreg
   _max: z.lazy(() => NestedStringFilterSchema).optional(),
 }).strict();
 
+export const StringNullableWithAggregatesFilterSchema: z.ZodType<Prisma.StringNullableWithAggregatesFilter> = z.object({
+  equals: z.string().optional().nullable(),
+  in: z.string().array().optional().nullable(),
+  notIn: z.string().array().optional().nullable(),
+  lt: z.string().optional(),
+  lte: z.string().optional(),
+  gt: z.string().optional(),
+  gte: z.string().optional(),
+  contains: z.string().optional(),
+  startsWith: z.string().optional(),
+  endsWith: z.string().optional(),
+  mode: z.lazy(() => QueryModeSchema).optional(),
+  not: z.union([ z.string(),z.lazy(() => NestedStringNullableWithAggregatesFilterSchema) ]).optional().nullable(),
+  _count: z.lazy(() => NestedIntNullableFilterSchema).optional(),
+  _min: z.lazy(() => NestedStringNullableFilterSchema).optional(),
+  _max: z.lazy(() => NestedStringNullableFilterSchema).optional(),
+}).strict();
+
+export const BoolWithAggregatesFilterSchema: z.ZodType<Prisma.BoolWithAggregatesFilter> = z.object({
+  equals: z.boolean().optional(),
+  not: z.union([ z.boolean(),z.lazy(() => NestedBoolWithAggregatesFilterSchema) ]).optional(),
+  _count: z.lazy(() => NestedIntFilterSchema).optional(),
+  _min: z.lazy(() => NestedBoolFilterSchema).optional(),
+  _max: z.lazy(() => NestedBoolFilterSchema).optional(),
+}).strict();
+
+export const JsonNullableFilterSchema: z.ZodType<Prisma.JsonNullableFilter> = z.object({
+  equals: InputJsonValueSchema.optional(),
+  path: z.string().array().optional(),
+  mode: z.lazy(() => QueryModeSchema).optional(),
+  string_contains: z.string().optional(),
+  string_starts_with: z.string().optional(),
+  string_ends_with: z.string().optional(),
+  array_starts_with: InputJsonValueSchema.optional().nullable(),
+  array_ends_with: InputJsonValueSchema.optional().nullable(),
+  array_contains: InputJsonValueSchema.optional().nullable(),
+  lt: InputJsonValueSchema.optional(),
+  lte: InputJsonValueSchema.optional(),
+  gt: InputJsonValueSchema.optional(),
+  gte: InputJsonValueSchema.optional(),
+  not: InputJsonValueSchema.optional(),
+}).strict();
+
+export const DecimalNullableFilterSchema: z.ZodType<Prisma.DecimalNullableFilter> = z.object({
+  equals: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional().nullable(),
+  in: z.union([z.number().array(),z.string().array(),z.instanceof(Prisma.Decimal).array(),DecimalJsLikeSchema.array(),]).refine((v) => Array.isArray(v) && (v as any[]).every((v) => isValidDecimalInput(v)), { message: 'Must be a Decimal' }).optional().nullable(),
+  notIn: z.union([z.number().array(),z.string().array(),z.instanceof(Prisma.Decimal).array(),DecimalJsLikeSchema.array(),]).refine((v) => Array.isArray(v) && (v as any[]).every((v) => isValidDecimalInput(v)), { message: 'Must be a Decimal' }).optional().nullable(),
+  lt: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional(),
+  lte: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional(),
+  gt: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional(),
+  gte: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional(),
+  not: z.union([ z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }),z.lazy(() => NestedDecimalNullableFilterSchema) ]).optional().nullable(),
+}).strict();
+
+export const FloatNullableFilterSchema: z.ZodType<Prisma.FloatNullableFilter> = z.object({
+  equals: z.number().optional().nullable(),
+  in: z.number().array().optional().nullable(),
+  notIn: z.number().array().optional().nullable(),
+  lt: z.number().optional(),
+  lte: z.number().optional(),
+  gt: z.number().optional(),
+  gte: z.number().optional(),
+  not: z.union([ z.number(),z.lazy(() => NestedFloatNullableFilterSchema) ]).optional().nullable(),
+}).strict();
+
+export const IntNullableFilterSchema: z.ZodType<Prisma.IntNullableFilter> = z.object({
+  equals: z.number().optional().nullable(),
+  in: z.number().array().optional().nullable(),
+  notIn: z.number().array().optional().nullable(),
+  lt: z.number().optional(),
+  lte: z.number().optional(),
+  gt: z.number().optional(),
+  gte: z.number().optional(),
+  not: z.union([ z.number(),z.lazy(() => NestedIntNullableFilterSchema) ]).optional().nullable(),
+}).strict();
+
+export const DateTimeFilterSchema: z.ZodType<Prisma.DateTimeFilter> = z.object({
+  equals: z.coerce.date().optional(),
+  in: z.coerce.date().array().optional(),
+  notIn: z.coerce.date().array().optional(),
+  lt: z.coerce.date().optional(),
+  lte: z.coerce.date().optional(),
+  gt: z.coerce.date().optional(),
+  gte: z.coerce.date().optional(),
+  not: z.union([ z.coerce.date(),z.lazy(() => NestedDateTimeFilterSchema) ]).optional(),
+}).strict();
+
+export const PartyNullableScalarRelationFilterSchema: z.ZodType<Prisma.PartyNullableScalarRelationFilter> = z.object({
+  is: z.lazy(() => PartyWhereInputSchema).optional().nullable(),
+  isNot: z.lazy(() => PartyWhereInputSchema).optional().nullable(),
+}).strict();
+
+export const ShipmentCarrierMetaNullableScalarRelationFilterSchema: z.ZodType<Prisma.ShipmentCarrierMetaNullableScalarRelationFilter> = z.object({
+  is: z.lazy(() => ShipmentCarrierMetaWhereInputSchema).optional().nullable(),
+  isNot: z.lazy(() => ShipmentCarrierMetaWhereInputSchema).optional().nullable(),
+}).strict();
+
+export const ShipmentCountOrderByAggregateInputSchema: z.ZodType<Prisma.ShipmentCountOrderByAggregateInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  shipperId: z.lazy(() => SortOrderSchema).optional(),
+  consigneeId: z.lazy(() => SortOrderSchema).optional(),
+  shipperSnapshot: z.lazy(() => SortOrderSchema).optional(),
+  consigneeSnapshot: z.lazy(() => SortOrderSchema).optional(),
+  incoterm: z.lazy(() => SortOrderSchema).optional(),
+  currency: z.lazy(() => SortOrderSchema).optional(),
+  totalValue: z.lazy(() => SortOrderSchema).optional(),
+  totalWeight: z.lazy(() => SortOrderSchema).optional(),
+  numPackages: z.lazy(() => SortOrderSchema).optional(),
+  originCountry: z.lazy(() => SortOrderSchema).optional(),
+  destinationCountry: z.lazy(() => SortOrderSchema).optional(),
+  status: z.lazy(() => SortOrderSchema).optional(),
+  trackingNumber: z.lazy(() => SortOrderSchema).optional(),
+  createdAt: z.lazy(() => SortOrderSchema).optional(),
+  updatedAt: z.lazy(() => SortOrderSchema).optional(),
+}).strict();
+
+export const ShipmentAvgOrderByAggregateInputSchema: z.ZodType<Prisma.ShipmentAvgOrderByAggregateInput> = z.object({
+  totalValue: z.lazy(() => SortOrderSchema).optional(),
+  totalWeight: z.lazy(() => SortOrderSchema).optional(),
+  numPackages: z.lazy(() => SortOrderSchema).optional(),
+}).strict();
+
+export const ShipmentMaxOrderByAggregateInputSchema: z.ZodType<Prisma.ShipmentMaxOrderByAggregateInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  shipperId: z.lazy(() => SortOrderSchema).optional(),
+  consigneeId: z.lazy(() => SortOrderSchema).optional(),
+  incoterm: z.lazy(() => SortOrderSchema).optional(),
+  currency: z.lazy(() => SortOrderSchema).optional(),
+  totalValue: z.lazy(() => SortOrderSchema).optional(),
+  totalWeight: z.lazy(() => SortOrderSchema).optional(),
+  numPackages: z.lazy(() => SortOrderSchema).optional(),
+  originCountry: z.lazy(() => SortOrderSchema).optional(),
+  destinationCountry: z.lazy(() => SortOrderSchema).optional(),
+  status: z.lazy(() => SortOrderSchema).optional(),
+  trackingNumber: z.lazy(() => SortOrderSchema).optional(),
+  createdAt: z.lazy(() => SortOrderSchema).optional(),
+  updatedAt: z.lazy(() => SortOrderSchema).optional(),
+}).strict();
+
+export const ShipmentMinOrderByAggregateInputSchema: z.ZodType<Prisma.ShipmentMinOrderByAggregateInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  shipperId: z.lazy(() => SortOrderSchema).optional(),
+  consigneeId: z.lazy(() => SortOrderSchema).optional(),
+  incoterm: z.lazy(() => SortOrderSchema).optional(),
+  currency: z.lazy(() => SortOrderSchema).optional(),
+  totalValue: z.lazy(() => SortOrderSchema).optional(),
+  totalWeight: z.lazy(() => SortOrderSchema).optional(),
+  numPackages: z.lazy(() => SortOrderSchema).optional(),
+  originCountry: z.lazy(() => SortOrderSchema).optional(),
+  destinationCountry: z.lazy(() => SortOrderSchema).optional(),
+  status: z.lazy(() => SortOrderSchema).optional(),
+  trackingNumber: z.lazy(() => SortOrderSchema).optional(),
+  createdAt: z.lazy(() => SortOrderSchema).optional(),
+  updatedAt: z.lazy(() => SortOrderSchema).optional(),
+}).strict();
+
+export const ShipmentSumOrderByAggregateInputSchema: z.ZodType<Prisma.ShipmentSumOrderByAggregateInput> = z.object({
+  totalValue: z.lazy(() => SortOrderSchema).optional(),
+  totalWeight: z.lazy(() => SortOrderSchema).optional(),
+  numPackages: z.lazy(() => SortOrderSchema).optional(),
+}).strict();
+
+export const JsonNullableWithAggregatesFilterSchema: z.ZodType<Prisma.JsonNullableWithAggregatesFilter> = z.object({
+  equals: InputJsonValueSchema.optional(),
+  path: z.string().array().optional(),
+  mode: z.lazy(() => QueryModeSchema).optional(),
+  string_contains: z.string().optional(),
+  string_starts_with: z.string().optional(),
+  string_ends_with: z.string().optional(),
+  array_starts_with: InputJsonValueSchema.optional().nullable(),
+  array_ends_with: InputJsonValueSchema.optional().nullable(),
+  array_contains: InputJsonValueSchema.optional().nullable(),
+  lt: InputJsonValueSchema.optional(),
+  lte: InputJsonValueSchema.optional(),
+  gt: InputJsonValueSchema.optional(),
+  gte: InputJsonValueSchema.optional(),
+  not: InputJsonValueSchema.optional(),
+  _count: z.lazy(() => NestedIntNullableFilterSchema).optional(),
+  _min: z.lazy(() => NestedJsonNullableFilterSchema).optional(),
+  _max: z.lazy(() => NestedJsonNullableFilterSchema).optional(),
+}).strict();
+
+export const DecimalNullableWithAggregatesFilterSchema: z.ZodType<Prisma.DecimalNullableWithAggregatesFilter> = z.object({
+  equals: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional().nullable(),
+  in: z.union([z.number().array(),z.string().array(),z.instanceof(Prisma.Decimal).array(),DecimalJsLikeSchema.array(),]).refine((v) => Array.isArray(v) && (v as any[]).every((v) => isValidDecimalInput(v)), { message: 'Must be a Decimal' }).optional().nullable(),
+  notIn: z.union([z.number().array(),z.string().array(),z.instanceof(Prisma.Decimal).array(),DecimalJsLikeSchema.array(),]).refine((v) => Array.isArray(v) && (v as any[]).every((v) => isValidDecimalInput(v)), { message: 'Must be a Decimal' }).optional().nullable(),
+  lt: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional(),
+  lte: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional(),
+  gt: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional(),
+  gte: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional(),
+  not: z.union([ z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }),z.lazy(() => NestedDecimalNullableWithAggregatesFilterSchema) ]).optional().nullable(),
+  _count: z.lazy(() => NestedIntNullableFilterSchema).optional(),
+  _avg: z.lazy(() => NestedDecimalNullableFilterSchema).optional(),
+  _sum: z.lazy(() => NestedDecimalNullableFilterSchema).optional(),
+  _min: z.lazy(() => NestedDecimalNullableFilterSchema).optional(),
+  _max: z.lazy(() => NestedDecimalNullableFilterSchema).optional(),
+}).strict();
+
+export const FloatNullableWithAggregatesFilterSchema: z.ZodType<Prisma.FloatNullableWithAggregatesFilter> = z.object({
+  equals: z.number().optional().nullable(),
+  in: z.number().array().optional().nullable(),
+  notIn: z.number().array().optional().nullable(),
+  lt: z.number().optional(),
+  lte: z.number().optional(),
+  gt: z.number().optional(),
+  gte: z.number().optional(),
+  not: z.union([ z.number(),z.lazy(() => NestedFloatNullableWithAggregatesFilterSchema) ]).optional().nullable(),
+  _count: z.lazy(() => NestedIntNullableFilterSchema).optional(),
+  _avg: z.lazy(() => NestedFloatNullableFilterSchema).optional(),
+  _sum: z.lazy(() => NestedFloatNullableFilterSchema).optional(),
+  _min: z.lazy(() => NestedFloatNullableFilterSchema).optional(),
+  _max: z.lazy(() => NestedFloatNullableFilterSchema).optional(),
+}).strict();
+
+export const IntNullableWithAggregatesFilterSchema: z.ZodType<Prisma.IntNullableWithAggregatesFilter> = z.object({
+  equals: z.number().optional().nullable(),
+  in: z.number().array().optional().nullable(),
+  notIn: z.number().array().optional().nullable(),
+  lt: z.number().optional(),
+  lte: z.number().optional(),
+  gt: z.number().optional(),
+  gte: z.number().optional(),
+  not: z.union([ z.number(),z.lazy(() => NestedIntNullableWithAggregatesFilterSchema) ]).optional().nullable(),
+  _count: z.lazy(() => NestedIntNullableFilterSchema).optional(),
+  _avg: z.lazy(() => NestedFloatNullableFilterSchema).optional(),
+  _sum: z.lazy(() => NestedIntNullableFilterSchema).optional(),
+  _min: z.lazy(() => NestedIntNullableFilterSchema).optional(),
+  _max: z.lazy(() => NestedIntNullableFilterSchema).optional(),
+}).strict();
+
+export const DateTimeWithAggregatesFilterSchema: z.ZodType<Prisma.DateTimeWithAggregatesFilter> = z.object({
+  equals: z.coerce.date().optional(),
+  in: z.coerce.date().array().optional(),
+  notIn: z.coerce.date().array().optional(),
+  lt: z.coerce.date().optional(),
+  lte: z.coerce.date().optional(),
+  gt: z.coerce.date().optional(),
+  gte: z.coerce.date().optional(),
+  not: z.union([ z.coerce.date(),z.lazy(() => NestedDateTimeWithAggregatesFilterSchema) ]).optional(),
+  _count: z.lazy(() => NestedIntFilterSchema).optional(),
+  _min: z.lazy(() => NestedDateTimeFilterSchema).optional(),
+  _max: z.lazy(() => NestedDateTimeFilterSchema).optional(),
+}).strict();
+
+export const CarrierAccountCountOrderByAggregateInputSchema: z.ZodType<Prisma.CarrierAccountCountOrderByAggregateInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  provider: z.lazy(() => SortOrderSchema).optional(),
+  credentials: z.lazy(() => SortOrderSchema).optional(),
+  accountNumber: z.lazy(() => SortOrderSchema).optional(),
+  description: z.lazy(() => SortOrderSchema).optional(),
+  isActive: z.lazy(() => SortOrderSchema).optional(),
+  userId: z.lazy(() => SortOrderSchema).optional(),
+  createdAt: z.lazy(() => SortOrderSchema).optional(),
+  updatedAt: z.lazy(() => SortOrderSchema).optional(),
+}).strict();
+
+export const CarrierAccountMaxOrderByAggregateInputSchema: z.ZodType<Prisma.CarrierAccountMaxOrderByAggregateInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  provider: z.lazy(() => SortOrderSchema).optional(),
+  credentials: z.lazy(() => SortOrderSchema).optional(),
+  accountNumber: z.lazy(() => SortOrderSchema).optional(),
+  description: z.lazy(() => SortOrderSchema).optional(),
+  isActive: z.lazy(() => SortOrderSchema).optional(),
+  userId: z.lazy(() => SortOrderSchema).optional(),
+  createdAt: z.lazy(() => SortOrderSchema).optional(),
+  updatedAt: z.lazy(() => SortOrderSchema).optional(),
+}).strict();
+
+export const CarrierAccountMinOrderByAggregateInputSchema: z.ZodType<Prisma.CarrierAccountMinOrderByAggregateInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  provider: z.lazy(() => SortOrderSchema).optional(),
+  credentials: z.lazy(() => SortOrderSchema).optional(),
+  accountNumber: z.lazy(() => SortOrderSchema).optional(),
+  description: z.lazy(() => SortOrderSchema).optional(),
+  isActive: z.lazy(() => SortOrderSchema).optional(),
+  userId: z.lazy(() => SortOrderSchema).optional(),
+  createdAt: z.lazy(() => SortOrderSchema).optional(),
+  updatedAt: z.lazy(() => SortOrderSchema).optional(),
+}).strict();
+
+export const DateTimeNullableFilterSchema: z.ZodType<Prisma.DateTimeNullableFilter> = z.object({
+  equals: z.coerce.date().optional().nullable(),
+  in: z.coerce.date().array().optional().nullable(),
+  notIn: z.coerce.date().array().optional().nullable(),
+  lt: z.coerce.date().optional(),
+  lte: z.coerce.date().optional(),
+  gt: z.coerce.date().optional(),
+  gte: z.coerce.date().optional(),
+  not: z.union([ z.coerce.date(),z.lazy(() => NestedDateTimeNullableFilterSchema) ]).optional().nullable(),
+}).strict();
+
+export const ShipmentScalarRelationFilterSchema: z.ZodType<Prisma.ShipmentScalarRelationFilter> = z.object({
+  is: z.lazy(() => ShipmentWhereInputSchema).optional(),
+  isNot: z.lazy(() => ShipmentWhereInputSchema).optional(),
+}).strict();
+
+export const ShipmentCarrierMetaCountOrderByAggregateInputSchema: z.ZodType<Prisma.ShipmentCarrierMetaCountOrderByAggregateInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  shipmentId: z.lazy(() => SortOrderSchema).optional(),
+  rateQuoteJson: z.lazy(() => SortOrderSchema).optional(),
+  bookingResponseJson: z.lazy(() => SortOrderSchema).optional(),
+  labelUrl: z.lazy(() => SortOrderSchema).optional(),
+  carrierCode: z.lazy(() => SortOrderSchema).optional(),
+  serviceLevelCode: z.lazy(() => SortOrderSchema).optional(),
+  trackingNumber: z.lazy(() => SortOrderSchema).optional(),
+  bookedAt: z.lazy(() => SortOrderSchema).optional(),
+}).strict();
+
+export const ShipmentCarrierMetaMaxOrderByAggregateInputSchema: z.ZodType<Prisma.ShipmentCarrierMetaMaxOrderByAggregateInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  shipmentId: z.lazy(() => SortOrderSchema).optional(),
+  rateQuoteJson: z.lazy(() => SortOrderSchema).optional(),
+  bookingResponseJson: z.lazy(() => SortOrderSchema).optional(),
+  labelUrl: z.lazy(() => SortOrderSchema).optional(),
+  carrierCode: z.lazy(() => SortOrderSchema).optional(),
+  serviceLevelCode: z.lazy(() => SortOrderSchema).optional(),
+  trackingNumber: z.lazy(() => SortOrderSchema).optional(),
+  bookedAt: z.lazy(() => SortOrderSchema).optional(),
+}).strict();
+
+export const ShipmentCarrierMetaMinOrderByAggregateInputSchema: z.ZodType<Prisma.ShipmentCarrierMetaMinOrderByAggregateInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  shipmentId: z.lazy(() => SortOrderSchema).optional(),
+  rateQuoteJson: z.lazy(() => SortOrderSchema).optional(),
+  bookingResponseJson: z.lazy(() => SortOrderSchema).optional(),
+  labelUrl: z.lazy(() => SortOrderSchema).optional(),
+  carrierCode: z.lazy(() => SortOrderSchema).optional(),
+  serviceLevelCode: z.lazy(() => SortOrderSchema).optional(),
+  trackingNumber: z.lazy(() => SortOrderSchema).optional(),
+  bookedAt: z.lazy(() => SortOrderSchema).optional(),
+}).strict();
+
+export const DateTimeNullableWithAggregatesFilterSchema: z.ZodType<Prisma.DateTimeNullableWithAggregatesFilter> = z.object({
+  equals: z.coerce.date().optional().nullable(),
+  in: z.coerce.date().array().optional().nullable(),
+  notIn: z.coerce.date().array().optional().nullable(),
+  lt: z.coerce.date().optional(),
+  lte: z.coerce.date().optional(),
+  gt: z.coerce.date().optional(),
+  gte: z.coerce.date().optional(),
+  not: z.union([ z.coerce.date(),z.lazy(() => NestedDateTimeNullableWithAggregatesFilterSchema) ]).optional().nullable(),
+  _count: z.lazy(() => NestedIntNullableFilterSchema).optional(),
+  _min: z.lazy(() => NestedDateTimeNullableFilterSchema).optional(),
+  _max: z.lazy(() => NestedDateTimeNullableFilterSchema).optional(),
+}).strict();
+
+export const ForwarderProfileCountOrderByAggregateInputSchema: z.ZodType<Prisma.ForwarderProfileCountOrderByAggregateInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  name: z.lazy(() => SortOrderSchema).optional(),
+  emailToJson: z.lazy(() => SortOrderSchema).optional(),
+  emailSubjectTemplate: z.lazy(() => SortOrderSchema).optional(),
+  dataBundleFormat: z.lazy(() => SortOrderSchema).optional(),
+  userId: z.lazy(() => SortOrderSchema).optional(),
+}).strict();
+
+export const ForwarderProfileMaxOrderByAggregateInputSchema: z.ZodType<Prisma.ForwarderProfileMaxOrderByAggregateInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  name: z.lazy(() => SortOrderSchema).optional(),
+  emailToJson: z.lazy(() => SortOrderSchema).optional(),
+  emailSubjectTemplate: z.lazy(() => SortOrderSchema).optional(),
+  dataBundleFormat: z.lazy(() => SortOrderSchema).optional(),
+  userId: z.lazy(() => SortOrderSchema).optional(),
+}).strict();
+
+export const ForwarderProfileMinOrderByAggregateInputSchema: z.ZodType<Prisma.ForwarderProfileMinOrderByAggregateInput> = z.object({
+  id: z.lazy(() => SortOrderSchema).optional(),
+  name: z.lazy(() => SortOrderSchema).optional(),
+  emailToJson: z.lazy(() => SortOrderSchema).optional(),
+  emailSubjectTemplate: z.lazy(() => SortOrderSchema).optional(),
+  dataBundleFormat: z.lazy(() => SortOrderSchema).optional(),
+  userId: z.lazy(() => SortOrderSchema).optional(),
+}).strict();
+
+export const ShipmentCreateNestedManyWithoutShipperInputSchema: z.ZodType<Prisma.ShipmentCreateNestedManyWithoutShipperInput> = z.object({
+  create: z.union([ z.lazy(() => ShipmentCreateWithoutShipperInputSchema), z.lazy(() => ShipmentCreateWithoutShipperInputSchema).array(), z.lazy(() => ShipmentUncheckedCreateWithoutShipperInputSchema), z.lazy(() => ShipmentUncheckedCreateWithoutShipperInputSchema).array() ]).optional(),
+  connectOrCreate: z.union([ z.lazy(() => ShipmentCreateOrConnectWithoutShipperInputSchema), z.lazy(() => ShipmentCreateOrConnectWithoutShipperInputSchema).array() ]).optional(),
+  createMany: z.lazy(() => ShipmentCreateManyShipperInputEnvelopeSchema).optional(),
+  connect: z.union([ z.lazy(() => ShipmentWhereUniqueInputSchema), z.lazy(() => ShipmentWhereUniqueInputSchema).array() ]).optional(),
+}).strict();
+
+export const ShipmentCreateNestedManyWithoutConsigneeInputSchema: z.ZodType<Prisma.ShipmentCreateNestedManyWithoutConsigneeInput> = z.object({
+  create: z.union([ z.lazy(() => ShipmentCreateWithoutConsigneeInputSchema), z.lazy(() => ShipmentCreateWithoutConsigneeInputSchema).array(), z.lazy(() => ShipmentUncheckedCreateWithoutConsigneeInputSchema), z.lazy(() => ShipmentUncheckedCreateWithoutConsigneeInputSchema).array() ]).optional(),
+  connectOrCreate: z.union([ z.lazy(() => ShipmentCreateOrConnectWithoutConsigneeInputSchema), z.lazy(() => ShipmentCreateOrConnectWithoutConsigneeInputSchema).array() ]).optional(),
+  createMany: z.lazy(() => ShipmentCreateManyConsigneeInputEnvelopeSchema).optional(),
+  connect: z.union([ z.lazy(() => ShipmentWhereUniqueInputSchema), z.lazy(() => ShipmentWhereUniqueInputSchema).array() ]).optional(),
+}).strict();
+
+export const ShipmentUncheckedCreateNestedManyWithoutShipperInputSchema: z.ZodType<Prisma.ShipmentUncheckedCreateNestedManyWithoutShipperInput> = z.object({
+  create: z.union([ z.lazy(() => ShipmentCreateWithoutShipperInputSchema), z.lazy(() => ShipmentCreateWithoutShipperInputSchema).array(), z.lazy(() => ShipmentUncheckedCreateWithoutShipperInputSchema), z.lazy(() => ShipmentUncheckedCreateWithoutShipperInputSchema).array() ]).optional(),
+  connectOrCreate: z.union([ z.lazy(() => ShipmentCreateOrConnectWithoutShipperInputSchema), z.lazy(() => ShipmentCreateOrConnectWithoutShipperInputSchema).array() ]).optional(),
+  createMany: z.lazy(() => ShipmentCreateManyShipperInputEnvelopeSchema).optional(),
+  connect: z.union([ z.lazy(() => ShipmentWhereUniqueInputSchema), z.lazy(() => ShipmentWhereUniqueInputSchema).array() ]).optional(),
+}).strict();
+
+export const ShipmentUncheckedCreateNestedManyWithoutConsigneeInputSchema: z.ZodType<Prisma.ShipmentUncheckedCreateNestedManyWithoutConsigneeInput> = z.object({
+  create: z.union([ z.lazy(() => ShipmentCreateWithoutConsigneeInputSchema), z.lazy(() => ShipmentCreateWithoutConsigneeInputSchema).array(), z.lazy(() => ShipmentUncheckedCreateWithoutConsigneeInputSchema), z.lazy(() => ShipmentUncheckedCreateWithoutConsigneeInputSchema).array() ]).optional(),
+  connectOrCreate: z.union([ z.lazy(() => ShipmentCreateOrConnectWithoutConsigneeInputSchema), z.lazy(() => ShipmentCreateOrConnectWithoutConsigneeInputSchema).array() ]).optional(),
+  createMany: z.lazy(() => ShipmentCreateManyConsigneeInputEnvelopeSchema).optional(),
+  connect: z.union([ z.lazy(() => ShipmentWhereUniqueInputSchema), z.lazy(() => ShipmentWhereUniqueInputSchema).array() ]).optional(),
+}).strict();
+
 export const StringFieldUpdateOperationsInputSchema: z.ZodType<Prisma.StringFieldUpdateOperationsInput> = z.object({
   set: z.string().optional(),
+}).strict();
+
+export const NullableStringFieldUpdateOperationsInputSchema: z.ZodType<Prisma.NullableStringFieldUpdateOperationsInput> = z.object({
+  set: z.string().optional().nullable(),
+}).strict();
+
+export const BoolFieldUpdateOperationsInputSchema: z.ZodType<Prisma.BoolFieldUpdateOperationsInput> = z.object({
+  set: z.boolean().optional(),
+}).strict();
+
+export const ShipmentUpdateManyWithoutShipperNestedInputSchema: z.ZodType<Prisma.ShipmentUpdateManyWithoutShipperNestedInput> = z.object({
+  create: z.union([ z.lazy(() => ShipmentCreateWithoutShipperInputSchema), z.lazy(() => ShipmentCreateWithoutShipperInputSchema).array(), z.lazy(() => ShipmentUncheckedCreateWithoutShipperInputSchema), z.lazy(() => ShipmentUncheckedCreateWithoutShipperInputSchema).array() ]).optional(),
+  connectOrCreate: z.union([ z.lazy(() => ShipmentCreateOrConnectWithoutShipperInputSchema), z.lazy(() => ShipmentCreateOrConnectWithoutShipperInputSchema).array() ]).optional(),
+  upsert: z.union([ z.lazy(() => ShipmentUpsertWithWhereUniqueWithoutShipperInputSchema), z.lazy(() => ShipmentUpsertWithWhereUniqueWithoutShipperInputSchema).array() ]).optional(),
+  createMany: z.lazy(() => ShipmentCreateManyShipperInputEnvelopeSchema).optional(),
+  set: z.union([ z.lazy(() => ShipmentWhereUniqueInputSchema), z.lazy(() => ShipmentWhereUniqueInputSchema).array() ]).optional(),
+  disconnect: z.union([ z.lazy(() => ShipmentWhereUniqueInputSchema), z.lazy(() => ShipmentWhereUniqueInputSchema).array() ]).optional(),
+  delete: z.union([ z.lazy(() => ShipmentWhereUniqueInputSchema), z.lazy(() => ShipmentWhereUniqueInputSchema).array() ]).optional(),
+  connect: z.union([ z.lazy(() => ShipmentWhereUniqueInputSchema), z.lazy(() => ShipmentWhereUniqueInputSchema).array() ]).optional(),
+  update: z.union([ z.lazy(() => ShipmentUpdateWithWhereUniqueWithoutShipperInputSchema), z.lazy(() => ShipmentUpdateWithWhereUniqueWithoutShipperInputSchema).array() ]).optional(),
+  updateMany: z.union([ z.lazy(() => ShipmentUpdateManyWithWhereWithoutShipperInputSchema), z.lazy(() => ShipmentUpdateManyWithWhereWithoutShipperInputSchema).array() ]).optional(),
+  deleteMany: z.union([ z.lazy(() => ShipmentScalarWhereInputSchema), z.lazy(() => ShipmentScalarWhereInputSchema).array() ]).optional(),
+}).strict();
+
+export const ShipmentUpdateManyWithoutConsigneeNestedInputSchema: z.ZodType<Prisma.ShipmentUpdateManyWithoutConsigneeNestedInput> = z.object({
+  create: z.union([ z.lazy(() => ShipmentCreateWithoutConsigneeInputSchema), z.lazy(() => ShipmentCreateWithoutConsigneeInputSchema).array(), z.lazy(() => ShipmentUncheckedCreateWithoutConsigneeInputSchema), z.lazy(() => ShipmentUncheckedCreateWithoutConsigneeInputSchema).array() ]).optional(),
+  connectOrCreate: z.union([ z.lazy(() => ShipmentCreateOrConnectWithoutConsigneeInputSchema), z.lazy(() => ShipmentCreateOrConnectWithoutConsigneeInputSchema).array() ]).optional(),
+  upsert: z.union([ z.lazy(() => ShipmentUpsertWithWhereUniqueWithoutConsigneeInputSchema), z.lazy(() => ShipmentUpsertWithWhereUniqueWithoutConsigneeInputSchema).array() ]).optional(),
+  createMany: z.lazy(() => ShipmentCreateManyConsigneeInputEnvelopeSchema).optional(),
+  set: z.union([ z.lazy(() => ShipmentWhereUniqueInputSchema), z.lazy(() => ShipmentWhereUniqueInputSchema).array() ]).optional(),
+  disconnect: z.union([ z.lazy(() => ShipmentWhereUniqueInputSchema), z.lazy(() => ShipmentWhereUniqueInputSchema).array() ]).optional(),
+  delete: z.union([ z.lazy(() => ShipmentWhereUniqueInputSchema), z.lazy(() => ShipmentWhereUniqueInputSchema).array() ]).optional(),
+  connect: z.union([ z.lazy(() => ShipmentWhereUniqueInputSchema), z.lazy(() => ShipmentWhereUniqueInputSchema).array() ]).optional(),
+  update: z.union([ z.lazy(() => ShipmentUpdateWithWhereUniqueWithoutConsigneeInputSchema), z.lazy(() => ShipmentUpdateWithWhereUniqueWithoutConsigneeInputSchema).array() ]).optional(),
+  updateMany: z.union([ z.lazy(() => ShipmentUpdateManyWithWhereWithoutConsigneeInputSchema), z.lazy(() => ShipmentUpdateManyWithWhereWithoutConsigneeInputSchema).array() ]).optional(),
+  deleteMany: z.union([ z.lazy(() => ShipmentScalarWhereInputSchema), z.lazy(() => ShipmentScalarWhereInputSchema).array() ]).optional(),
+}).strict();
+
+export const ShipmentUncheckedUpdateManyWithoutShipperNestedInputSchema: z.ZodType<Prisma.ShipmentUncheckedUpdateManyWithoutShipperNestedInput> = z.object({
+  create: z.union([ z.lazy(() => ShipmentCreateWithoutShipperInputSchema), z.lazy(() => ShipmentCreateWithoutShipperInputSchema).array(), z.lazy(() => ShipmentUncheckedCreateWithoutShipperInputSchema), z.lazy(() => ShipmentUncheckedCreateWithoutShipperInputSchema).array() ]).optional(),
+  connectOrCreate: z.union([ z.lazy(() => ShipmentCreateOrConnectWithoutShipperInputSchema), z.lazy(() => ShipmentCreateOrConnectWithoutShipperInputSchema).array() ]).optional(),
+  upsert: z.union([ z.lazy(() => ShipmentUpsertWithWhereUniqueWithoutShipperInputSchema), z.lazy(() => ShipmentUpsertWithWhereUniqueWithoutShipperInputSchema).array() ]).optional(),
+  createMany: z.lazy(() => ShipmentCreateManyShipperInputEnvelopeSchema).optional(),
+  set: z.union([ z.lazy(() => ShipmentWhereUniqueInputSchema), z.lazy(() => ShipmentWhereUniqueInputSchema).array() ]).optional(),
+  disconnect: z.union([ z.lazy(() => ShipmentWhereUniqueInputSchema), z.lazy(() => ShipmentWhereUniqueInputSchema).array() ]).optional(),
+  delete: z.union([ z.lazy(() => ShipmentWhereUniqueInputSchema), z.lazy(() => ShipmentWhereUniqueInputSchema).array() ]).optional(),
+  connect: z.union([ z.lazy(() => ShipmentWhereUniqueInputSchema), z.lazy(() => ShipmentWhereUniqueInputSchema).array() ]).optional(),
+  update: z.union([ z.lazy(() => ShipmentUpdateWithWhereUniqueWithoutShipperInputSchema), z.lazy(() => ShipmentUpdateWithWhereUniqueWithoutShipperInputSchema).array() ]).optional(),
+  updateMany: z.union([ z.lazy(() => ShipmentUpdateManyWithWhereWithoutShipperInputSchema), z.lazy(() => ShipmentUpdateManyWithWhereWithoutShipperInputSchema).array() ]).optional(),
+  deleteMany: z.union([ z.lazy(() => ShipmentScalarWhereInputSchema), z.lazy(() => ShipmentScalarWhereInputSchema).array() ]).optional(),
+}).strict();
+
+export const ShipmentUncheckedUpdateManyWithoutConsigneeNestedInputSchema: z.ZodType<Prisma.ShipmentUncheckedUpdateManyWithoutConsigneeNestedInput> = z.object({
+  create: z.union([ z.lazy(() => ShipmentCreateWithoutConsigneeInputSchema), z.lazy(() => ShipmentCreateWithoutConsigneeInputSchema).array(), z.lazy(() => ShipmentUncheckedCreateWithoutConsigneeInputSchema), z.lazy(() => ShipmentUncheckedCreateWithoutConsigneeInputSchema).array() ]).optional(),
+  connectOrCreate: z.union([ z.lazy(() => ShipmentCreateOrConnectWithoutConsigneeInputSchema), z.lazy(() => ShipmentCreateOrConnectWithoutConsigneeInputSchema).array() ]).optional(),
+  upsert: z.union([ z.lazy(() => ShipmentUpsertWithWhereUniqueWithoutConsigneeInputSchema), z.lazy(() => ShipmentUpsertWithWhereUniqueWithoutConsigneeInputSchema).array() ]).optional(),
+  createMany: z.lazy(() => ShipmentCreateManyConsigneeInputEnvelopeSchema).optional(),
+  set: z.union([ z.lazy(() => ShipmentWhereUniqueInputSchema), z.lazy(() => ShipmentWhereUniqueInputSchema).array() ]).optional(),
+  disconnect: z.union([ z.lazy(() => ShipmentWhereUniqueInputSchema), z.lazy(() => ShipmentWhereUniqueInputSchema).array() ]).optional(),
+  delete: z.union([ z.lazy(() => ShipmentWhereUniqueInputSchema), z.lazy(() => ShipmentWhereUniqueInputSchema).array() ]).optional(),
+  connect: z.union([ z.lazy(() => ShipmentWhereUniqueInputSchema), z.lazy(() => ShipmentWhereUniqueInputSchema).array() ]).optional(),
+  update: z.union([ z.lazy(() => ShipmentUpdateWithWhereUniqueWithoutConsigneeInputSchema), z.lazy(() => ShipmentUpdateWithWhereUniqueWithoutConsigneeInputSchema).array() ]).optional(),
+  updateMany: z.union([ z.lazy(() => ShipmentUpdateManyWithWhereWithoutConsigneeInputSchema), z.lazy(() => ShipmentUpdateManyWithWhereWithoutConsigneeInputSchema).array() ]).optional(),
+  deleteMany: z.union([ z.lazy(() => ShipmentScalarWhereInputSchema), z.lazy(() => ShipmentScalarWhereInputSchema).array() ]).optional(),
+}).strict();
+
+export const PartyCreateNestedOneWithoutShipmentsAsShipperInputSchema: z.ZodType<Prisma.PartyCreateNestedOneWithoutShipmentsAsShipperInput> = z.object({
+  create: z.union([ z.lazy(() => PartyCreateWithoutShipmentsAsShipperInputSchema), z.lazy(() => PartyUncheckedCreateWithoutShipmentsAsShipperInputSchema) ]).optional(),
+  connectOrCreate: z.lazy(() => PartyCreateOrConnectWithoutShipmentsAsShipperInputSchema).optional(),
+  connect: z.lazy(() => PartyWhereUniqueInputSchema).optional(),
+}).strict();
+
+export const PartyCreateNestedOneWithoutShipmentsAsConsigneeInputSchema: z.ZodType<Prisma.PartyCreateNestedOneWithoutShipmentsAsConsigneeInput> = z.object({
+  create: z.union([ z.lazy(() => PartyCreateWithoutShipmentsAsConsigneeInputSchema), z.lazy(() => PartyUncheckedCreateWithoutShipmentsAsConsigneeInputSchema) ]).optional(),
+  connectOrCreate: z.lazy(() => PartyCreateOrConnectWithoutShipmentsAsConsigneeInputSchema).optional(),
+  connect: z.lazy(() => PartyWhereUniqueInputSchema).optional(),
+}).strict();
+
+export const ShipmentCarrierMetaCreateNestedOneWithoutShipmentInputSchema: z.ZodType<Prisma.ShipmentCarrierMetaCreateNestedOneWithoutShipmentInput> = z.object({
+  create: z.union([ z.lazy(() => ShipmentCarrierMetaCreateWithoutShipmentInputSchema), z.lazy(() => ShipmentCarrierMetaUncheckedCreateWithoutShipmentInputSchema) ]).optional(),
+  connectOrCreate: z.lazy(() => ShipmentCarrierMetaCreateOrConnectWithoutShipmentInputSchema).optional(),
+  connect: z.lazy(() => ShipmentCarrierMetaWhereUniqueInputSchema).optional(),
+}).strict();
+
+export const ShipmentCarrierMetaUncheckedCreateNestedOneWithoutShipmentInputSchema: z.ZodType<Prisma.ShipmentCarrierMetaUncheckedCreateNestedOneWithoutShipmentInput> = z.object({
+  create: z.union([ z.lazy(() => ShipmentCarrierMetaCreateWithoutShipmentInputSchema), z.lazy(() => ShipmentCarrierMetaUncheckedCreateWithoutShipmentInputSchema) ]).optional(),
+  connectOrCreate: z.lazy(() => ShipmentCarrierMetaCreateOrConnectWithoutShipmentInputSchema).optional(),
+  connect: z.lazy(() => ShipmentCarrierMetaWhereUniqueInputSchema).optional(),
+}).strict();
+
+export const NullableDecimalFieldUpdateOperationsInputSchema: z.ZodType<Prisma.NullableDecimalFieldUpdateOperationsInput> = z.object({
+  set: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional().nullable(),
+  increment: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional(),
+  decrement: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional(),
+  multiply: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional(),
+  divide: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional(),
+}).strict();
+
+export const NullableFloatFieldUpdateOperationsInputSchema: z.ZodType<Prisma.NullableFloatFieldUpdateOperationsInput> = z.object({
+  set: z.number().optional().nullable(),
+  increment: z.number().optional(),
+  decrement: z.number().optional(),
+  multiply: z.number().optional(),
+  divide: z.number().optional(),
+}).strict();
+
+export const NullableIntFieldUpdateOperationsInputSchema: z.ZodType<Prisma.NullableIntFieldUpdateOperationsInput> = z.object({
+  set: z.number().optional().nullable(),
+  increment: z.number().optional(),
+  decrement: z.number().optional(),
+  multiply: z.number().optional(),
+  divide: z.number().optional(),
+}).strict();
+
+export const DateTimeFieldUpdateOperationsInputSchema: z.ZodType<Prisma.DateTimeFieldUpdateOperationsInput> = z.object({
+  set: z.coerce.date().optional(),
+}).strict();
+
+export const PartyUpdateOneWithoutShipmentsAsShipperNestedInputSchema: z.ZodType<Prisma.PartyUpdateOneWithoutShipmentsAsShipperNestedInput> = z.object({
+  create: z.union([ z.lazy(() => PartyCreateWithoutShipmentsAsShipperInputSchema), z.lazy(() => PartyUncheckedCreateWithoutShipmentsAsShipperInputSchema) ]).optional(),
+  connectOrCreate: z.lazy(() => PartyCreateOrConnectWithoutShipmentsAsShipperInputSchema).optional(),
+  upsert: z.lazy(() => PartyUpsertWithoutShipmentsAsShipperInputSchema).optional(),
+  disconnect: z.union([ z.boolean(),z.lazy(() => PartyWhereInputSchema) ]).optional(),
+  delete: z.union([ z.boolean(),z.lazy(() => PartyWhereInputSchema) ]).optional(),
+  connect: z.lazy(() => PartyWhereUniqueInputSchema).optional(),
+  update: z.union([ z.lazy(() => PartyUpdateToOneWithWhereWithoutShipmentsAsShipperInputSchema), z.lazy(() => PartyUpdateWithoutShipmentsAsShipperInputSchema), z.lazy(() => PartyUncheckedUpdateWithoutShipmentsAsShipperInputSchema) ]).optional(),
+}).strict();
+
+export const PartyUpdateOneWithoutShipmentsAsConsigneeNestedInputSchema: z.ZodType<Prisma.PartyUpdateOneWithoutShipmentsAsConsigneeNestedInput> = z.object({
+  create: z.union([ z.lazy(() => PartyCreateWithoutShipmentsAsConsigneeInputSchema), z.lazy(() => PartyUncheckedCreateWithoutShipmentsAsConsigneeInputSchema) ]).optional(),
+  connectOrCreate: z.lazy(() => PartyCreateOrConnectWithoutShipmentsAsConsigneeInputSchema).optional(),
+  upsert: z.lazy(() => PartyUpsertWithoutShipmentsAsConsigneeInputSchema).optional(),
+  disconnect: z.union([ z.boolean(),z.lazy(() => PartyWhereInputSchema) ]).optional(),
+  delete: z.union([ z.boolean(),z.lazy(() => PartyWhereInputSchema) ]).optional(),
+  connect: z.lazy(() => PartyWhereUniqueInputSchema).optional(),
+  update: z.union([ z.lazy(() => PartyUpdateToOneWithWhereWithoutShipmentsAsConsigneeInputSchema), z.lazy(() => PartyUpdateWithoutShipmentsAsConsigneeInputSchema), z.lazy(() => PartyUncheckedUpdateWithoutShipmentsAsConsigneeInputSchema) ]).optional(),
+}).strict();
+
+export const ShipmentCarrierMetaUpdateOneWithoutShipmentNestedInputSchema: z.ZodType<Prisma.ShipmentCarrierMetaUpdateOneWithoutShipmentNestedInput> = z.object({
+  create: z.union([ z.lazy(() => ShipmentCarrierMetaCreateWithoutShipmentInputSchema), z.lazy(() => ShipmentCarrierMetaUncheckedCreateWithoutShipmentInputSchema) ]).optional(),
+  connectOrCreate: z.lazy(() => ShipmentCarrierMetaCreateOrConnectWithoutShipmentInputSchema).optional(),
+  upsert: z.lazy(() => ShipmentCarrierMetaUpsertWithoutShipmentInputSchema).optional(),
+  disconnect: z.union([ z.boolean(),z.lazy(() => ShipmentCarrierMetaWhereInputSchema) ]).optional(),
+  delete: z.union([ z.boolean(),z.lazy(() => ShipmentCarrierMetaWhereInputSchema) ]).optional(),
+  connect: z.lazy(() => ShipmentCarrierMetaWhereUniqueInputSchema).optional(),
+  update: z.union([ z.lazy(() => ShipmentCarrierMetaUpdateToOneWithWhereWithoutShipmentInputSchema), z.lazy(() => ShipmentCarrierMetaUpdateWithoutShipmentInputSchema), z.lazy(() => ShipmentCarrierMetaUncheckedUpdateWithoutShipmentInputSchema) ]).optional(),
+}).strict();
+
+export const ShipmentCarrierMetaUncheckedUpdateOneWithoutShipmentNestedInputSchema: z.ZodType<Prisma.ShipmentCarrierMetaUncheckedUpdateOneWithoutShipmentNestedInput> = z.object({
+  create: z.union([ z.lazy(() => ShipmentCarrierMetaCreateWithoutShipmentInputSchema), z.lazy(() => ShipmentCarrierMetaUncheckedCreateWithoutShipmentInputSchema) ]).optional(),
+  connectOrCreate: z.lazy(() => ShipmentCarrierMetaCreateOrConnectWithoutShipmentInputSchema).optional(),
+  upsert: z.lazy(() => ShipmentCarrierMetaUpsertWithoutShipmentInputSchema).optional(),
+  disconnect: z.union([ z.boolean(),z.lazy(() => ShipmentCarrierMetaWhereInputSchema) ]).optional(),
+  delete: z.union([ z.boolean(),z.lazy(() => ShipmentCarrierMetaWhereInputSchema) ]).optional(),
+  connect: z.lazy(() => ShipmentCarrierMetaWhereUniqueInputSchema).optional(),
+  update: z.union([ z.lazy(() => ShipmentCarrierMetaUpdateToOneWithWhereWithoutShipmentInputSchema), z.lazy(() => ShipmentCarrierMetaUpdateWithoutShipmentInputSchema), z.lazy(() => ShipmentCarrierMetaUncheckedUpdateWithoutShipmentInputSchema) ]).optional(),
+}).strict();
+
+export const ShipmentCreateNestedOneWithoutCarrierMetaInputSchema: z.ZodType<Prisma.ShipmentCreateNestedOneWithoutCarrierMetaInput> = z.object({
+  create: z.union([ z.lazy(() => ShipmentCreateWithoutCarrierMetaInputSchema), z.lazy(() => ShipmentUncheckedCreateWithoutCarrierMetaInputSchema) ]).optional(),
+  connectOrCreate: z.lazy(() => ShipmentCreateOrConnectWithoutCarrierMetaInputSchema).optional(),
+  connect: z.lazy(() => ShipmentWhereUniqueInputSchema).optional(),
+}).strict();
+
+export const NullableDateTimeFieldUpdateOperationsInputSchema: z.ZodType<Prisma.NullableDateTimeFieldUpdateOperationsInput> = z.object({
+  set: z.coerce.date().optional().nullable(),
+}).strict();
+
+export const ShipmentUpdateOneRequiredWithoutCarrierMetaNestedInputSchema: z.ZodType<Prisma.ShipmentUpdateOneRequiredWithoutCarrierMetaNestedInput> = z.object({
+  create: z.union([ z.lazy(() => ShipmentCreateWithoutCarrierMetaInputSchema), z.lazy(() => ShipmentUncheckedCreateWithoutCarrierMetaInputSchema) ]).optional(),
+  connectOrCreate: z.lazy(() => ShipmentCreateOrConnectWithoutCarrierMetaInputSchema).optional(),
+  upsert: z.lazy(() => ShipmentUpsertWithoutCarrierMetaInputSchema).optional(),
+  connect: z.lazy(() => ShipmentWhereUniqueInputSchema).optional(),
+  update: z.union([ z.lazy(() => ShipmentUpdateToOneWithWhereWithoutCarrierMetaInputSchema), z.lazy(() => ShipmentUpdateWithoutCarrierMetaInputSchema), z.lazy(() => ShipmentUncheckedUpdateWithoutCarrierMetaInputSchema) ]).optional(),
 }).strict();
 
 export const NestedStringFilterSchema: z.ZodType<Prisma.NestedStringFilter> = z.object({
@@ -171,6 +1939,25 @@ export const NestedStringFilterSchema: z.ZodType<Prisma.NestedStringFilter> = z.
   startsWith: z.string().optional(),
   endsWith: z.string().optional(),
   not: z.union([ z.string(),z.lazy(() => NestedStringFilterSchema) ]).optional(),
+}).strict();
+
+export const NestedStringNullableFilterSchema: z.ZodType<Prisma.NestedStringNullableFilter> = z.object({
+  equals: z.string().optional().nullable(),
+  in: z.string().array().optional().nullable(),
+  notIn: z.string().array().optional().nullable(),
+  lt: z.string().optional(),
+  lte: z.string().optional(),
+  gt: z.string().optional(),
+  gte: z.string().optional(),
+  contains: z.string().optional(),
+  startsWith: z.string().optional(),
+  endsWith: z.string().optional(),
+  not: z.union([ z.string(),z.lazy(() => NestedStringNullableFilterSchema) ]).optional().nullable(),
+}).strict();
+
+export const NestedBoolFilterSchema: z.ZodType<Prisma.NestedBoolFilter> = z.object({
+  equals: z.boolean().optional(),
+  not: z.union([ z.boolean(),z.lazy(() => NestedBoolFilterSchema) ]).optional(),
 }).strict();
 
 export const NestedStringWithAggregatesFilterSchema: z.ZodType<Prisma.NestedStringWithAggregatesFilter> = z.object({
@@ -201,12 +1988,850 @@ export const NestedIntFilterSchema: z.ZodType<Prisma.NestedIntFilter> = z.object
   not: z.union([ z.number(),z.lazy(() => NestedIntFilterSchema) ]).optional(),
 }).strict();
 
+export const NestedStringNullableWithAggregatesFilterSchema: z.ZodType<Prisma.NestedStringNullableWithAggregatesFilter> = z.object({
+  equals: z.string().optional().nullable(),
+  in: z.string().array().optional().nullable(),
+  notIn: z.string().array().optional().nullable(),
+  lt: z.string().optional(),
+  lte: z.string().optional(),
+  gt: z.string().optional(),
+  gte: z.string().optional(),
+  contains: z.string().optional(),
+  startsWith: z.string().optional(),
+  endsWith: z.string().optional(),
+  not: z.union([ z.string(),z.lazy(() => NestedStringNullableWithAggregatesFilterSchema) ]).optional().nullable(),
+  _count: z.lazy(() => NestedIntNullableFilterSchema).optional(),
+  _min: z.lazy(() => NestedStringNullableFilterSchema).optional(),
+  _max: z.lazy(() => NestedStringNullableFilterSchema).optional(),
+}).strict();
+
+export const NestedIntNullableFilterSchema: z.ZodType<Prisma.NestedIntNullableFilter> = z.object({
+  equals: z.number().optional().nullable(),
+  in: z.number().array().optional().nullable(),
+  notIn: z.number().array().optional().nullable(),
+  lt: z.number().optional(),
+  lte: z.number().optional(),
+  gt: z.number().optional(),
+  gte: z.number().optional(),
+  not: z.union([ z.number(),z.lazy(() => NestedIntNullableFilterSchema) ]).optional().nullable(),
+}).strict();
+
+export const NestedBoolWithAggregatesFilterSchema: z.ZodType<Prisma.NestedBoolWithAggregatesFilter> = z.object({
+  equals: z.boolean().optional(),
+  not: z.union([ z.boolean(),z.lazy(() => NestedBoolWithAggregatesFilterSchema) ]).optional(),
+  _count: z.lazy(() => NestedIntFilterSchema).optional(),
+  _min: z.lazy(() => NestedBoolFilterSchema).optional(),
+  _max: z.lazy(() => NestedBoolFilterSchema).optional(),
+}).strict();
+
+export const NestedDecimalNullableFilterSchema: z.ZodType<Prisma.NestedDecimalNullableFilter> = z.object({
+  equals: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional().nullable(),
+  in: z.union([z.number().array(),z.string().array(),z.instanceof(Prisma.Decimal).array(),DecimalJsLikeSchema.array(),]).refine((v) => Array.isArray(v) && (v as any[]).every((v) => isValidDecimalInput(v)), { message: 'Must be a Decimal' }).optional().nullable(),
+  notIn: z.union([z.number().array(),z.string().array(),z.instanceof(Prisma.Decimal).array(),DecimalJsLikeSchema.array(),]).refine((v) => Array.isArray(v) && (v as any[]).every((v) => isValidDecimalInput(v)), { message: 'Must be a Decimal' }).optional().nullable(),
+  lt: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional(),
+  lte: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional(),
+  gt: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional(),
+  gte: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional(),
+  not: z.union([ z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }),z.lazy(() => NestedDecimalNullableFilterSchema) ]).optional().nullable(),
+}).strict();
+
+export const NestedFloatNullableFilterSchema: z.ZodType<Prisma.NestedFloatNullableFilter> = z.object({
+  equals: z.number().optional().nullable(),
+  in: z.number().array().optional().nullable(),
+  notIn: z.number().array().optional().nullable(),
+  lt: z.number().optional(),
+  lte: z.number().optional(),
+  gt: z.number().optional(),
+  gte: z.number().optional(),
+  not: z.union([ z.number(),z.lazy(() => NestedFloatNullableFilterSchema) ]).optional().nullable(),
+}).strict();
+
+export const NestedDateTimeFilterSchema: z.ZodType<Prisma.NestedDateTimeFilter> = z.object({
+  equals: z.coerce.date().optional(),
+  in: z.coerce.date().array().optional(),
+  notIn: z.coerce.date().array().optional(),
+  lt: z.coerce.date().optional(),
+  lte: z.coerce.date().optional(),
+  gt: z.coerce.date().optional(),
+  gte: z.coerce.date().optional(),
+  not: z.union([ z.coerce.date(),z.lazy(() => NestedDateTimeFilterSchema) ]).optional(),
+}).strict();
+
+export const NestedJsonNullableFilterSchema: z.ZodType<Prisma.NestedJsonNullableFilter> = z.object({
+  equals: InputJsonValueSchema.optional(),
+  path: z.string().array().optional(),
+  mode: z.lazy(() => QueryModeSchema).optional(),
+  string_contains: z.string().optional(),
+  string_starts_with: z.string().optional(),
+  string_ends_with: z.string().optional(),
+  array_starts_with: InputJsonValueSchema.optional().nullable(),
+  array_ends_with: InputJsonValueSchema.optional().nullable(),
+  array_contains: InputJsonValueSchema.optional().nullable(),
+  lt: InputJsonValueSchema.optional(),
+  lte: InputJsonValueSchema.optional(),
+  gt: InputJsonValueSchema.optional(),
+  gte: InputJsonValueSchema.optional(),
+  not: InputJsonValueSchema.optional(),
+}).strict();
+
+export const NestedDecimalNullableWithAggregatesFilterSchema: z.ZodType<Prisma.NestedDecimalNullableWithAggregatesFilter> = z.object({
+  equals: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional().nullable(),
+  in: z.union([z.number().array(),z.string().array(),z.instanceof(Prisma.Decimal).array(),DecimalJsLikeSchema.array(),]).refine((v) => Array.isArray(v) && (v as any[]).every((v) => isValidDecimalInput(v)), { message: 'Must be a Decimal' }).optional().nullable(),
+  notIn: z.union([z.number().array(),z.string().array(),z.instanceof(Prisma.Decimal).array(),DecimalJsLikeSchema.array(),]).refine((v) => Array.isArray(v) && (v as any[]).every((v) => isValidDecimalInput(v)), { message: 'Must be a Decimal' }).optional().nullable(),
+  lt: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional(),
+  lte: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional(),
+  gt: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional(),
+  gte: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional(),
+  not: z.union([ z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }),z.lazy(() => NestedDecimalNullableWithAggregatesFilterSchema) ]).optional().nullable(),
+  _count: z.lazy(() => NestedIntNullableFilterSchema).optional(),
+  _avg: z.lazy(() => NestedDecimalNullableFilterSchema).optional(),
+  _sum: z.lazy(() => NestedDecimalNullableFilterSchema).optional(),
+  _min: z.lazy(() => NestedDecimalNullableFilterSchema).optional(),
+  _max: z.lazy(() => NestedDecimalNullableFilterSchema).optional(),
+}).strict();
+
+export const NestedFloatNullableWithAggregatesFilterSchema: z.ZodType<Prisma.NestedFloatNullableWithAggregatesFilter> = z.object({
+  equals: z.number().optional().nullable(),
+  in: z.number().array().optional().nullable(),
+  notIn: z.number().array().optional().nullable(),
+  lt: z.number().optional(),
+  lte: z.number().optional(),
+  gt: z.number().optional(),
+  gte: z.number().optional(),
+  not: z.union([ z.number(),z.lazy(() => NestedFloatNullableWithAggregatesFilterSchema) ]).optional().nullable(),
+  _count: z.lazy(() => NestedIntNullableFilterSchema).optional(),
+  _avg: z.lazy(() => NestedFloatNullableFilterSchema).optional(),
+  _sum: z.lazy(() => NestedFloatNullableFilterSchema).optional(),
+  _min: z.lazy(() => NestedFloatNullableFilterSchema).optional(),
+  _max: z.lazy(() => NestedFloatNullableFilterSchema).optional(),
+}).strict();
+
+export const NestedIntNullableWithAggregatesFilterSchema: z.ZodType<Prisma.NestedIntNullableWithAggregatesFilter> = z.object({
+  equals: z.number().optional().nullable(),
+  in: z.number().array().optional().nullable(),
+  notIn: z.number().array().optional().nullable(),
+  lt: z.number().optional(),
+  lte: z.number().optional(),
+  gt: z.number().optional(),
+  gte: z.number().optional(),
+  not: z.union([ z.number(),z.lazy(() => NestedIntNullableWithAggregatesFilterSchema) ]).optional().nullable(),
+  _count: z.lazy(() => NestedIntNullableFilterSchema).optional(),
+  _avg: z.lazy(() => NestedFloatNullableFilterSchema).optional(),
+  _sum: z.lazy(() => NestedIntNullableFilterSchema).optional(),
+  _min: z.lazy(() => NestedIntNullableFilterSchema).optional(),
+  _max: z.lazy(() => NestedIntNullableFilterSchema).optional(),
+}).strict();
+
+export const NestedDateTimeWithAggregatesFilterSchema: z.ZodType<Prisma.NestedDateTimeWithAggregatesFilter> = z.object({
+  equals: z.coerce.date().optional(),
+  in: z.coerce.date().array().optional(),
+  notIn: z.coerce.date().array().optional(),
+  lt: z.coerce.date().optional(),
+  lte: z.coerce.date().optional(),
+  gt: z.coerce.date().optional(),
+  gte: z.coerce.date().optional(),
+  not: z.union([ z.coerce.date(),z.lazy(() => NestedDateTimeWithAggregatesFilterSchema) ]).optional(),
+  _count: z.lazy(() => NestedIntFilterSchema).optional(),
+  _min: z.lazy(() => NestedDateTimeFilterSchema).optional(),
+  _max: z.lazy(() => NestedDateTimeFilterSchema).optional(),
+}).strict();
+
+export const NestedDateTimeNullableFilterSchema: z.ZodType<Prisma.NestedDateTimeNullableFilter> = z.object({
+  equals: z.coerce.date().optional().nullable(),
+  in: z.coerce.date().array().optional().nullable(),
+  notIn: z.coerce.date().array().optional().nullable(),
+  lt: z.coerce.date().optional(),
+  lte: z.coerce.date().optional(),
+  gt: z.coerce.date().optional(),
+  gte: z.coerce.date().optional(),
+  not: z.union([ z.coerce.date(),z.lazy(() => NestedDateTimeNullableFilterSchema) ]).optional().nullable(),
+}).strict();
+
+export const NestedDateTimeNullableWithAggregatesFilterSchema: z.ZodType<Prisma.NestedDateTimeNullableWithAggregatesFilter> = z.object({
+  equals: z.coerce.date().optional().nullable(),
+  in: z.coerce.date().array().optional().nullable(),
+  notIn: z.coerce.date().array().optional().nullable(),
+  lt: z.coerce.date().optional(),
+  lte: z.coerce.date().optional(),
+  gt: z.coerce.date().optional(),
+  gte: z.coerce.date().optional(),
+  not: z.union([ z.coerce.date(),z.lazy(() => NestedDateTimeNullableWithAggregatesFilterSchema) ]).optional().nullable(),
+  _count: z.lazy(() => NestedIntNullableFilterSchema).optional(),
+  _min: z.lazy(() => NestedDateTimeNullableFilterSchema).optional(),
+  _max: z.lazy(() => NestedDateTimeNullableFilterSchema).optional(),
+}).strict();
+
+export const ShipmentCreateWithoutShipperInputSchema: z.ZodType<Prisma.ShipmentCreateWithoutShipperInput> = z.object({
+  id: z.string().uuid().optional(),
+  shipperSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  consigneeSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  incoterm: z.string().optional().nullable(),
+  currency: z.string().optional().nullable(),
+  totalValue: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional().nullable(),
+  totalWeight: z.number().optional().nullable(),
+  numPackages: z.number().int().optional().nullable(),
+  originCountry: z.string().optional().nullable(),
+  destinationCountry: z.string().optional().nullable(),
+  status: z.string().optional(),
+  trackingNumber: z.string().optional().nullable(),
+  createdAt: z.coerce.date().optional(),
+  updatedAt: z.coerce.date().optional(),
+  consignee: z.lazy(() => PartyCreateNestedOneWithoutShipmentsAsConsigneeInputSchema).optional(),
+  carrierMeta: z.lazy(() => ShipmentCarrierMetaCreateNestedOneWithoutShipmentInputSchema).optional(),
+}).strict();
+
+export const ShipmentUncheckedCreateWithoutShipperInputSchema: z.ZodType<Prisma.ShipmentUncheckedCreateWithoutShipperInput> = z.object({
+  id: z.string().uuid().optional(),
+  consigneeId: z.string().optional().nullable(),
+  shipperSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  consigneeSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  incoterm: z.string().optional().nullable(),
+  currency: z.string().optional().nullable(),
+  totalValue: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional().nullable(),
+  totalWeight: z.number().optional().nullable(),
+  numPackages: z.number().int().optional().nullable(),
+  originCountry: z.string().optional().nullable(),
+  destinationCountry: z.string().optional().nullable(),
+  status: z.string().optional(),
+  trackingNumber: z.string().optional().nullable(),
+  createdAt: z.coerce.date().optional(),
+  updatedAt: z.coerce.date().optional(),
+  carrierMeta: z.lazy(() => ShipmentCarrierMetaUncheckedCreateNestedOneWithoutShipmentInputSchema).optional(),
+}).strict();
+
+export const ShipmentCreateOrConnectWithoutShipperInputSchema: z.ZodType<Prisma.ShipmentCreateOrConnectWithoutShipperInput> = z.object({
+  where: z.lazy(() => ShipmentWhereUniqueInputSchema),
+  create: z.union([ z.lazy(() => ShipmentCreateWithoutShipperInputSchema), z.lazy(() => ShipmentUncheckedCreateWithoutShipperInputSchema) ]),
+}).strict();
+
+export const ShipmentCreateManyShipperInputEnvelopeSchema: z.ZodType<Prisma.ShipmentCreateManyShipperInputEnvelope> = z.object({
+  data: z.union([ z.lazy(() => ShipmentCreateManyShipperInputSchema), z.lazy(() => ShipmentCreateManyShipperInputSchema).array() ]),
+  skipDuplicates: z.boolean().optional(),
+}).strict();
+
+export const ShipmentCreateWithoutConsigneeInputSchema: z.ZodType<Prisma.ShipmentCreateWithoutConsigneeInput> = z.object({
+  id: z.string().uuid().optional(),
+  shipperSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  consigneeSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  incoterm: z.string().optional().nullable(),
+  currency: z.string().optional().nullable(),
+  totalValue: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional().nullable(),
+  totalWeight: z.number().optional().nullable(),
+  numPackages: z.number().int().optional().nullable(),
+  originCountry: z.string().optional().nullable(),
+  destinationCountry: z.string().optional().nullable(),
+  status: z.string().optional(),
+  trackingNumber: z.string().optional().nullable(),
+  createdAt: z.coerce.date().optional(),
+  updatedAt: z.coerce.date().optional(),
+  shipper: z.lazy(() => PartyCreateNestedOneWithoutShipmentsAsShipperInputSchema).optional(),
+  carrierMeta: z.lazy(() => ShipmentCarrierMetaCreateNestedOneWithoutShipmentInputSchema).optional(),
+}).strict();
+
+export const ShipmentUncheckedCreateWithoutConsigneeInputSchema: z.ZodType<Prisma.ShipmentUncheckedCreateWithoutConsigneeInput> = z.object({
+  id: z.string().uuid().optional(),
+  shipperId: z.string().optional().nullable(),
+  shipperSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  consigneeSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  incoterm: z.string().optional().nullable(),
+  currency: z.string().optional().nullable(),
+  totalValue: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional().nullable(),
+  totalWeight: z.number().optional().nullable(),
+  numPackages: z.number().int().optional().nullable(),
+  originCountry: z.string().optional().nullable(),
+  destinationCountry: z.string().optional().nullable(),
+  status: z.string().optional(),
+  trackingNumber: z.string().optional().nullable(),
+  createdAt: z.coerce.date().optional(),
+  updatedAt: z.coerce.date().optional(),
+  carrierMeta: z.lazy(() => ShipmentCarrierMetaUncheckedCreateNestedOneWithoutShipmentInputSchema).optional(),
+}).strict();
+
+export const ShipmentCreateOrConnectWithoutConsigneeInputSchema: z.ZodType<Prisma.ShipmentCreateOrConnectWithoutConsigneeInput> = z.object({
+  where: z.lazy(() => ShipmentWhereUniqueInputSchema),
+  create: z.union([ z.lazy(() => ShipmentCreateWithoutConsigneeInputSchema), z.lazy(() => ShipmentUncheckedCreateWithoutConsigneeInputSchema) ]),
+}).strict();
+
+export const ShipmentCreateManyConsigneeInputEnvelopeSchema: z.ZodType<Prisma.ShipmentCreateManyConsigneeInputEnvelope> = z.object({
+  data: z.union([ z.lazy(() => ShipmentCreateManyConsigneeInputSchema), z.lazy(() => ShipmentCreateManyConsigneeInputSchema).array() ]),
+  skipDuplicates: z.boolean().optional(),
+}).strict();
+
+export const ShipmentUpsertWithWhereUniqueWithoutShipperInputSchema: z.ZodType<Prisma.ShipmentUpsertWithWhereUniqueWithoutShipperInput> = z.object({
+  where: z.lazy(() => ShipmentWhereUniqueInputSchema),
+  update: z.union([ z.lazy(() => ShipmentUpdateWithoutShipperInputSchema), z.lazy(() => ShipmentUncheckedUpdateWithoutShipperInputSchema) ]),
+  create: z.union([ z.lazy(() => ShipmentCreateWithoutShipperInputSchema), z.lazy(() => ShipmentUncheckedCreateWithoutShipperInputSchema) ]),
+}).strict();
+
+export const ShipmentUpdateWithWhereUniqueWithoutShipperInputSchema: z.ZodType<Prisma.ShipmentUpdateWithWhereUniqueWithoutShipperInput> = z.object({
+  where: z.lazy(() => ShipmentWhereUniqueInputSchema),
+  data: z.union([ z.lazy(() => ShipmentUpdateWithoutShipperInputSchema), z.lazy(() => ShipmentUncheckedUpdateWithoutShipperInputSchema) ]),
+}).strict();
+
+export const ShipmentUpdateManyWithWhereWithoutShipperInputSchema: z.ZodType<Prisma.ShipmentUpdateManyWithWhereWithoutShipperInput> = z.object({
+  where: z.lazy(() => ShipmentScalarWhereInputSchema),
+  data: z.union([ z.lazy(() => ShipmentUpdateManyMutationInputSchema), z.lazy(() => ShipmentUncheckedUpdateManyWithoutShipperInputSchema) ]),
+}).strict();
+
+export const ShipmentScalarWhereInputSchema: z.ZodType<Prisma.ShipmentScalarWhereInput> = z.object({
+  AND: z.union([ z.lazy(() => ShipmentScalarWhereInputSchema), z.lazy(() => ShipmentScalarWhereInputSchema).array() ]).optional(),
+  OR: z.lazy(() => ShipmentScalarWhereInputSchema).array().optional(),
+  NOT: z.union([ z.lazy(() => ShipmentScalarWhereInputSchema), z.lazy(() => ShipmentScalarWhereInputSchema).array() ]).optional(),
+  id: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  shipperId: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  consigneeId: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  shipperSnapshot: z.lazy(() => JsonNullableFilterSchema).optional(),
+  consigneeSnapshot: z.lazy(() => JsonNullableFilterSchema).optional(),
+  incoterm: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  currency: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  totalValue: z.union([ z.lazy(() => DecimalNullableFilterSchema), z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }) ]).optional().nullable(),
+  totalWeight: z.union([ z.lazy(() => FloatNullableFilterSchema), z.number() ]).optional().nullable(),
+  numPackages: z.union([ z.lazy(() => IntNullableFilterSchema), z.number() ]).optional().nullable(),
+  originCountry: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  destinationCountry: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  status: z.union([ z.lazy(() => StringFilterSchema), z.string() ]).optional(),
+  trackingNumber: z.union([ z.lazy(() => StringNullableFilterSchema), z.string() ]).optional().nullable(),
+  createdAt: z.union([ z.lazy(() => DateTimeFilterSchema), z.coerce.date() ]).optional(),
+  updatedAt: z.union([ z.lazy(() => DateTimeFilterSchema), z.coerce.date() ]).optional(),
+}).strict();
+
+export const ShipmentUpsertWithWhereUniqueWithoutConsigneeInputSchema: z.ZodType<Prisma.ShipmentUpsertWithWhereUniqueWithoutConsigneeInput> = z.object({
+  where: z.lazy(() => ShipmentWhereUniqueInputSchema),
+  update: z.union([ z.lazy(() => ShipmentUpdateWithoutConsigneeInputSchema), z.lazy(() => ShipmentUncheckedUpdateWithoutConsigneeInputSchema) ]),
+  create: z.union([ z.lazy(() => ShipmentCreateWithoutConsigneeInputSchema), z.lazy(() => ShipmentUncheckedCreateWithoutConsigneeInputSchema) ]),
+}).strict();
+
+export const ShipmentUpdateWithWhereUniqueWithoutConsigneeInputSchema: z.ZodType<Prisma.ShipmentUpdateWithWhereUniqueWithoutConsigneeInput> = z.object({
+  where: z.lazy(() => ShipmentWhereUniqueInputSchema),
+  data: z.union([ z.lazy(() => ShipmentUpdateWithoutConsigneeInputSchema), z.lazy(() => ShipmentUncheckedUpdateWithoutConsigneeInputSchema) ]),
+}).strict();
+
+export const ShipmentUpdateManyWithWhereWithoutConsigneeInputSchema: z.ZodType<Prisma.ShipmentUpdateManyWithWhereWithoutConsigneeInput> = z.object({
+  where: z.lazy(() => ShipmentScalarWhereInputSchema),
+  data: z.union([ z.lazy(() => ShipmentUpdateManyMutationInputSchema), z.lazy(() => ShipmentUncheckedUpdateManyWithoutConsigneeInputSchema) ]),
+}).strict();
+
+export const PartyCreateWithoutShipmentsAsShipperInputSchema: z.ZodType<Prisma.PartyCreateWithoutShipmentsAsShipperInput> = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string(),
+  address: z.string().optional().nullable(),
+  city: z.string().optional().nullable(),
+  country: z.string().optional().nullable(),
+  contactName: z.string().optional().nullable(),
+  phone: z.string().optional().nullable(),
+  email: z.string().optional().nullable(),
+  taxIdOrEori: z.string().optional().nullable(),
+  isAddressBookEntry: z.boolean().optional(),
+  createdByUserId: z.string().optional().nullable(),
+  shipmentsAsConsignee: z.lazy(() => ShipmentCreateNestedManyWithoutConsigneeInputSchema).optional(),
+}).strict();
+
+export const PartyUncheckedCreateWithoutShipmentsAsShipperInputSchema: z.ZodType<Prisma.PartyUncheckedCreateWithoutShipmentsAsShipperInput> = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string(),
+  address: z.string().optional().nullable(),
+  city: z.string().optional().nullable(),
+  country: z.string().optional().nullable(),
+  contactName: z.string().optional().nullable(),
+  phone: z.string().optional().nullable(),
+  email: z.string().optional().nullable(),
+  taxIdOrEori: z.string().optional().nullable(),
+  isAddressBookEntry: z.boolean().optional(),
+  createdByUserId: z.string().optional().nullable(),
+  shipmentsAsConsignee: z.lazy(() => ShipmentUncheckedCreateNestedManyWithoutConsigneeInputSchema).optional(),
+}).strict();
+
+export const PartyCreateOrConnectWithoutShipmentsAsShipperInputSchema: z.ZodType<Prisma.PartyCreateOrConnectWithoutShipmentsAsShipperInput> = z.object({
+  where: z.lazy(() => PartyWhereUniqueInputSchema),
+  create: z.union([ z.lazy(() => PartyCreateWithoutShipmentsAsShipperInputSchema), z.lazy(() => PartyUncheckedCreateWithoutShipmentsAsShipperInputSchema) ]),
+}).strict();
+
+export const PartyCreateWithoutShipmentsAsConsigneeInputSchema: z.ZodType<Prisma.PartyCreateWithoutShipmentsAsConsigneeInput> = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string(),
+  address: z.string().optional().nullable(),
+  city: z.string().optional().nullable(),
+  country: z.string().optional().nullable(),
+  contactName: z.string().optional().nullable(),
+  phone: z.string().optional().nullable(),
+  email: z.string().optional().nullable(),
+  taxIdOrEori: z.string().optional().nullable(),
+  isAddressBookEntry: z.boolean().optional(),
+  createdByUserId: z.string().optional().nullable(),
+  shipmentsAsShipper: z.lazy(() => ShipmentCreateNestedManyWithoutShipperInputSchema).optional(),
+}).strict();
+
+export const PartyUncheckedCreateWithoutShipmentsAsConsigneeInputSchema: z.ZodType<Prisma.PartyUncheckedCreateWithoutShipmentsAsConsigneeInput> = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string(),
+  address: z.string().optional().nullable(),
+  city: z.string().optional().nullable(),
+  country: z.string().optional().nullable(),
+  contactName: z.string().optional().nullable(),
+  phone: z.string().optional().nullable(),
+  email: z.string().optional().nullable(),
+  taxIdOrEori: z.string().optional().nullable(),
+  isAddressBookEntry: z.boolean().optional(),
+  createdByUserId: z.string().optional().nullable(),
+  shipmentsAsShipper: z.lazy(() => ShipmentUncheckedCreateNestedManyWithoutShipperInputSchema).optional(),
+}).strict();
+
+export const PartyCreateOrConnectWithoutShipmentsAsConsigneeInputSchema: z.ZodType<Prisma.PartyCreateOrConnectWithoutShipmentsAsConsigneeInput> = z.object({
+  where: z.lazy(() => PartyWhereUniqueInputSchema),
+  create: z.union([ z.lazy(() => PartyCreateWithoutShipmentsAsConsigneeInputSchema), z.lazy(() => PartyUncheckedCreateWithoutShipmentsAsConsigneeInputSchema) ]),
+}).strict();
+
+export const ShipmentCarrierMetaCreateWithoutShipmentInputSchema: z.ZodType<Prisma.ShipmentCarrierMetaCreateWithoutShipmentInput> = z.object({
+  id: z.string().uuid().optional(),
+  rateQuoteJson: z.string().optional().nullable(),
+  bookingResponseJson: z.string().optional().nullable(),
+  labelUrl: z.string().optional().nullable(),
+  carrierCode: z.string().optional().nullable(),
+  serviceLevelCode: z.string().optional().nullable(),
+  trackingNumber: z.string().optional().nullable(),
+  bookedAt: z.coerce.date().optional().nullable(),
+}).strict();
+
+export const ShipmentCarrierMetaUncheckedCreateWithoutShipmentInputSchema: z.ZodType<Prisma.ShipmentCarrierMetaUncheckedCreateWithoutShipmentInput> = z.object({
+  id: z.string().uuid().optional(),
+  rateQuoteJson: z.string().optional().nullable(),
+  bookingResponseJson: z.string().optional().nullable(),
+  labelUrl: z.string().optional().nullable(),
+  carrierCode: z.string().optional().nullable(),
+  serviceLevelCode: z.string().optional().nullable(),
+  trackingNumber: z.string().optional().nullable(),
+  bookedAt: z.coerce.date().optional().nullable(),
+}).strict();
+
+export const ShipmentCarrierMetaCreateOrConnectWithoutShipmentInputSchema: z.ZodType<Prisma.ShipmentCarrierMetaCreateOrConnectWithoutShipmentInput> = z.object({
+  where: z.lazy(() => ShipmentCarrierMetaWhereUniqueInputSchema),
+  create: z.union([ z.lazy(() => ShipmentCarrierMetaCreateWithoutShipmentInputSchema), z.lazy(() => ShipmentCarrierMetaUncheckedCreateWithoutShipmentInputSchema) ]),
+}).strict();
+
+export const PartyUpsertWithoutShipmentsAsShipperInputSchema: z.ZodType<Prisma.PartyUpsertWithoutShipmentsAsShipperInput> = z.object({
+  update: z.union([ z.lazy(() => PartyUpdateWithoutShipmentsAsShipperInputSchema), z.lazy(() => PartyUncheckedUpdateWithoutShipmentsAsShipperInputSchema) ]),
+  create: z.union([ z.lazy(() => PartyCreateWithoutShipmentsAsShipperInputSchema), z.lazy(() => PartyUncheckedCreateWithoutShipmentsAsShipperInputSchema) ]),
+  where: z.lazy(() => PartyWhereInputSchema).optional(),
+}).strict();
+
+export const PartyUpdateToOneWithWhereWithoutShipmentsAsShipperInputSchema: z.ZodType<Prisma.PartyUpdateToOneWithWhereWithoutShipmentsAsShipperInput> = z.object({
+  where: z.lazy(() => PartyWhereInputSchema).optional(),
+  data: z.union([ z.lazy(() => PartyUpdateWithoutShipmentsAsShipperInputSchema), z.lazy(() => PartyUncheckedUpdateWithoutShipmentsAsShipperInputSchema) ]),
+}).strict();
+
+export const PartyUpdateWithoutShipmentsAsShipperInputSchema: z.ZodType<Prisma.PartyUpdateWithoutShipmentsAsShipperInput> = z.object({
+  id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  name: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  address: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  city: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  country: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  contactName: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  phone: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  email: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  taxIdOrEori: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  isAddressBookEntry: z.union([ z.boolean(),z.lazy(() => BoolFieldUpdateOperationsInputSchema) ]).optional(),
+  createdByUserId: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  shipmentsAsConsignee: z.lazy(() => ShipmentUpdateManyWithoutConsigneeNestedInputSchema).optional(),
+}).strict();
+
+export const PartyUncheckedUpdateWithoutShipmentsAsShipperInputSchema: z.ZodType<Prisma.PartyUncheckedUpdateWithoutShipmentsAsShipperInput> = z.object({
+  id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  name: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  address: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  city: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  country: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  contactName: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  phone: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  email: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  taxIdOrEori: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  isAddressBookEntry: z.union([ z.boolean(),z.lazy(() => BoolFieldUpdateOperationsInputSchema) ]).optional(),
+  createdByUserId: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  shipmentsAsConsignee: z.lazy(() => ShipmentUncheckedUpdateManyWithoutConsigneeNestedInputSchema).optional(),
+}).strict();
+
+export const PartyUpsertWithoutShipmentsAsConsigneeInputSchema: z.ZodType<Prisma.PartyUpsertWithoutShipmentsAsConsigneeInput> = z.object({
+  update: z.union([ z.lazy(() => PartyUpdateWithoutShipmentsAsConsigneeInputSchema), z.lazy(() => PartyUncheckedUpdateWithoutShipmentsAsConsigneeInputSchema) ]),
+  create: z.union([ z.lazy(() => PartyCreateWithoutShipmentsAsConsigneeInputSchema), z.lazy(() => PartyUncheckedCreateWithoutShipmentsAsConsigneeInputSchema) ]),
+  where: z.lazy(() => PartyWhereInputSchema).optional(),
+}).strict();
+
+export const PartyUpdateToOneWithWhereWithoutShipmentsAsConsigneeInputSchema: z.ZodType<Prisma.PartyUpdateToOneWithWhereWithoutShipmentsAsConsigneeInput> = z.object({
+  where: z.lazy(() => PartyWhereInputSchema).optional(),
+  data: z.union([ z.lazy(() => PartyUpdateWithoutShipmentsAsConsigneeInputSchema), z.lazy(() => PartyUncheckedUpdateWithoutShipmentsAsConsigneeInputSchema) ]),
+}).strict();
+
+export const PartyUpdateWithoutShipmentsAsConsigneeInputSchema: z.ZodType<Prisma.PartyUpdateWithoutShipmentsAsConsigneeInput> = z.object({
+  id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  name: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  address: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  city: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  country: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  contactName: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  phone: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  email: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  taxIdOrEori: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  isAddressBookEntry: z.union([ z.boolean(),z.lazy(() => BoolFieldUpdateOperationsInputSchema) ]).optional(),
+  createdByUserId: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  shipmentsAsShipper: z.lazy(() => ShipmentUpdateManyWithoutShipperNestedInputSchema).optional(),
+}).strict();
+
+export const PartyUncheckedUpdateWithoutShipmentsAsConsigneeInputSchema: z.ZodType<Prisma.PartyUncheckedUpdateWithoutShipmentsAsConsigneeInput> = z.object({
+  id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  name: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  address: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  city: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  country: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  contactName: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  phone: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  email: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  taxIdOrEori: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  isAddressBookEntry: z.union([ z.boolean(),z.lazy(() => BoolFieldUpdateOperationsInputSchema) ]).optional(),
+  createdByUserId: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  shipmentsAsShipper: z.lazy(() => ShipmentUncheckedUpdateManyWithoutShipperNestedInputSchema).optional(),
+}).strict();
+
+export const ShipmentCarrierMetaUpsertWithoutShipmentInputSchema: z.ZodType<Prisma.ShipmentCarrierMetaUpsertWithoutShipmentInput> = z.object({
+  update: z.union([ z.lazy(() => ShipmentCarrierMetaUpdateWithoutShipmentInputSchema), z.lazy(() => ShipmentCarrierMetaUncheckedUpdateWithoutShipmentInputSchema) ]),
+  create: z.union([ z.lazy(() => ShipmentCarrierMetaCreateWithoutShipmentInputSchema), z.lazy(() => ShipmentCarrierMetaUncheckedCreateWithoutShipmentInputSchema) ]),
+  where: z.lazy(() => ShipmentCarrierMetaWhereInputSchema).optional(),
+}).strict();
+
+export const ShipmentCarrierMetaUpdateToOneWithWhereWithoutShipmentInputSchema: z.ZodType<Prisma.ShipmentCarrierMetaUpdateToOneWithWhereWithoutShipmentInput> = z.object({
+  where: z.lazy(() => ShipmentCarrierMetaWhereInputSchema).optional(),
+  data: z.union([ z.lazy(() => ShipmentCarrierMetaUpdateWithoutShipmentInputSchema), z.lazy(() => ShipmentCarrierMetaUncheckedUpdateWithoutShipmentInputSchema) ]),
+}).strict();
+
+export const ShipmentCarrierMetaUpdateWithoutShipmentInputSchema: z.ZodType<Prisma.ShipmentCarrierMetaUpdateWithoutShipmentInput> = z.object({
+  id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  rateQuoteJson: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  bookingResponseJson: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  labelUrl: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  carrierCode: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  serviceLevelCode: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  trackingNumber: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  bookedAt: z.union([ z.coerce.date(),z.lazy(() => NullableDateTimeFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+}).strict();
+
+export const ShipmentCarrierMetaUncheckedUpdateWithoutShipmentInputSchema: z.ZodType<Prisma.ShipmentCarrierMetaUncheckedUpdateWithoutShipmentInput> = z.object({
+  id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  rateQuoteJson: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  bookingResponseJson: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  labelUrl: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  carrierCode: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  serviceLevelCode: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  trackingNumber: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  bookedAt: z.union([ z.coerce.date(),z.lazy(() => NullableDateTimeFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+}).strict();
+
+export const ShipmentCreateWithoutCarrierMetaInputSchema: z.ZodType<Prisma.ShipmentCreateWithoutCarrierMetaInput> = z.object({
+  id: z.string().uuid().optional(),
+  shipperSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  consigneeSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  incoterm: z.string().optional().nullable(),
+  currency: z.string().optional().nullable(),
+  totalValue: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional().nullable(),
+  totalWeight: z.number().optional().nullable(),
+  numPackages: z.number().int().optional().nullable(),
+  originCountry: z.string().optional().nullable(),
+  destinationCountry: z.string().optional().nullable(),
+  status: z.string().optional(),
+  trackingNumber: z.string().optional().nullable(),
+  createdAt: z.coerce.date().optional(),
+  updatedAt: z.coerce.date().optional(),
+  shipper: z.lazy(() => PartyCreateNestedOneWithoutShipmentsAsShipperInputSchema).optional(),
+  consignee: z.lazy(() => PartyCreateNestedOneWithoutShipmentsAsConsigneeInputSchema).optional(),
+}).strict();
+
+export const ShipmentUncheckedCreateWithoutCarrierMetaInputSchema: z.ZodType<Prisma.ShipmentUncheckedCreateWithoutCarrierMetaInput> = z.object({
+  id: z.string().uuid().optional(),
+  shipperId: z.string().optional().nullable(),
+  consigneeId: z.string().optional().nullable(),
+  shipperSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  consigneeSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  incoterm: z.string().optional().nullable(),
+  currency: z.string().optional().nullable(),
+  totalValue: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional().nullable(),
+  totalWeight: z.number().optional().nullable(),
+  numPackages: z.number().int().optional().nullable(),
+  originCountry: z.string().optional().nullable(),
+  destinationCountry: z.string().optional().nullable(),
+  status: z.string().optional(),
+  trackingNumber: z.string().optional().nullable(),
+  createdAt: z.coerce.date().optional(),
+  updatedAt: z.coerce.date().optional(),
+}).strict();
+
+export const ShipmentCreateOrConnectWithoutCarrierMetaInputSchema: z.ZodType<Prisma.ShipmentCreateOrConnectWithoutCarrierMetaInput> = z.object({
+  where: z.lazy(() => ShipmentWhereUniqueInputSchema),
+  create: z.union([ z.lazy(() => ShipmentCreateWithoutCarrierMetaInputSchema), z.lazy(() => ShipmentUncheckedCreateWithoutCarrierMetaInputSchema) ]),
+}).strict();
+
+export const ShipmentUpsertWithoutCarrierMetaInputSchema: z.ZodType<Prisma.ShipmentUpsertWithoutCarrierMetaInput> = z.object({
+  update: z.union([ z.lazy(() => ShipmentUpdateWithoutCarrierMetaInputSchema), z.lazy(() => ShipmentUncheckedUpdateWithoutCarrierMetaInputSchema) ]),
+  create: z.union([ z.lazy(() => ShipmentCreateWithoutCarrierMetaInputSchema), z.lazy(() => ShipmentUncheckedCreateWithoutCarrierMetaInputSchema) ]),
+  where: z.lazy(() => ShipmentWhereInputSchema).optional(),
+}).strict();
+
+export const ShipmentUpdateToOneWithWhereWithoutCarrierMetaInputSchema: z.ZodType<Prisma.ShipmentUpdateToOneWithWhereWithoutCarrierMetaInput> = z.object({
+  where: z.lazy(() => ShipmentWhereInputSchema).optional(),
+  data: z.union([ z.lazy(() => ShipmentUpdateWithoutCarrierMetaInputSchema), z.lazy(() => ShipmentUncheckedUpdateWithoutCarrierMetaInputSchema) ]),
+}).strict();
+
+export const ShipmentUpdateWithoutCarrierMetaInputSchema: z.ZodType<Prisma.ShipmentUpdateWithoutCarrierMetaInput> = z.object({
+  id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  shipperSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  consigneeSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  incoterm: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  currency: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  totalValue: z.union([ z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }),z.lazy(() => NullableDecimalFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  totalWeight: z.union([ z.number(),z.lazy(() => NullableFloatFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  numPackages: z.union([ z.number().int(),z.lazy(() => NullableIntFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  originCountry: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  destinationCountry: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  status: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  trackingNumber: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  createdAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  updatedAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  shipper: z.lazy(() => PartyUpdateOneWithoutShipmentsAsShipperNestedInputSchema).optional(),
+  consignee: z.lazy(() => PartyUpdateOneWithoutShipmentsAsConsigneeNestedInputSchema).optional(),
+}).strict();
+
+export const ShipmentUncheckedUpdateWithoutCarrierMetaInputSchema: z.ZodType<Prisma.ShipmentUncheckedUpdateWithoutCarrierMetaInput> = z.object({
+  id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  shipperId: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  consigneeId: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  shipperSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  consigneeSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  incoterm: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  currency: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  totalValue: z.union([ z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }),z.lazy(() => NullableDecimalFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  totalWeight: z.union([ z.number(),z.lazy(() => NullableFloatFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  numPackages: z.union([ z.number().int(),z.lazy(() => NullableIntFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  originCountry: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  destinationCountry: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  status: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  trackingNumber: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  createdAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  updatedAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+}).strict();
+
+export const ShipmentCreateManyShipperInputSchema: z.ZodType<Prisma.ShipmentCreateManyShipperInput> = z.object({
+  id: z.string().uuid().optional(),
+  consigneeId: z.string().optional().nullable(),
+  shipperSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  consigneeSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  incoterm: z.string().optional().nullable(),
+  currency: z.string().optional().nullable(),
+  totalValue: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional().nullable(),
+  totalWeight: z.number().optional().nullable(),
+  numPackages: z.number().int().optional().nullable(),
+  originCountry: z.string().optional().nullable(),
+  destinationCountry: z.string().optional().nullable(),
+  status: z.string().optional(),
+  trackingNumber: z.string().optional().nullable(),
+  createdAt: z.coerce.date().optional(),
+  updatedAt: z.coerce.date().optional(),
+}).strict();
+
+export const ShipmentCreateManyConsigneeInputSchema: z.ZodType<Prisma.ShipmentCreateManyConsigneeInput> = z.object({
+  id: z.string().uuid().optional(),
+  shipperId: z.string().optional().nullable(),
+  shipperSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  consigneeSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  incoterm: z.string().optional().nullable(),
+  currency: z.string().optional().nullable(),
+  totalValue: z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }).optional().nullable(),
+  totalWeight: z.number().optional().nullable(),
+  numPackages: z.number().int().optional().nullable(),
+  originCountry: z.string().optional().nullable(),
+  destinationCountry: z.string().optional().nullable(),
+  status: z.string().optional(),
+  trackingNumber: z.string().optional().nullable(),
+  createdAt: z.coerce.date().optional(),
+  updatedAt: z.coerce.date().optional(),
+}).strict();
+
+export const ShipmentUpdateWithoutShipperInputSchema: z.ZodType<Prisma.ShipmentUpdateWithoutShipperInput> = z.object({
+  id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  shipperSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  consigneeSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  incoterm: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  currency: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  totalValue: z.union([ z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }),z.lazy(() => NullableDecimalFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  totalWeight: z.union([ z.number(),z.lazy(() => NullableFloatFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  numPackages: z.union([ z.number().int(),z.lazy(() => NullableIntFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  originCountry: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  destinationCountry: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  status: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  trackingNumber: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  createdAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  updatedAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  consignee: z.lazy(() => PartyUpdateOneWithoutShipmentsAsConsigneeNestedInputSchema).optional(),
+  carrierMeta: z.lazy(() => ShipmentCarrierMetaUpdateOneWithoutShipmentNestedInputSchema).optional(),
+}).strict();
+
+export const ShipmentUncheckedUpdateWithoutShipperInputSchema: z.ZodType<Prisma.ShipmentUncheckedUpdateWithoutShipperInput> = z.object({
+  id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  consigneeId: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  shipperSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  consigneeSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  incoterm: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  currency: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  totalValue: z.union([ z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }),z.lazy(() => NullableDecimalFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  totalWeight: z.union([ z.number(),z.lazy(() => NullableFloatFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  numPackages: z.union([ z.number().int(),z.lazy(() => NullableIntFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  originCountry: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  destinationCountry: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  status: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  trackingNumber: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  createdAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  updatedAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  carrierMeta: z.lazy(() => ShipmentCarrierMetaUncheckedUpdateOneWithoutShipmentNestedInputSchema).optional(),
+}).strict();
+
+export const ShipmentUncheckedUpdateManyWithoutShipperInputSchema: z.ZodType<Prisma.ShipmentUncheckedUpdateManyWithoutShipperInput> = z.object({
+  id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  consigneeId: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  shipperSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  consigneeSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  incoterm: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  currency: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  totalValue: z.union([ z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }),z.lazy(() => NullableDecimalFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  totalWeight: z.union([ z.number(),z.lazy(() => NullableFloatFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  numPackages: z.union([ z.number().int(),z.lazy(() => NullableIntFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  originCountry: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  destinationCountry: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  status: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  trackingNumber: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  createdAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  updatedAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+}).strict();
+
+export const ShipmentUpdateWithoutConsigneeInputSchema: z.ZodType<Prisma.ShipmentUpdateWithoutConsigneeInput> = z.object({
+  id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  shipperSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  consigneeSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  incoterm: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  currency: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  totalValue: z.union([ z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }),z.lazy(() => NullableDecimalFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  totalWeight: z.union([ z.number(),z.lazy(() => NullableFloatFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  numPackages: z.union([ z.number().int(),z.lazy(() => NullableIntFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  originCountry: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  destinationCountry: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  status: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  trackingNumber: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  createdAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  updatedAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  shipper: z.lazy(() => PartyUpdateOneWithoutShipmentsAsShipperNestedInputSchema).optional(),
+  carrierMeta: z.lazy(() => ShipmentCarrierMetaUpdateOneWithoutShipmentNestedInputSchema).optional(),
+}).strict();
+
+export const ShipmentUncheckedUpdateWithoutConsigneeInputSchema: z.ZodType<Prisma.ShipmentUncheckedUpdateWithoutConsigneeInput> = z.object({
+  id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  shipperId: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  shipperSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  consigneeSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  incoterm: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  currency: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  totalValue: z.union([ z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }),z.lazy(() => NullableDecimalFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  totalWeight: z.union([ z.number(),z.lazy(() => NullableFloatFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  numPackages: z.union([ z.number().int(),z.lazy(() => NullableIntFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  originCountry: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  destinationCountry: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  status: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  trackingNumber: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  createdAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  updatedAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  carrierMeta: z.lazy(() => ShipmentCarrierMetaUncheckedUpdateOneWithoutShipmentNestedInputSchema).optional(),
+}).strict();
+
+export const ShipmentUncheckedUpdateManyWithoutConsigneeInputSchema: z.ZodType<Prisma.ShipmentUncheckedUpdateManyWithoutConsigneeInput> = z.object({
+  id: z.union([ z.string().uuid(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  shipperId: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  shipperSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  consigneeSnapshot: z.union([ z.lazy(() => NullableJsonNullValueInputSchema), InputJsonValueSchema ]).optional(),
+  incoterm: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  currency: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  totalValue: z.union([ z.union([z.number(),z.string(),z.instanceof(Prisma.Decimal),DecimalJsLikeSchema,]).refine((v) => isValidDecimalInput(v), { message: 'Must be a Decimal' }),z.lazy(() => NullableDecimalFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  totalWeight: z.union([ z.number(),z.lazy(() => NullableFloatFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  numPackages: z.union([ z.number().int(),z.lazy(() => NullableIntFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  originCountry: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  destinationCountry: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  status: z.union([ z.string(),z.lazy(() => StringFieldUpdateOperationsInputSchema) ]).optional(),
+  trackingNumber: z.union([ z.string(),z.lazy(() => NullableStringFieldUpdateOperationsInputSchema) ]).optional().nullable(),
+  createdAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+  updatedAt: z.union([ z.coerce.date(),z.lazy(() => DateTimeFieldUpdateOperationsInputSchema) ]).optional(),
+}).strict();
+
 /////////////////////////////////////////
 // ARGS
 /////////////////////////////////////////
 
+export const PartyFindFirstArgsSchema: z.ZodType<Prisma.PartyFindFirstArgs> = z.object({
+  select: PartySelectSchema.optional(),
+  include: PartyIncludeSchema.optional(),
+  where: PartyWhereInputSchema.optional(), 
+  orderBy: z.union([ PartyOrderByWithRelationInputSchema.array(), PartyOrderByWithRelationInputSchema ]).optional(),
+  cursor: PartyWhereUniqueInputSchema.optional(), 
+  take: z.number().optional(),
+  skip: z.number().optional(),
+  distinct: z.union([ PartyScalarFieldEnumSchema, PartyScalarFieldEnumSchema.array() ]).optional(),
+}).strict();
+
+export const PartyFindFirstOrThrowArgsSchema: z.ZodType<Prisma.PartyFindFirstOrThrowArgs> = z.object({
+  select: PartySelectSchema.optional(),
+  include: PartyIncludeSchema.optional(),
+  where: PartyWhereInputSchema.optional(), 
+  orderBy: z.union([ PartyOrderByWithRelationInputSchema.array(), PartyOrderByWithRelationInputSchema ]).optional(),
+  cursor: PartyWhereUniqueInputSchema.optional(), 
+  take: z.number().optional(),
+  skip: z.number().optional(),
+  distinct: z.union([ PartyScalarFieldEnumSchema, PartyScalarFieldEnumSchema.array() ]).optional(),
+}).strict();
+
+export const PartyFindManyArgsSchema: z.ZodType<Prisma.PartyFindManyArgs> = z.object({
+  select: PartySelectSchema.optional(),
+  include: PartyIncludeSchema.optional(),
+  where: PartyWhereInputSchema.optional(), 
+  orderBy: z.union([ PartyOrderByWithRelationInputSchema.array(), PartyOrderByWithRelationInputSchema ]).optional(),
+  cursor: PartyWhereUniqueInputSchema.optional(), 
+  take: z.number().optional(),
+  skip: z.number().optional(),
+  distinct: z.union([ PartyScalarFieldEnumSchema, PartyScalarFieldEnumSchema.array() ]).optional(),
+}).strict();
+
+export const PartyAggregateArgsSchema: z.ZodType<Prisma.PartyAggregateArgs> = z.object({
+  where: PartyWhereInputSchema.optional(), 
+  orderBy: z.union([ PartyOrderByWithRelationInputSchema.array(), PartyOrderByWithRelationInputSchema ]).optional(),
+  cursor: PartyWhereUniqueInputSchema.optional(), 
+  take: z.number().optional(),
+  skip: z.number().optional(),
+}).strict();
+
+export const PartyGroupByArgsSchema: z.ZodType<Prisma.PartyGroupByArgs> = z.object({
+  where: PartyWhereInputSchema.optional(), 
+  orderBy: z.union([ PartyOrderByWithAggregationInputSchema.array(), PartyOrderByWithAggregationInputSchema ]).optional(),
+  by: PartyScalarFieldEnumSchema.array(), 
+  having: PartyScalarWhereWithAggregatesInputSchema.optional(), 
+  take: z.number().optional(),
+  skip: z.number().optional(),
+}).strict();
+
+export const PartyFindUniqueArgsSchema: z.ZodType<Prisma.PartyFindUniqueArgs> = z.object({
+  select: PartySelectSchema.optional(),
+  include: PartyIncludeSchema.optional(),
+  where: PartyWhereUniqueInputSchema, 
+}).strict();
+
+export const PartyFindUniqueOrThrowArgsSchema: z.ZodType<Prisma.PartyFindUniqueOrThrowArgs> = z.object({
+  select: PartySelectSchema.optional(),
+  include: PartyIncludeSchema.optional(),
+  where: PartyWhereUniqueInputSchema, 
+}).strict();
+
 export const ShipmentFindFirstArgsSchema: z.ZodType<Prisma.ShipmentFindFirstArgs> = z.object({
   select: ShipmentSelectSchema.optional(),
+  include: ShipmentIncludeSchema.optional(),
   where: ShipmentWhereInputSchema.optional(), 
   orderBy: z.union([ ShipmentOrderByWithRelationInputSchema.array(), ShipmentOrderByWithRelationInputSchema ]).optional(),
   cursor: ShipmentWhereUniqueInputSchema.optional(), 
@@ -217,6 +2842,7 @@ export const ShipmentFindFirstArgsSchema: z.ZodType<Prisma.ShipmentFindFirstArgs
 
 export const ShipmentFindFirstOrThrowArgsSchema: z.ZodType<Prisma.ShipmentFindFirstOrThrowArgs> = z.object({
   select: ShipmentSelectSchema.optional(),
+  include: ShipmentIncludeSchema.optional(),
   where: ShipmentWhereInputSchema.optional(), 
   orderBy: z.union([ ShipmentOrderByWithRelationInputSchema.array(), ShipmentOrderByWithRelationInputSchema ]).optional(),
   cursor: ShipmentWhereUniqueInputSchema.optional(), 
@@ -227,6 +2853,7 @@ export const ShipmentFindFirstOrThrowArgsSchema: z.ZodType<Prisma.ShipmentFindFi
 
 export const ShipmentFindManyArgsSchema: z.ZodType<Prisma.ShipmentFindManyArgs> = z.object({
   select: ShipmentSelectSchema.optional(),
+  include: ShipmentIncludeSchema.optional(),
   where: ShipmentWhereInputSchema.optional(), 
   orderBy: z.union([ ShipmentOrderByWithRelationInputSchema.array(), ShipmentOrderByWithRelationInputSchema ]).optional(),
   cursor: ShipmentWhereUniqueInputSchema.optional(), 
@@ -254,21 +2881,255 @@ export const ShipmentGroupByArgsSchema: z.ZodType<Prisma.ShipmentGroupByArgs> = 
 
 export const ShipmentFindUniqueArgsSchema: z.ZodType<Prisma.ShipmentFindUniqueArgs> = z.object({
   select: ShipmentSelectSchema.optional(),
+  include: ShipmentIncludeSchema.optional(),
   where: ShipmentWhereUniqueInputSchema, 
 }).strict();
 
 export const ShipmentFindUniqueOrThrowArgsSchema: z.ZodType<Prisma.ShipmentFindUniqueOrThrowArgs> = z.object({
   select: ShipmentSelectSchema.optional(),
+  include: ShipmentIncludeSchema.optional(),
   where: ShipmentWhereUniqueInputSchema, 
+}).strict();
+
+export const CarrierAccountFindFirstArgsSchema: z.ZodType<Prisma.CarrierAccountFindFirstArgs> = z.object({
+  select: CarrierAccountSelectSchema.optional(),
+  where: CarrierAccountWhereInputSchema.optional(), 
+  orderBy: z.union([ CarrierAccountOrderByWithRelationInputSchema.array(), CarrierAccountOrderByWithRelationInputSchema ]).optional(),
+  cursor: CarrierAccountWhereUniqueInputSchema.optional(), 
+  take: z.number().optional(),
+  skip: z.number().optional(),
+  distinct: z.union([ CarrierAccountScalarFieldEnumSchema, CarrierAccountScalarFieldEnumSchema.array() ]).optional(),
+}).strict();
+
+export const CarrierAccountFindFirstOrThrowArgsSchema: z.ZodType<Prisma.CarrierAccountFindFirstOrThrowArgs> = z.object({
+  select: CarrierAccountSelectSchema.optional(),
+  where: CarrierAccountWhereInputSchema.optional(), 
+  orderBy: z.union([ CarrierAccountOrderByWithRelationInputSchema.array(), CarrierAccountOrderByWithRelationInputSchema ]).optional(),
+  cursor: CarrierAccountWhereUniqueInputSchema.optional(), 
+  take: z.number().optional(),
+  skip: z.number().optional(),
+  distinct: z.union([ CarrierAccountScalarFieldEnumSchema, CarrierAccountScalarFieldEnumSchema.array() ]).optional(),
+}).strict();
+
+export const CarrierAccountFindManyArgsSchema: z.ZodType<Prisma.CarrierAccountFindManyArgs> = z.object({
+  select: CarrierAccountSelectSchema.optional(),
+  where: CarrierAccountWhereInputSchema.optional(), 
+  orderBy: z.union([ CarrierAccountOrderByWithRelationInputSchema.array(), CarrierAccountOrderByWithRelationInputSchema ]).optional(),
+  cursor: CarrierAccountWhereUniqueInputSchema.optional(), 
+  take: z.number().optional(),
+  skip: z.number().optional(),
+  distinct: z.union([ CarrierAccountScalarFieldEnumSchema, CarrierAccountScalarFieldEnumSchema.array() ]).optional(),
+}).strict();
+
+export const CarrierAccountAggregateArgsSchema: z.ZodType<Prisma.CarrierAccountAggregateArgs> = z.object({
+  where: CarrierAccountWhereInputSchema.optional(), 
+  orderBy: z.union([ CarrierAccountOrderByWithRelationInputSchema.array(), CarrierAccountOrderByWithRelationInputSchema ]).optional(),
+  cursor: CarrierAccountWhereUniqueInputSchema.optional(), 
+  take: z.number().optional(),
+  skip: z.number().optional(),
+}).strict();
+
+export const CarrierAccountGroupByArgsSchema: z.ZodType<Prisma.CarrierAccountGroupByArgs> = z.object({
+  where: CarrierAccountWhereInputSchema.optional(), 
+  orderBy: z.union([ CarrierAccountOrderByWithAggregationInputSchema.array(), CarrierAccountOrderByWithAggregationInputSchema ]).optional(),
+  by: CarrierAccountScalarFieldEnumSchema.array(), 
+  having: CarrierAccountScalarWhereWithAggregatesInputSchema.optional(), 
+  take: z.number().optional(),
+  skip: z.number().optional(),
+}).strict();
+
+export const CarrierAccountFindUniqueArgsSchema: z.ZodType<Prisma.CarrierAccountFindUniqueArgs> = z.object({
+  select: CarrierAccountSelectSchema.optional(),
+  where: CarrierAccountWhereUniqueInputSchema, 
+}).strict();
+
+export const CarrierAccountFindUniqueOrThrowArgsSchema: z.ZodType<Prisma.CarrierAccountFindUniqueOrThrowArgs> = z.object({
+  select: CarrierAccountSelectSchema.optional(),
+  where: CarrierAccountWhereUniqueInputSchema, 
+}).strict();
+
+export const ShipmentCarrierMetaFindFirstArgsSchema: z.ZodType<Prisma.ShipmentCarrierMetaFindFirstArgs> = z.object({
+  select: ShipmentCarrierMetaSelectSchema.optional(),
+  include: ShipmentCarrierMetaIncludeSchema.optional(),
+  where: ShipmentCarrierMetaWhereInputSchema.optional(), 
+  orderBy: z.union([ ShipmentCarrierMetaOrderByWithRelationInputSchema.array(), ShipmentCarrierMetaOrderByWithRelationInputSchema ]).optional(),
+  cursor: ShipmentCarrierMetaWhereUniqueInputSchema.optional(), 
+  take: z.number().optional(),
+  skip: z.number().optional(),
+  distinct: z.union([ ShipmentCarrierMetaScalarFieldEnumSchema, ShipmentCarrierMetaScalarFieldEnumSchema.array() ]).optional(),
+}).strict();
+
+export const ShipmentCarrierMetaFindFirstOrThrowArgsSchema: z.ZodType<Prisma.ShipmentCarrierMetaFindFirstOrThrowArgs> = z.object({
+  select: ShipmentCarrierMetaSelectSchema.optional(),
+  include: ShipmentCarrierMetaIncludeSchema.optional(),
+  where: ShipmentCarrierMetaWhereInputSchema.optional(), 
+  orderBy: z.union([ ShipmentCarrierMetaOrderByWithRelationInputSchema.array(), ShipmentCarrierMetaOrderByWithRelationInputSchema ]).optional(),
+  cursor: ShipmentCarrierMetaWhereUniqueInputSchema.optional(), 
+  take: z.number().optional(),
+  skip: z.number().optional(),
+  distinct: z.union([ ShipmentCarrierMetaScalarFieldEnumSchema, ShipmentCarrierMetaScalarFieldEnumSchema.array() ]).optional(),
+}).strict();
+
+export const ShipmentCarrierMetaFindManyArgsSchema: z.ZodType<Prisma.ShipmentCarrierMetaFindManyArgs> = z.object({
+  select: ShipmentCarrierMetaSelectSchema.optional(),
+  include: ShipmentCarrierMetaIncludeSchema.optional(),
+  where: ShipmentCarrierMetaWhereInputSchema.optional(), 
+  orderBy: z.union([ ShipmentCarrierMetaOrderByWithRelationInputSchema.array(), ShipmentCarrierMetaOrderByWithRelationInputSchema ]).optional(),
+  cursor: ShipmentCarrierMetaWhereUniqueInputSchema.optional(), 
+  take: z.number().optional(),
+  skip: z.number().optional(),
+  distinct: z.union([ ShipmentCarrierMetaScalarFieldEnumSchema, ShipmentCarrierMetaScalarFieldEnumSchema.array() ]).optional(),
+}).strict();
+
+export const ShipmentCarrierMetaAggregateArgsSchema: z.ZodType<Prisma.ShipmentCarrierMetaAggregateArgs> = z.object({
+  where: ShipmentCarrierMetaWhereInputSchema.optional(), 
+  orderBy: z.union([ ShipmentCarrierMetaOrderByWithRelationInputSchema.array(), ShipmentCarrierMetaOrderByWithRelationInputSchema ]).optional(),
+  cursor: ShipmentCarrierMetaWhereUniqueInputSchema.optional(), 
+  take: z.number().optional(),
+  skip: z.number().optional(),
+}).strict();
+
+export const ShipmentCarrierMetaGroupByArgsSchema: z.ZodType<Prisma.ShipmentCarrierMetaGroupByArgs> = z.object({
+  where: ShipmentCarrierMetaWhereInputSchema.optional(), 
+  orderBy: z.union([ ShipmentCarrierMetaOrderByWithAggregationInputSchema.array(), ShipmentCarrierMetaOrderByWithAggregationInputSchema ]).optional(),
+  by: ShipmentCarrierMetaScalarFieldEnumSchema.array(), 
+  having: ShipmentCarrierMetaScalarWhereWithAggregatesInputSchema.optional(), 
+  take: z.number().optional(),
+  skip: z.number().optional(),
+}).strict();
+
+export const ShipmentCarrierMetaFindUniqueArgsSchema: z.ZodType<Prisma.ShipmentCarrierMetaFindUniqueArgs> = z.object({
+  select: ShipmentCarrierMetaSelectSchema.optional(),
+  include: ShipmentCarrierMetaIncludeSchema.optional(),
+  where: ShipmentCarrierMetaWhereUniqueInputSchema, 
+}).strict();
+
+export const ShipmentCarrierMetaFindUniqueOrThrowArgsSchema: z.ZodType<Prisma.ShipmentCarrierMetaFindUniqueOrThrowArgs> = z.object({
+  select: ShipmentCarrierMetaSelectSchema.optional(),
+  include: ShipmentCarrierMetaIncludeSchema.optional(),
+  where: ShipmentCarrierMetaWhereUniqueInputSchema, 
+}).strict();
+
+export const ForwarderProfileFindFirstArgsSchema: z.ZodType<Prisma.ForwarderProfileFindFirstArgs> = z.object({
+  select: ForwarderProfileSelectSchema.optional(),
+  where: ForwarderProfileWhereInputSchema.optional(), 
+  orderBy: z.union([ ForwarderProfileOrderByWithRelationInputSchema.array(), ForwarderProfileOrderByWithRelationInputSchema ]).optional(),
+  cursor: ForwarderProfileWhereUniqueInputSchema.optional(), 
+  take: z.number().optional(),
+  skip: z.number().optional(),
+  distinct: z.union([ ForwarderProfileScalarFieldEnumSchema, ForwarderProfileScalarFieldEnumSchema.array() ]).optional(),
+}).strict();
+
+export const ForwarderProfileFindFirstOrThrowArgsSchema: z.ZodType<Prisma.ForwarderProfileFindFirstOrThrowArgs> = z.object({
+  select: ForwarderProfileSelectSchema.optional(),
+  where: ForwarderProfileWhereInputSchema.optional(), 
+  orderBy: z.union([ ForwarderProfileOrderByWithRelationInputSchema.array(), ForwarderProfileOrderByWithRelationInputSchema ]).optional(),
+  cursor: ForwarderProfileWhereUniqueInputSchema.optional(), 
+  take: z.number().optional(),
+  skip: z.number().optional(),
+  distinct: z.union([ ForwarderProfileScalarFieldEnumSchema, ForwarderProfileScalarFieldEnumSchema.array() ]).optional(),
+}).strict();
+
+export const ForwarderProfileFindManyArgsSchema: z.ZodType<Prisma.ForwarderProfileFindManyArgs> = z.object({
+  select: ForwarderProfileSelectSchema.optional(),
+  where: ForwarderProfileWhereInputSchema.optional(), 
+  orderBy: z.union([ ForwarderProfileOrderByWithRelationInputSchema.array(), ForwarderProfileOrderByWithRelationInputSchema ]).optional(),
+  cursor: ForwarderProfileWhereUniqueInputSchema.optional(), 
+  take: z.number().optional(),
+  skip: z.number().optional(),
+  distinct: z.union([ ForwarderProfileScalarFieldEnumSchema, ForwarderProfileScalarFieldEnumSchema.array() ]).optional(),
+}).strict();
+
+export const ForwarderProfileAggregateArgsSchema: z.ZodType<Prisma.ForwarderProfileAggregateArgs> = z.object({
+  where: ForwarderProfileWhereInputSchema.optional(), 
+  orderBy: z.union([ ForwarderProfileOrderByWithRelationInputSchema.array(), ForwarderProfileOrderByWithRelationInputSchema ]).optional(),
+  cursor: ForwarderProfileWhereUniqueInputSchema.optional(), 
+  take: z.number().optional(),
+  skip: z.number().optional(),
+}).strict();
+
+export const ForwarderProfileGroupByArgsSchema: z.ZodType<Prisma.ForwarderProfileGroupByArgs> = z.object({
+  where: ForwarderProfileWhereInputSchema.optional(), 
+  orderBy: z.union([ ForwarderProfileOrderByWithAggregationInputSchema.array(), ForwarderProfileOrderByWithAggregationInputSchema ]).optional(),
+  by: ForwarderProfileScalarFieldEnumSchema.array(), 
+  having: ForwarderProfileScalarWhereWithAggregatesInputSchema.optional(), 
+  take: z.number().optional(),
+  skip: z.number().optional(),
+}).strict();
+
+export const ForwarderProfileFindUniqueArgsSchema: z.ZodType<Prisma.ForwarderProfileFindUniqueArgs> = z.object({
+  select: ForwarderProfileSelectSchema.optional(),
+  where: ForwarderProfileWhereUniqueInputSchema, 
+}).strict();
+
+export const ForwarderProfileFindUniqueOrThrowArgsSchema: z.ZodType<Prisma.ForwarderProfileFindUniqueOrThrowArgs> = z.object({
+  select: ForwarderProfileSelectSchema.optional(),
+  where: ForwarderProfileWhereUniqueInputSchema, 
+}).strict();
+
+export const PartyCreateArgsSchema: z.ZodType<Prisma.PartyCreateArgs> = z.object({
+  select: PartySelectSchema.optional(),
+  include: PartyIncludeSchema.optional(),
+  data: z.union([ PartyCreateInputSchema, PartyUncheckedCreateInputSchema ]),
+}).strict();
+
+export const PartyUpsertArgsSchema: z.ZodType<Prisma.PartyUpsertArgs> = z.object({
+  select: PartySelectSchema.optional(),
+  include: PartyIncludeSchema.optional(),
+  where: PartyWhereUniqueInputSchema, 
+  create: z.union([ PartyCreateInputSchema, PartyUncheckedCreateInputSchema ]),
+  update: z.union([ PartyUpdateInputSchema, PartyUncheckedUpdateInputSchema ]),
+}).strict();
+
+export const PartyCreateManyArgsSchema: z.ZodType<Prisma.PartyCreateManyArgs> = z.object({
+  data: z.union([ PartyCreateManyInputSchema, PartyCreateManyInputSchema.array() ]),
+  skipDuplicates: z.boolean().optional(),
+}).strict();
+
+export const PartyCreateManyAndReturnArgsSchema: z.ZodType<Prisma.PartyCreateManyAndReturnArgs> = z.object({
+  data: z.union([ PartyCreateManyInputSchema, PartyCreateManyInputSchema.array() ]),
+  skipDuplicates: z.boolean().optional(),
+}).strict();
+
+export const PartyDeleteArgsSchema: z.ZodType<Prisma.PartyDeleteArgs> = z.object({
+  select: PartySelectSchema.optional(),
+  include: PartyIncludeSchema.optional(),
+  where: PartyWhereUniqueInputSchema, 
+}).strict();
+
+export const PartyUpdateArgsSchema: z.ZodType<Prisma.PartyUpdateArgs> = z.object({
+  select: PartySelectSchema.optional(),
+  include: PartyIncludeSchema.optional(),
+  data: z.union([ PartyUpdateInputSchema, PartyUncheckedUpdateInputSchema ]),
+  where: PartyWhereUniqueInputSchema, 
+}).strict();
+
+export const PartyUpdateManyArgsSchema: z.ZodType<Prisma.PartyUpdateManyArgs> = z.object({
+  data: z.union([ PartyUpdateManyMutationInputSchema, PartyUncheckedUpdateManyInputSchema ]),
+  where: PartyWhereInputSchema.optional(), 
+  limit: z.number().optional(),
+}).strict();
+
+export const PartyUpdateManyAndReturnArgsSchema: z.ZodType<Prisma.PartyUpdateManyAndReturnArgs> = z.object({
+  data: z.union([ PartyUpdateManyMutationInputSchema, PartyUncheckedUpdateManyInputSchema ]),
+  where: PartyWhereInputSchema.optional(), 
+  limit: z.number().optional(),
+}).strict();
+
+export const PartyDeleteManyArgsSchema: z.ZodType<Prisma.PartyDeleteManyArgs> = z.object({
+  where: PartyWhereInputSchema.optional(), 
+  limit: z.number().optional(),
 }).strict();
 
 export const ShipmentCreateArgsSchema: z.ZodType<Prisma.ShipmentCreateArgs> = z.object({
   select: ShipmentSelectSchema.optional(),
-  data: z.union([ ShipmentCreateInputSchema, ShipmentUncheckedCreateInputSchema ]).optional(),
+  include: ShipmentIncludeSchema.optional(),
+  data: z.union([ ShipmentCreateInputSchema, ShipmentUncheckedCreateInputSchema ]),
 }).strict();
 
 export const ShipmentUpsertArgsSchema: z.ZodType<Prisma.ShipmentUpsertArgs> = z.object({
   select: ShipmentSelectSchema.optional(),
+  include: ShipmentIncludeSchema.optional(),
   where: ShipmentWhereUniqueInputSchema, 
   create: z.union([ ShipmentCreateInputSchema, ShipmentUncheckedCreateInputSchema ]),
   update: z.union([ ShipmentUpdateInputSchema, ShipmentUncheckedUpdateInputSchema ]),
@@ -286,11 +3147,13 @@ export const ShipmentCreateManyAndReturnArgsSchema: z.ZodType<Prisma.ShipmentCre
 
 export const ShipmentDeleteArgsSchema: z.ZodType<Prisma.ShipmentDeleteArgs> = z.object({
   select: ShipmentSelectSchema.optional(),
+  include: ShipmentIncludeSchema.optional(),
   where: ShipmentWhereUniqueInputSchema, 
 }).strict();
 
 export const ShipmentUpdateArgsSchema: z.ZodType<Prisma.ShipmentUpdateArgs> = z.object({
   select: ShipmentSelectSchema.optional(),
+  include: ShipmentIncludeSchema.optional(),
   data: z.union([ ShipmentUpdateInputSchema, ShipmentUncheckedUpdateInputSchema ]),
   where: ShipmentWhereUniqueInputSchema, 
 }).strict();
@@ -309,5 +3172,159 @@ export const ShipmentUpdateManyAndReturnArgsSchema: z.ZodType<Prisma.ShipmentUpd
 
 export const ShipmentDeleteManyArgsSchema: z.ZodType<Prisma.ShipmentDeleteManyArgs> = z.object({
   where: ShipmentWhereInputSchema.optional(), 
+  limit: z.number().optional(),
+}).strict();
+
+export const CarrierAccountCreateArgsSchema: z.ZodType<Prisma.CarrierAccountCreateArgs> = z.object({
+  select: CarrierAccountSelectSchema.optional(),
+  data: z.union([ CarrierAccountCreateInputSchema, CarrierAccountUncheckedCreateInputSchema ]),
+}).strict();
+
+export const CarrierAccountUpsertArgsSchema: z.ZodType<Prisma.CarrierAccountUpsertArgs> = z.object({
+  select: CarrierAccountSelectSchema.optional(),
+  where: CarrierAccountWhereUniqueInputSchema, 
+  create: z.union([ CarrierAccountCreateInputSchema, CarrierAccountUncheckedCreateInputSchema ]),
+  update: z.union([ CarrierAccountUpdateInputSchema, CarrierAccountUncheckedUpdateInputSchema ]),
+}).strict();
+
+export const CarrierAccountCreateManyArgsSchema: z.ZodType<Prisma.CarrierAccountCreateManyArgs> = z.object({
+  data: z.union([ CarrierAccountCreateManyInputSchema, CarrierAccountCreateManyInputSchema.array() ]),
+  skipDuplicates: z.boolean().optional(),
+}).strict();
+
+export const CarrierAccountCreateManyAndReturnArgsSchema: z.ZodType<Prisma.CarrierAccountCreateManyAndReturnArgs> = z.object({
+  data: z.union([ CarrierAccountCreateManyInputSchema, CarrierAccountCreateManyInputSchema.array() ]),
+  skipDuplicates: z.boolean().optional(),
+}).strict();
+
+export const CarrierAccountDeleteArgsSchema: z.ZodType<Prisma.CarrierAccountDeleteArgs> = z.object({
+  select: CarrierAccountSelectSchema.optional(),
+  where: CarrierAccountWhereUniqueInputSchema, 
+}).strict();
+
+export const CarrierAccountUpdateArgsSchema: z.ZodType<Prisma.CarrierAccountUpdateArgs> = z.object({
+  select: CarrierAccountSelectSchema.optional(),
+  data: z.union([ CarrierAccountUpdateInputSchema, CarrierAccountUncheckedUpdateInputSchema ]),
+  where: CarrierAccountWhereUniqueInputSchema, 
+}).strict();
+
+export const CarrierAccountUpdateManyArgsSchema: z.ZodType<Prisma.CarrierAccountUpdateManyArgs> = z.object({
+  data: z.union([ CarrierAccountUpdateManyMutationInputSchema, CarrierAccountUncheckedUpdateManyInputSchema ]),
+  where: CarrierAccountWhereInputSchema.optional(), 
+  limit: z.number().optional(),
+}).strict();
+
+export const CarrierAccountUpdateManyAndReturnArgsSchema: z.ZodType<Prisma.CarrierAccountUpdateManyAndReturnArgs> = z.object({
+  data: z.union([ CarrierAccountUpdateManyMutationInputSchema, CarrierAccountUncheckedUpdateManyInputSchema ]),
+  where: CarrierAccountWhereInputSchema.optional(), 
+  limit: z.number().optional(),
+}).strict();
+
+export const CarrierAccountDeleteManyArgsSchema: z.ZodType<Prisma.CarrierAccountDeleteManyArgs> = z.object({
+  where: CarrierAccountWhereInputSchema.optional(), 
+  limit: z.number().optional(),
+}).strict();
+
+export const ShipmentCarrierMetaCreateArgsSchema: z.ZodType<Prisma.ShipmentCarrierMetaCreateArgs> = z.object({
+  select: ShipmentCarrierMetaSelectSchema.optional(),
+  include: ShipmentCarrierMetaIncludeSchema.optional(),
+  data: z.union([ ShipmentCarrierMetaCreateInputSchema, ShipmentCarrierMetaUncheckedCreateInputSchema ]),
+}).strict();
+
+export const ShipmentCarrierMetaUpsertArgsSchema: z.ZodType<Prisma.ShipmentCarrierMetaUpsertArgs> = z.object({
+  select: ShipmentCarrierMetaSelectSchema.optional(),
+  include: ShipmentCarrierMetaIncludeSchema.optional(),
+  where: ShipmentCarrierMetaWhereUniqueInputSchema, 
+  create: z.union([ ShipmentCarrierMetaCreateInputSchema, ShipmentCarrierMetaUncheckedCreateInputSchema ]),
+  update: z.union([ ShipmentCarrierMetaUpdateInputSchema, ShipmentCarrierMetaUncheckedUpdateInputSchema ]),
+}).strict();
+
+export const ShipmentCarrierMetaCreateManyArgsSchema: z.ZodType<Prisma.ShipmentCarrierMetaCreateManyArgs> = z.object({
+  data: z.union([ ShipmentCarrierMetaCreateManyInputSchema, ShipmentCarrierMetaCreateManyInputSchema.array() ]),
+  skipDuplicates: z.boolean().optional(),
+}).strict();
+
+export const ShipmentCarrierMetaCreateManyAndReturnArgsSchema: z.ZodType<Prisma.ShipmentCarrierMetaCreateManyAndReturnArgs> = z.object({
+  data: z.union([ ShipmentCarrierMetaCreateManyInputSchema, ShipmentCarrierMetaCreateManyInputSchema.array() ]),
+  skipDuplicates: z.boolean().optional(),
+}).strict();
+
+export const ShipmentCarrierMetaDeleteArgsSchema: z.ZodType<Prisma.ShipmentCarrierMetaDeleteArgs> = z.object({
+  select: ShipmentCarrierMetaSelectSchema.optional(),
+  include: ShipmentCarrierMetaIncludeSchema.optional(),
+  where: ShipmentCarrierMetaWhereUniqueInputSchema, 
+}).strict();
+
+export const ShipmentCarrierMetaUpdateArgsSchema: z.ZodType<Prisma.ShipmentCarrierMetaUpdateArgs> = z.object({
+  select: ShipmentCarrierMetaSelectSchema.optional(),
+  include: ShipmentCarrierMetaIncludeSchema.optional(),
+  data: z.union([ ShipmentCarrierMetaUpdateInputSchema, ShipmentCarrierMetaUncheckedUpdateInputSchema ]),
+  where: ShipmentCarrierMetaWhereUniqueInputSchema, 
+}).strict();
+
+export const ShipmentCarrierMetaUpdateManyArgsSchema: z.ZodType<Prisma.ShipmentCarrierMetaUpdateManyArgs> = z.object({
+  data: z.union([ ShipmentCarrierMetaUpdateManyMutationInputSchema, ShipmentCarrierMetaUncheckedUpdateManyInputSchema ]),
+  where: ShipmentCarrierMetaWhereInputSchema.optional(), 
+  limit: z.number().optional(),
+}).strict();
+
+export const ShipmentCarrierMetaUpdateManyAndReturnArgsSchema: z.ZodType<Prisma.ShipmentCarrierMetaUpdateManyAndReturnArgs> = z.object({
+  data: z.union([ ShipmentCarrierMetaUpdateManyMutationInputSchema, ShipmentCarrierMetaUncheckedUpdateManyInputSchema ]),
+  where: ShipmentCarrierMetaWhereInputSchema.optional(), 
+  limit: z.number().optional(),
+}).strict();
+
+export const ShipmentCarrierMetaDeleteManyArgsSchema: z.ZodType<Prisma.ShipmentCarrierMetaDeleteManyArgs> = z.object({
+  where: ShipmentCarrierMetaWhereInputSchema.optional(), 
+  limit: z.number().optional(),
+}).strict();
+
+export const ForwarderProfileCreateArgsSchema: z.ZodType<Prisma.ForwarderProfileCreateArgs> = z.object({
+  select: ForwarderProfileSelectSchema.optional(),
+  data: z.union([ ForwarderProfileCreateInputSchema, ForwarderProfileUncheckedCreateInputSchema ]),
+}).strict();
+
+export const ForwarderProfileUpsertArgsSchema: z.ZodType<Prisma.ForwarderProfileUpsertArgs> = z.object({
+  select: ForwarderProfileSelectSchema.optional(),
+  where: ForwarderProfileWhereUniqueInputSchema, 
+  create: z.union([ ForwarderProfileCreateInputSchema, ForwarderProfileUncheckedCreateInputSchema ]),
+  update: z.union([ ForwarderProfileUpdateInputSchema, ForwarderProfileUncheckedUpdateInputSchema ]),
+}).strict();
+
+export const ForwarderProfileCreateManyArgsSchema: z.ZodType<Prisma.ForwarderProfileCreateManyArgs> = z.object({
+  data: z.union([ ForwarderProfileCreateManyInputSchema, ForwarderProfileCreateManyInputSchema.array() ]),
+  skipDuplicates: z.boolean().optional(),
+}).strict();
+
+export const ForwarderProfileCreateManyAndReturnArgsSchema: z.ZodType<Prisma.ForwarderProfileCreateManyAndReturnArgs> = z.object({
+  data: z.union([ ForwarderProfileCreateManyInputSchema, ForwarderProfileCreateManyInputSchema.array() ]),
+  skipDuplicates: z.boolean().optional(),
+}).strict();
+
+export const ForwarderProfileDeleteArgsSchema: z.ZodType<Prisma.ForwarderProfileDeleteArgs> = z.object({
+  select: ForwarderProfileSelectSchema.optional(),
+  where: ForwarderProfileWhereUniqueInputSchema, 
+}).strict();
+
+export const ForwarderProfileUpdateArgsSchema: z.ZodType<Prisma.ForwarderProfileUpdateArgs> = z.object({
+  select: ForwarderProfileSelectSchema.optional(),
+  data: z.union([ ForwarderProfileUpdateInputSchema, ForwarderProfileUncheckedUpdateInputSchema ]),
+  where: ForwarderProfileWhereUniqueInputSchema, 
+}).strict();
+
+export const ForwarderProfileUpdateManyArgsSchema: z.ZodType<Prisma.ForwarderProfileUpdateManyArgs> = z.object({
+  data: z.union([ ForwarderProfileUpdateManyMutationInputSchema, ForwarderProfileUncheckedUpdateManyInputSchema ]),
+  where: ForwarderProfileWhereInputSchema.optional(), 
+  limit: z.number().optional(),
+}).strict();
+
+export const ForwarderProfileUpdateManyAndReturnArgsSchema: z.ZodType<Prisma.ForwarderProfileUpdateManyAndReturnArgs> = z.object({
+  data: z.union([ ForwarderProfileUpdateManyMutationInputSchema, ForwarderProfileUncheckedUpdateManyInputSchema ]),
+  where: ForwarderProfileWhereInputSchema.optional(), 
+  limit: z.number().optional(),
+}).strict();
+
+export const ForwarderProfileDeleteManyArgsSchema: z.ZodType<Prisma.ForwarderProfileDeleteManyArgs> = z.object({
+  where: ForwarderProfileWhereInputSchema.optional(), 
   limit: z.number().optional(),
 }).strict();

@@ -12,6 +12,96 @@ datasource db {
   provider = "postgresql"
 }
 
+
+model Party {
+  id      String @id @default(uuid())
+  name    String
+  address String?
+  city    String?
+  country String? // ISO 2-char
+  
+  // Extended Fields
+  contactName String?
+  phone       String?
+  email       String?
+  taxIdOrEori String?
+  
+  isAddressBookEntry Boolean @default(false)
+  createdByUserId    String? // For tracking ownership
+
+  shipmentsAsShipper   Shipment[] @relation("Shipper")
+  shipmentsAsConsignee Shipment[] @relation("Consignee")
+}
+
 model Shipment {
   id String @id @default(uuid())
+  
+  // Relations
+  shipperId String? // Optional if unlinked
+  shipper   Party? @relation("Shipper", fields: [shipperId], references: [id])
+  
+  consigneeId String? // Optional if unlinked
+  consignee   Party? @relation("Consignee", fields: [consigneeId], references: [id])
+  
+  // Snapshots for historically accurate or unlinked data
+  shipperSnapshot   Json?
+  consigneeSnapshot Json?
+
+  // Core Data
+  incoterm      String? // e.g. DDP, FOB
+  currency      String? // e.g. USD
+  totalValue    Decimal? @default(0)
+  totalWeight   Float? @default(0) // Kg
+  numPackages   Int? @default(1)
+  
+  originCountry      String?
+  destinationCountry String?
+  
+  status         String @default("draft") // draft, booked, in_transit, delivered
+  trackingNumber String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  carrierMeta ShipmentCarrierMeta?
+}
+
+model CarrierAccount {
+  id            String  @id @default(uuid())
+  provider      String  // fedex, ups, mock
+  credentials   String  // Encrypted JSON
+  accountNumber String? // Encrypted
+  description   String?
+  isActive      Boolean @default(true)
+  userId        String 
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ShipmentCarrierMeta {
+  id String @id @default(uuid())
+  
+  shipmentId String @unique
+  shipment   Shipment @relation(fields: [shipmentId], references: [id])
+  
+  rateQuoteJson       String? // JSON blob of rates
+  bookingResponseJson String? // JSON blob of booking receipt
+  labelUrl            String?
+  
+  carrierCode      String?
+  serviceLevelCode String?
+  trackingNumber   String?
+  
+  bookedAt DateTime?
+}
+
+model ForwarderProfile {
+  id              String @id @default(uuid())
+  name            String
+  emailToJson     String // JSON array
+  emailSubjectTemplate String
+  dataBundleFormat String // PDF, ZIP, etc.
+  
+  userId String
 }

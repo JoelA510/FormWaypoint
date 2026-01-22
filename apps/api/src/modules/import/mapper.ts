@@ -1,28 +1,27 @@
-const logger = require('../../utils/logger');
 
-// Common synonyms for canonical fields
-const SYNONYM_MAP = {
+const SYNONYM_MAP: Record<string, string[]> = {
     'trackingNumber': ['track', 'tracking', 'ref', 'reference', 'trk#', 'pro number'],
-    'weight': ['wgt', 'weight (lb)', 'weight (kg)', 'gross weight', 'mass'],
+    'totalWeight': ['wgt', 'weight (lb)', 'weight (kg)', 'gross weight', 'mass', 'total weight'],
     'consignee': ['receiver', 'to', 'destination party', 'ship to'],
-    'shipper': ['sender', 'from', 'origin party', 'ship from']
+    'shipper': ['sender', 'from', 'origin party', 'ship from'],
+    'incoterm': ['terms', 'incoterms', 'shipping terms'],
+    'currency': ['curr', 'currency code'],
+    'originCountry': ['origin', 'country of origin', 'coo', 'from country'],
+    'destinationCountry': ['destination', 'dest', 'to country']
 };
 
-class SemanticMapper {
-
+export class SemanticMapper {
     /**
      * Maps raw CSV headers to Canonical Schema fields using fuzzy matching.
-     * @param {string[]} rawHeaders 
-     * @returns {Object} Mapping object { "Raw Header": "canonicalField" }
      */
-    generateMapping(rawHeaders) {
-        const mapping = {};
+    static generateMapping(rawHeaders: string[]): Record<string, string> {
+        const mapping: Record<string, string> = {};
 
         for (const header of rawHeaders) {
             const normalized = header.toLowerCase().trim();
-            let match = null;
+            let match: string | null = null;
 
-            // Direct Match
+            // Direct Match check against keys
             if (SYNONYM_MAP[normalized]) match = normalized;
 
             // Synonym Match
@@ -36,7 +35,6 @@ class SemanticMapper {
             }
 
             if (match) {
-                logger.info(`Mapped "${header}" -> "${match}"`);
                 mapping[header] = match;
             }
         }
@@ -46,21 +44,17 @@ class SemanticMapper {
 
     /**
      * Transform a raw row using the mapping.
-     * @param {Object} rawRow 
-     * @param {Object} mapping 
      */
-    transform(rawRow, mapping) {
-        const canonical = {};
+    static transform(rawRow: Record<string, any>, mapping: Record<string, string>): Record<string, any> {
+        const canonical: Record<string, any> = {};
         for (const [rawKey, val] of Object.entries(rawRow)) {
             const canonicalKey = mapping[rawKey];
             if (canonicalKey) {
                 canonical[canonicalKey] = val;
             } else {
-                canonical[rawKey] = val; // Keep unmapped fields?
+                canonical[rawKey] = val; // Keep unmapped fields
             }
         }
         return canonical;
     }
 }
-
-module.exports = new SemanticMapper();

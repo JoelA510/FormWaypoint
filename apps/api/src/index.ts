@@ -3,6 +3,10 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { ingestionRouter } from './modules/ingestion/api'
 import { classificationRouter } from './modules/classification/api'
+import { shipmentRouter } from './modules/shipments/api'
+import { partiesRouter } from './modules/parties/api'
+import { freightRouter } from './modules/freight/api'
+import { importRouter } from './modules/import/api'
 
 const app = new Hono()
 
@@ -15,6 +19,10 @@ app.get('/', (c) => {
 const routes = app
     .route('/ingest', ingestionRouter)
     .route('/classification', classificationRouter)
+    .route('/shipments', shipmentRouter)
+    .route('/parties', partiesRouter)
+    .route('/freight', freightRouter)
+    .route('/import', importRouter)
 
 export type AppType = typeof routes
 
