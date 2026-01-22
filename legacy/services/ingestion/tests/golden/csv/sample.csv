@@ -1,9 +1,0 @@
-# Shipper: Acme Exports
-# Consignee: Global Imports
-# Incoterm: FOB
-# Currency: usd
-# Reference: PO-12345
-
-partNumber,description,quantity,netWeightKg,valueUsd,htsCode,countryOfOrigin
-W123,Widget Assembly,10,125.5 kg,1500 USD,847150,us
-G456,Gadget Kit,5,25 kg,USD 750,902710,CN

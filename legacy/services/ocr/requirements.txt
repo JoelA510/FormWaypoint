@@ -1,6 +1,0 @@
-flask
-easyocr
-pymupdf
-numpy
-torch
-opencv-python-headless

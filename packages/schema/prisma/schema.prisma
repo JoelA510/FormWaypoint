@@ -180,3 +180,24 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+model ErpExportConfig {
+  id              String @id @default(uuid())
+  destination     String // e.g. "SAP", "NetSuite"
+  httpHeadersJson String? // JSON
+  endpointUrl     String
+  
+  userId          String
+  createdAt       DateTime @default(now())
+}
+
+model ErpExportJob {
+  id                String @id @default(uuid())
+  configId          String
+  status            String // SUCCESS, FAILURE
+  fromDate          DateTime
+  toDate            DateTime
+  resultSummaryJson String? // JSON
+  
+  createdAt         DateTime @default(now())
+}
