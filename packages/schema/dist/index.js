@@ -10,14 +10,37 @@ var __createBinding = (this && this.__createBinding) || (Object.create ? (functi
     if (k2 === undefined) k2 = k;
     o[k2] = m[k];
 }));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
 var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.IngestResponseSchema = exports.DocumentSchema = exports.ShipmentSchema = exports.LineItemSchema = exports.PartySchema = exports.DocumentStatusEnum = exports.ShipmentStatusEnum = void 0;
+exports.IngestResponseSchema = exports.DocumentSchema = exports.ShipmentSchema = exports.LineItemSchema = exports.PartySchema = exports.DocumentStatusEnum = exports.ShipmentStatusEnum = exports.Generated = void 0;
 const zod_1 = require("zod");
 __exportStar(require("./validation"), exports);
-__exportStar(require("./generated/zod"), exports);
+__exportStar(require("./db"), exports);
+exports.Generated = __importStar(require("./generated/zod"));
 __exportStar(require("@prisma/client"), exports);
 // --- Enums ---
 exports.ShipmentStatusEnum = zod_1.z.enum(["draft", "ready_to_book", "booked", "in_transit", "exception", "closed"]);

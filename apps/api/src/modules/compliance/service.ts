@@ -1,7 +1,7 @@
 
-import { PrismaClient, Prisma, Shipment, Party } from '@repo/schema';
+import { Prisma, Shipment, Party, prisma } from '@repo/schema';
 
-const prisma = new PrismaClient();
+
 
 // Mock Denied Parties (In real world, this would be an external API or vector search)
 const DENIED_PARTIES = ['Bad Guys Ltd', 'Embargoed Entity', 'Evil Corp'];

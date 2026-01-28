@@ -12,7 +12,9 @@
         "lint": "echo lint_passed"
     },
     "dependencies": {
+        "@prisma/adapter-pg": "^7.3.0",
         "@prisma/client": "7.2.0",
+        "pg": "^8.17.2",
         "zod": "^3.23.0"
     },
     "devDependencies": {

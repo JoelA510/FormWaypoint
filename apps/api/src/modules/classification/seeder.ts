@@ -1,6 +1,6 @@
-import { PrismaClient } from '@repo/schema';
+import { prisma } from '@repo/schema';
 
-const prisma = new PrismaClient();
+
 const UK_TARIFF_API = 'https://www.trade-tariff.service.gov.uk/api/v2';
 
 interface TariffSection {

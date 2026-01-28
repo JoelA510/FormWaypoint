@@ -1,11 +1,11 @@
 
 import Handlebars from 'handlebars';
 import puppeteer from 'puppeteer';
-import { PrismaClient } from '@repo/schema';
+import { prisma } from '@repo/schema';
 import fs from 'fs/promises';
 import path from 'path';
 
-const prisma = new PrismaClient();
+
 
 // Simple Template Registry
 const TEMPLATES = {
