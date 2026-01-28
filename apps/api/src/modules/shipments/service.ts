@@ -1,7 +1,7 @@
 
-import { PrismaClient, Shipment, Prisma } from '@repo/schema';
+import { Shipment, Prisma, prisma } from '@repo/schema';
 
-const prisma = new PrismaClient(); // In a real app, use a singleton or DI
+ // In a real app, use a singleton or DI
 
 export class ShipmentService {
     static async createShipment(data: Prisma.ShipmentCreateInput) {

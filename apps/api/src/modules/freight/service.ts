@@ -1,7 +1,7 @@
 
-import { PrismaClient, Prisma, CarrierAccount } from '@repo/schema';
+import { Prisma, CarrierAccount, prisma } from '@repo/schema';
 
-const prisma = new PrismaClient();
+
 
 // Mock Rate Response Type
 interface Rate {

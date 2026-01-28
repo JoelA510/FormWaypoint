@@ -1,6 +1,7 @@
 import { z } from "zod";
 export * from "./validation";
-export * from "./generated/zod";
+export * from "./db";
+export * as Generated from "./generated/zod";
 export * from "@prisma/client";
 
 // --- Enums ---

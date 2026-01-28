@@ -1,8 +1,8 @@
 
-import { PrismaClient, Prisma } from '@repo/schema';
+import { Prisma, prisma } from '@repo/schema';
 import { SemanticMapper } from './mapper';
 
-const prisma = new PrismaClient();
+
 
 export class ImportService {
 

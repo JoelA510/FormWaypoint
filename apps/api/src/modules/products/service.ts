@@ -1,7 +1,7 @@
 
-import { PrismaClient, Prisma } from '@repo/schema';
+import { Prisma, prisma } from '@repo/schema';
 
-const prisma = new PrismaClient();
+
 
 export class ProductService {
 
