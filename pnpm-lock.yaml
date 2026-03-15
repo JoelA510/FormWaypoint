@@ -30,11 +30,11 @@ importers:
         specifier: ^3.972.0
         version: 3.972.0
       '@hono/node-server':
-        specifier: ^1.0.0
-        version: 1.19.9(hono@4.11.7)
+        specifier: ^1.19.10
+        version: 1.19.10(hono@4.12.7)
       '@hono/zod-validator':
         specifier: ^0.2.0
-        version: 0.2.2(hono@4.11.7)(zod@3.25.76)
+        version: 0.2.2(hono@4.12.7)(zod@3.25.76)
       '@repo/schema':
         specifier: workspace:*
         version: link:../../packages/schema
@@ -57,8 +57,8 @@ importers:
         specifier: ^4.7.8
         version: 4.7.8
       hono:
-        specifier: ^4.11.7
-        version: 4.11.7
+        specifier: ^4.12.7
+        version: 4.12.7
       jsonwebtoken:
         specifier: ^9.0.3
         version: 9.0.3
@@ -97,11 +97,11 @@ importers:
   apps/web:
     dependencies:
       '@hono/node-server':
-        specifier: ^1.13.7
-        version: 1.19.9(hono@4.11.7)
+        specifier: ^1.19.10
+        version: 1.19.10(hono@4.12.7)
       '@hono/zod-validator':
         specifier: ^0.2.2
-        version: 0.2.2(hono@4.11.7)(zod@3.25.76)
+        version: 0.2.2(hono@4.12.7)(zod@3.25.76)
       '@hookform/resolvers':
         specifier: ^3.10.0
         version: 3.10.0(react-hook-form@7.71.1(react@19.2.3))
@@ -118,8 +118,8 @@ importers:
         specifier: ^2.1.1
         version: 2.1.1
       hono:
-        specifier: ^4.11.7
-        version: 4.11.7
+        specifier: ^4.12.7
+        version: 4.12.7
       react:
         specifier: ^19.0.0
         version: 19.2.3
@@ -1088,14 +1088,14 @@ packages:
     resolution: {integrity: sha512-43/qtrDUokr7LJqoF2c3+RInu/t4zfrpYdoSDfYyhg52rwLV6TnOvdG4fXm7IkSB3wErkcmJS9iEhjVtOSEjjA==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
 
-  '@hono/node-server@1.19.6':
-    resolution: {integrity: sha512-Shz/KjlIeAhfiuE93NDKVdZ7HdBVLQAfdbaXEaoAVO3ic9ibRSLGIQGkcBbFyuLr+7/1D5ZCINM8B+6IvXeMtw==}
+  '@hono/node-server@1.19.10':
+    resolution: {integrity: sha512-hZ7nOssGqRgyV3FVVQdfi+U4q02uB23bpnYpdvNXkYTRRyWx84b7yf1ans+dnJ/7h41sGL3CeQTfO+ZGxuO+Iw==}
     engines: {node: '>=18.14.1'}
     peerDependencies:
       hono: ^4
 
-  '@hono/node-server@1.19.9':
-    resolution: {integrity: sha512-vHL6w3ecZsky+8P5MD+eFfaGTyCeOHUIFYMGpQGbrBTSmNNoxv0if69rEZ5giu36weC5saFuznL411gRX7bJDw==}
+  '@hono/node-server@1.19.6':
+    resolution: {integrity: sha512-Shz/KjlIeAhfiuE93NDKVdZ7HdBVLQAfdbaXEaoAVO3ic9ibRSLGIQGkcBbFyuLr+7/1D5ZCINM8B+6IvXeMtw==}
     engines: {node: '>=18.14.1'}
     peerDependencies:
       hono: ^4
@@ -1850,6 +1850,7 @@ packages:
   basic-ftp@5.1.0:
     resolution: {integrity: sha512-RkaJzeJKDbaDWTIPiJwubyljaEPwpVWkm9Rt5h9Nd6h7tEXTJ3VB4qxdZBioV7JO5yLUaOKwz7vDOzlncUsegw==}
     engines: {node: '>=10.0.0'}
+    deprecated: Security vulnerability fixed in 5.2.0, please upgrade
 
   bcryptjs@3.0.3:
     resolution: {integrity: sha512-GlF5wPWnSa/X5LKM1o0wz0suXIINz1iHRLvTS+sLyi7XPbe5ycmYI3DlZqVGZZtDgl4DmasFg7gOB3JYbphV5g==}
@@ -2275,8 +2276,8 @@ packages:
     resolution: {integrity: sha512-BIdolzGpDO9MQ4nu3AUuDwHZZ+KViNm+EZ75Ae55eMXMqLVhDFqEMXxtUe9Qh8hjL+pIna/frs2j6Y2yD5Ua/g==}
     engines: {node: '>=16.9.0'}
 
-  hono@4.11.7:
-    resolution: {integrity: sha512-l7qMiNee7t82bH3SeyUCt9UF15EVmaBvsppY2zQtrbIhl/yzBTny+YUxsVjSjQ6gaqaeVtZmGocom8TzBlA4Yw==}
+  hono@4.12.7:
+    resolution: {integrity: sha512-jq9l1DM0zVIvsm3lv9Nw9nlJnMNPOcAtsbsgiUhWcFzPE99Gvo6yRTlszSLLYacMeQ6quHD6hMfId8crVHvexw==}
     engines: {node: '>=16.9.0'}
 
   http-proxy-agent@7.0.2:
@@ -4574,17 +4575,17 @@ snapshots:
       '@eslint/core': 0.17.0
       levn: 0.4.1
 
+  '@hono/node-server@1.19.10(hono@4.12.7)':
+    dependencies:
+      hono: 4.12.7
+
   '@hono/node-server@1.19.6(hono@4.10.6)':
     dependencies:
       hono: 4.10.6
 
-  '@hono/node-server@1.19.9(hono@4.11.7)':
+  '@hono/zod-validator@0.2.2(hono@4.12.7)(zod@3.25.76)':
     dependencies:
-      hono: 4.11.7
-
-  '@hono/zod-validator@0.2.2(hono@4.11.7)(zod@3.25.76)':
-    dependencies:
-      hono: 4.11.7
+      hono: 4.12.7
       zod: 3.25.76
 
   '@hookform/resolvers@3.10.0(react-hook-form@7.71.1(react@19.2.3))':
@@ -6005,7 +6006,7 @@ snapshots:
 
   hono@4.10.6: {}
 
-  hono@4.11.7: {}
+  hono@4.12.7: {}
 
   http-proxy-agent@7.0.2:
     dependencies:
