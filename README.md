@@ -135,9 +135,9 @@ public/
   data/          Schedule B dataset
 ```
 
-## Superseded code
+## History
 
-`apps/`, `packages/` and `services/` are the previous monorepo (Hono API, Prisma/Postgres,
-a Python OCR service, FedEx/UPS rate-shopping stubs). None of it is used by this
-application and none of it is built, linted or typechecked. It is left in place only so the
-history is easy to consult, and can be deleted.
+An earlier version of this repository was a monorepo — a Hono API, Prisma/Postgres, a
+Python OCR service and FedEx/UPS rate-shopping stubs. None of it served this problem, and
+it was removed in full once the client-side pipeline was verified. It remains in the git
+history if you need to consult it.

@@ -7,9 +7,7 @@ import tseslint from 'typescript-eslint'
 import { globalIgnores } from 'eslint/config'
 
 export default tseslint.config(
-  // `apps/`, `packages/` and `services/` are the pre-rewrite monorepo, superseded by the
-  // client-side app in `src/`. They are excluded rather than fixed; see README.
-  globalIgnores(['dist', 'apps', 'packages', 'services', 'public', 'scripts/*.mjs']),
+  globalIgnores(['dist', 'public', 'scripts/*.mjs']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [js.configs.recommended, ...tseslint.configs.recommended, jsxA11y.flatConfigs.recommended],
