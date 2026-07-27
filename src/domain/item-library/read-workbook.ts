@@ -1,0 +1,255 @@
+/**
+ * Reads a spreadsheet into rows of strings, in the browser, with no dependencies.
+ *
+ * An .xlsx file is a ZIP of XML parts. Everything needed to read one is already in the
+ * platform: `DecompressionStream('deflate-raw')` inflates the entries, and the parts
+ * themselves are machine-generated XML regular enough to read without a DOM.
+ *
+ * The alternative was a spreadsheet library. The maintained build of the usual one is not
+ * published to npm, and pulling a parser for a file the user picks by hand would put a
+ * large dependency on the same page as their shipment data for no capability gain. This is
+ * ~150 lines and reads every export Excel produces.
+ *
+ * Deliberately narrow: first worksheet, cell text only. No formulas, styles, or dates —
+ * an item master is a table of part numbers, codes and weights.
+ */
+
+/** A sheet as a rectangle of trimmed strings. Row 0 is whatever the file had first. */
+export type SheetRows = string[][]
+
+export class WorkbookError extends Error {}
+
+// ---------------------------------------------------------------------------
+// ZIP
+// ---------------------------------------------------------------------------
+
+const EOCD_SIGNATURE = 0x06054b50
+const CENTRAL_SIGNATURE = 0x02014b50
+
+/** Finds the end-of-central-directory record, scanning back over any trailing comment. */
+function findEocd(view: DataView): number {
+  const min = Math.max(0, view.byteLength - 0xffff - 22)
+  for (let i = view.byteLength - 22; i >= min; i--) {
+    if (view.getUint32(i, true) === EOCD_SIGNATURE) return i
+  }
+  throw new WorkbookError('Not a .xlsx file — no ZIP end-of-directory record was found.')
+}
+
+async function inflate(bytes: Uint8Array, method: number, name: string): Promise<Uint8Array> {
+  if (method === 0) return bytes
+  if (method !== 8) {
+    throw new WorkbookError(`"${name}" uses an unsupported ZIP compression method (${method}).`)
+  }
+  const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new DecompressionStream('deflate-raw'))
+  return new Uint8Array(await new Response(stream).arrayBuffer())
+}
+
+/**
+ * Extracts the named entries from a ZIP. Returns only those present, so a caller can ask
+ * for optional parts (`sharedStrings.xml` is absent from a workbook with no text cells).
+ */
+async function unzip(data: Uint8Array, wanted: (name: string) => boolean): Promise<Map<string, Uint8Array>> {
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
+  const eocd = findEocd(view)
+  const entryCount = view.getUint16(eocd + 10, true)
+  let offset = view.getUint32(eocd + 16, true)
+
+  if (entryCount === 0xffff || offset === 0xffffffff) {
+    throw new WorkbookError('This workbook uses ZIP64, which this reader does not support. Re-save it as .xlsx or export it as .csv.')
+  }
+
+  const out = new Map<string, Uint8Array>()
+  const decoder = new TextDecoder()
+
+  for (let i = 0; i < entryCount; i++) {
+    if (view.getUint32(offset, true) !== CENTRAL_SIGNATURE) {
+      throw new WorkbookError('This workbook’s ZIP directory is damaged.')
+    }
+    const method = view.getUint16(offset + 10, true)
+    const compressedSize = view.getUint32(offset + 20, true)
+    const nameLength = view.getUint16(offset + 28, true)
+    const extraLength = view.getUint16(offset + 30, true)
+    const commentLength = view.getUint16(offset + 32, true)
+    const localOffset = view.getUint32(offset + 42, true)
+    const name = decoder.decode(data.subarray(offset + 46, offset + 46 + nameLength))
+
+    if (wanted(name)) {
+      // The local header repeats the name and extra fields, and its extra-field length can
+      // differ from the central one, so it has to be read rather than assumed.
+      const localNameLength = view.getUint16(localOffset + 26, true)
+      const localExtraLength = view.getUint16(localOffset + 28, true)
+      const start = localOffset + 30 + localNameLength + localExtraLength
+      out.set(name, await inflate(data.subarray(start, start + compressedSize), method, name))
+    }
+
+    offset += 46 + nameLength + extraLength + commentLength
+  }
+
+  return out
+}
+
+// ---------------------------------------------------------------------------
+// XML
+// ---------------------------------------------------------------------------
+
+const ENTITIES: Record<string, string> = { lt: '<', gt: '>', quot: '"', apos: "'", amp: '&' }
+
+function decodeXml(text: string): string {
+  return text.replace(/&(#x?[0-9a-fA-F]+|[a-z]+);/g, (match, body: string) => {
+    if (body.startsWith('#x') || body.startsWith('#X')) return String.fromCodePoint(parseInt(body.slice(2), 16))
+    if (body.startsWith('#')) return String.fromCodePoint(Number(body.slice(1)))
+    return ENTITIES[body] ?? match
+  })
+}
+
+/** Concatenates every `<t>` in a fragment, which is how rich-text runs spell one string. */
+function textRuns(fragment: string): string {
+  let out = ''
+  for (const match of fragment.matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)) out += decodeXml(match[1])
+  return out
+}
+
+/** `A` -> 0, `Z` -> 25, `AA` -> 26. */
+export function columnToIndex(reference: string): number {
+  let n = 0
+  for (const char of reference) n = n * 26 + (char.charCodeAt(0) - 64)
+  return n - 1
+}
+
+// ---------------------------------------------------------------------------
+// Workbook
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolves the path of the first worksheet through the workbook's relationships.
+ *
+ * Sheet order in `workbook.xml` is the order shown in Excel's tab bar, which is not
+ * necessarily `sheet1.xml` — a workbook whose first tab was deleted and re-added starts at
+ * `sheet2.xml`. Falling back to the lowest-numbered file would silently read the wrong tab.
+ */
+function firstSheetPath(workbookXml: string, relsXml: string): string | null {
+  const sheet = workbookXml.match(/<sheet\b[^>]*\/?>/)?.[0]
+  const relationId = sheet?.match(/r:id="([^"]+)"/)?.[1]
+  if (!relationId) return null
+
+  for (const relation of relsXml.matchAll(/<Relationship\b[^>]*>/g)) {
+    if (relation[0].match(/Id="([^"]+)"/)?.[1] !== relationId) continue
+    const target = relation[0].match(/Target="([^"]+)"/)?.[1]
+    if (!target) return null
+    return target.startsWith('/') ? target.slice(1) : `xl/${target.replace(/^\.\//, '')}`
+  }
+  return null
+}
+
+/** Reads the first worksheet of an .xlsx file. */
+export async function readXlsx(data: Uint8Array): Promise<SheetRows> {
+  const decoder = new TextDecoder()
+  const parts = await unzip(
+    data,
+    (name) =>
+      name === 'xl/workbook.xml' ||
+      name === 'xl/_rels/workbook.xml.rels' ||
+      name === 'xl/sharedStrings.xml' ||
+      name.startsWith('xl/worksheets/'),
+  )
+
+  const workbookXml = parts.get('xl/workbook.xml')
+  if (!workbookXml) throw new WorkbookError('Not a .xlsx workbook — xl/workbook.xml is missing.')
+
+  const relsXml = parts.get('xl/_rels/workbook.xml.rels')
+  const path = relsXml ? firstSheetPath(decoder.decode(workbookXml), decoder.decode(relsXml)) : null
+  const sheetBytes =
+    (path ? parts.get(path) : undefined) ??
+    parts.get('xl/worksheets/sheet1.xml') ??
+    [...parts.entries()].filter(([name]) => name.startsWith('xl/worksheets/')).sort(([a], [b]) => a.localeCompare(b))[0]?.[1]
+  if (!sheetBytes) throw new WorkbookError('This workbook contains no worksheets.')
+
+  const shared: string[] = []
+  const sharedBytes = parts.get('xl/sharedStrings.xml')
+  if (sharedBytes) {
+    for (const item of decoder.decode(sharedBytes).matchAll(/<si>([\s\S]*?)<\/si>/g)) shared.push(textRuns(item[1]))
+  }
+
+  const rows: SheetRows = []
+  for (const row of decoder.decode(sheetBytes).matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
+    const cells: string[] = []
+    // Matches both `<c ...>...</c>` and the self-closing `<c ... />` Excel writes for a
+    // cell that carries only formatting.
+    for (const cell of row[1].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+      const attributes = cell[1]
+      const body = cell[2] ?? ''
+      const reference = attributes.match(/r="([A-Z]+)\d+"/)?.[1]
+      const type = attributes.match(/t="([^"]+)"/)?.[1]
+
+      let value: string
+      if (type === 's') {
+        const raw = body.match(/<v>([\s\S]*?)<\/v>/)?.[1]
+        value = shared[Number(raw)] ?? ''
+      } else if (type === 'inlineStr') {
+        value = textRuns(body)
+      } else {
+        value = decodeXml(body.match(/<v>([\s\S]*?)<\/v>/)?.[1] ?? '')
+      }
+
+      const index = reference ? columnToIndex(reference) : cells.length
+      while (cells.length < index) cells.push('')
+      cells[index] = value.trim()
+    }
+    rows.push(cells)
+  }
+
+  return rows
+}
+
+// ---------------------------------------------------------------------------
+// Delimited text
+// ---------------------------------------------------------------------------
+
+/** Parses CSV/TSV, honouring RFC 4180 quoting (`"a,b"`, `""` for a literal quote). */
+export function readDelimited(text: string, delimiter?: string): SheetRows {
+  const body = text.replace(/^\uFEFF/, '')
+  const sep = delimiter ?? guessDelimiter(body)
+  const rows: SheetRows = []
+  let row: string[] = []
+  let field = ''
+  let quoted = false
+
+  for (let i = 0; i < body.length; i++) {
+    const char = body[i]
+    if (quoted) {
+      if (char !== '"') field += char
+      else if (body[i + 1] === '"') { field += '"'; i++ }
+      else quoted = false
+      continue
+    }
+    if (char === '"') quoted = true
+    else if (char === sep) { row.push(field.trim()); field = '' }
+    else if (char === '\n') { row.push(field.trim()); rows.push(row); row = []; field = '' }
+    else if (char !== '\r') field += char
+  }
+  if (field || row.length) { row.push(field.trim()); rows.push(row) }
+
+  return rows
+}
+
+function guessDelimiter(text: string): string {
+  const sample = text.slice(0, 4096)
+  const tabs = (sample.match(/\t/g) ?? []).length
+  const commas = (sample.match(/,/g) ?? []).length
+  const semicolons = (sample.match(/;/g) ?? []).length
+  if (tabs > commas && tabs > semicolons) return '\t'
+  if (semicolons > commas) return ';'
+  return ','
+}
+
+/** Reads whichever of the supported formats `fileName` names. */
+export async function readWorkbook(fileName: string, data: Uint8Array): Promise<SheetRows> {
+  if (/\.(csv|tsv|txt)$/i.test(fileName)) return readDelimited(new TextDecoder().decode(data))
+  if (/\.xlsx$/i.test(fileName)) return readXlsx(data)
+  if (/\.xls$/i.test(fileName)) {
+    throw new WorkbookError('The old .xls format is not supported. Open it in Excel and save as .xlsx or .csv.')
+  }
+  // No recognised extension: sniff the ZIP magic number rather than refusing outright.
+  if (data[0] === 0x50 && data[1] === 0x4b) return readXlsx(data)
+  return readDelimited(new TextDecoder().decode(data))
+}
