@@ -3,8 +3,10 @@ import { Badge, Button, Card, CardBody, CardHeader, Select } from './components/
 import { UploadPanel } from './features/upload-panel'
 import { ChecksPanel, CommodityTable, OverridesPanel, PartWeightsPanel, ShipmentSummary } from './features/review'
 import { ManualFieldsPanel } from './features/manual-fields'
+import { ItemLibraryPanel, type ImportMode } from './features/item-library'
 import { HistoryPanel, OutputPanel } from './features/output-panel'
 import { reconcile, resolveDestinationCountry } from './domain/reconcile'
+import { indexByPart, libraryWeights, type ItemLibraryEntry } from './domain/item-library'
 import { loadScheduleB, type ScheduleBIndex } from './domain/schedule-b'
 import {
   applyCarrierDefaults,
@@ -38,6 +40,7 @@ export function App() {
   const [settings, setSettings] = useState<ShipmentSettings>(() => defaultShipmentSettings(getAdapter('nippon-express')))
   const [overrides, setOverrides] = useState<OverrideRecord[]>([])
   const [partWeights, setPartWeights] = useState<PartWeightRecord[]>([])
+  const [items, setItems] = useState<ItemLibraryEntry[]>([])
   const [shipments, setShipments] = useState<ShipmentRecord[]>([])
   const [scheduleB, setScheduleB] = useState<ScheduleBIndex | null>(null)
   const [scheduleBError, setScheduleBError] = useState<string | null>(null)
@@ -53,15 +56,17 @@ export function App() {
       .catch((e: unknown) => setScheduleBError(e instanceof Error ? e.message : 'Schedule B data unavailable.'))
 
     void (async () => {
-      const [saved, savedOverrides, savedWeights, history] = await Promise.all([
+      const [saved, savedOverrides, savedWeights, savedItems, history] = await Promise.all([
         indexedDbStore.getProfile(),
         indexedDbStore.listOverrides(),
         indexedDbStore.listPartWeights(),
+        indexedDbStore.listItems(),
         indexedDbStore.listShipments(),
       ])
       if (saved) setProfile(saved)
       setOverrides(savedOverrides)
       setPartWeights(savedWeights)
+      setItems(savedItems)
       setShipments(history)
     })()
   }, [])
@@ -103,6 +108,20 @@ export function App() {
     [carrierId],
   )
 
+  const itemsByPart = useMemo(() => indexByPart(items), [items])
+
+  /**
+   * Weights available to a format that prints none.
+   *
+   * The imported item master is the base layer and a weight typed on the review screen
+   * overrides it, because a figure a person entered for this shipment is a deliberate act
+   * and a library row is a default.
+   */
+  const unitWeightsByPart = useMemo(
+    () => ({ ...libraryWeights(items), ...partWeightsToMap(partWeights) }),
+    [items, partWeights],
+  )
+
   const reconciliation = useMemo(() => {
     if (!parsed) return null
     return reconcile(parsed, scheduleB, {
@@ -111,10 +130,11 @@ export function App() {
       license: settings.license || null,
       overrides: overridesToMap(overrides),
       // Only consulted for formats that state no weights; a printed weight always wins.
-      unitWeightsByPart: partWeightsToMap(partWeights),
+      unitWeightsByPart,
+      itemsByPart,
       maxRows: adapter.maxCommodityRows,
     })
-  }, [parsed, scheduleB, settings.eccn, settings.sme, settings.license, overrides, partWeights, adapter])
+  }, [parsed, scheduleB, settings.eccn, settings.sme, settings.license, overrides, unitWeightsByPart, itemsByPart, adapter])
 
   const draft = useMemo(
     () => (reconciliation ? buildDraft(reconciliation, profile, settings, adapter) : null),
@@ -186,12 +206,30 @@ export function App() {
     setShipments(await indexedDbStore.listShipments())
   }, [reconciliation, parsed, adapter, settings, draft])
 
+  const importItemLibrary = useCallback(async (entries: ItemLibraryEntry[], mode: ImportMode) => {
+    if (mode === 'merge') await indexedDbStore.mergeItems(entries)
+    else await indexedDbStore.replaceItems(entries)
+    setItems(await indexedDbStore.listItems())
+  }, [])
+
+  const clearItemLibrary = useCallback(async () => {
+    if (!window.confirm('Remove the imported item library from this machine?')) return
+    await indexedDbStore.clearItems()
+    setItems([])
+  }, [])
+
   const clearAll = useCallback(async () => {
-    if (!window.confirm('Delete the saved profile, consignees, overrides and shipment history from this machine?')) return
+    if (
+      !window.confirm(
+        'Delete the saved profile, consignees, overrides, item library and shipment history from this machine?',
+      )
+    )
+      return
     await indexedDbStore.clearAll()
     setProfile(EMPTY_PROFILE)
     setOverrides([])
     setPartWeights([])
+    setItems([])
     setShipments([])
   }, [])
 
@@ -233,6 +271,12 @@ export function App() {
         {!parsed ? (
           <>
             <UploadPanel onParsed={(p) => void handleParsed(p)} onError={setError} busy={busy} />
+            <ItemLibraryPanel
+              entries={items}
+              scheduleB={scheduleB}
+              onImport={(entries, mode) => void importItemLibrary(entries, mode)}
+              onClear={() => void clearItemLibrary()}
+            />
             <HistoryPanel shipments={shipments} onClear={() => void clearAll()} />
           </>
         ) : reconciliation && draft ? (
@@ -282,7 +326,7 @@ export function App() {
             {!parsed.providesWeights ? (
               <PartWeightsPanel
                 reconciliation={reconciliation}
-                weights={partWeightsToMap(partWeights)}
+                weights={unitWeightsByPart}
                 onSave={(part, description, weight) => void savePartWeight(part, description, weight)}
               />
             ) : null}
