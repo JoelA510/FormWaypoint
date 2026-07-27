@@ -1,49 +1,143 @@
-# FormWaypoint (2026 Rewrite)
+# FormWaypoint
 
-**Last verified**: 2026-01-16
+Turns a combined **Commercial Invoice & Packing List (CIPL)** into a completed carrier
+**Shipper's Letter of Instruction (SLI)**.
 
-A self-healing, fully typed, AI-native logistics platform. Built with the **2026 Tech Stack**.
-
-## 1. Quick Start
+Everything runs in the browser. The CIPL is parsed locally, the carrier's blank PDF form is
+filled locally, and nothing is uploaded — there is no backend, no account, and no network
+call carrying shipment data.
 
 ```bash
-# Install dependencies
-pnpm install
-
-# Start Development Server (Full Stack)
-turbo run dev
+npm install
+npm run dev      # http://localhost:5173
 ```
 
-## 2. Project Structure
+## What it does
 
-- **apps/api**: Hono (Node 24) Backend.
-  - `src/modules`: Domain-driven vertical slices (Ingestion, Classification, Shipments).
-- **apps/web**: React 19 + Vite + TanStack Router.
-  - `src/routes`: File-based routing.
-  - `src/utils/client.ts`: Type-safe Hono RPC Client.
-- **packages/schema**: Shared Prisma Schema & Zod Types.
-  - `prisma/schema.prisma`: Defines `Shipment` and `HtsCode` with ParadeDB extensions.
-- **services/ai**: Python 3.14 FastAPI Service (OCR & Predictions).
+1. **Reads the CIPL.** These are generated PDFs with a real text layer, so there is no OCR
+   anywhere in the pipeline — the parser works from the text and its coordinates.
+2. **Picks the controlling document set.** vendor CIPLs contain the same shipment twice:
+   `FC` priced in USD and `TP1` priced in the destination currency. Only the USD set is
+   used, because SLI box 31 is "value at the port of export in US dollars".
+3. **Joins invoice lines to packing-list lines** by lot id, then order + sequence, then
+   order + line + part. Never by description.
+4. **Groups lines into commodity rows** keyed on Schedule B, D/F and the export-control
+   triplet — matching how these shipments are actually filed.
+5. **Validates every Schedule B number** against the U.S. Census Bureau AES commodity file:
+   ten digits, currently active, reported in the required unit of quantity, and plausibly
+   describing the goods.
+6. **Proves the arithmetic** before generating anything. Quantities, weights and values must
+   sum back to the totals printed on the source document.
+7. **Fills the carrier's real blank form** and downloads it, still editable and unsigned.
 
-## 3. Technology Stack
+## Supported carriers
 
-- **Monorepo**: Turborepo + pnpm
-- **Backend**: Hono (RPC-style)
-- **Database**: PostgreSQL (Neon) + ParadeDB (Search/Vector)
-- **ORM**: Prisma 7.2 (TypedSQL, `postgresqlExtensions`)
-- **Frontend**: React 19, Tailwind v4, TanStack (Router/Query)
-- **AI**: Python + FastAPI (ATLAS/Tesseract wrappers)
+| Carrier | Form | Rows | Notes |
+| --- | --- | --- | --- |
+| Nippon Express USA | SLI, file version 01/04/2022 | 8 | Per-cell fields; values keep cents; `EAR99` per row |
+| CEVA Logistics | SLI 11201-C3 rev. 8/2023 | 12 | One multiline field per column; values rounded to whole dollars |
 
-## 4. Architecture Standards
+FedEx and UPS are handled differently on purpose: instead of an API, the tool produces a
+**keying sheet** laid out in the order FedEx Ship Manager and UPS WorldShip prompt for each
+field, for manual entry. Import files are not generated because WorldShip import maps and
+Ship Manager flat-file layouts are configured per installation, and a mismatched layout
+fails silently or transposes values.
 
-- **Vertical Slices**: Code organized by feature capability, not usage layer.
-- **Strict Type Safety**: Frontend consumes Backend types directly via `hc<AppType>`.
-- **Schema First**: All data changes start in `@repo/schema`.
+Adding a carrier means writing one adapter under `src/carriers/`. The parser and the
+reconciliation engine contain no carrier-specific logic.
 
-## 5. Current State
+## What it will not do
 
-- ✅ **Monorepo Scaffolding**: Complete.
-- ✅ **Data Ingestion**: S3 Uploads & BullMQ Workers implemented.
-- ✅ **Search**: Hybrid Search (BM25 + Vector) wired up via Prisma Raw SQL.
-- ✅ **Frontend**: Shipment Review page consuming real API types.
-- 🚧 **AI Service**: Endpoints mocked, logic pending.
+These are deliberate. An export declaration is signed under penalty, and the tool refuses to
+manufacture the parts a document cannot support:
+
+- It never assigns **EAR99** because no ECCN appears on the invoice, and never assigns
+  **NLR** because EAR99 was chosen. Both are entered by the filer.
+- It never converts an **HTSUS** number into a Schedule B number.
+- It never adopts a classification from a historical form. One sample shipment was filed
+  with `8483.10.5000` ("transmission shafts and cranks") on a cable assembly; a tool that
+  learned from that would repeat the error forever. Changing a code requires an explicit,
+  recorded override — and the override is still challenged if it does not fit the goods.
+- It never infers **country of origin**, **hazardous-material status**, **routed-export
+  status**, **consignee type** or **related-party status**.
+- It never treats a blank field as zero, and never applies a signature.
+
+## Verification
+
+70 tests run against three real, manually-processed shipments. The expected values come from
+the completed SLIs that were filed for them, so a pass means the tool reproduces what a
+person produced by hand. A further set pins the failure modes that would otherwise be
+silent — a blank exporter profile, an unreadable weight total, a double-claimed packing
+line, an impossible date — because a form that looks complete and is wrong is the worst
+outcome this tool can produce.
+
+| Shipment | Carrier | Lines → rows | Quantity | Net weight | USD |
+| --- | --- | --- | ---: | ---: | ---: |
+| vendorA1 | Nippon Express | 3 → 2 | 3 | 2.468 kg | 1,113.14 |
+| vendorA2 | Nippon Express | 1 → 1 | 1 | 1.270 kg | 51.60 |
+| vendorA3 | CEVA | 11 → 3 | 97 | 138.841 kg | 129,999.10 |
+
+```bash
+npm run check    # typecheck, lint, tests, production build
+```
+
+CI runs exactly this command on every push and pull request, so it cannot drift from what
+you see locally.
+
+Only the CIPLs are committed as fixtures. The completed SLIs they were checked against are
+not, because they carry handwritten signatures; the values read off them live in the test
+expectations instead.
+
+## Schedule B data
+
+`public/data/schedule-b.json` is built from the Census Bureau's AES commodity concordance
+(9,746 codes). Refresh it when Schedule B changes — typically each January and July:
+
+```bash
+node scripts/build-schedule-b.mjs --fetch
+```
+
+The dataset is the authority on three things the CIPL cannot tell you: whether a code is
+currently valid, its official description, and the unit of quantity AES requires. That last
+one matters more than it looks — `9031.90.0000` and `8483.10.5000` are reported in
+kilograms, not pieces, and the tool flags a piece count filed against them.
+
+## Local data
+
+Kept in IndexedDB on this machine only, and clearable from the History panel:
+
+- the exporter profile (USPPI name, EIN, signer details),
+- per-consignee values that are not on the CIPL (EORI/USCI, consignee type),
+- approved classification overrides with their reason and approver,
+- processed shipments, for autofill and audit.
+
+`LocalStore` in `src/store/local-store.ts` is the seam for a desktop build: a Tauri
+packaging swaps the IndexedDB implementation for a file-backed one without touching any
+calling code.
+
+## Project layout
+
+```
+src/
+  domain/
+    cipl/        PDF text extraction and the vendor CIPL parser
+    reconcile/   document-set selection, line joining, grouping, checks
+    schedule-b/  Census dataset lookup and validation
+    draft.ts     assembles reviewed values for a carrier form
+  carriers/
+    nippon-express/   field map + adapter
+    ceva/             field map + adapter
+    keying-sheet/     FedEx Ship Manager / UPS WorldShip
+  features/      upload, review, manual fields, output
+  store/         local persistence
+public/
+  templates/     blank carrier forms
+  data/          Schedule B dataset
+```
+
+## Superseded code
+
+`apps/`, `packages/` and `services/` are the previous monorepo (Hono API, Prisma/Postgres,
+a Python OCR service, FedEx/UPS rate-shopping stubs). None of it is used by this
+application and none of it is built, linted or typechecked. It is left in place only so the
+history is easy to consult, and can be deleted.
