@@ -46,33 +46,52 @@ export function roundTo(value: number, decimals: number): number {
  * must stay distinct until the aggregation step decides to merge them).
  */
 export function joinInvoiceToPacking(invoiceLines: SourceLine[], packingLines: SourceLine[]): MergedLine[] {
-  const remaining = new Set(packingLines.map((l) => l.id))
-  const byItemId = new Map<string, SourceLine>()
-  const byOrderSequence = new Map<string, SourceLine>()
-  const byOrderLinePart = new Map<string, SourceLine>()
+  // Buckets rather than single values: two packing lines can legitimately share a weaker
+  // key, and a Map would silently keep only the last one.
+  const byItemId = new Map<string, SourceLine[]>()
+  const byOrderSequence = new Map<string, SourceLine[]>()
+  const byOrderLinePart = new Map<string, SourceLine[]>()
+
+  const push = (map: Map<string, SourceLine[]>, key: string, line: SourceLine) => {
+    const bucket = map.get(key)
+    if (bucket) bucket.push(line)
+    else map.set(key, [line])
+  }
 
   for (const line of packingLines) {
-    if (line.itemId) byItemId.set(line.itemId, line)
-    byOrderSequence.set(`${line.orderNumber}|${line.sequence}`, line)
-    byOrderLinePart.set(`${line.orderNumber}|${line.lineNumber}|${line.partNumber}`, line)
+    if (line.itemId) push(byItemId, line.itemId, line)
+    push(byOrderSequence, `${line.orderNumber}|${line.sequence}`, line)
+    push(byOrderLinePart, `${line.orderNumber}|${line.lineNumber}|${line.partNumber}`, line)
   }
+
+  // The join must be one-to-one. If two invoice lines both claimed the same packing line,
+  // its weight would be counted twice while the real partner line went missing — an
+  // overstatement that only the weight reconciliation would catch, and only if the
+  // packing-list total could be read.
+  const claimed = new Set<string>()
+  const takeFirstUnclaimed = (bucket: SourceLine[] | undefined): SourceLine | undefined =>
+    bucket?.find((line) => !claimed.has(line.id))
 
   return invoiceLines.map((invoice) => {
     let match: SourceLine | undefined
     let joinKey: MergedLine['joinKey'] = 'unmatched'
 
-    if (invoice.itemId && byItemId.has(invoice.itemId)) {
-      match = byItemId.get(invoice.itemId)
-      joinKey = 'itemId'
-    } else if (byOrderSequence.has(`${invoice.orderNumber}|${invoice.sequence}`)) {
-      match = byOrderSequence.get(`${invoice.orderNumber}|${invoice.sequence}`)
-      joinKey = 'order+sequence'
-    } else if (byOrderLinePart.has(`${invoice.orderNumber}|${invoice.lineNumber}|${invoice.partNumber}`)) {
-      match = byOrderLinePart.get(`${invoice.orderNumber}|${invoice.lineNumber}|${invoice.partNumber}`)
-      joinKey = 'order+line+part'
+    if (invoice.itemId) {
+      match = takeFirstUnclaimed(byItemId.get(invoice.itemId))
+      if (match) joinKey = 'itemId'
+    }
+    if (!match) {
+      match = takeFirstUnclaimed(byOrderSequence.get(`${invoice.orderNumber}|${invoice.sequence}`))
+      if (match) joinKey = 'order+sequence'
+    }
+    if (!match) {
+      match = takeFirstUnclaimed(
+        byOrderLinePart.get(`${invoice.orderNumber}|${invoice.lineNumber}|${invoice.partNumber}`),
+      )
+      if (match) joinKey = 'order+line+part'
     }
 
-    if (match) remaining.delete(match.id)
+    if (match) claimed.add(match.id)
 
     return {
       ...invoice,
@@ -108,11 +127,6 @@ export interface AggregationOptions {
    * Applied before grouping, so an override can merge two previously separate rows.
    */
   overrides?: Record<string, string>
-  /**
-   * Whether country of origin joins the grouping key. Off by default: the historical SLIs
-   * group purely by classification and D/F, rolling several origins into one row.
-   */
-  separateByCountry?: boolean
 }
 
 /**
@@ -142,7 +156,6 @@ export function aggregateLines(lines: MergedLine[], options: AggregationOptions)
       options.license ?? '',
       options.sme ?? '',
       canonicalUnit(line.uom) ?? '',
-      options.separateByCountry ? line.countryOfOrigin : '',
     ].join('|')
 
     const existing = groups.get(key)

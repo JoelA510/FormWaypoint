@@ -14,7 +14,7 @@ import type { CompanyProfile, ShipmentSettings } from '../domain/draft'
 import type { CheckResult, SLILine } from '../domain/types'
 
 const DB_NAME = 'formwaypoint'
-const DB_VERSION = 1
+const DB_VERSION = 2
 
 /** Saved per consignee so the values that are not on the CIPL only get typed once. */
 export interface ConsigneeRecord {
@@ -46,6 +46,15 @@ export interface OverrideRecord {
 
 /** One processed shipment, kept for autofill and as an audit trail. */
 export interface ShipmentRecord {
+  /**
+   * `${invoiceNumber}@${processedAt}`.
+   *
+   * Keyed per run, not per invoice: regenerating a shipment after correcting an ECCN must
+   * add a record, not replace the earlier one. An audit trail that overwrites its own
+   * history is worse than none. It also keeps shipments whose invoice number could not be
+   * parsed from all collapsing onto the empty-string key.
+   */
+  id: string
   invoiceNumber: string
   processedAt: string
   carrierId: string
@@ -94,10 +103,13 @@ function db(): Promise<Schema> {
         if (!database.objectStoreNames.contains('overrides')) {
           database.createObjectStore('overrides', { keyPath: 'sourceCode' })
         }
-        if (!database.objectStoreNames.contains('shipments')) {
-          const store = database.createObjectStore('shipments', { keyPath: 'invoiceNumber' })
-          store.createIndex('processedAt', 'processedAt')
-        }
+        // v1 keyed shipments on invoiceNumber, which silently overwrote re-runs. v2 keys
+        // on a per-run id; the old store is dropped rather than migrated because it only
+        // ever held the most recent attempt per invoice.
+        if (database.objectStoreNames.contains('shipments')) database.deleteObjectStore('shipments')
+        const shipments = database.createObjectStore('shipments', { keyPath: 'id' })
+        shipments.createIndex('processedAt', 'processedAt')
+        shipments.createIndex('invoiceNumber', 'invoiceNumber')
       },
     })
   }
@@ -152,51 +164,4 @@ export const indexedDbStore: LocalStore = {
 /** Overrides in the shape the reconciliation engine expects. */
 export function overridesToMap(records: OverrideRecord[]): Record<string, string> {
   return Object.fromEntries(records.map((r) => [r.sourceCode, r.approvedCode]))
-}
-
-/** In-memory implementation used by tests and by a strict no-persistence mode. */
-export function createMemoryStore(): LocalStore {
-  let profile: CompanyProfile | null = null
-  const consignees = new Map<string, ConsigneeRecord>()
-  const overrides = new Map<string, OverrideRecord>()
-  const shipments = new Map<string, ShipmentRecord>()
-
-  return {
-    async getProfile() {
-      return profile
-    },
-    async saveProfile(next) {
-      profile = next
-    },
-    async getConsignee(name) {
-      return consignees.get(name) ?? null
-    },
-    async saveConsignee(record) {
-      consignees.set(record.name, record)
-    },
-    async listConsignees() {
-      return [...consignees.values()]
-    },
-    async listOverrides() {
-      return [...overrides.values()]
-    },
-    async saveOverride(record) {
-      overrides.set(record.sourceCode, record)
-    },
-    async deleteOverride(sourceCode) {
-      overrides.delete(sourceCode)
-    },
-    async listShipments(limit = 50) {
-      return [...shipments.values()].sort((a, b) => b.processedAt.localeCompare(a.processedAt)).slice(0, limit)
-    },
-    async saveShipment(record) {
-      shipments.set(record.invoiceNumber, record)
-    },
-    async clearAll() {
-      profile = null
-      consignees.clear()
-      overrides.clear()
-      shipments.clear()
-    },
-  }
 }

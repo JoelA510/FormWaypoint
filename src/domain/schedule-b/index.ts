@@ -35,8 +35,6 @@ export interface ScheduleBIndex {
   readonly generatedAt: string
   readonly size: number
   lookup(rawCode: string): ScheduleBEntry | null
-  /** Codes sharing the first `n` digits — used to suggest alternatives for a bad code. */
-  siblings(rawCode: string, prefixLength?: number): ScheduleBEntry[]
 }
 
 /** `8544.42.0000` -> `8544420000`. Also tolerates spaces and hyphens. */
@@ -62,13 +60,6 @@ export function createScheduleBIndex(payload: RawPayload): ScheduleBIndex {
       const hit = codes[digits]
       return hit ? { code: digits, description: hit.d, units: hit.u } : null
     },
-    siblings(rawCode: string, prefixLength = 6) {
-      const prefix = normalizeScheduleB(rawCode).slice(0, prefixLength)
-      if (prefix.length < prefixLength) return []
-      return Object.entries(codes)
-        .filter(([code]) => code.startsWith(prefix))
-        .map(([code, v]) => ({ code, description: v.d, units: v.u }))
-    },
   }
 }
 
@@ -87,11 +78,6 @@ export function loadScheduleB(fetchJson?: () => Promise<RawPayload>): Promise<Sc
     cached = loader().then(createScheduleBIndex)
   }
   return cached
-}
-
-/** Test seam — drops the memoised dataset. */
-export function resetScheduleBCache(): void {
-  cached = null
 }
 
 // ---------------------------------------------------------------------------

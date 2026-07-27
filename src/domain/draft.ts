@@ -8,7 +8,8 @@
  * profile or from the person filing, and is marked as such on the review screen.
  */
 import type { CarrierAdapter, ConsigneeType, SliDraft, TransportMode } from '../carriers/types'
-import type { Reconciliation } from './types'
+import { parseLooseDate } from '../carriers/form-utils'
+import type { CheckResult, Reconciliation } from './types'
 import { resolveDestinationCountry } from './reconcile'
 
 /** Stable facts about the exporter. Saved locally and reused across shipments. */
@@ -192,6 +193,114 @@ export function summariseReferences(references: string[]): string {
   if (!references.length) return ''
   if (references.length === 1) return references[0]
   return `${references[0]}, ${references.length - 1} Add'l`
+}
+
+/**
+ * Carrier defaults, reapplied when the forwarder changes.
+ *
+ * Only fields the *adapter* owns are reset. Anything the person typed — references,
+ * consignee id, instructions, and the export-control triplet — is theirs and survives the
+ * switch. The transport mode is additionally clamped, because CEVA's form has no truck or
+ * rail column and a stale `TRUCK` would otherwise be filed as air.
+ */
+export function applyCarrierDefaults(previous: ShipmentSettings, adapter: CarrierAdapter): ShipmentSettings {
+  const defaults = defaultShipmentSettings(adapter)
+  return {
+    ...defaults,
+    transportationReference: previous.transportationReference,
+    shipmentReference: previous.shipmentReference,
+    consigneeId: previous.consigneeId,
+    consigneeType: previous.consigneeType,
+    partiesRelated: previous.partiesRelated,
+    hazardous: previous.hazardous,
+    routedExport: previous.routedExport,
+    insured: previous.insured,
+    specialInstructions: previous.specialInstructions,
+    namedPlace: previous.namedPlace,
+    piecesAndDimensions: previous.piecesAndDimensions,
+    eccn: previous.eccn,
+    sme: previous.sme,
+    license: previous.license,
+    mode: adapter.supportedModes.includes(previous.mode) ? previous.mode : (defaults.mode ?? 'AIR'),
+  }
+}
+
+/**
+ * Checks over the assembled draft rather than the source document.
+ *
+ * `reconcile` can only prove what the CIPL says. These cover the other half — the fields a
+ * person supplies — because a form whose totals reconcile perfectly but whose USPPI name,
+ * EIN and signer block are blank is not a form anyone should be able to download.
+ */
+export function checkDraft(draft: SliDraft, adapter: CarrierAdapter): CheckResult[] {
+  const checks: CheckResult[] = []
+
+  const required: [string, string][] = [
+    ['USPPI name', draft.usppiName],
+    ['USPPI EIN', draft.usppiEin],
+    ['ZIP code', draft.usppiZip],
+    ['Point of origin', draft.pointOfOrigin],
+    ['Signer name', draft.signerName],
+    ['Signer title', draft.signerTitle],
+  ]
+  const missing = required.filter(([, value]) => !value?.trim()).map(([label]) => label)
+
+  checks.push({
+    id: 'profile-complete',
+    severity: 'blocking',
+    title: 'Exporter profile is complete',
+    detail: missing.length
+      ? `Not set: ${missing.join(', ')}. These identify the party certifying the declaration and cannot be left blank.`
+      : 'Every identifying field the form requires is present.',
+    passed: missing.length === 0,
+  })
+
+  checks.push({
+    id: 'destination-country',
+    severity: 'blocking',
+    title: 'Country of ultimate destination established',
+    detail: draft.destinationCountry
+      ? `Filing "${draft.destinationCountry}".`
+      : 'Neither the discharge port nor the consignee address yields a country name. Enter it before filing — ' +
+        'a postal line must not be used here.',
+    passed: Boolean(draft.destinationCountry),
+  })
+
+  const dateOk = parseLooseDate(draft.dateOfExportation) !== null
+  checks.push({
+    id: 'export-date',
+    severity: 'blocking',
+    title: 'Date of exportation is a real date',
+    detail: dateOk
+      ? `Filing ${draft.dateOfExportation}.`
+      : `"${draft.dateOfExportation || '(blank)'}" could not be read as a date, so it would be written to the ` +
+        'form unformatted. Correct it before filing.',
+    passed: dateOk,
+  })
+
+  const modeOk = adapter.supportedModes.includes(draft.mode)
+  checks.push({
+    id: 'mode-supported',
+    severity: 'blocking',
+    title: 'Transport mode is on this form',
+    detail: modeOk
+      ? `${draft.mode} is supported by the ${adapter.name} form.`
+      : `${draft.mode} has no box on the ${adapter.name} form (it supports ${adapter.supportedModes.join(', ')}). ` +
+        'Choose a supported mode or a different carrier.',
+    passed: modeOk,
+  })
+
+  checks.push({
+    id: 'shipment-reference',
+    severity: 'warning',
+    title: 'Shipment reference supplied',
+    detail: draft.shipmentReference
+      ? `Filing "${draft.shipmentReference}".`
+      : 'Empty. The reference identifies this filing and must be unique for five years; it is not on the CIPL.',
+    passed: Boolean(draft.shipmentReference),
+  })
+
+  return checks
 }
 
 /** Package summary from the packing list. Dimensions are not on the CIPL and stay manual. */

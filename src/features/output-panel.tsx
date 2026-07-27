@@ -10,11 +10,14 @@ export function OutputPanel({
   adapter,
   reconciliation,
   draft,
+  canGenerate,
   onGenerated,
 }: {
   adapter: CarrierAdapter
   reconciliation: Reconciliation
   draft: SliDraft
+  /** Gated on the document checks *and* the draft checks — see App. */
+  canGenerate: boolean
   onGenerated: () => void
 }) {
   const [busy, setBusy] = useState(false)
@@ -22,7 +25,7 @@ export function OutputPanel({
   const [error, setError] = useState<string | null>(null)
   const [target, setTarget] = useState<KeyingTarget>('fedex-ship-manager')
 
-  const { canGenerate, header } = reconciliation
+  const { header } = reconciliation
 
   async function generate() {
     setBusy(true)
@@ -162,8 +165,8 @@ export function HistoryPanel({
               </thead>
               <tbody>
                 {shipments.map((record) => (
-                  <tr key={record.invoiceNumber} className="border-b last:border-b-0">
-                    <td className="tabular py-2 pr-4">{record.invoiceNumber}</td>
+                  <tr key={record.id} className="border-b last:border-b-0">
+                    <td className="tabular py-2 pr-4">{record.invoiceNumber || '—'}</td>
                     <td className="py-2 pr-4">{record.consigneeName}</td>
                     <td className="py-2 pr-4">{record.destinationCountry}</td>
                     <td className="tabular py-2 pr-4 text-right">{record.totalQuantity}</td>

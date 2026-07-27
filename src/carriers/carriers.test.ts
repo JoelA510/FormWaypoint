@@ -309,3 +309,30 @@ describe('country in the ultimate consignee block', () => {
     expect(lines.filter((l) => l.trim() === 'China')).toHaveLength(1)
   })
 })
+
+describe('CEVA fields that were mapped but not written', () => {
+  it('writes the insurance box when the shipment is insured', async () => {
+    const adapter = getAdapter('ceva')
+    const result = reconcile(parsed.K78027EC, scheduleB, { ...CONTROLLED, maxRows: adapter.maxCommodityRows })
+    const draft = { ...buildDraft(result, OMRON, defaultShipmentSettings(adapter), adapter), insured: true }
+    const values = await readBack((await adapter.fill(template('ceva-sli.pdf'), draft)).bytes)
+    expect(values.Insurance).toBe('YES')
+  })
+
+  it('always completes exactly one dangerous-goods declaration', async () => {
+    const adapter = getAdapter('ceva')
+    const result = reconcile(parsed.K78027EC, scheduleB, { ...CONTROLLED, maxRows: adapter.maxCommodityRows })
+    const base = buildDraft(result, OMRON, defaultShipmentSettings(adapter), adapter)
+
+    const safe = await readBack((await adapter.fill(template('ceva-sli.pdf'), base)).bytes)
+    expect(safe['DOES NOT CONTAIN DANGEROUS GOODS']).toBe('JA')
+    expect(safe['DOES CONTAIN DANGEROUS GOODS']).toBeUndefined()
+
+    // Previously a hazardous shipment left *both* boxes blank, declaring nothing.
+    const hazardous = await adapter.fill(template('ceva-sli.pdf'), { ...base, hazardous: true })
+    const values = await readBack(hazardous.bytes)
+    expect(values['DOES CONTAIN DANGEROUS GOODS']).toBe('JA')
+    expect(values['DOES NOT CONTAIN DANGEROUS GOODS']).toBeUndefined()
+    expect(hazardous.warnings.join(' ')).toMatch(/shipper’s declaration/)
+  })
+})
