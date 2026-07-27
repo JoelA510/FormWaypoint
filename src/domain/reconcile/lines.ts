@@ -108,11 +108,16 @@ export function joinInvoiceToPacking(invoiceLines: SourceLine[], packingLines: S
  * Fill in weights for lines the document does not state, from the saved per-part table.
  *
  * Only ever fills gaps: a weight printed on the packing list is never replaced.
+ *
+ * Part numbers are matched case-insensitively. An imported item master and a CIPL are
+ * produced by different systems, and a part that failed to match on letter case alone would
+ * block the shipment with no visible reason.
  */
 export function applyUnitWeights(lines: MergedLine[], unitWeightsByPart: Record<string, number>): MergedLine[] {
+  const byUpperPart = new Map(Object.entries(unitWeightsByPart).map(([part, weight]) => [part.trim().toUpperCase(), weight]))
   return lines.map((line) => {
     if (line.netWeightKg != null) return line
-    const unit = unitWeightsByPart[line.partNumber]
+    const unit = unitWeightsByPart[line.partNumber] ?? byUpperPart.get(line.partNumber.trim().toUpperCase())
     if (unit == null) return line
     return { ...line, netWeightKg: roundTo(unit * line.quantity, 3) }
   })
