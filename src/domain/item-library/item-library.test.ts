@@ -269,6 +269,25 @@ describe('column detection', () => {
   it('refuses a sheet with no recognisable columns', () => {
     expect(() => inspectWorkbook([['alpha', 'beta'], ['1', '2']])).toThrow(ItemLibraryError)
   })
+
+  it('takes the net weight column when the file also carries a gross one', () => {
+    // Box 26 is a net weight. Reading positionally would put gross there.
+    const grossFirst = inspectWorkbook([['Part Number', 'Gross Weight (G)', 'Net Weight (G)'], ['P', '900', '544']])
+    expect(grossFirst.columns.weight).toBe(2)
+
+    const netFirst = inspectWorkbook([['Part Number', 'Net Weight (G)', 'Gross Weight (G)'], ['P', '544', '900']])
+    expect(netFirst.columns.weight).toBe(1)
+  })
+
+  it('avoids a gross column when nothing is named net', () => {
+    const inspection = inspectWorkbook([['Part Number', 'Gross Weight (G)', 'Shipping Weight (G)'], ['P', '900', '544']])
+    expect(inspection.columns.weight).toBe(2)
+  })
+
+  it('still uses a gross column when it is the only weight there is', () => {
+    const inspection = inspectWorkbook([['Part Number', 'Gross Weight (G)'], ['P', '900']])
+    expect(inspection.columns.weight).toBe(1)
+  })
 })
 
 describe('import', () => {
@@ -336,6 +355,29 @@ describe('import', () => {
       index,
     })
     expect(summary.entries[0].netWeightKg).toBe(411.408)
+  })
+
+  it('reads a decimal comma as a decimal point, not a thousands separator', () => {
+    // A semicolon-delimited export writes 0,544 for 0.544 g. Stripping the comma would file
+    // 544 g — a thousandfold overstatement.
+    const summary = importItems(
+      [
+        STORE_HEADERS,
+        ['A', 'point five four four grams', '8544.42.0000', '', '0,544'],
+        ['B', 'one and a half grams', '8544.42.0000', '', '1,5'],
+      ],
+      { fileName: 'f.csv', index },
+    )
+    expect(summary.entries[0].netWeightKg).toBe(0.000544)
+    expect(summary.entries[1].netWeightKg).toBe(0.0015)
+  })
+
+  it('still reads a three-group thousands value as thousands', () => {
+    const summary = importItems([STORE_HEADERS, ['X', 'big', '8544.42.0000', '', '1,234']], {
+      fileName: 'f.xlsx',
+      index,
+    })
+    expect(summary.entries[0].netWeightKg).toBe(1.234)
   })
 
   it('skips rows with no part number and reports duplicates', () => {
@@ -436,5 +478,18 @@ describe('flagging an imported library', () => {
   it('screens the export code and never the import one', () => {
     // 4016.99.6050 is an import-only number; it must not be judged, only the export code.
     expect(flagEntries([entry({ exportCode: '4016.99.6000', importCode: '4016.99.6050' })], index)).toEqual([])
+  })
+
+  it('reports only format failures when the Census dataset is unavailable', () => {
+    // Without the dataset, "not in the file" is a fact about the tool, not the item master.
+    // Declaring every part broken would bury the one finding that is still real.
+    const entries = [
+      entry({ partNumber: 'GOOD', displayPartNumber: 'GOOD' }),
+      entry({ partNumber: 'RETIRED', displayPartNumber: 'RETIRED', exportCode: '9801.00.1012' }),
+      entry({ partNumber: 'BAD-FORMAT', displayPartNumber: 'BAD-FORMAT', exportCode: '85444.2.0000' }),
+    ]
+    expect(flagEntries(entries, null).map((f) => [f.partNumber, f.status])).toEqual([['BAD-FORMAT', 'malformed']])
+    // With the dataset, the retired code is a finding again.
+    expect(flagEntries(entries, index)).toHaveLength(2)
   })
 })

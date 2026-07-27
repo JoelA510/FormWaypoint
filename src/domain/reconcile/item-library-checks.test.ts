@@ -115,6 +115,17 @@ describe('part-level commodity number screening', () => {
     expect(result.sliLines[0].scheduleB).toBe('8504.40.4000')
   })
 
+  it('does not declare every part broken when the Census dataset failed to load', () => {
+    const { checks } = reconcile(parsed['278514'], null, {
+      ...CONTROLLED,
+      unitWeightsByPart: { '13960-102D': 0.147 },
+    })
+    // 8504.40.4000 is well-formed; without the dataset that is all that can be said, and
+    // the separate `schedule-b-unavailable` warning is what reports the missing file.
+    expect(find(checks, 'part-codes')!.passed).toBe(true)
+    expect(find(checks, 'schedule-b-unavailable')!.passed).toBe(false)
+  })
+
   it('says nothing about the library when none is loaded', () => {
     const { checks } = reconcile(parsed['278514'], scheduleB, {
       ...CONTROLLED,
