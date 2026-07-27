@@ -368,18 +368,26 @@ function partCodeChecks(
 ): CheckResult[] {
   if (!merged.length) return []
 
-  const seen = new Map<string, { code: string; description: string }>()
+  // Keyed on part *and* code: one part can appear on two lines under two classifications,
+  // and screening only the first would pass a shipment carrying a bad second one.
+  const seen = new Map<string, { part: string; code: string; description: string }>()
   for (const line of merged) {
-    if (!seen.has(line.partNumber)) {
-      seen.set(line.partNumber, { code: line.classification, description: line.description })
+    const key = `${line.partNumber} ${line.classification}`
+    if (!seen.has(key)) {
+      seen.set(key, { part: line.partNumber, code: line.classification, description: line.description })
     }
   }
+  const parts = new Set([...seen.values()].map((s) => s.part))
 
   const results: CheckResult[] = []
 
-  const badOnDocument = [...seen.entries()].flatMap(([part, { code }]) => {
+  const badOnDocument = [...seen.values()].flatMap(({ part, code }) => {
     const screening = screenCode(code, index)
-    return screening.status === 'ok' ? [] : [{ part, code, reason: screening.reason }]
+    if (screening.status === 'ok') return []
+    // Without the dataset only the written form can be judged. Saying a code is not in a
+    // file that never loaded would be a finding about the tool, not about the shipment.
+    if (!index && screening.status !== 'malformed') return []
+    return [{ part, code, reason: screening.reason }]
   })
 
   results.push({
@@ -390,27 +398,31 @@ function partCodeChecks(
       ? badOnDocument
           .map((f) => `${f.part}: ${f.code || '(blank)'} — ${f.reason}`)
           .join(' · ') + ' These need correcting in the item master.'
-      : `All ${seen.size} part(s) carry a ${'####.##.####'} number present in the Census commodity file.`,
+      : `All ${parts.size} part(s) carry a well-formed number present in the Census commodity file.`,
     passed: badOnDocument.length === 0,
-    actual: badOnDocument.length ? `${badOnDocument.length} of ${seen.size} part(s)` : undefined,
+    actual: badOnDocument.length ? `${badOnDocument.length} of ${parts.size} part(s)` : undefined,
   })
 
   if (!itemsByPart?.size) return results
 
   // --- The item master's own record for these parts ------------------------
-  const covered: string[] = []
+  const covered = new Set<string>()
   const badInLibrary: { part: string; code: string; reason: string }[] = []
   const disagreeing: { part: string; document: string; library: string }[] = []
 
-  for (const [part, { code }] of seen) {
+  for (const { part, code } of seen.values()) {
     const entry = itemsByPart.get(part.trim().toUpperCase())
     if (!entry) continue
-    covered.push(part)
+    const first = !covered.has(part)
+    covered.add(part)
     if (!entry.exportCode) continue
 
     const screening = screenCode(entry.exportCode, index)
     if (screening.status !== 'ok') {
-      badInLibrary.push({ part, code: entry.exportCode, reason: screening.reason })
+      // One finding per part, however many lines it appears on.
+      if (first && (index || screening.status === 'malformed')) {
+        badInLibrary.push({ part, code: entry.exportCode, reason: screening.reason })
+      }
     } else if (normalizeScheduleB(entry.exportCode) !== normalizeScheduleB(code)) {
       disagreeing.push({ part, document: code, library: entry.exportCode })
     }
@@ -420,11 +432,11 @@ function partCodeChecks(
     id: 'item-library-coverage',
     severity: 'info',
     title: 'Parts found in the item library',
-    detail: covered.length
-      ? `${covered.length} of ${seen.size} part(s) on this shipment are in the imported item master.`
+    detail: covered.size
+      ? `${covered.size} of ${parts.size} part(s) on this shipment are in the imported item master.`
       : 'None of the parts on this shipment are in the imported item master.',
     passed: true,
-    actual: `${covered.length}/${seen.size}`,
+    actual: `${covered.size}/${parts.size}`,
   })
 
   if (badInLibrary.length) {
