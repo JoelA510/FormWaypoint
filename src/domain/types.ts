@@ -82,8 +82,17 @@ export interface SourceLine {
   documentKind: DocumentKind
   page: number
 
-  /** Purchase order / customer order number, e.g. `00299378OP0080` or `4208676052`. */
+  /**
+   * The order this line belongs to.
+   *
+   * Which order depends on the format: `vendor-a` prints the *customer's* purchase
+   * order here, while `vendor-b` prints vendor's own sales order and carries the
+   * customer PO separately in `purchaseOrder`. The distinction matters because the CEVA
+   * form has a box for each.
+   */
   orderNumber: string
+  /** Customer purchase order, when the format prints one separately from `orderNumber`. */
+  purchaseOrder?: string
   /** Sequence within the order — distinguishes repeated POs (`4208669164` 1..4). */
   sequence: string
   /** Order line number, e.g. `0001`. */
@@ -151,6 +160,11 @@ export interface ShipmentHeader {
   vesselAgent: string | null
   /** Every distinct order number found across the line items, in first-seen order. */
   orderNumbers: string[]
+  /**
+   * Customer purchase orders, when the format prints them separately from `orderNumbers`.
+   * Empty for layouts where `orderNumbers` already are the customer's POs.
+   */
+  purchaseOrders: string[]
   tradeTerms: string | null
   incoterm: string | null
   freightTerms: 'PREPAID' | 'COLLECT' | null

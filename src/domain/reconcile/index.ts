@@ -115,6 +115,7 @@ const UNREADABLE_HEADER: ShipmentHeader = {
   dischargePort: null,
   vesselAgent: null,
   orderNumbers: [],
+  purchaseOrders: [],
   tradeTerms: null,
   incoterm: null,
   freightTerms: null,
@@ -138,10 +139,13 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
   const packingLines = parsed.lines.filter((l) => l.documentSet === set && l.documentKind === 'PACKING_LIST')
 
   const joined = joinInvoiceToPacking(invoiceLines, packingLines)
-  // Formats that print no weights get them from the saved per-part table instead.
-  const mergedLines = options.unitWeightsByPart
-    ? applyUnitWeights(joined, options.unitWeightsByPart)
-    : joined
+  // The per-part table stands in only for formats that print no weights. Applying it to a
+  // format that does would let a saved figure quietly cover for a line the parser failed to
+  // read — turning a loud parse failure into a plausible wrong number.
+  const mergedLines =
+    !parsed.providesWeights && options.unitWeightsByPart
+      ? applyUnitWeights(joined, options.unitWeightsByPart)
+      : joined
   const sliLines = aggregateLines(mergedLines, options)
 
   if (index) {

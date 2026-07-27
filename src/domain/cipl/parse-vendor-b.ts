@@ -66,6 +66,10 @@ export function parseVendorBPages(fileName: string, pages: TextPage[]): ParsedCi
 
   if (header) {
     header.orderNumbers = distinct(invoiceLines.map((l) => l.orderNumber).filter(Boolean))
+    // Sales orders and customer POs are different columns in this layout, and the CEVA form
+    // has a box for each. Keeping them apart is what stops vendor's own sales order being
+    // filed as the consignee's purchase order.
+    header.purchaseOrders = distinct(invoiceLines.map((l) => l.purchaseOrder ?? '').filter(Boolean))
     header.totalQuantity = round(invoiceLines.reduce((sum, l) => sum + l.quantity, 0), 3)
     // The printed "Total Net Value" is authoritative; fall back to the sum of the lines.
     if (!header.totalValue) {
@@ -144,6 +148,7 @@ function parseHeader(page: TextPage): ShipmentHeader {
     dischargePort: null,
     vesselAgent: modeOfTransport,
     orderNumbers: [],
+    purchaseOrders: [],
     tradeTerms: null,
     // No Incoterm appears anywhere in this layout. It is left null rather than guessed.
     incoterm: null,
@@ -261,6 +266,11 @@ function parseBlock(block: TextRow[], page: TextPage, kind: DocumentKind): Sourc
   const itemAnchor = head[orderIndex + 1]
   const descriptionAnchor = head[orderIndex + 2]
   if (!itemAnchor || !descriptionAnchor) return null
+  // Positional indexing is only safe while those two cells really are the item number and
+  // the description. If a line omitted one, the description anchor would land on the
+  // shipping code and "HSCD: 8537.10.9090" would be filed as the commodity description —
+  // silently. Refuse the block instead; the caller reports the shortfall.
+  if (isStructuralCell(itemAnchor.str) || isStructuralCell(descriptionAnchor.str)) return null
 
   const partNumber = itemAnchor.str
   const description = descriptionAnchor.str
@@ -338,16 +348,21 @@ function parseBlock(block: TextRow[], page: TextPage, kind: DocumentKind): Sourc
     eccn,
     quantity,
     uom,
+    // The customer purchase order, kept for the CEVA consignee-PO box.
+    purchaseOrder,
     ...(kind === 'INVOICE'
       ? {
           currency: 'USD',
           unitValue: prices[0]?.value,
           extendedValue: prices.length > 1 ? prices[1].value : prices[0]?.value,
-          // The customer purchase order, kept for the CEVA consignee-PO box.
-          purchaseOrder,
         }
       : {}),
-  } as SourceLine & { purchaseOrder?: string }
+  }
+}
+
+/** A cell that belongs to a later column and can never be the item number or description. */
+function isStructuralCell(text: string): boolean {
+  return SHIPPING_CODE.test(text) || QUANTITY_UOM.test(text) || parseNumber(text) !== null
 }
 
 function distinct<T>(values: T[]): T[] {
