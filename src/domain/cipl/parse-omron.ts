@@ -99,7 +99,16 @@ export function parseCiplPages(fileName: string, pages: TextPage[]): ParsedCipl 
 
   if (!availableSets.length) warnings.push('No FC or TP1 document set was recognised in this file.')
 
-  return { fileName, pageCount: pages.length, availableSets, headers, lines, warnings }
+  return {
+    fileName,
+    format: 'omron-fc-tp1',
+    providesWeights: true,
+    pageCount: pages.length,
+    availableSets,
+    headers,
+    lines,
+    warnings,
+  }
 }
 
 /** Prefer a freshly parsed value, falling back to what an earlier page of the set supplied. */
@@ -191,6 +200,9 @@ function parseHeaderPage(page: TextPage, existing?: ShipmentHeader): ShipmentHea
     dischargePort: coalesce(dischargePort, existing?.dischargePort),
     vesselAgent: coalesce(vesselAgent, existing?.vesselAgent),
     orderNumbers: orderNumbers.length ? orderNumbers : (existing?.orderNumbers ?? []),
+    // This layout prints the customer's purchase order as the order number, so there is no
+    // separate list to keep.
+    purchaseOrders: [],
     tradeTerms: effectiveTradeTerms,
     incoterm: effectiveTradeTerms ? incotermFromTradeTerms(effectiveTradeTerms) : null,
     freightTerms: effectiveTradeTerms ? freightFromTradeTerms(effectiveTradeTerms) : null,

@@ -50,6 +50,15 @@ export interface ShipmentSettings {
   containerized: boolean
   specialInstructions: string
   namedPlace: string
+  /**
+   * Overrides for values the document may not supply.
+   *
+   * The `omron-shipment` layout prints no Incoterm and often no country (its consignee
+   * block can end at a postal line), so both have to be enterable. Empty means "use what
+   * the document says"; a value here always wins.
+   */
+  destinationCountry: string
+  incoterm: string
   /** Free text for CEVA box 23; dimensions are not on the CIPL. */
   piecesAndDimensions: string
 
@@ -98,6 +107,8 @@ export function defaultShipmentSettings(adapter: CarrierAdapter): ShipmentSettin
     containerized: d.containerized ?? false,
     specialInstructions: '',
     namedPlace: '',
+    destinationCountry: '',
+    incoterm: '',
     piecesAndDimensions: '',
     // Deliberately blank — see the note on ShipmentSettings.
     eccn: '',
@@ -135,7 +146,7 @@ export function buildDraft(
   adapter: CarrierAdapter,
 ): SliDraft {
   const { header, sliLines } = reconciliation
-  const destinationCountry = resolveDestinationCountry(header)
+  const destinationCountry = settings.destinationCountry.trim() || resolveDestinationCountry(header)
 
   return {
     usppiName: profile.usppiName,
@@ -157,12 +168,28 @@ export function buildDraft(
     // all three historical shipments do.
     dateOfExportation: header.invoiceDate,
     transportationReference: settings.transportationReference,
-    shipmentReference: settings.shipmentReference,
-    consigneePo: summariseReferences(header.orderNumbers),
+    // Prefilled from the sales orders where the document actually carries them, and only
+    // there: a layout that prints the *customer's* PO as its order number has no sales
+    // order to offer, and guessing one would be worse than leaving the box empty.
+    // Shipment 278514 was filed with a stale reference carried over from a previous form —
+    // exactly the transcription this removes.
+    shipmentReference:
+      settings.shipmentReference ||
+      (header.purchaseOrders.length
+        ? summariseReferences(header.orderNumbers, adapter.maxInlineReferences)
+        : ''),
+    // The consignee's *purchase* orders. Layouts that print them separately from the
+    // sales order supply `purchaseOrders`; where the two are the same column (FC/TP1), the
+    // order numbers already are the customer's POs. Filing Omron's own sales order in a box
+    // labelled "Consignee PO#" would be wrong on both counts.
+    consigneePo: summariseReferences(
+      header.purchaseOrders.length ? header.purchaseOrders : header.orderNumbers,
+      adapter.maxInlineReferences,
+    ),
     pointOfOrigin: profile.pointOfOrigin || (adapter.defaults.pointOfOrigin ?? ''),
     destinationCountry: destinationCountry ?? '',
     mode: settings.mode,
-    incoterm: header.incoterm ?? '',
+    incoterm: settings.incoterm.trim() || header.incoterm || '',
     namedPlace: settings.namedPlace,
     freight: header.freightTerms ?? adapter.defaults.freight ?? 'COLLECT',
     insured: settings.insured,
@@ -189,10 +216,11 @@ export function buildDraft(
  * Both forms have a single-line reference box, and the historical examples abbreviate a long
  * list as `<first>, N Add'l` rather than truncating it. Reproduced here.
  */
-export function summariseReferences(references: string[]): string {
+export function summariseReferences(references: string[], maxInline = 1): string {
   if (!references.length) return ''
-  if (references.length === 1) return references[0]
-  return `${references[0]}, ${references.length - 1} Add'l`
+  const shown = references.slice(0, Math.max(1, maxInline))
+  const remaining = references.length - shown.length
+  return remaining > 0 ? `${shown.join(', ')}, ${remaining} Add'l` : shown.join(', ')
 }
 
 /**
@@ -217,6 +245,8 @@ export function applyCarrierDefaults(previous: ShipmentSettings, adapter: Carrie
     insured: previous.insured,
     specialInstructions: previous.specialInstructions,
     namedPlace: previous.namedPlace,
+    destinationCountry: previous.destinationCountry,
+    incoterm: previous.incoterm,
     piecesAndDimensions: previous.piecesAndDimensions,
     eccn: previous.eccn,
     sme: previous.sme,

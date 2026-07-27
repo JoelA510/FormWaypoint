@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Badge, Button, Card, CardBody, CardHeader, Select } from './components/ui'
 import { UploadPanel } from './features/upload-panel'
-import { ChecksPanel, CommodityTable, OverridesPanel, ShipmentSummary } from './features/review'
+import { ChecksPanel, CommodityTable, OverridesPanel, PartWeightsPanel, ShipmentSummary } from './features/review'
 import { ManualFieldsPanel } from './features/manual-fields'
 import { HistoryPanel, OutputPanel } from './features/output-panel'
 import { reconcile, resolveDestinationCountry } from './domain/reconcile'
@@ -16,7 +16,14 @@ import {
   type ShipmentSettings,
 } from './domain/draft'
 import { detectCarrier, getAdapter, type CarrierId } from './carriers/registry'
-import { indexedDbStore, overridesToMap, type OverrideRecord, type ShipmentRecord } from './store/local-store'
+import {
+  indexedDbStore,
+  overridesToMap,
+  partWeightsToMap,
+  type OverrideRecord,
+  type PartWeightRecord,
+  type ShipmentRecord,
+} from './store/local-store'
 import type { ParsedCipl } from './domain/types'
 
 const CARRIER_LABELS: Record<CarrierId, string> = {
@@ -30,6 +37,7 @@ export function App() {
   const [profile, setProfile] = useState<CompanyProfile>(EMPTY_PROFILE)
   const [settings, setSettings] = useState<ShipmentSettings>(() => defaultShipmentSettings(getAdapter('nippon-express')))
   const [overrides, setOverrides] = useState<OverrideRecord[]>([])
+  const [partWeights, setPartWeights] = useState<PartWeightRecord[]>([])
   const [shipments, setShipments] = useState<ShipmentRecord[]>([])
   const [scheduleB, setScheduleB] = useState<ScheduleBIndex | null>(null)
   const [scheduleBError, setScheduleBError] = useState<string | null>(null)
@@ -45,13 +53,15 @@ export function App() {
       .catch((e: unknown) => setScheduleBError(e instanceof Error ? e.message : 'Schedule B data unavailable.'))
 
     void (async () => {
-      const [saved, savedOverrides, history] = await Promise.all([
+      const [saved, savedOverrides, savedWeights, history] = await Promise.all([
         indexedDbStore.getProfile(),
         indexedDbStore.listOverrides(),
+        indexedDbStore.listPartWeights(),
         indexedDbStore.listShipments(),
       ])
       if (saved) setProfile(saved)
       setOverrides(savedOverrides)
+      setPartWeights(savedWeights)
       setShipments(history)
     })()
   }, [])
@@ -79,7 +89,13 @@ export function App() {
       const known = header ? await indexedDbStore.getConsignee(header.consignedTo.name) : null
       setSettings(
         known
-          ? { ...base, consigneeId: known.consigneeId, consigneeType: known.consigneeType, partiesRelated: known.partiesRelated }
+          ? {
+              ...base,
+              consigneeId: known.consigneeId,
+              consigneeType: known.consigneeType,
+              partiesRelated: known.partiesRelated,
+              destinationCountry: known.destinationCountry ?? '',
+            }
           : base,
       )
       setBusy(false)
@@ -94,9 +110,11 @@ export function App() {
       sme: settings.sme || null,
       license: settings.license || null,
       overrides: overridesToMap(overrides),
+      // Only consulted for formats that state no weights; a printed weight always wins.
+      unitWeightsByPart: partWeightsToMap(partWeights),
       maxRows: adapter.maxCommodityRows,
     })
-  }, [parsed, scheduleB, settings.eccn, settings.sme, settings.license, overrides, adapter])
+  }, [parsed, scheduleB, settings.eccn, settings.sme, settings.license, overrides, partWeights, adapter])
 
   const draft = useMemo(
     () => (reconciliation ? buildDraft(reconciliation, profile, settings, adapter) : null),
@@ -125,6 +143,16 @@ export function App() {
     setOverrides(await indexedDbStore.listOverrides())
   }, [])
 
+  const savePartWeight = useCallback(async (partNumber: string, description: string, netWeightKg: number) => {
+    await indexedDbStore.savePartWeight({
+      partNumber,
+      description,
+      netWeightKg,
+      updatedAt: new Date().toISOString(),
+    })
+    setPartWeights(await indexedDbStore.listPartWeights())
+  }, [])
+
   const handleGenerated = useCallback(async () => {
     if (!reconciliation || !parsed) return
     const { header, sliLines, checks } = reconciliation
@@ -151,17 +179,19 @@ export function App() {
         consigneeId: settings.consigneeId,
         consigneeType: settings.consigneeType,
         partiesRelated: settings.partiesRelated,
+        destinationCountry: draft?.destinationCountry ?? '',
         lastUsed: new Date().toISOString(),
       })
     }
     setShipments(await indexedDbStore.listShipments())
-  }, [reconciliation, parsed, adapter, settings])
+  }, [reconciliation, parsed, adapter, settings, draft])
 
   const clearAll = useCallback(async () => {
     if (!window.confirm('Delete the saved profile, consignees, overrides and shipment history from this machine?')) return
     await indexedDbStore.clearAll()
     setProfile(EMPTY_PROFILE)
     setOverrides([])
+    setPartWeights([])
     setShipments([])
   }, [])
 
@@ -249,6 +279,13 @@ export function App() {
             </Card>
 
             <ShipmentSummary parsed={parsed} reconciliation={reconciliation} />
+            {!parsed.providesWeights ? (
+              <PartWeightsPanel
+                reconciliation={reconciliation}
+                weights={partWeightsToMap(partWeights)}
+                onSave={(part, description, weight) => void savePartWeight(part, description, weight)}
+              />
+            ) : null}
             <CommodityTable reconciliation={reconciliation} />
             <ChecksPanel checks={checks} canGenerate={canGenerate} />
             <OverridesPanel
