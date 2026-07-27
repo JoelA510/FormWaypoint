@@ -15,7 +15,8 @@ import type {
   ShipmentHeader,
   SourceLine,
 } from '../types'
-import { checkClassification, type ScheduleBIndex } from '../schedule-b'
+import { checkClassification, normalizeScheduleB, screenCode, type ScheduleBIndex } from '../schedule-b'
+import type { ItemLibraryEntry } from '../item-library'
 import {
   aggregateLines,
   applyUnitWeights,
@@ -36,6 +37,13 @@ export interface ReconcileOptions extends AggregationOptions {
   maxRows?: number
   /** Overrides which document set is used. Defaults to the USD set. */
   forceSet?: DocumentSet
+  /**
+   * The imported item master, keyed by uppercased part number.
+   *
+   * Used to screen the commodity numbers held against the parts on this shipment, and to
+   * report where the master and the CIPL disagree. Never used to change a code.
+   */
+  itemsByPart?: Map<string, ItemLibraryEntry>
 }
 
 /**
@@ -168,6 +176,7 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
     },
     ...totalsChecks(header, mergedLines, sliLines, parsed.providesWeights),
     ...lineageChecks(mergedLines, packingLines, sliLines),
+    ...partCodeChecks(mergedLines, index, options.itemsByPart),
     ...classificationChecks(sliLines, mergedLines, index),
     ...exportControlChecks(options),
     ...sourceEccnChecks(sliLines, mergedLines),
@@ -336,6 +345,111 @@ function lineageChecks(merged: MergedLine[], packingLines: SourceLine[], sliLine
         : `Rows draw on ${[...sets].join(' and ')} simultaneously. FC and TP1 describe the same goods.`,
     passed: sets.size <= 1,
   })
+
+  return results
+}
+
+/**
+ * Screens every commodity number on the shipment, reported by part.
+ *
+ * The per-row classification checks below say "row 3"; this says "part 40652-0030", which
+ * is what you need to go and fix the record. Two mechanical rules only — written as
+ * `####.##.####`, and present in the Census concordance — applied to the number on the CIPL
+ * and, where an item master is loaded, to the number it holds for the same part.
+ *
+ * Nothing here rewrites a code. A part whose master record is wrong is named so it can be
+ * corrected at source; a shipment is not held up for it, because the number actually being
+ * filed is the one on the CIPL, and that one is already checked per row.
+ */
+function partCodeChecks(
+  merged: MergedLine[],
+  index: ScheduleBIndex | null,
+  itemsByPart?: Map<string, ItemLibraryEntry>,
+): CheckResult[] {
+  if (!merged.length) return []
+
+  const seen = new Map<string, { code: string; description: string }>()
+  for (const line of merged) {
+    if (!seen.has(line.partNumber)) {
+      seen.set(line.partNumber, { code: line.classification, description: line.description })
+    }
+  }
+
+  const results: CheckResult[] = []
+
+  const badOnDocument = [...seen.entries()].flatMap(([part, { code }]) => {
+    const screening = screenCode(code, index)
+    return screening.status === 'ok' ? [] : [{ part, code, reason: screening.reason }]
+  })
+
+  results.push({
+    id: 'part-codes',
+    severity: 'warning',
+    title: 'Every part’s commodity number is well-formed and current',
+    detail: badOnDocument.length
+      ? badOnDocument
+          .map((f) => `${f.part}: ${f.code || '(blank)'} — ${f.reason}`)
+          .join(' · ') + ' These need correcting in the item master.'
+      : `All ${seen.size} part(s) carry a ${'####.##.####'} number present in the Census commodity file.`,
+    passed: badOnDocument.length === 0,
+    actual: badOnDocument.length ? `${badOnDocument.length} of ${seen.size} part(s)` : undefined,
+  })
+
+  if (!itemsByPart?.size) return results
+
+  // --- The item master's own record for these parts ------------------------
+  const covered: string[] = []
+  const badInLibrary: { part: string; code: string; reason: string }[] = []
+  const disagreeing: { part: string; document: string; library: string }[] = []
+
+  for (const [part, { code }] of seen) {
+    const entry = itemsByPart.get(part.trim().toUpperCase())
+    if (!entry) continue
+    covered.push(part)
+    if (!entry.exportCode) continue
+
+    const screening = screenCode(entry.exportCode, index)
+    if (screening.status !== 'ok') {
+      badInLibrary.push({ part, code: entry.exportCode, reason: screening.reason })
+    } else if (normalizeScheduleB(entry.exportCode) !== normalizeScheduleB(code)) {
+      disagreeing.push({ part, document: code, library: entry.exportCode })
+    }
+  }
+
+  results.push({
+    id: 'item-library-coverage',
+    severity: 'info',
+    title: 'Parts found in the item library',
+    detail: covered.length
+      ? `${covered.length} of ${seen.size} part(s) on this shipment are in the imported item master.`
+      : 'None of the parts on this shipment are in the imported item master.',
+    passed: true,
+    actual: `${covered.length}/${seen.size}`,
+  })
+
+  if (badInLibrary.length) {
+    results.push({
+      id: 'item-library-codes',
+      severity: 'warning',
+      title: 'The item library holds a bad commodity number for some parts',
+      detail:
+        badInLibrary.map((f) => `${f.part}: ${f.code} — ${f.reason}`).join(' · ') +
+        ' The shipment files the number on the CIPL; this is the master record to fix.',
+      passed: false,
+    })
+  }
+
+  if (disagreeing.length) {
+    results.push({
+      id: 'item-library-conflict',
+      severity: 'warning',
+      title: 'The CIPL and the item library classify some parts differently',
+      detail:
+        disagreeing.map((d) => `${d.part}: CIPL says ${d.document}, library says ${d.library}`).join(' · ') +
+        '. The CIPL number is what will be filed — record an override if the library is the correct one.',
+      passed: false,
+    })
+  }
 
   return results
 }

@@ -11,10 +11,11 @@
  */
 import { openDB, type IDBPDatabase } from 'idb'
 import type { CompanyProfile, ShipmentSettings } from '../domain/draft'
+import type { ItemLibraryEntry } from '../domain/item-library'
 import type { CheckResult, SLILine } from '../domain/types'
 
 const DB_NAME = 'formwaypoint'
-const DB_VERSION = 3
+const DB_VERSION = 4
 
 /** Saved per consignee so the values that are not on the CIPL only get typed once. */
 export interface ConsigneeRecord {
@@ -103,6 +104,13 @@ export interface LocalStore {
   savePartWeight(record: PartWeightRecord): Promise<void>
   deletePartWeight(partNumber: string): Promise<void>
 
+  listItems(): Promise<ItemLibraryEntry[]>
+  /** Replaces the whole library — a refreshed extract of the same item master. */
+  replaceItems(entries: ItemLibraryEntry[]): Promise<void>
+  /** Adds to the library, the incoming row winning on a part already held. */
+  mergeItems(entries: ItemLibraryEntry[]): Promise<void>
+  clearItems(): Promise<void>
+
   listShipments(limit?: number): Promise<ShipmentRecord[]>
   saveShipment(record: ShipmentRecord): Promise<void>
 
@@ -128,6 +136,10 @@ function db(): Promise<Schema> {
         // v3 adds per-part weights, needed by formats that print none.
         if (!database.objectStoreNames.contains('partWeights')) {
           database.createObjectStore('partWeights', { keyPath: 'partNumber' })
+        }
+        // v4 adds the imported item master.
+        if (!database.objectStoreNames.contains('items')) {
+          database.createObjectStore('items', { keyPath: 'partNumber' })
         }
         // v1 keyed shipments on invoiceNumber, which silently overwrote re-runs. v2 keys
         // on a per-run id; the old store is dropped rather than migrated because it only
@@ -189,6 +201,26 @@ export const indexedDbStore: LocalStore = {
     await (await db()).delete('partWeights', partNumber)
   },
 
+  async listItems() {
+    return (await (await db()).getAll('items')) as ItemLibraryEntry[]
+  },
+  async replaceItems(entries) {
+    // One transaction: a library half-replaced by a failed write would silently mix two
+    // item masters, and the weights it supplies go straight onto a customs form.
+    const tx = (await db()).transaction('items', 'readwrite')
+    await tx.store.clear()
+    await Promise.all(entries.map((entry) => tx.store.put(entry)))
+    await tx.done
+  },
+  async mergeItems(entries) {
+    const tx = (await db()).transaction('items', 'readwrite')
+    await Promise.all(entries.map((entry) => tx.store.put(entry)))
+    await tx.done
+  },
+  async clearItems() {
+    await (await db()).clear('items')
+  },
+
   async listShipments(limit = 50) {
     const all = (await (await db()).getAll('shipments')) as ShipmentRecord[]
     return all.sort((a, b) => b.processedAt.localeCompare(a.processedAt)).slice(0, limit)
@@ -200,7 +232,7 @@ export const indexedDbStore: LocalStore = {
   async clearAll() {
     const database = await db()
     await Promise.all(
-      ['profile', 'consignees', 'overrides', 'shipments', 'partWeights'].map((name) => database.clear(name)),
+      ['profile', 'consignees', 'overrides', 'shipments', 'partWeights', 'items'].map((name) => database.clear(name)),
     )
   },
 }
