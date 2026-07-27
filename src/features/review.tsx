@@ -343,3 +343,98 @@ export function OverridesPanel({
     </Card>
   )
 }
+
+/**
+ * Per-part net weights, for CIPL formats that state none.
+ *
+ * Shown only when the document cannot supply weights. Parts still missing a figure are
+ * listed first, because each one blocks generation — a blank weight is never filed as zero.
+ */
+export function PartWeightsPanel({
+  reconciliation,
+  weights,
+  onSave,
+}: {
+  reconciliation: Reconciliation
+  weights: Record<string, number>
+  onSave: (partNumber: string, description: string, netWeightKg: number) => void
+}) {
+  const parts = [...new Map(reconciliation.mergedLines.map((l) => [l.partNumber, l])).values()]
+  const missing = parts.filter((p) => weights[p.partNumber] == null)
+
+  return (
+    <Card>
+      <CardHeader
+        title="Part weights"
+        description="This document states no weights. Enter the net weight of one unit; it is saved and reused."
+        actions={
+          missing.length ? (
+            <Badge tone="block">{missing.length} missing</Badge>
+          ) : (
+            <Badge tone="pass">all supplied</Badge>
+          )
+        }
+      />
+      <CardBody className="px-0 py-0">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[620px] border-collapse text-sm">
+            <thead>
+              <tr className="border-b bg-[var(--color-sunken)] text-left text-xs tracking-wide text-[var(--color-ink-faint)] uppercase">
+                <th className="px-4 py-2.5 font-semibold">Part</th>
+                <th className="px-4 py-2.5 font-semibold">Description</th>
+                <th className="px-4 py-2.5 text-right font-semibold">Qty</th>
+                <th className="px-4 py-2.5 font-semibold">Net kg each</th>
+                <th className="px-4 py-2.5 text-right font-semibold">Line kg</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...missing, ...parts.filter((p) => weights[p.partNumber] != null)].map((part) => {
+                const unit = weights[part.partNumber]
+                return (
+                  <tr key={part.partNumber} className="border-b last:border-b-0">
+                    <td className="tabular px-4 py-2.5 whitespace-nowrap">{part.partNumber}</td>
+                    <td className="px-4 py-2.5 text-[var(--color-ink-soft)]">{part.description}</td>
+                    <td className="tabular px-4 py-2.5 text-right">{part.quantity}</td>
+                    <td className="px-4 py-2.5">
+                      <UnitWeightInput
+                        value={unit}
+                        onCommit={(next) => onSave(part.partNumber, part.description, next)}
+                      />
+                    </td>
+                    <td className="tabular px-4 py-2.5 text-right">
+                      {unit == null ? (
+                        <span className="text-[var(--color-block)]">needed</span>
+                      ) : (
+                        (unit * part.quantity).toFixed(3)
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </CardBody>
+    </Card>
+  )
+}
+
+function UnitWeightInput({ value, onCommit }: { value: number | undefined; onCommit: (next: number) => void }) {
+  const [draft, setDraft] = useState(value == null ? '' : String(value))
+  const parsed = Number(draft)
+  const valid = draft.trim() !== '' && Number.isFinite(parsed) && parsed > 0
+
+  return (
+    <Input
+      value={draft}
+      inputMode="decimal"
+      aria-label="Net weight per unit in kilograms"
+      placeholder="0.000"
+      className={valid || draft === '' ? undefined : 'border-[var(--color-block)]'}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        if (valid) onCommit(parsed)
+      }}
+    />
+  )
+}

@@ -106,6 +106,13 @@ export interface CarrierAdapter {
   templateUrl: string
   /** Commodity rows the blank form can hold before a continuation sheet is needed. */
   maxCommodityRows: number
+  /**
+   * How many references fit in the reference box before the rest are abbreviated.
+   *
+   * Observed: the Nippon box 11 lists three sales orders then "3 Add'l"; the narrower CEVA
+   * box 7 lists one then "3 Add'l".
+   */
+  maxInlineReferences: number
   supportedModes: TransportMode[]
   /** Controlled values applied when the reviewer does not choose otherwise. */
   defaults: Partial<SliDraft>

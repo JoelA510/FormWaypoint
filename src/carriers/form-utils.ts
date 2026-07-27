@@ -127,10 +127,14 @@ export function parseLooseDate(input: string): [number, number, number] | null {
     return isRealDate(...parts) ? parts : null
   }
 
-  // US convention, matching what both forms print.
-  const numeric = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/)
+  // US convention, matching what the forms print. The `omron-shipment` CIPL abbreviates the
+  // year to two digits (`07/22/26`), so that is accepted and expanded — 69-99 map to the
+  // 1900s per the usual POSIX pivot, everything else to the 2000s.
+  const numeric = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2}|\d{4})$/)
   if (numeric) {
-    const parts: [number, number, number] = [Number(numeric[3]), Number(numeric[1]), Number(numeric[2])]
+    const rawYear = Number(numeric[3])
+    const year = numeric[3].length === 2 ? (rawYear >= 69 ? 1900 + rawYear : 2000 + rawYear) : rawYear
+    const parts: [number, number, number] = [year, Number(numeric[1]), Number(numeric[2])]
     return isRealDate(...parts) ? parts : null
   }
 
