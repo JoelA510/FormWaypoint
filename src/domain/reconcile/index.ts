@@ -15,7 +15,7 @@ import type {
   ShipmentHeader,
   SourceLine,
 } from '../types'
-import { checkClassification, formatScheduleB, type ScheduleBIndex } from '../schedule-b'
+import { checkClassification, type ScheduleBIndex } from '../schedule-b'
 import { aggregateLines, joinInvoiceToPacking, roundTo, unmatchedPackingLines, type AggregationOptions } from './lines'
 
 export * from './lines'
@@ -65,22 +65,67 @@ export function selectDocumentSet(parsed: ParsedCipl, force?: DocumentSet): { se
   }
 }
 
-/** Destination country for SLI box 7. */
+/**
+ * A country name, as opposed to a postal line.
+ *
+ * The consignee block's last line is usually `Bangalore, KARNATAKA 562123` — writing that
+ * into box 7 would file a city and postcode as the country of ultimate destination, so
+ * anything containing digits or a comma is rejected rather than passed through.
+ */
+function isPlausibleCountry(value: string | null | undefined): value is string {
+  const text = (value ?? '').trim()
+  return text.length >= 2 && text.length <= 56 && !/\d/.test(text) && !text.includes(',')
+}
+
+/**
+ * Destination country for SLI box 7, or null when the documents do not establish one.
+ *
+ * The discharge port is the primary source because the consignee address block frequently
+ * omits the country entirely (vendorA3 ends at `'s-Hertogenbosch NA 5234`). Returning null
+ * is deliberate: a blank box a reviewer is told about beats a wrong one they are not.
+ */
 export function resolveDestinationCountry(header: ShipmentHeader): string | null {
-  // The discharge port is printed as "City, Country" and is the most reliable source: the
-  // consignee address block frequently omits the country entirely (vendorA1 ends at
-  // "Bangalore, KARNATAKA 562123" with no mention of India).
   if (header.dischargePort?.includes(',')) {
     const country = header.dischargePort.split(',').pop()?.trim()
-    if (country) return country
+    if (isPlausibleCountry(country)) return country
   }
   const lastLine = header.consignedTo.lines.at(-1)?.trim()
-  return lastLine || null
+  return isPlausibleCountry(lastLine) ? lastLine : null
+}
+
+/**
+ * Stand-in used only when no document set could be read at all, so that `reconcile` reports
+ * the failure as a check instead of throwing on an undefined header.
+ */
+const UNREADABLE_HEADER: ShipmentHeader = {
+  invoiceNumber: '',
+  invoiceDate: '',
+  onOrAboutDate: null,
+  soldTo: { name: '', lines: [], country: null },
+  consignedTo: { name: '', lines: [], country: null },
+  notifyTo: null,
+  shippedFrom: null,
+  dischargePort: null,
+  vesselAgent: null,
+  orderNumbers: [],
+  tradeTerms: null,
+  incoterm: null,
+  freightTerms: null,
+  cartons: null,
+  documentCurrency: '',
+  totalQuantity: 0,
+  totalValue: 0,
+  totalNetWeightKg: null,
+  totalGrossWeightKg: null,
+  totalMeasurementM3: null,
 }
 
 export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, options: ReconcileOptions): Reconciliation {
   const { set, reason } = selectDocumentSet(parsed, options.forceSet)
-  const header = parsed.headers[set]
+  // `selectDocumentSet` falls back to a set name when nothing was recognised, so the header
+  // for it may genuinely not exist. Report that rather than dereferencing undefined.
+  const header = parsed.headers[set] ?? UNREADABLE_HEADER
+  const headerReadable = Boolean(parsed.headers[set])
 
   const invoiceLines = parsed.lines.filter((l) => l.documentSet === set && l.documentKind === 'INVOICE')
   const packingLines = parsed.lines.filter((l) => l.documentSet === set && l.documentKind === 'PACKING_LIST')
@@ -96,6 +141,16 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
 
   const checks: CheckResult[] = [
     { id: 'set-selection', severity: 'info', title: 'Controlling document set', detail: reason, passed: true },
+    {
+      id: 'header-readable',
+      severity: 'blocking',
+      title: 'Shipment header was read',
+      detail: headerReadable
+        ? `Header read from the ${set} document set.`
+        : `No header could be read for the ${set} set, so there are no document totals to reconcile against. ` +
+          'This file is probably not the vendor CIPL layout.',
+      passed: headerReadable,
+    },
     ...totalsChecks(header, mergedLines, sliLines),
     ...lineageChecks(mergedLines, packingLines, sliLines),
     ...classificationChecks(sliLines, mergedLines, index),
@@ -148,8 +203,23 @@ function totalsChecks(header: ShipmentHeader, merged: MergedLine[], sliLines: SL
     actual: value.toFixed(2),
   })
 
-  if (header.totalNetWeightKg != null) {
-    const weight = roundTo(sliLines.reduce((s, l) => s + l.weightKg, 0), 3)
+  // This check must never quietly disappear. If the packing-list total could not be read
+  // there is nothing to reconcile weights against, and that absence is itself a blocking
+  // problem — an unverified weight is not the same as a verified one.
+  const weight = roundTo(sliLines.reduce((s, l) => s + l.weightKg, 0), 3)
+  if (header.totalNetWeightKg == null) {
+    results.push({
+      id: 'total-weight',
+      severity: 'blocking',
+      title: 'Weights reconcile to the packing list total',
+      detail:
+        'No net-weight total could be read from the packing list, so the row weights cannot be proved against ' +
+        `the source document. Rows currently total ${weight.toFixed(3)} kg.`,
+      passed: false,
+      expected: 'a packing-list net total',
+      actual: 'not found',
+    })
+  } else {
     const weightOk = Math.abs(weight - header.totalNetWeightKg) <= WEIGHT_TOLERANCE
     results.push({
       id: 'total-weight',
@@ -317,9 +387,4 @@ function capacityCheck(sliLines: SLILine[], maxRows?: number): CheckResult[] {
       actual: String(sliLines.length),
     },
   ]
-}
-
-/** Formatted one-line summary of a row, used in the keying sheet and audit views. */
-export function describeLine(line: SLILine): string {
-  return `${line.domesticForeign} ${formatScheduleB(line.scheduleB)} — ${line.description} — ${line.quantity} ${line.sourceUom}, ${line.weightKg.toFixed(3)} kg, $${line.valueUsd.toFixed(2)}`
 }

@@ -20,8 +20,10 @@
 import type { DocumentKind, DocumentSet, ParsedCipl, PartyAddress, ShipmentHeader, SourceLine } from '../types'
 import {
   extractTextPages,
+  findLabelRow,
   findRowIndex,
   itemsInRange,
+  labelItem,
   parseNumber,
   rowText,
   valueRightOf,
@@ -165,8 +167,7 @@ function parseHeaderPage(page: TextPage, existing?: ShipmentHeader): ShipmentHea
 
   const soldTo = addressBlock(rows, 'SOLD TO:')
   const consignedTo = addressBlock(rows, 'CONSIGNED TO:')
-  const notifyIdx = findRowIndex(rows, 'NOTIFY TO:')
-  const notifyTo = notifyIdx === -1 ? null : (valueRightOf(rows[notifyIdx], 'NOTIFY TO:') ?? null)
+  const notifyTo = labelValue(rows, 'NOTIFY TO:') ?? null
 
   const tradeTerms = tradeTermsValue(rows)
   const { totalQuantity, cartons } = totalsBlock(rows)
@@ -204,9 +205,15 @@ function parseHeaderPage(page: TextPage, existing?: ShipmentHeader): ShipmentHea
 }
 
 function labelValue(rows: TextRow[], label: string): string | undefined {
-  const idx = findRowIndex(rows, label)
-  if (idx === -1) return undefined
-  return valueRightOf(rows[idx], label)
+  // Keep looking past rows that merely mention the label in passing.
+  for (let from = 0; from < rows.length; ) {
+    const idx = findLabelRow(rows, label, from)
+    if (idx === -1) return undefined
+    const value = valueRightOf(rows[idx], label)
+    if (value) return value
+    from = idx + 1
+  }
+  return undefined
 }
 
 /**
@@ -215,12 +222,13 @@ function labelValue(rows: TextRow[], label: string): string | undefined {
  * share those rows and are excluded by x.
  */
 function addressBlock(rows: TextRow[], label: string): PartyAddress {
-  const start = findRowIndex(rows, label)
+  const start = findLabelRow(rows, label)
   if (start === -1) return { name: '', lines: [], country: null }
 
   const labelRow = rows[start]
-  const labelItem = labelRow.items.find((i) => i.str.toLowerCase().startsWith(label.toLowerCase()))
-  const valueX = labelRow.items.find((i) => labelItem && i.x > labelItem.x && i.x < LEFT_LABEL_MAX)?.x
+  const marker = labelItem(labelRow, label)
+  if (!marker) return { name: '', lines: [], country: null }
+  const valueX = labelRow.items.find((i) => i.x > marker.x && i.x < LEFT_LABEL_MAX)?.x
   if (valueX === undefined) return { name: '', lines: [], country: null }
 
   const collected: string[] = []
@@ -240,9 +248,7 @@ function addressBlock(rows: TextRow[], label: string): PartyAddress {
 }
 
 function tradeTermsValue(rows: TextRow[]): string | null {
-  const idx = findRowIndex(rows, 'TRADE TERMS:')
-  if (idx === -1) return null
-  return valueRightOf(rows[idx], 'TRADE TERMS:') ?? null
+  return labelValue(rows, 'TRADE TERMS:') ?? null
 }
 
 /** `FOB Origin - Collect` -> `FOB`. */
@@ -263,7 +269,7 @@ function totalsBlock(rows: TextRow[]): { totalQuantity: number | null; cartons: 
   let totalQuantity: number | null = null
   let cartons: number | null = null
 
-  const totalIdx = findRowIndex(rows, 'TOTAL:')
+  const totalIdx = findLabelRow(rows, 'TOTAL:')
   if (totalIdx !== -1) {
     // Printed as either `3 PCS` in one cell or `3` and `PCS` in two.
     const after = valueRightOf(rows[totalIdx], 'TOTAL:')
@@ -271,7 +277,7 @@ function totalsBlock(rows: TextRow[]): { totalQuantity: number | null; cartons: 
     if (n !== null) totalQuantity = n
   }
 
-  const cartonIdx = findRowIndex(rows, 'CARTONS:')
+  const cartonIdx = findLabelRow(rows, 'CARTONS:')
   if (cartonIdx !== -1) {
     const after = valueRightOf(rows[cartonIdx], 'CARTONS:')
     // `1 (ONE)` on the invoice, `(ONE) 1` on some packing lists.
@@ -312,7 +318,7 @@ function packingTotals(rows: TextRow[]): { net: number | null; gross: number | n
 }
 
 function headerOrderNumbers(rows: TextRow[]): string[] {
-  const idx = findRowIndex(rows, 'P/O NUMBER:')
+  const idx = findLabelRow(rows, 'P/O NUMBER:')
   if (idx === -1) return []
   const found: string[] = []
   const label = rows[idx].items.find((i) => i.str.startsWith('P/O NUMBER'))
@@ -487,7 +493,7 @@ function parseInvoiceBlock(
   const description = descriptionFrom(block, valueRowIdx, partNumber)
 
   return {
-    id: `${ctx.set}:INV:${core.orderNumber}:${core.sequence}`,
+    id: sourceLineId(ctx.set, 'INV', core),
     documentSet: ctx.set,
     documentKind: 'INVOICE',
     page: page.pageNumber,
@@ -597,7 +603,7 @@ function parsePackingBlock(
   }
 
   return {
-    id: `${ctx.set}:PKG:${core.orderNumber}:${core.sequence}`,
+    id: sourceLineId(ctx.set, 'PKG', core),
     documentSet: ctx.set,
     documentKind: 'PACKING_LIST',
     page: page.pageNumber,
@@ -617,6 +623,19 @@ function parsePackingBlock(
     grossWeightKg,
     measurementM3,
   }
+}
+
+/**
+ * Identity of a physical merchandise line.
+ *
+ * Order number and sequence alone are not unique: a single purchase-order sequence can
+ * carry several order lines (0001, 0002). Including the line number and the lot id — which
+ * is unique per physical line across the whole document — means two real lines can never
+ * collapse into one id, which would otherwise silently drop a line during the
+ * invoice-to-packing-list join and misreport it as a double count.
+ */
+function sourceLineId(set: DocumentSet, kind: 'INV' | 'PKG', core: BlockCore): string {
+  return [set, kind, core.orderNumber, core.sequence, core.lineNumber, core.itemId].join(':')
 }
 
 function distinct<T>(values: T[]): T[] {

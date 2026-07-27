@@ -60,7 +60,13 @@ export interface FieldValue<T = string> {
  * weight, a packing-list line has no price.
  */
 export interface SourceLine {
-  /** Stable synthetic id: `${documentSet}:${orderNumber}:${sequence}`. */
+  /**
+   * Stable synthetic id:
+   * `${documentSet}:${INV|PKG}:${orderNumber}:${sequence}:${lineNumber}:${itemId}`.
+   *
+   * Every distinguishing field is included because order + sequence alone can repeat
+   * across order lines within one purchase order.
+   */
   id: string
   documentSet: DocumentSet
   documentKind: DocumentKind

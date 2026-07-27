@@ -103,21 +103,50 @@ const MONTHS = [
   'july', 'august', 'september', 'october', 'november', 'december',
 ]
 
-/** Returns [year, month, day] or null. Handles the CIPL's `July 20, 2026` wording. */
+/** Real calendar date, so `25-12-2026` read as MM-DD is rejected rather than written out. */
+function isRealDate(year: number, month: number, day: number): boolean {
+  if (month < 1 || month > 12 || day < 1 || year < 1900 || year > 2999) return false
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate()
+  return day <= daysInMonth
+}
+
+/**
+ * Returns [year, month, day] or null.
+ *
+ * Handles the CIPL's `July 20, 2026` wording, common abbreviations (`Jul`, `Sept`), ISO,
+ * and MM/DD/YYYY. Anything that is not a real calendar date returns null so the caller can
+ * surface it — an unparseable date must never reach the form unnoticed.
+ */
 export function parseLooseDate(input: string): [number, number, number] | null {
   const text = (input ?? '').trim()
   if (!text) return null
 
-  const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})$/)
-  if (iso) return [Number(iso[1]), Number(iso[2]), Number(iso[3])]
+  const iso = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)
+  if (iso) {
+    const parts: [number, number, number] = [Number(iso[1]), Number(iso[2]), Number(iso[3])]
+    return isRealDate(...parts) ? parts : null
+  }
 
+  // US convention, matching what both forms print.
   const numeric = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/)
-  if (numeric) return [Number(numeric[3]), Number(numeric[1]), Number(numeric[2])]
+  if (numeric) {
+    const parts: [number, number, number] = [Number(numeric[3]), Number(numeric[1]), Number(numeric[2])]
+    return isRealDate(...parts) ? parts : null
+  }
 
-  const named = text.match(/^([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})$/)
+  const named = text.match(/^([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})$/)
   if (named) {
-    const month = MONTHS.indexOf(named[1].toLowerCase())
-    if (month !== -1) return [Number(named[3]), month + 1, Number(named[2])]
+    const needle = named[1].toLowerCase()
+    // `Sept` and `Sep` both have to resolve to September, so match on prefix.
+    const matches = MONTHS.filter((m) => m.startsWith(needle) || needle.startsWith(m))
+    if (matches.length === 1) {
+      const parts: [number, number, number] = [
+        Number(named[3]),
+        MONTHS.indexOf(matches[0]) + 1,
+        Number(named[2]),
+      ]
+      return isRealDate(...parts) ? parts : null
+    }
   }
   return null
 }

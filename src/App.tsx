@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Badge, Button, Card, CardBody, CardHeader, Select } from './components/ui'
 import { UploadPanel } from './features/upload-panel'
-import { ChecksPanel, CommodityTable, ShipmentSummary } from './features/review'
+import { ChecksPanel, CommodityTable, OverridesPanel, ShipmentSummary } from './features/review'
 import { ManualFieldsPanel } from './features/manual-fields'
 import { HistoryPanel, OutputPanel } from './features/output-panel'
 import { reconcile, resolveDestinationCountry } from './domain/reconcile'
 import { loadScheduleB, type ScheduleBIndex } from './domain/schedule-b'
-import { buildDraft, defaultShipmentSettings, EMPTY_PROFILE, type CompanyProfile, type ShipmentSettings } from './domain/draft'
+import {
+  applyCarrierDefaults,
+  buildDraft,
+  checkDraft,
+  defaultShipmentSettings,
+  EMPTY_PROFILE,
+  type CompanyProfile,
+  type ShipmentSettings,
+} from './domain/draft'
 import { detectCarrier, getAdapter, type CarrierId } from './carriers/registry'
 import { indexedDbStore, overridesToMap, type OverrideRecord, type ShipmentRecord } from './store/local-store'
 import type { ParsedCipl } from './domain/types'
@@ -95,12 +103,36 @@ export function App() {
     [reconciliation, profile, settings, adapter],
   )
 
+  // The document checks prove what the CIPL says; the draft checks cover the fields a
+  // person supplies. Generation is gated on both — reconciled totals alone are not enough
+  // to make a form fit to sign.
+  const checks = useMemo(
+    () => (reconciliation && draft ? [...reconciliation.checks, ...checkDraft(draft, adapter)] : []),
+    [reconciliation, draft, adapter],
+  )
+  const canGenerate = useMemo(
+    () => checks.length > 0 && checks.every((c) => c.severity !== 'blocking' || c.passed),
+    [checks],
+  )
+
+  const saveOverride = useCallback(async (record: OverrideRecord) => {
+    await indexedDbStore.saveOverride(record)
+    setOverrides(await indexedDbStore.listOverrides())
+  }, [])
+
+  const removeOverride = useCallback(async (sourceCode: string) => {
+    await indexedDbStore.deleteOverride(sourceCode)
+    setOverrides(await indexedDbStore.listOverrides())
+  }, [])
+
   const handleGenerated = useCallback(async () => {
     if (!reconciliation || !parsed) return
     const { header, sliLines, checks } = reconciliation
+    const processedAt = new Date().toISOString()
     const record: ShipmentRecord = {
+      id: `${header.invoiceNumber}@${processedAt}`,
       invoiceNumber: header.invoiceNumber,
-      processedAt: new Date().toISOString(),
+      processedAt,
       carrierId: adapter.id,
       fileName: parsed.fileName,
       consigneeName: header.consignedTo.name,
@@ -204,7 +236,7 @@ export function App() {
                   onChange={(e) => {
                     const next = e.target.value as CarrierId
                     setCarrierId(next)
-                    setSettings((prev) => ({ ...defaultShipmentSettings(getAdapter(next)), ...prev }))
+                    setSettings((prev) => applyCarrierDefaults(prev, getAdapter(next)))
                   }}
                 >
                   {(Object.keys(CARRIER_LABELS) as CarrierId[]).map((id) => (
@@ -218,7 +250,13 @@ export function App() {
 
             <ShipmentSummary parsed={parsed} reconciliation={reconciliation} />
             <CommodityTable reconciliation={reconciliation} />
-            <ChecksPanel reconciliation={reconciliation} />
+            <ChecksPanel checks={checks} canGenerate={canGenerate} />
+            <OverridesPanel
+              reconciliation={reconciliation}
+              overrides={overrides}
+              onSave={(record) => void saveOverride(record)}
+              onDelete={(sourceCode) => void removeOverride(sourceCode)}
+            />
             <ManualFieldsPanel
               profile={profile}
               settings={settings}
@@ -230,6 +268,7 @@ export function App() {
               adapter={adapter}
               reconciliation={reconciliation}
               draft={draft}
+              canGenerate={canGenerate}
               onGenerated={() => void handleGenerated()}
             />
             <HistoryPanel shipments={shipments} onClear={() => void clearAll()} />

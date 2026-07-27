@@ -1,5 +1,8 @@
-import { Badge, Card, CardBody, CardHeader, ProvenanceRow, type Tone } from '../components/ui'
+import { useState } from 'react'
+import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Field, Input, ProvenanceRow, Select, type Tone } from '../components/ui'
 import { resolveDestinationCountry } from '../domain/reconcile'
+import { formatScheduleB, normalizeScheduleB } from '../domain/schedule-b'
+import type { OverrideRecord } from '../store/local-store'
 import type { CheckResult, ParsedCipl, Reconciliation } from '../domain/types'
 
 const SEVERITY_TONE: Record<CheckResult['severity'], Tone> = {
@@ -80,8 +83,7 @@ export function ShipmentSummary({ parsed, reconciliation }: { parsed: ParsedCipl
 }
 
 /** Reconciliation and compliance results, blocking failures first. */
-export function ChecksPanel({ reconciliation }: { reconciliation: Reconciliation }) {
-  const { checks, canGenerate } = reconciliation
+export function ChecksPanel({ checks, canGenerate }: { checks: CheckResult[]; canGenerate: boolean }) {
   const failures = checks.filter((c) => !c.passed)
   const blocking = failures.filter((c) => c.severity === 'blocking')
   const advisory = failures.filter((c) => c.severity !== 'blocking')
@@ -218,4 +220,126 @@ export function CommodityTable({ reconciliation }: { reconciliation: Reconciliat
 
 function sum(values: number[]): number {
   return Math.round(values.reduce((a, b) => a + b, 0) * 1000) / 1000
+}
+
+/**
+ * Approved classification changes.
+ *
+ * The tool will not adopt a code from a historical form, so a reclassification has to be
+ * entered here with a reason and an approver. Both are recorded alongside the change: an
+ * override that nobody can account for later is indistinguishable from a typo, which is
+ * exactly how `8483.10.5000` came to sit on a cable assembly.
+ */
+export function OverridesPanel({
+  reconciliation,
+  overrides,
+  onSave,
+  onDelete,
+}: {
+  reconciliation: Reconciliation
+  overrides: OverrideRecord[]
+  onSave: (record: OverrideRecord) => void
+  onDelete: (sourceCode: string) => void
+}) {
+  const sourceCodes = [...new Set(reconciliation.mergedLines.map((l) => l.classification))].filter(Boolean)
+  const [sourceCode, setSourceCode] = useState(sourceCodes[0] ?? '')
+  const [approvedCode, setApprovedCode] = useState('')
+  const [reason, setReason] = useState('')
+  const [approvedBy, setApprovedBy] = useState('')
+
+  const normalisedApproved = normalizeScheduleB(approvedCode)
+  const canSave = Boolean(sourceCode) && normalisedApproved.length === 10 && reason.trim() && approvedBy.trim()
+
+  function save() {
+    if (!canSave) return
+    onSave({
+      sourceCode: normalizeScheduleB(sourceCode),
+      approvedCode: normalisedApproved,
+      reason: reason.trim(),
+      approvedBy: approvedBy.trim(),
+      approvedAt: new Date().toISOString(),
+    })
+    setApprovedCode('')
+    setReason('')
+  }
+
+  return (
+    <Card>
+      <CardHeader
+        title="Classification overrides"
+        description="Applied before grouping, so an override can merge rows. Kept on this machine and reused."
+        actions={overrides.length ? <Badge tone="warn">{overrides.length} active</Badge> : undefined}
+      />
+      <CardBody className="space-y-4">
+        {overrides.length ? (
+          <ul className="space-y-2">
+            {overrides.map((record) => (
+              <li
+                key={record.sourceCode}
+                className="flex flex-wrap items-start justify-between gap-3 rounded-md border bg-[var(--color-sunken)] px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <p className="tabular text-sm text-[var(--color-ink)]">
+                    {formatScheduleB(record.sourceCode)} → {formatScheduleB(record.approvedCode)}
+                  </p>
+                  <p className="text-xs text-[var(--color-ink-soft)]">
+                    {record.reason} — {record.approvedBy}, {record.approvedAt.slice(0, 10)}
+                  </p>
+                </div>
+                <Button size="sm" variant="ghost" onClick={() => onDelete(record.sourceCode)}>
+                  Remove
+                </Button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <EmptyState title="No overrides">
+            Codes are filed exactly as the CIPL states them.
+          </EmptyState>
+        )}
+
+        <div className="grid gap-3 border-t pt-4 sm:grid-cols-2">
+          <Field label="Code on the CIPL">
+            {(id) => (
+              <Select id={id} value={sourceCode} onChange={(e) => setSourceCode(e.target.value)}>
+                {sourceCodes.map((code) => (
+                  <option key={code} value={code}>
+                    {code}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+          <Field label="File instead" hint="Ten digits.">
+            {(id) => (
+              <Input
+                id={id}
+                value={approvedCode}
+                onChange={(e) => setApprovedCode(e.target.value)}
+                placeholder="8544.42.0000"
+              />
+            )}
+          </Field>
+          <Field label="Reason" className="sm:col-span-2">
+            {(id) => (
+              <Input
+                id={id}
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="Why this classification is correct for these goods"
+              />
+            )}
+          </Field>
+          <Field label="Approved by">
+            {(id) => <Input id={id} value={approvedBy} onChange={(e) => setApprovedBy(e.target.value)} />}
+          </Field>
+          <div className="flex items-end">
+            <Button variant="primary" onClick={save} disabled={!canSave}>
+              Record override
+            </Button>
+          </div>
+        </div>
+      </CardBody>
+    </Card>
+  )
 }
