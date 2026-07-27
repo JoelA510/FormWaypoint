@@ -130,11 +130,6 @@ function sortByX(items: TextItem[]): TextItem[] {
 // break extraction.
 // ---------------------------------------------------------------------------
 
-/** First item whose left edge falls in [min, max]. */
-export function itemInRange(row: TextRow, min: number, max: number): TextItem | undefined {
-  return row.items.find((i) => i.x >= min && i.x <= max)
-}
-
 /** Every item whose left edge falls in [min, max]. */
 export function itemsInRange(row: TextRow, min: number, max: number): TextItem[] {
   return row.items.filter((i) => i.x >= min && i.x <= max)
@@ -152,6 +147,28 @@ export function findRowIndex(rows: TextRow[], needle: string, from = 0): number 
     if (rowText(rows[i]).toLowerCase().includes(target)) return i
   }
   return -1
+}
+
+/**
+ * Index of the first row containing an item that *begins* with `label`.
+ *
+ * Stricter than `findRowIndex` on purpose. Searching for `DATE:` by substring also matches
+ * a row holding `DELIVERY DATE:`, and the caller would then look for an item starting with
+ * `DATE:`, find none, and give up — silently losing the real field further down the page.
+ * Matching the label cell itself means the search continues past near misses.
+ */
+export function findLabelRow(rows: TextRow[], label: string, from = 0): number {
+  const target = label.toLowerCase()
+  for (let i = from; i < rows.length; i++) {
+    if (rows[i].items.some((item) => item.str.toLowerCase().startsWith(target))) return i
+  }
+  return -1
+}
+
+/** The item that carries `label`, if this row has one. */
+export function labelItem(row: TextRow, label: string): TextItem | undefined {
+  const target = label.toLowerCase()
+  return row.items.find((item) => item.str.toLowerCase().startsWith(target))
 }
 
 /**

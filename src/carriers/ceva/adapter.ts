@@ -94,6 +94,8 @@ export function createCevaAdapter(): CarrierAdapter {
       setText(ctx, F.specialInstructions, instructions)
       setText(ctx, F.piecesAndDimensions, draft.piecesAndDimensions)
       setText(ctx, F.freightPaymentLocation, draft.freight === 'PREPAID' ? 'PREPAID' : 'COLLECT')
+      // The form's own caption: "If no value is indicated, the shipment will not be insured."
+      if (draft.insured) setText(ctx, F.insurance, 'YES')
 
       // --- Commodity table -------------------------------------------------
       const rows = draft.lines.slice(0, CEVA_MAX_ROWS)
@@ -121,8 +123,16 @@ export function createCevaAdapter(): CarrierAdapter {
       // --- Signature block -------------------------------------------------
       setText(ctx, F.dulyAuthorized, draft.signerName)
       setText(ctx, F.signerTitle, draft.signerTitle)
-      // Box 33 is initialled, not signed; boxes 29/30 are left for a pen.
-      if (!draft.hazardous) setText(ctx, F.noDangerousGoods, draft.signerInitials)
+      // Box 33 is initialled, not signed; boxes 29/30 are left for a pen. Exactly one of
+      // the two declarations is always completed — leaving both blank would produce a form
+      // that silently declares nothing about dangerous goods.
+      setText(ctx, draft.hazardous ? F.hasDangerousGoods : F.noDangerousGoods, draft.signerInitials)
+      if (draft.hazardous) {
+        ctx.warnings.push(
+          'Marked as containing dangerous goods. Box 33 requires an attached shipper’s declaration, ' +
+            'which this tool does not produce.',
+        )
+      }
 
       const bytes = await doc.save({ updateFieldAppearances: true })
       return { bytes, written: ctx.written, warnings: ctx.warnings }

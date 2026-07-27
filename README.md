@@ -64,9 +64,12 @@ manufacture the parts a document cannot support:
 
 ## Verification
 
-48 tests run against three real, manually-processed shipments. The expected values come from
+70 tests run against three real, manually-processed shipments. The expected values come from
 the completed SLIs that were filed for them, so a pass means the tool reproduces what a
-person produced by hand.
+person produced by hand. A further set pins the failure modes that would otherwise be
+silent — a blank exporter profile, an unreadable weight total, a double-claimed packing
+line, an impossible date — because a form that looks complete and is wrong is the worst
+outcome this tool can produce.
 
 | Shipment | Carrier | Lines → rows | Quantity | Net weight | USD |
 | --- | --- | --- | ---: | ---: | ---: |
@@ -77,6 +80,9 @@ person produced by hand.
 ```bash
 npm run check    # typecheck, lint, tests, production build
 ```
+
+CI runs exactly this command on every push and pull request, so it cannot drift from what
+you see locally.
 
 Only the CIPLs are committed as fixtures. The completed SLIs they were checked against are
 not, because they carry handwritten signatures; the values read off them live in the test

@@ -1,93 +1,31 @@
-name: CI/CD Pipeline
+name: CI
 
 on:
   push:
-    branches: [main, develop]
-  pull_request:
     branches: [main]
+  pull_request:
 
+# `npm run check` is the single gate: typecheck, lint, the regression tests against
+# real shipments, and a production build. It is the same command run locally, so CI
+# cannot drift from what a developer sees.
 jobs:
-  test:
+  check:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        service: [api, web, ingestion]
-    
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '22'
           cache: 'npm'
-          cache-dependency-path: |
-            apps/api/package-lock.json
-            apps/web/package-lock.json
-            services/ingestion/package-lock.json
-      
+          cache-dependency-path: package-lock.json
+
       - name: Install dependencies
-        run: |
-          if [ "${{ matrix.service }}" = "api" ]; then
-            cd apps/api && npm ci
-          elif [ "${{ matrix.service }}" = "web" ]; then
-            cd apps/web && npm ci
-          else
-            cd services/ingestion && npm ci
-          fi
-      
-      - name: Run tests
-        run: |
-          if [ "${{ matrix.service }}" = "api" ]; then
-            cd apps/api && npm test
-          elif [ "${{ matrix.service }}" = "web" ]; then
-            cd apps/web && npm test -- --run
-          else
-            cd services/ingestion && npm test
-          fi
-      
-      - name: Security audit
-        run: |
-          if [ "${{ matrix.service }}" = "api" ]; then
-            cd apps/api && npm audit --audit-level=high || true
-          elif [ "${{ matrix.service }}" = "ingestion" ]; then
-            cd services/ingestion && npm audit --audit-level=high || true
-          fi
-        continue-on-error: true
+        run: npm ci
 
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
-        with:
-          node-version: '18'
-      
-      - name: Install web dependencies
-        run: cd apps/web && npm ci
-      
-      - name: Lint
-        run: cd apps/web && npm run lint
-        continue-on-error: true
+      - name: Typecheck, lint, test and build
+        run: npm run check
 
-  build:
-    needs: [test, lint]
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    
-    steps:
-      - uses: actions/checkout@v3
-      
-      - name: Build frontend
-        run: |
-          cd apps/web
-          npm ci
-          npm run build
-      
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v3
-        with:
-          name: web-build
-          path: apps/web/build
-          retention-days: 7
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+        continue-on-error: true
