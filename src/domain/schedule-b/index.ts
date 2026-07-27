@@ -49,6 +49,64 @@ export function formatScheduleB(code: string): string {
   return `${digits.slice(0, 4)}.${digits.slice(4, 6)}.${digits.slice(6)}`
 }
 
+/** The written form every Schedule B number is expected in. */
+export const SCHEDULE_B_PATTERN = /^\d{4}\.\d{2}\.\d{4}$/
+
+export type CodeScreening =
+  /** Correctly written and present in the Census file. */
+  | { status: 'ok'; code: string; description: string }
+  /** Not written as `####.##.####` — may still resolve, but needs correcting at source. */
+  | { status: 'malformed'; code: string; reason: string; resolves: boolean }
+  /** Correctly written, but absent from the Census file. AES will reject it. */
+  | { status: 'unknown'; code: string; reason: string }
+  /** No code at all. */
+  | { status: 'absent'; code: string; reason: string }
+
+/**
+ * The standing filter over any commodity number, wherever it came from — a CIPL line or an
+ * imported item master.
+ *
+ * Two rules, both purely mechanical: is it written as `####.##.####`, and is it in the
+ * Census concordance. Nothing here judges whether a code *suits* the goods, and nothing
+ * corrects one; a number that fails either rule is reported so a human can fix it at source.
+ *
+ * `malformed` is reported separately from `unknown` because they need different fixes: a
+ * punctuation slip is a typing correction, while a code the Census file has never heard of
+ * is a reclassification.
+ */
+export function screenCode(raw: string | null | undefined, index: ScheduleBIndex | null): CodeScreening {
+  const text = (raw ?? '').trim()
+  if (!text) return { status: 'absent', code: '', reason: 'No commodity number.' }
+
+  const digits = normalizeScheduleB(text)
+  const entry = index?.lookup(digits) ?? null
+
+  if (!SCHEDULE_B_PATTERN.test(text)) {
+    const resolves = digits.length === 10 && Boolean(entry)
+    return {
+      status: 'malformed',
+      code: text,
+      reason:
+        digits.length === 10
+          ? `Written as "${text}" instead of ${formatScheduleB(digits)}.`
+          : `Has ${digits.length} digit(s); Schedule B numbers have exactly 10, written ####.##.####.`,
+      resolves,
+    }
+  }
+
+  if (!entry) {
+    return {
+      status: 'unknown',
+      code: text,
+      reason: index
+        ? 'Not in the Census Bureau commodity file. The code is retired, mistyped, or an import-only HTS number.'
+        : 'The Census commodity file is not loaded, so this code could not be checked.',
+    }
+  }
+
+  return { status: 'ok', code: text, description: entry.description }
+}
+
 export function createScheduleBIndex(payload: RawPayload): ScheduleBIndex {
   const { codes } = payload
   return {
