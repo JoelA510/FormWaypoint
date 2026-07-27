@@ -65,6 +65,34 @@ export function ManualFieldsPanel({
             </Field>
           ) : null}
 
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field
+              label="Country of destination"
+              hint="Leave blank to use the document. Some layouts state none."
+            >
+              {(id) => (
+                <Input
+                  id={id}
+                  value={settings.destinationCountry}
+                  onChange={(e) => setSetting('destinationCountry', e.target.value)}
+                  placeholder="from the document"
+                />
+              )}
+            </Field>
+            <Field label="Incoterm" hint="Leave blank to use the document's trade terms.">
+              {(id) => (
+                <Select id={id} value={settings.incoterm} onChange={(e) => setSetting('incoterm', e.target.value)}>
+                  <option value="">from the document</option>
+                  {['EXW', 'FCA', 'FOB', 'FAS', 'CFR', 'CIF', 'CPT', 'CIP', 'DAP', 'DPU', 'DDP'].map((code) => (
+                    <option key={code} value={code}>
+                      {code}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </Field>
+          </div>
+
           <Field label="Consignee ID" hint="EORI in the EU, USCI in China. Required by some destinations.">
             {(id) => (
               <Input
