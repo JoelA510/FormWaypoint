@@ -126,18 +126,34 @@ const ROLE_PATTERNS: { role: ColumnRole; test: (header: string) => boolean }[] =
   },
 ]
 
+/**
+ * Ranks weight columns so the *net* one wins.
+ *
+ * An item master that carries both a gross and a net weight would otherwise be read
+ * positionally, and whichever came first would end up in box 26 — which is a net weight.
+ * Filing gross there overstates the shipment, silently and plausibly.
+ */
+function preferNetWeight(candidates: number[], normalised: string[]): number {
+  const net = candidates.find((i) => /\bnet\b/.test(normalised[i]))
+  if (net != null) return net
+  const notGross = candidates.find((i) => !/\bgross\b/.test(normalised[i]))
+  return notGross ?? candidates[0]
+}
+
 function detectColumns(headers: string[]): DetectedColumns {
   const columns: DetectedColumns = {}
   const normalised = headers.map(normalise)
 
   for (const { role, test } of ROLE_PATTERNS) {
+    const candidates: number[] = []
     for (let i = 0; i < normalised.length; i++) {
-      if (columns[role] != null) break
       // A column already claimed by a more specific role is not offered again — otherwise
       // `Current Import HTS` would also satisfy the looser export-code pattern.
       if (Object.values(columns).includes(i)) continue
-      if (normalised[i] && test(normalised[i])) columns[role] = i
+      if (normalised[i] && test(normalised[i])) candidates.push(i)
     }
+    if (!candidates.length) continue
+    columns[role] = role === 'weight' ? preferNetWeight(candidates, normalised) : candidates[0]
   }
 
   return columns
@@ -189,10 +205,27 @@ export function inspectWorkbook(rows: string[][]): WorkbookInspection {
 // Import
 // ---------------------------------------------------------------------------
 
+/**
+ * Reads a number that may be written in either convention.
+ *
+ * `411,408` is four hundred and eleven thousand; `0,544` is nought point five four four.
+ * Stripping every comma turns the second into 544 — a thousandfold error on a figure that
+ * goes straight onto a customs form — and this reader accepts semicolon-delimited files,
+ * which is exactly where the second convention shows up.
+ *
+ * `1,234` is genuinely ambiguous. It is read as a thousands separator, because the forms
+ * this tool files are US export declarations.
+ */
+function parseLooseNumber(text: string): number {
+  if (/^[1-9]\d{0,2}(,\d{3})+(\.\d+)?$/.test(text)) return Number(text.replace(/,/g, ''))
+  if (/^\d+,\d+$/.test(text)) return Number(text.replace(',', '.'))
+  return Number(text.replace(/,/g, ''))
+}
+
 function parseWeight(raw: string | undefined, unit: WeightUnit): number | null {
-  const text = (raw ?? '').replace(/,/g, '').trim()
+  const text = (raw ?? '').trim()
   if (!text) return null
-  const value = Number(text)
+  const value = parseLooseNumber(text)
   // Zero is not a weight. Filing one would put 0.000 kg in box 26, which is exactly the
   // silent wrong answer a blank is meant to prevent.
   if (!Number.isFinite(value) || value <= 0) return null
@@ -265,7 +298,13 @@ export function importItems(rows: string[][], options: ImportOptions): ImportSum
   }
 }
 
-/** Every entry whose export code fails the format or existence filter. */
+/**
+ * Every entry whose export code fails the format or existence filter.
+ *
+ * With no Census dataset loaded only the *format* rule can be applied. Reporting the rest as
+ * findings would tell the user their whole item master is broken when the truth is that
+ * nothing could be checked — the missing dataset is reported on its own, once.
+ */
 export function flagEntries(entries: ItemLibraryEntry[], index: ScheduleBIndex | null): FlaggedItem[] {
   const flagged: FlaggedItem[] = []
   for (const entry of entries) {
@@ -274,6 +313,7 @@ export function flagEntries(entries: ItemLibraryEntry[], index: ScheduleBIndex |
     if (!entry.exportCode) continue
     const screening = screenCode(entry.exportCode, index)
     if (screening.status === 'ok') continue
+    if (!index && screening.status !== 'malformed') continue
     flagged.push({
       partNumber: entry.displayPartNumber,
       description: entry.description,
