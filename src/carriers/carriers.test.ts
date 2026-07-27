@@ -285,3 +285,27 @@ describe('FedEx / UPS keying sheets', () => {
     expect(text).toContain('8501.51.3040')
   })
 })
+
+describe('country in the ultimate consignee block', () => {
+  it('appends the country when the CIPL address omits it', async () => {
+    // K78027EC's consigned-to block ends "'s-Hertogenbosch NA 5234" — no country anywhere.
+    const ceva = await generate('K78027EC', 'ceva')
+    expect(ceva.values['Ultimate Consignee'].split('\r').at(-1)).toBe('Netherlands')
+    expect(ceva.values['Country of Ultimate']).toBe('Netherlands')
+
+    // G78495IQ ends "Bangalore, KARNATAKA 562123".
+    const nippon = await generate('G78495IQ', 'nippon-express')
+    const consignee =
+      nippon.values['4a2 ULTIMATE CONSIGNEE Complete name  address and contact name  tel if available']
+    expect(consignee.split('\r').at(-1)).toBe('India')
+  })
+
+  it('does not duplicate a country the CIPL already prints', async () => {
+    // K78464FJ's consigned-to block already ends "China".
+    const { values } = await generate('K78464FJ', 'nippon-express')
+    const lines =
+      values['4a2 ULTIMATE CONSIGNEE Complete name  address and contact name  tel if available'].split('\r')
+    expect(lines.at(-1)).toBe('China')
+    expect(lines.filter((l) => l.trim() === 'China')).toHaveLength(1)
+  })
+})
