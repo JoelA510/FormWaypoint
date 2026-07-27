@@ -6,3 +6,6 @@ dist
 coverage
 legacy/node_modules
 legacy/venv
+
+# TypeScript incremental build state
+*.tsbuildinfo
