@@ -105,6 +105,28 @@ export function defaultShipmentSettings(adapter: CarrierAdapter): ShipmentSettin
   }
 }
 
+/**
+ * Both forms ask box 6 / box 4a for a *complete* name and address, and an international
+ * address without a country is not complete. The CIPL's consigned-to block is inconsistent
+ * about it — vendorA2 ends "China" while vendorA1 ends "Bangalore, KARNATAKA 562123" and
+ * vendorA3 ends "'s-Hertogenbosch NA 5234" — so the country is appended when it is missing
+ * and left alone when it is already there.
+ *
+ * It duplicates the country-of-ultimate-destination box on purpose. That box is a coded
+ * data element for the export declaration; this one is the delivery address the forwarder
+ * actually routes on.
+ */
+export function withDestinationCountry(addressLines: string[], country: string | null): string[] {
+  const lines = addressLines.filter((line) => line.trim())
+  if (!country) return lines
+  const needle = country.trim().toLowerCase()
+  const alreadyThere = lines.some((line) => {
+    const normalised = line.trim().toLowerCase()
+    return normalised === needle || normalised.endsWith(` ${needle}`) || normalised.endsWith(`,${needle}`)
+  })
+  return alreadyThere ? lines : [...lines, country]
+}
+
 export function buildDraft(
   reconciliation: Reconciliation,
   profile: CompanyProfile,
@@ -112,6 +134,7 @@ export function buildDraft(
   adapter: CarrierAdapter,
 ): SliDraft {
   const { header, sliLines } = reconciliation
+  const destinationCountry = resolveDestinationCountry(header)
 
   return {
     usppiName: profile.usppiName,
@@ -123,7 +146,7 @@ export function buildDraft(
 
     ultimateConsignee: {
       name: header.consignedTo.name,
-      addressLines: header.consignedTo.lines,
+      addressLines: withDestinationCountry(header.consignedTo.lines, destinationCountry),
       consigneeId: settings.consigneeId || undefined,
     },
     consigneeType: settings.consigneeType,
@@ -136,7 +159,7 @@ export function buildDraft(
     shipmentReference: settings.shipmentReference,
     consigneePo: summariseReferences(header.orderNumbers),
     pointOfOrigin: profile.pointOfOrigin || (adapter.defaults.pointOfOrigin ?? ''),
-    destinationCountry: resolveDestinationCountry(header) ?? '',
+    destinationCountry: destinationCountry ?? '',
     mode: settings.mode,
     incoterm: header.incoterm ?? '',
     namedPlace: settings.namedPlace,
