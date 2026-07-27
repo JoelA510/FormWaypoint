@@ -1,22 +1,49 @@
 {
-    "name": "form-waypoint-monorepo",
-    "private": true,
-    "scripts": {
-        "build": "turbo run build",
-        "dev": "turbo run dev",
-        "lint": "turbo run lint",
-        "types": "turbo run types",
-        "test": "turbo run test"
-    },
-    "devDependencies": {
-        "eslint": "^9.39.2",
-        "prettier": "latest",
-        "turbo": "latest",
-        "typescript": "^5.7.0"
-    },
-    "packageManager": "pnpm@9.0.0",
-    "workspaces": [
-        "apps/*",
-        "packages/*"
-    ]
+  "name": "formwaypoint",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Turns a commercial invoice & packing list (CIPL) into a completed carrier Shipper's Letter of Instruction. Runs entirely in the browser — documents never leave the machine.",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "lint": "eslint .",
+    "typecheck": "tsc -b --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "data:schedule-b": "node scripts/build-schedule-b.mjs",
+    "check": "npm run typecheck && npm run lint && npm run test && npm run build"
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "idb": "^8.0.3",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^4.10.38",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "tailwind-merge": "^3.6.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.3.4",
+    "eslint": "^9.39.1",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "eslint-plugin-react-refresh": "^0.4.16",
+    "globals": "^15.14.0",
+    "jsdom": "^25.0.1",
+    "tailwindcss": "^4.3.3",
+    "typescript": "5.9.3",
+    "typescript-eslint": "^8.65.0",
+    "vite": "^6.0.7",
+    "vitest": "^2.1.8"
+  }
 }
