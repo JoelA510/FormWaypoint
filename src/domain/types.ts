@@ -21,6 +21,16 @@ export type DocumentSet = 'FC' | 'TP1'
 
 export type DocumentKind = 'INVOICE' | 'PACKING_LIST'
 
+/**
+ * CIPL layouts this tool can read. Each has its own parser behind a shared contract.
+ *
+ * `omron-fc-tp1` — the Omron Robotics invoice/packing-list pair, printed twice (FC in USD,
+ *   TP1 in the destination currency), with per-line net and gross weights.
+ * `omron-shipment` — the SAP-style "OMRON SHIPMENT#" commercial invoice and master packing
+ *   list. Single currency, carries an ECCN column, and **has no weights at all**.
+ */
+export type CiplFormat = 'omron-fc-tp1' | 'omron-shipment'
+
 /** Where a value came from. Rendered next to every field on the review screen. */
 export type Provenance =
   /** Read directly off the source document. */
@@ -96,6 +106,13 @@ export interface SourceLine {
   countryOfOrigin: string
   /** Classification as printed on the CIPL. May be Schedule B or US HTS. */
   classification: string
+  /**
+   * ECCN printed against this line, when the format carries one.
+   *
+   * Only `omron-shipment` does. Where present it is authoritative and must not be replaced
+   * by a blanket EAR99 — one sample line is `5A992.C`, and the SLI filed for it says EAR99.
+   */
+  eccn?: string
 
   quantity: number
   uom: string
@@ -156,7 +173,16 @@ export interface PartyAddress {
 /** Everything extracted from one CIPL PDF, both document sets. */
 export interface ParsedCipl {
   fileName: string
+  format: CiplFormat
   pageCount: number
+  /**
+   * Whether the document itself states line weights.
+   *
+   * False for `omron-shipment`, which prints none. Weights then have to come from the saved
+   * per-part table, and the reconciliation says so rather than implying the figures were
+   * proved against the source.
+   */
+  providesWeights: boolean
   /** Document sets present in the file, in the order encountered. */
   availableSets: DocumentSet[]
   /** Header per document set. */

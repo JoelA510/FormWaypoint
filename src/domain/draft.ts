@@ -50,6 +50,15 @@ export interface ShipmentSettings {
   containerized: boolean
   specialInstructions: string
   namedPlace: string
+  /**
+   * Overrides for values the document may not supply.
+   *
+   * The `omron-shipment` layout prints no Incoterm and often no country (its consignee
+   * block can end at a postal line), so both have to be enterable. Empty means "use what
+   * the document says"; a value here always wins.
+   */
+  destinationCountry: string
+  incoterm: string
   /** Free text for CEVA box 23; dimensions are not on the CIPL. */
   piecesAndDimensions: string
 
@@ -98,6 +107,8 @@ export function defaultShipmentSettings(adapter: CarrierAdapter): ShipmentSettin
     containerized: d.containerized ?? false,
     specialInstructions: '',
     namedPlace: '',
+    destinationCountry: '',
+    incoterm: '',
     piecesAndDimensions: '',
     // Deliberately blank — see the note on ShipmentSettings.
     eccn: '',
@@ -135,7 +146,7 @@ export function buildDraft(
   adapter: CarrierAdapter,
 ): SliDraft {
   const { header, sliLines } = reconciliation
-  const destinationCountry = resolveDestinationCountry(header)
+  const destinationCountry = settings.destinationCountry.trim() || resolveDestinationCountry(header)
 
   return {
     usppiName: profile.usppiName,
@@ -158,11 +169,11 @@ export function buildDraft(
     dateOfExportation: header.invoiceDate,
     transportationReference: settings.transportationReference,
     shipmentReference: settings.shipmentReference,
-    consigneePo: summariseReferences(header.orderNumbers),
+    consigneePo: summariseReferences(header.orderNumbers, adapter.maxInlineReferences),
     pointOfOrigin: profile.pointOfOrigin || (adapter.defaults.pointOfOrigin ?? ''),
     destinationCountry: destinationCountry ?? '',
     mode: settings.mode,
-    incoterm: header.incoterm ?? '',
+    incoterm: settings.incoterm.trim() || header.incoterm || '',
     namedPlace: settings.namedPlace,
     freight: header.freightTerms ?? adapter.defaults.freight ?? 'COLLECT',
     insured: settings.insured,
@@ -189,10 +200,11 @@ export function buildDraft(
  * Both forms have a single-line reference box, and the historical examples abbreviate a long
  * list as `<first>, N Add'l` rather than truncating it. Reproduced here.
  */
-export function summariseReferences(references: string[]): string {
+export function summariseReferences(references: string[], maxInline = 1): string {
   if (!references.length) return ''
-  if (references.length === 1) return references[0]
-  return `${references[0]}, ${references.length - 1} Add'l`
+  const shown = references.slice(0, Math.max(1, maxInline))
+  const remaining = references.length - shown.length
+  return remaining > 0 ? `${shown.join(', ')}, ${remaining} Add'l` : shown.join(', ')
 }
 
 /**
@@ -217,6 +229,8 @@ export function applyCarrierDefaults(previous: ShipmentSettings, adapter: Carrie
     insured: previous.insured,
     specialInstructions: previous.specialInstructions,
     namedPlace: previous.namedPlace,
+    destinationCountry: previous.destinationCountry,
+    incoterm: previous.incoterm,
     piecesAndDimensions: previous.piecesAndDimensions,
     eccn: previous.eccn,
     sme: previous.sme,
