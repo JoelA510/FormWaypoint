@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Field, Input, ProvenanceRow, Select, type Tone } from '../components/ui'
 import { resolveDestinationCountry } from '../domain/reconcile'
 import { formatScheduleB, normalizeScheduleB } from '../domain/schedule-b'
@@ -421,6 +421,13 @@ export function PartWeightsPanel({
 
 function UnitWeightInput({ value, onCommit }: { value: number | undefined; onCommit: (next: number) => void }) {
   const [draft, setDraft] = useState(value == null ? '' : String(value))
+
+  // Saved weights arrive from IndexedDB after the first render, so the input has to follow
+  // the incoming value; otherwise a part with a stored weight shows an empty box next to a
+  // populated line total.
+  useEffect(() => {
+    setDraft(value == null ? '' : String(value))
+  }, [value])
   const parsed = Number(draft)
   const valid = draft.trim() !== '' && Number.isFinite(parsed) && parsed > 0
 
