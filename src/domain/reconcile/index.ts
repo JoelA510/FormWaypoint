@@ -16,7 +16,14 @@ import type {
   SourceLine,
 } from '../types'
 import { checkClassification, type ScheduleBIndex } from '../schedule-b'
-import { aggregateLines, joinInvoiceToPacking, roundTo, unmatchedPackingLines, type AggregationOptions } from './lines'
+import {
+  aggregateLines,
+  applyUnitWeights,
+  joinInvoiceToPacking,
+  roundTo,
+  unmatchedPackingLines,
+  type AggregationOptions,
+} from './lines'
 
 export * from './lines'
 
@@ -130,7 +137,11 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
   const invoiceLines = parsed.lines.filter((l) => l.documentSet === set && l.documentKind === 'INVOICE')
   const packingLines = parsed.lines.filter((l) => l.documentSet === set && l.documentKind === 'PACKING_LIST')
 
-  const mergedLines = joinInvoiceToPacking(invoiceLines, packingLines)
+  const joined = joinInvoiceToPacking(invoiceLines, packingLines)
+  // Formats that print no weights get them from the saved per-part table instead.
+  const mergedLines = options.unitWeightsByPart
+    ? applyUnitWeights(joined, options.unitWeightsByPart)
+    : joined
   const sliLines = aggregateLines(mergedLines, options)
 
   if (index) {
@@ -151,10 +162,11 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
           'This file is probably not the vendor CIPL layout.',
       passed: headerReadable,
     },
-    ...totalsChecks(header, mergedLines, sliLines),
+    ...totalsChecks(header, mergedLines, sliLines, parsed.providesWeights),
     ...lineageChecks(mergedLines, packingLines, sliLines),
     ...classificationChecks(sliLines, mergedLines, index),
     ...exportControlChecks(options),
+    ...sourceEccnChecks(sliLines, mergedLines),
     ...capacityCheck(sliLines, options.maxRows),
   ]
 
@@ -172,7 +184,12 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
 // Checks
 // ---------------------------------------------------------------------------
 
-function totalsChecks(header: ShipmentHeader, merged: MergedLine[], sliLines: SLILine[]): CheckResult[] {
+function totalsChecks(
+  header: ShipmentHeader,
+  merged: MergedLine[],
+  sliLines: SLILine[],
+  providesWeights: boolean,
+): CheckResult[] {
   const results: CheckResult[] = []
 
   const quantity = roundTo(sliLines.reduce((s, l) => s + l.quantity, 0), 3)
@@ -207,7 +224,21 @@ function totalsChecks(header: ShipmentHeader, merged: MergedLine[], sliLines: SL
   // there is nothing to reconcile weights against, and that absence is itself a blocking
   // problem — an unverified weight is not the same as a verified one.
   const weight = roundTo(sliLines.reduce((s, l) => s + l.weightKg, 0), 3)
-  if (header.totalNetWeightKg == null) {
+  if (!providesWeights) {
+    // A format that prints no weights cannot have them proved against it. Say so plainly
+    // rather than reporting a reconciliation that did not happen; the per-line
+    // `weights-present` check below is what actually guards the output here.
+    results.push({
+      id: 'total-weight',
+      severity: 'info',
+      title: 'Weights come from the saved per-part table',
+      detail:
+        'This document states no weights, so there is nothing to reconcile against. Rows total ' +
+        `${weight.toFixed(3)} kg from the per-part figures — confirm them before filing.`,
+      passed: true,
+      actual: weight.toFixed(3),
+    })
+  } else if (header.totalNetWeightKg == null) {
     results.push({
       id: 'total-weight',
       severity: 'blocking',
@@ -366,6 +397,39 @@ function exportControlChecks(options: ReconcileOptions): CheckResult[] {
           'an absent ECCN does not establish EAR99, and EAR99 does not by itself establish NLR.'
         : `Every row will be filed as ${options.eccn} / SME ${options.sme} / ${options.license}, as entered.`,
       passed: missing.length === 0,
+    },
+  ]
+}
+
+/**
+ * Rows whose ECCN came from the CIPL rather than from the blanket value.
+ *
+ * Surfaced because the substitution runs the other way in the historical data: shipment
+ * vendorB1 states `ECCN: 5A992.C` against its T20 pendant kit, and the SLI filed for it says
+ * EAR99. A stated ECCN is a classification the exporter already made, so it wins — but the
+ * reviewer is told, because it changes what is being declared.
+ */
+function sourceEccnChecks(sliLines: SLILine[], merged: MergedLine[]): CheckResult[] {
+  const byId = new Map(merged.map((l) => [l.id, l]))
+  const stated = sliLines.flatMap((line, i) => {
+    const sourceEccn = line.sourceLineIds.map((id) => byId.get(id)?.eccn).find(Boolean)
+    return sourceEccn ? [{ row: i + 1, scheduleB: line.scheduleB, eccn: sourceEccn }] : []
+  })
+
+  if (!stated.length) return []
+
+  return [
+    {
+      id: 'eccn-from-document',
+      severity: 'warning',
+      title: 'The CIPL states an ECCN for some rows',
+      detail:
+        stated
+          .map((s) => `Row ${s.row} (${s.scheduleB}) will be filed as ${s.eccn}, as printed on the CIPL`)
+          .join('; ') +
+        '. A stated ECCN is not EAR99 — confirm it before signing.',
+      passed: false,
+      refs: stated.map((s) => `row-${s.row}`),
     },
   ]
 }

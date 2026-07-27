@@ -46,6 +46,7 @@ export function createNipponExpressAdapter(options: NipponOptions = {}): Carrier
     templateVersion: '01/04/2022',
     templateUrl: 'templates/nippon-express-sli.pdf',
     maxCommodityRows: NIPPON_ROWS.length,
+    maxInlineReferences: 3,
     supportedModes: ['AIR', 'OCEAN', 'TRUCK', 'RAIL'],
 
     defaults: {

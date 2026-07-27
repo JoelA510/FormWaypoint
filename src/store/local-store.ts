@@ -14,7 +14,7 @@ import type { CompanyProfile, ShipmentSettings } from '../domain/draft'
 import type { CheckResult, SLILine } from '../domain/types'
 
 const DB_NAME = 'formwaypoint'
-const DB_VERSION = 2
+const DB_VERSION = 3
 
 /** Saved per consignee so the values that are not on the CIPL only get typed once. */
 export interface ConsigneeRecord {
@@ -24,6 +24,8 @@ export interface ConsigneeRecord {
   consigneeId: string
   consigneeType: ShipmentSettings['consigneeType']
   partiesRelated: boolean
+  /** Country of ultimate destination, for layouts whose address block omits it. */
+  destinationCountry: string
   lastUsed: string
 }
 
@@ -42,6 +44,22 @@ export interface OverrideRecord {
   reason: string
   approvedBy: string
   approvedAt: string
+}
+
+/**
+ * Net weight of one unit of a part.
+ *
+ * The `vendor-b` CIPL format prints no weights at all, so box 26 has to come from
+ * somewhere. Entered once per part and reused, which is why this is reference data rather
+ * than shipment data. Never inferred: an unknown part blocks generation instead of
+ * defaulting to zero.
+ */
+export interface PartWeightRecord {
+  partNumber: string
+  netWeightKg: number
+  /** Description as last seen, purely to make the saved list readable. */
+  description: string
+  updatedAt: string
 }
 
 /** One processed shipment, kept for autofill and as an audit trail. */
@@ -81,6 +99,10 @@ export interface LocalStore {
   saveOverride(record: OverrideRecord): Promise<void>
   deleteOverride(sourceCode: string): Promise<void>
 
+  listPartWeights(): Promise<PartWeightRecord[]>
+  savePartWeight(record: PartWeightRecord): Promise<void>
+  deletePartWeight(partNumber: string): Promise<void>
+
   listShipments(limit?: number): Promise<ShipmentRecord[]>
   saveShipment(record: ShipmentRecord): Promise<void>
 
@@ -95,7 +117,7 @@ let dbPromise: Promise<Schema> | null = null
 function db(): Promise<Schema> {
   if (!dbPromise) {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
-      upgrade(database) {
+      upgrade(database, oldVersion) {
         if (!database.objectStoreNames.contains('profile')) database.createObjectStore('profile')
         if (!database.objectStoreNames.contains('consignees')) {
           database.createObjectStore('consignees', { keyPath: 'name' })
@@ -103,13 +125,25 @@ function db(): Promise<Schema> {
         if (!database.objectStoreNames.contains('overrides')) {
           database.createObjectStore('overrides', { keyPath: 'sourceCode' })
         }
+        // v3 adds per-part weights, needed by formats that print none.
+        if (!database.objectStoreNames.contains('partWeights')) {
+          database.createObjectStore('partWeights', { keyPath: 'partNumber' })
+        }
         // v1 keyed shipments on invoiceNumber, which silently overwrote re-runs. v2 keys
         // on a per-run id; the old store is dropped rather than migrated because it only
         // ever held the most recent attempt per invoice.
-        if (database.objectStoreNames.contains('shipments')) database.deleteObjectStore('shipments')
-        const shipments = database.createObjectStore('shipments', { keyPath: 'id' })
-        shipments.createIndex('processedAt', 'processedAt')
-        shipments.createIndex('invoiceNumber', 'invoiceNumber')
+        if (!database.objectStoreNames.contains('shipments')) {
+          const shipments = database.createObjectStore('shipments', { keyPath: 'id' })
+          shipments.createIndex('processedAt', 'processedAt')
+          shipments.createIndex('invoiceNumber', 'invoiceNumber')
+        } else if (oldVersion < 2) {
+          // v1 keyed on invoiceNumber, which silently overwrote re-runs. Rebuild on the
+          // per-run id; the old store only ever held the latest attempt per invoice.
+          database.deleteObjectStore('shipments')
+          const shipments = database.createObjectStore('shipments', { keyPath: 'id' })
+          shipments.createIndex('processedAt', 'processedAt')
+          shipments.createIndex('invoiceNumber', 'invoiceNumber')
+        }
       },
     })
   }
@@ -145,6 +179,16 @@ export const indexedDbStore: LocalStore = {
     await (await db()).delete('overrides', sourceCode)
   },
 
+  async listPartWeights() {
+    return (await (await db()).getAll('partWeights')) as PartWeightRecord[]
+  },
+  async savePartWeight(record) {
+    await (await db()).put('partWeights', record)
+  },
+  async deletePartWeight(partNumber) {
+    await (await db()).delete('partWeights', partNumber)
+  },
+
   async listShipments(limit = 50) {
     const all = (await (await db()).getAll('shipments')) as ShipmentRecord[]
     return all.sort((a, b) => b.processedAt.localeCompare(a.processedAt)).slice(0, limit)
@@ -156,9 +200,14 @@ export const indexedDbStore: LocalStore = {
   async clearAll() {
     const database = await db()
     await Promise.all(
-      ['profile', 'consignees', 'overrides', 'shipments'].map((name) => database.clear(name)),
+      ['profile', 'consignees', 'overrides', 'shipments', 'partWeights'].map((name) => database.clear(name)),
     )
   },
+}
+
+/** Per-part weights in the shape the reconciliation engine expects. */
+export function partWeightsToMap(records: PartWeightRecord[]): Record<string, number> {
+  return Object.fromEntries(records.map((r) => [r.partNumber, r.netWeightKg]))
 }
 
 /** Overrides in the shape the reconciliation engine expects. */

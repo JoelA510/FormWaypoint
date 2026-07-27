@@ -2,7 +2,7 @@ import { describe, expect, it, beforeAll } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { parseCipl } from './cipl/parse-vendor-a'
+import { parseCipl } from './cipl'
 import { readFixture } from '../test/fixtures'
 import { createScheduleBIndex, type ScheduleBIndex } from './schedule-b'
 import { reconcile, resolveDestinationCountry, joinInvoiceToPacking } from './reconcile'
@@ -132,6 +132,9 @@ describe('dates', () => {
     expect(parseLooseDate('Sept 3, 2026')).toEqual([2026, 9, 3])
     expect(parseLooseDate('2026-07-20')).toEqual([2026, 7, 20])
     expect(formatDateMMDDYYYY('July 20, 2026')).toBe('07-20-2026')
+    // The vendor-b CIPL abbreviates the year, and box 2 needs all four digits.
+    expect(parseLooseDate('07/22/26')).toEqual([2026, 7, 22])
+    expect(formatDateMMDDYYYY('07/22/26')).toBe('07-22-2026')
   })
 
   it('rejects impossible dates rather than writing them to the form', () => {
@@ -243,6 +246,8 @@ describe('reconciliation cannot fail open', () => {
   it('reports an unreadable document instead of throwing', () => {
     const empty: ParsedCipl = {
       fileName: 'not-a-cipl.pdf',
+      format: 'vendor-a',
+      providesWeights: true,
       pageCount: 1,
       availableSets: [],
       headers: {},

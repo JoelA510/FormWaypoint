@@ -22,6 +22,7 @@ export function createCevaAdapter(): CarrierAdapter {
     templateVersion: '11201-C3 rev. 8/2023',
     templateUrl: 'templates/ceva-sli.pdf',
     maxCommodityRows: CEVA_MAX_ROWS,
+    maxInlineReferences: 1,
     supportedModes: ['AIR', 'OCEAN'],
 
     defaults: {
