@@ -168,8 +168,24 @@ export function buildDraft(
     // all three historical shipments do.
     dateOfExportation: header.invoiceDate,
     transportationReference: settings.transportationReference,
-    shipmentReference: settings.shipmentReference,
-    consigneePo: summariseReferences(header.orderNumbers, adapter.maxInlineReferences),
+    // Prefilled from the sales orders where the document actually carries them, and only
+    // there: a layout that prints the *customer's* PO as its order number has no sales
+    // order to offer, and guessing one would be worse than leaving the box empty.
+    // Shipment 278514 was filed with a stale reference carried over from a previous form —
+    // exactly the transcription this removes.
+    shipmentReference:
+      settings.shipmentReference ||
+      (header.purchaseOrders.length
+        ? summariseReferences(header.orderNumbers, adapter.maxInlineReferences)
+        : ''),
+    // The consignee's *purchase* orders. Layouts that print them separately from the
+    // sales order supply `purchaseOrders`; where the two are the same column (FC/TP1), the
+    // order numbers already are the customer's POs. Filing Omron's own sales order in a box
+    // labelled "Consignee PO#" would be wrong on both counts.
+    consigneePo: summariseReferences(
+      header.purchaseOrders.length ? header.purchaseOrders : header.orderNumbers,
+      adapter.maxInlineReferences,
+    ),
     pointOfOrigin: profile.pointOfOrigin || (adapter.defaults.pointOfOrigin ?? ''),
     destinationCountry: destinationCountry ?? '',
     mode: settings.mode,

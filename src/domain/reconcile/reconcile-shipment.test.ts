@@ -6,6 +6,8 @@ import { parseCipl } from '../cipl'
 import { readFixture } from '../../test/fixtures'
 import { createScheduleBIndex, type ScheduleBIndex } from '../schedule-b'
 import { reconcile, resolveDestinationCountry } from '.'
+import { buildDraft, defaultShipmentSettings, EMPTY_PROFILE, type CompanyProfile } from '../draft'
+import { getAdapter } from '../../carriers/registry'
 import type { ParsedCipl, SLILine } from '../types'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -40,6 +42,8 @@ beforeAll(async () => {
 }, 60_000)
 
 const byCode = (lines: SLILine[], code: string) => lines.find((l) => l.scheduleB === code)!
+
+const PROFILE: CompanyProfile = { ...EMPTY_PROFILE, usppiName: 'Omron', pointOfOrigin: 'California' }
 
 describe('278515 — reproduces the filed Nippon Express SLI', () => {
   const run = () =>
@@ -143,5 +147,79 @@ describe('278514 — reproduces the filed CEVA SLI', () => {
 
   it('takes the country stated in the consignee block', () => {
     expect(resolveDestinationCountry(parsed['278514'].headers.FC)).toBe('Brazil')
+  })
+})
+
+describe('sales orders and customer purchase orders stay apart', () => {
+  it('files the customer PO in the consignee-PO box, not Omron\'s sales order', () => {
+    const lines = parsed['278515'].lines.filter((l) => l.documentKind === 'INVOICE')
+    const header = parsed['278515'].headers.FC
+
+    // Two different columns on this layout, and the CEVA form has a box for each.
+    expect(header.orderNumbers[0]).toBe('13383820')
+    expect(header.purchaseOrders[0]).toBe('4500966093')
+    expect(header.purchaseOrders).toHaveLength(6)
+    expect(lines[0].purchaseOrder).toBe('4500966093')
+
+    // 278514's single line: SO 13393035, customer PO 1413823.
+    expect(parsed['278514'].headers.FC.orderNumbers).toEqual(['13393035'])
+    expect(parsed['278514'].headers.FC.purchaseOrders).toEqual(['1413823'])
+  })
+
+  it('leaves purchaseOrders empty where the order number already is the customer PO', async () => {
+    const fcTp1 = await parseCipl('G78495IQ', readFixture('G78495IQ'))
+    expect(fcTp1.headers.FC.purchaseOrders).toEqual([])
+    expect(fcTp1.headers.FC.orderNumbers[0]).toBe('00299378OP0080')
+  })
+})
+
+describe('the per-part weight table is scoped to formats that need it', () => {
+  it('never fills a gap on a format that states its own weights', async () => {
+    const fcTp1 = await parseCipl('G78495IQ', readFixture('G78495IQ'))
+    // A saved weight for a part in this shipment must not be consulted: if the parser ever
+    // failed to read a printed weight, the saved figure would hide the failure.
+    const withTable = reconcile(fcTp1, scheduleB, {
+      ...CONTROLLED,
+      unitWeightsByPart: { '04465-000': 99, '19102-000F': 99 },
+    })
+    expect(withTable.sliLines.reduce((s, l) => s + l.weightKg, 0)).toBeCloseTo(2.468, 3)
+  })
+})
+
+describe('shipment reference', () => {
+  const nippon = getAdapter('nippon-express')
+  const ceva = getAdapter('ceva')
+
+  it('prefills from the sales orders on a layout that carries them', () => {
+    const result = reconcile(parsed['278515'], scheduleB, {
+      ...CONTROLLED,
+      unitWeightsByPart: UNIT_WEIGHTS_278515,
+      maxRows: 8,
+    })
+    const draft = buildDraft(result, PROFILE, defaultShipmentSettings(nippon), nippon)
+    // Matches the filed 278515 SLI box 11 exactly: three shown, three abbreviated.
+    expect(draft.shipmentReference).toBe("13383820, 13385729, 13385732, 3 Add'l")
+
+    const cevaDraft = buildDraft(result, PROFILE, defaultShipmentSettings(ceva), ceva)
+    // CEVA's narrower box shows one.
+    expect(cevaDraft.shipmentReference).toBe("13383820, 5 Add'l")
+  })
+
+  it('is left empty on a layout whose order numbers are customer POs', async () => {
+    const fcTp1 = await parseCipl('G78495IQ', readFixture('G78495IQ'))
+    const result = reconcile(fcTp1, scheduleB, CONTROLLED)
+    const draft = buildDraft(result, PROFILE, defaultShipmentSettings(nippon), nippon)
+    // Those SO numbers appear nowhere in an FC/TP1 CIPL, so nothing is invented.
+    expect(draft.shipmentReference).toBe('')
+  })
+
+  it('never overrides what the operator typed', () => {
+    const result = reconcile(parsed['278514'], scheduleB, {
+      ...CONTROLLED,
+      unitWeightsByPart: { '13960-102D': 0.147 },
+      maxRows: 12,
+    })
+    const settings = { ...defaultShipmentSettings(ceva), shipmentReference: 'SO 13393035' }
+    expect(buildDraft(result, PROFILE, settings, ceva).shipmentReference).toBe('SO 13393035')
   })
 })
