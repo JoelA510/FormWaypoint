@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import { Button, Card, CardBody, CardHeader } from '../components/ui'
-import { parseCipl } from '../domain/cipl/parse-vendor-a'
+import { parseCipl } from '../domain/cipl'
 import type { ParsedCipl } from '../domain/types'
 
 export function UploadPanel({

@@ -15,6 +15,9 @@ export const FIXTURES = {
   vendorA1: 'vendorA1_CIPL.pdf',
   vendorA2: 'vendorA2_CIPL.pdf',
   vendorA3: 'vendorA3_CIPL.pdf',
+  // "SHIPMENT#" format — no weights, carries an ECCN column.
+  'vendorB1': 'vendorB1_CIPL.pdf',
+  'vendorB2': 'vendorB2_CIPL.pdf',
 } as const
 
 export type FixtureName = keyof typeof FIXTURES

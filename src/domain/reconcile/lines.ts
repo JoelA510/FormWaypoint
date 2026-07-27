@@ -104,6 +104,20 @@ export function joinInvoiceToPacking(invoiceLines: SourceLine[], packingLines: S
   })
 }
 
+/**
+ * Fill in weights for lines the document does not state, from the saved per-part table.
+ *
+ * Only ever fills gaps: a weight printed on the packing list is never replaced.
+ */
+export function applyUnitWeights(lines: MergedLine[], unitWeightsByPart: Record<string, number>): MergedLine[] {
+  return lines.map((line) => {
+    if (line.netWeightKg != null) return line
+    const unit = unitWeightsByPart[line.partNumber]
+    if (unit == null) return line
+    return { ...line, netWeightKg: roundTo(unit * line.quantity, 3) }
+  })
+}
+
 /** Packing-list lines that no invoice line claimed — a sign the documents disagree. */
 export function unmatchedPackingLines(invoiceLines: MergedLine[], packingLines: SourceLine[]): SourceLine[] {
   const claimed = new Set(invoiceLines.map((l) => l.packingListLineId).filter(Boolean))
@@ -127,6 +141,14 @@ export interface AggregationOptions {
    * Applied before grouping, so an override can merge two previously separate rows.
    */
   overrides?: Record<string, string>
+  /**
+   * Net weight per unit, keyed by part number, used when the document states no weights.
+   *
+   * The `vendor-b` format prints none at all, so its SLIs have always been filled
+   * from figures held outside the document. Supplying them here keeps that explicit: the
+   * reconciliation reports the weights as *supplied*, never as proved against the source.
+   */
+  unitWeightsByPart?: Record<string, number>
 }
 
 /**
@@ -148,11 +170,15 @@ export function aggregateLines(lines: MergedLine[], options: AggregationOptions)
     const sourceCode = normalizeScheduleB(line.classification)
     const code = options.overrides?.[sourceCode] ?? line.classification
     const df = domesticForeign(line.countryOfOrigin)
+    // An ECCN printed on the CIPL is authoritative and beats the blanket value. Filing
+    // EAR99 over a stated 5A992.C would be a misdeclaration, and it is also part of the
+    // grouping key: two lines that differ in export control are not one commodity row.
+    const eccn = line.eccn || options.eccn
 
     const key = [
       normalizeScheduleB(code),
       df,
-      options.eccn ?? '',
+      eccn ?? '',
       options.license ?? '',
       options.sme ?? '',
       canonicalUnit(line.uom) ?? '',
@@ -182,7 +208,7 @@ export function aggregateLines(lines: MergedLine[], options: AggregationOptions)
         sourceUom: line.uom,
         weightKg: line.netWeightKg ?? 0,
         valueUsd: line.extendedValue ?? 0,
-        eccn: options.eccn,
+        eccn,
         sme: options.sme,
         license: options.license,
         countriesOfOrigin: [line.countryOfOrigin],

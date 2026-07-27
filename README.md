@@ -12,6 +12,21 @@ npm install
 npm run dev      # http://localhost:5173
 ```
 
+## Supported CIPL formats
+
+| Format | Shape | Weights | ECCN |
+| --- | --- | --- | --- |
+| Vendor A FC/TP1 | Invoice + packing list, printed twice (USD and destination currency) | per line | not stated |
+| vendor shipment (`SHIPMENT#`) | Commercial invoice + master packing list, single copy | **none — supplied per part** | stated per line |
+
+The format is detected from the document and dispatched to its own parser; everything
+downstream is shared. Adding a third means adding a detector and a parser, nothing else.
+
+The second format states no weights at all, so box 26 comes from a per-part table you fill
+in once and the tool reuses. The reconciliation reports those weights as *supplied* rather
+than proved against the source, because there is nothing in the document to prove them
+against. A part with no saved weight blocks generation instead of defaulting to zero.
+
 ## What it does
 
 1. **Reads the CIPL.** These are generated PDFs with a real text layer, so there is no OCR
@@ -23,12 +38,15 @@ npm run dev      # http://localhost:5173
    order + line + part. Never by description.
 4. **Groups lines into commodity rows** keyed on Schedule B, D/F and the export-control
    triplet — matching how these shipments are actually filed.
-5. **Validates every Schedule B number** against the U.S. Census Bureau AES commodity file:
+5. **Honours an ECCN the document states.** Where a CIPL prints one it wins over the blanket
+   value, and the reviewer is told — shipment vendorB1 states `ECCN: 5A992.C` on a line whose
+   filed SLI says EAR99.
+6. **Validates every Schedule B number** against the U.S. Census Bureau AES commodity file:
    ten digits, currently active, reported in the required unit of quantity, and plausibly
    describing the goods.
-6. **Proves the arithmetic** before generating anything. Quantities, weights and values must
+7. **Proves the arithmetic** before generating anything. Quantities, weights and values must
    sum back to the totals printed on the source document.
-7. **Fills the carrier's real blank form** and downloads it, still editable and unsigned.
+8. **Fills the carrier's real blank form** and downloads it, still editable and unsigned.
 
 ## Supported carriers
 
@@ -64,7 +82,7 @@ manufacture the parts a document cannot support:
 
 ## Verification
 
-70 tests run against three real, manually-processed shipments. The expected values come from
+92 tests run against five real, manually-processed shipments across both CIPL formats. The expected values come from
 the completed SLIs that were filed for them, so a pass means the tool reproduces what a
 person produced by hand. A further set pins the failure modes that would otherwise be
 silent — a blank exporter profile, an unreadable weight total, a double-claimed packing
@@ -76,6 +94,8 @@ outcome this tool can produce.
 | vendorA1 | Nippon Express | 3 → 2 | 3 | 2.468 kg | 1,113.14 |
 | vendorA2 | Nippon Express | 1 → 1 | 1 | 1.270 kg | 51.60 |
 | vendorA3 | CEVA | 11 → 3 | 97 | 138.841 kg | 129,999.10 |
+| vendorB1 | Nippon Express | 6 → 5 | 9 | supplied | 11,532.24 |
+| vendorB2 | CEVA | 1 → 1 | 2 | supplied | 1,251.37 |
 
 ```bash
 npm run check    # typecheck, lint, tests, production build
@@ -107,7 +127,8 @@ kilograms, not pieces, and the tool flags a piece count filed against them.
 Kept in IndexedDB on this machine only, and clearable from the History panel:
 
 - the exporter profile (USPPI name, EIN, signer details),
-- per-consignee values that are not on the CIPL (EORI/USCI, consignee type),
+- per-consignee values that are not on the CIPL (EORI/USCI, consignee type, destination country),
+- net weight per part, for the format that states none,
 - approved classification overrides with their reason and approver,
 - processed shipments, for autofill and audit.
 

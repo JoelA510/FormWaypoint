@@ -186,6 +186,22 @@ export function valueRightOf(row: TextRow, label: string): string | undefined {
   return rest.map((i) => i.str).join(' ').trim() || undefined
 }
 
+/**
+ * Text rendered in a barcode font, which extracts as mojibake.
+ *
+ * The `vendor-b` layout puts a Code-128 barcode under several columns; pdfjs reports
+ * its glyphs as strings like `xiU&yzxÿÿÿÿÿ`. They sit in the same x-bands as real data, so
+ * they have to be dropped before a column is read rather than after.
+ */
+export function isLikelyBarcode(text: string): boolean {
+  const trimmed = text.trim()
+  if (!trimmed) return true
+  // Any character outside printable ASCII marks the barcode font.
+  if (/[^\x20-\x7E]/.test(trimmed)) return true
+  // Short leading fragments the font splits off, e.g. `xh"c` or `xh`.
+  return /^x[hi][\s"'#&(]*[A-Za-z0-9]?$/.test(trimmed)
+}
+
 /** Parse a report number like `1,113.140` or `.544`. Returns null when not numeric. */
 export function parseNumber(raw: string | undefined | null): number | null {
   if (raw == null) return null

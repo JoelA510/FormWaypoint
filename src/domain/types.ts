@@ -21,6 +21,16 @@ export type DocumentSet = 'FC' | 'TP1'
 
 export type DocumentKind = 'INVOICE' | 'PACKING_LIST'
 
+/**
+ * CIPL layouts this tool can read. Each has its own parser behind a shared contract.
+ *
+ * `vendor-a` — the Vendor A invoice/packing-list pair, printed twice (FC in USD,
+ *   TP1 in the destination currency), with per-line net and gross weights.
+ * `vendor-b` — the SAP-style "SHIPMENT#" commercial invoice and master packing
+ *   list. Single currency, carries an ECCN column, and **has no weights at all**.
+ */
+export type CiplFormat = 'vendor-a' | 'vendor-b'
+
 /** Where a value came from. Rendered next to every field on the review screen. */
 export type Provenance =
   /** Read directly off the source document. */
@@ -72,8 +82,17 @@ export interface SourceLine {
   documentKind: DocumentKind
   page: number
 
-  /** Purchase order / customer order number, e.g. `00299378OP0080` or `4208676052`. */
+  /**
+   * The order this line belongs to.
+   *
+   * Which order depends on the format: `vendor-a` prints the *customer's* purchase
+   * order here, while `vendor-b` prints vendor's own sales order and carries the
+   * customer PO separately in `purchaseOrder`. The distinction matters because the CEVA
+   * form has a box for each.
+   */
   orderNumber: string
+  /** Customer purchase order, when the format prints one separately from `orderNumber`. */
+  purchaseOrder?: string
   /** Sequence within the order — distinguishes repeated POs (`4208669164` 1..4). */
   sequence: string
   /** Order line number, e.g. `0001`. */
@@ -96,6 +115,13 @@ export interface SourceLine {
   countryOfOrigin: string
   /** Classification as printed on the CIPL. May be Schedule B or US HTS. */
   classification: string
+  /**
+   * ECCN printed against this line, when the format carries one.
+   *
+   * Only `vendor-b` does. Where present it is authoritative and must not be replaced
+   * by a blanket EAR99 — one sample line is `5A992.C`, and the SLI filed for it says EAR99.
+   */
+  eccn?: string
 
   quantity: number
   uom: string
@@ -134,6 +160,11 @@ export interface ShipmentHeader {
   vesselAgent: string | null
   /** Every distinct order number found across the line items, in first-seen order. */
   orderNumbers: string[]
+  /**
+   * Customer purchase orders, when the format prints them separately from `orderNumbers`.
+   * Empty for layouts where `orderNumbers` already are the customer's POs.
+   */
+  purchaseOrders: string[]
   tradeTerms: string | null
   incoterm: string | null
   freightTerms: 'PREPAID' | 'COLLECT' | null
@@ -156,7 +187,16 @@ export interface PartyAddress {
 /** Everything extracted from one CIPL PDF, both document sets. */
 export interface ParsedCipl {
   fileName: string
+  format: CiplFormat
   pageCount: number
+  /**
+   * Whether the document itself states line weights.
+   *
+   * False for `vendor-b`, which prints none. Weights then have to come from the saved
+   * per-part table, and the reconciliation says so rather than implying the figures were
+   * proved against the source.
+   */
+  providesWeights: boolean
   /** Document sets present in the file, in the order encountered. */
   availableSets: DocumentSet[]
   /** Header per document set. */
