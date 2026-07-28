@@ -23,7 +23,13 @@ export interface ScheduleBEntry {
   units: string[]
 }
 
-interface RawPayload {
+/**
+ * The on-disk dataset, exactly as `scripts/build-schedule-b.mjs` writes it.
+ *
+ * Exported because the revision diff compares two of these directly — an installed dataset
+ * against a freshly downloaded one — before either becomes a lookup index.
+ */
+export interface RawPayload {
   source: string
   generatedAt: string
   count: number
