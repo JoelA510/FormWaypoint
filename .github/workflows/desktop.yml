@@ -1,0 +1,59 @@
+name: Desktop build
+
+# The Windows installer cannot be produced anywhere but a Windows runner, so this is the
+# only route to a testable .exe. Runs on demand, and on any push that touches the shell or
+# the code it wraps, so a change that breaks packaging is caught here rather than the next
+# time someone wants a build.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'src-tauri/**'
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/desktop.yml'
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The same gate the web build uses. A desktop artifact should never be produced from
+      # a tree that fails the suite.
+      - name: Typecheck, lint, test and build
+        run: npm run check
+
+      - name: Rust unit tests
+        working-directory: src-tauri
+        run: cargo test
+
+      - name: Build the installer
+        run: npx --yes @tauri-apps/cli@^2 build
+
+      - name: Upload the installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: FormWaypoint-windows-installer
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/FormWaypoint.exe
+          if-no-files-found: error
+          retention-days: 30
