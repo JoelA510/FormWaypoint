@@ -22,10 +22,11 @@ npm run dev      # http://localhost:5173
 The format is detected from the document and dispatched to its own parser; everything
 downstream is shared. Adding a third means adding a detector and a parser, nothing else.
 
-The second format states no weights at all, so box 26 comes from a per-part table you fill
-in once and the tool reuses. The reconciliation reports those weights as *supplied* rather
-than proved against the source, because there is nothing in the document to prove them
-against. A part with no saved weight blocks generation instead of defaulting to zero.
+The second format states no weights at all, so box 26 comes from an imported item library
+or a per-part table you fill in once and the tool reuses. The reconciliation reports those
+weights as *supplied* rather than proved against the source, because there is nothing in
+the document to prove them against. A part with no known weight blocks generation instead
+of defaulting to zero.
 
 ## What it does
 
@@ -64,6 +65,32 @@ fails silently or transposes values.
 Adding a carrier means writing one adapter under `src/carriers/`. The parser and the
 reconciliation engine contain no carrier-specific logic.
 
+## Item library
+
+An item master exported from your ERP can be imported (`.xlsx`, `.csv`, `.tsv`) to supply
+what a CIPL cannot: the net weight of each part, for the format that prints none. Columns
+are matched by heading rather than position, so differently-shaped exports read without
+configuration — `Part Number` / `Current Export HTS` / `Weight (G)` and `2nd Item Number` /
+`Harmonized Shipping Code` / `Net Weight` land in the same fields. The `.xlsx` reader is
+~250 dependency-free lines over the platform's own `DecompressionStream`; no spreadsheet
+library touches the page your shipment data is on.
+
+Two decisions are put to you rather than guessed:
+
+- **The weight unit**, whenever the file's heading does not state one. Grams read as
+  kilograms overstate a shipment a thousandfold, and nothing in the numbers distinguishes
+  them, so the choice is explicit and previewed against real rows first.
+- **What to do about bad commodity numbers.** Every code in the library — and every code on
+  each processed CIPL — is put through two mechanical rules: written as `####.##.####`, and
+  present in the Census concordance. Failures are listed by part number for correction at
+  source, never corrected in place. The number filed is always the one on the CIPL; when
+  the library disagrees, that disagreement is reported and the existing override mechanism
+  is how a filing actually changes.
+
+A second file can replace the library or merge into it. A weight typed on the review screen
+wins over the library figure, and a library figure never displaces a weight the packing
+list itself prints.
+
 ## What it will not do
 
 These are deliberate. An export declaration is signed under penalty, and the tool refuses to
@@ -82,7 +109,7 @@ manufacture the parts a document cannot support:
 
 ## Verification
 
-92 tests run against five real, manually-processed shipments across both CIPL formats. The expected values come from
+154 tests run against five real, manually-processed shipments across both CIPL formats. The expected values come from
 the completed SLIs that were filed for them, so a pass means the tool reproduces what a
 person produced by hand. A further set pins the failure modes that would otherwise be
 silent — a blank exporter profile, an unreadable weight total, a double-claimed packing
@@ -117,6 +144,10 @@ expectations instead.
 node scripts/build-schedule-b.mjs --fetch
 ```
 
+The app knows the revision calendar: once a 1 January or 1 July boundary passes the
+dataset's generation date, the header badge turns amber and a notice explains that retired
+codes will still pass as active until the dataset is rebuilt.
+
 The dataset is the authority on three things the CIPL cannot tell you: whether a code is
 currently valid, its official description, and the unit of quantity AES requires. That last
 one matters more than it looks — `9031.90.0000` and `8483.10.5000` are reported in
@@ -130,11 +161,13 @@ Kept in IndexedDB on this machine only, and clearable from the History panel:
 - per-consignee values that are not on the CIPL (EORI/USCI, consignee type, destination country),
 - net weight per part, for the format that states none,
 - approved classification overrides with their reason and approver,
-- processed shipments, for autofill and audit.
+- processed shipments, for autofill and audit,
 
-`LocalStore` in `src/store/local-store.ts` is the seam for a desktop build: a Tauri
-packaging swaps the IndexedDB implementation for a file-backed one without touching any
-calling code.
+- the imported item library.
+
+`localStore` in `src/store/local-store.ts` is the seam for a desktop build: it is the one
+place an implementation is named, so a Tauri packaging replaces that single assignment with
+a file-backed `LocalStore` and no calling code changes.
 
 ## Project layout
 
@@ -144,6 +177,7 @@ src/
     cipl/        PDF text extraction and the Omron CIPL parser
     reconcile/   document-set selection, line joining, grouping, checks
     schedule-b/  Census dataset lookup and validation
+    item-library/  item-master import and commodity-number screening
     draft.ts     assembles reviewed values for a carrier form
   carriers/
     nippon-express/   field map + adapter
