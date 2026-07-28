@@ -135,6 +135,16 @@ export interface SourceLine {
   netWeightKg?: number
   grossWeightKg?: number
   measurementM3?: number
+  /**
+   * Set when the packing list printed this line's figures divided N ways (`(@ / 6)`) and
+   * they were multiplied back up.
+   *
+   * Recorded because the reconstruction cannot be exact: the printed figure is rounded to
+   * three decimals before it is divided, so multiplying re-inflates that rounding by a
+   * factor of N. The weight reconciliation widens its tolerance to match rather than
+   * failing a document that is internally consistent.
+   */
+  weightDivisor?: number
 }
 
 /** A merchandise line with invoice and packing-list data joined together. */

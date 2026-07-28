@@ -60,6 +60,12 @@ export function parseCiplPages(fileName: string, pages: TextPage[]): ParsedCipl 
 
   let currentSet: DocumentSet | null = null
   let currentKind: DocumentKind | null = null
+  /** A line block that ran off the bottom of the previous page. See `parseDetailLines`. */
+  let carry: CarriedBlock | null = null
+  /** The commodity heading in force, which survives a page break but not a new document. */
+  let lastGroup = ''
+  let groupSet: DocumentSet | null = null
+  let groupKind: DocumentKind | null = null
 
   for (const page of pages) {
     const ctx = classifyPage(page, currentSet, currentKind)
@@ -77,7 +83,32 @@ export function parseCiplPages(fileName: string, pages: TextPage[]): ParsedCipl 
       headers[ctx.set] = parseHeaderPage(page, headers[ctx.set])
     }
 
-    lines.push(...parseDetailLines(page, ctx))
+    // A block can only continue into the next page of the same set and kind. Anything else
+    // means the document moved on and the partial block was genuinely unreadable.
+    if (carry && (carry.set !== ctx.set || carry.kind !== ctx.kind)) {
+      warnings.push(
+        `${carry.set} ${carry.kind === 'INVOICE' ? 'invoice' : 'packing list'}: the last line on page ` +
+          `${carry.page} is incomplete and nothing follows it. Its figures could not be read.`,
+      )
+      carry = null
+    }
+
+    // The heading only carries within one set and kind; a new document starts fresh.
+    if (groupSet !== ctx.set || groupKind !== ctx.kind) {
+      lastGroup = ''
+      groupSet = ctx.set
+      groupKind = ctx.kind
+    }
+    const detail = parseDetailLines(page, ctx, carry, lastGroup)
+    lines.push(...detail.lines)
+    carry = detail.carry
+    lastGroup = detail.group
+  }
+
+  if (carry) {
+    warnings.push(
+      `${carry.set}: the last line on page ${carry.page} is incomplete and the document ends there.`,
+    )
   }
 
   // The header's P/O NUMBER field is a fixed-width display field and silently truncates —
@@ -364,42 +395,140 @@ function isLineStart(row: TextRow): boolean {
   )
 }
 
-function parseDetailLines(page: TextPage, ctx: PageContext): SourceLine[] {
+/** A line block cut in half by a page break, waiting for the rest of itself. */
+interface CarriedBlock {
+  rows: TextRow[]
+  commodityGroup: string
+  /** Page the block started on — the provenance a reviewer needs, not where it finished. */
+  page: number
+  set: DocumentSet
+  kind: DocumentKind
+}
+
+/**
+ * Whether a parsed line found the figure its document kind exists to state.
+ *
+ * Used to decide that a block ran off the bottom of a page rather than genuinely ending:
+ * a packing-list line always carries weights, an invoice line always carries a value.
+ */
+function isComplete(line: SourceLine, kind: DocumentKind): boolean {
+  return kind === 'PACKING_LIST' ? line.netWeightKg !== undefined : line.extendedValue !== undefined
+}
+
+/**
+ * The rows on this page that belong to a block carried over from the previous one.
+ *
+ * Everything down to and including the column-header row is page furniture; the block's
+ * remaining rows follow it. The consignee and `C/NO` lines that sit between are harmless —
+ * the block parser locates fields by shape and position, and none of them match.
+ */
+function continuationRows(rows: TextRow[], upTo: number): TextRow[] {
+  const out: TextRow[] = []
+  let pastFurniture = false
+  for (let i = 0; i < upTo; i++) {
+    const text = rowText(rows[i])
+    if (isTotalsRow(text)) break
+    if (!pastFurniture) {
+      if (/MARKS & NOS\./i.test(text)) pastFurniture = true
+      continue
+    }
+    out.push(rows[i])
+  }
+  return out
+}
+
+function parseDetailLines(
+  page: TextPage,
+  ctx: PageContext,
+  carryIn: CarriedBlock | null,
+  groupIn: string,
+): { lines: SourceLine[]; carry: CarriedBlock | null; group: string } {
   const rows = page.rows
   const starts: number[] = []
   for (let i = 0; i < rows.length; i++) if (isLineStart(rows[i])) starts.push(i)
-  if (!starts.length) return []
+  // A heading governs every line until the next one, and the page break is not a next one.
+  // K78541WH ends a page with `Electrical Conductors` and starts the following page with
+  // the line it heads; without this that line reaches the form with no description at all.
+  let group = groupIn
 
   const lines: SourceLine[] = []
+  const parseBlock = (block: TextRow[], group: string, pageNumber: number) => {
+    const on = pageNumber === page.pageNumber ? page : { ...page, pageNumber }
+    return ctx.kind === 'INVOICE'
+      ? parseInvoiceBlock(block, on, ctx, group)
+      : parsePackingBlock(block, on, ctx, group)
+  }
+
+  // Finish a block that began on the previous page before reading this page's own.
+  if (carryIn) {
+    const block = [...carryIn.rows, ...continuationRows(rows, starts.length ? starts[0] : rows.length)]
+    const line = parseBlock(block, carryIn.commodityGroup, carryIn.page)
+    if (line) lines.push(line)
+  }
+
+  let carry: CarriedBlock | null = null
   for (let s = 0; s < starts.length; s++) {
     const from = starts[s]
     const to = s + 1 < starts.length ? starts[s + 1] : rows.length
-    const block = rows.slice(from, truncateAtPageTotals(rows, from, to))
-    const commodityGroup = commodityGroupBefore(rows, from)
-    const line = ctx.kind === 'INVOICE' ? parseInvoiceBlock(block, page, ctx, commodityGroup) : parsePackingBlock(block, page, ctx, commodityGroup)
+    const cut = truncateAtPageTotals(rows, from, to)
+    const block = rows.slice(from, cut)
+    group = commodityGroupBefore(rows, from) || group
+    const commodityGroup = group
+    const line = parseBlock(block, commodityGroup, page.pageNumber)
+
+    // A block that reaches the foot of the page without its figures has not ended — it is
+    // continued overleaf. Emitting it here would file a line with no weight, and drop the
+    // rest of it on the floor.
+    if (line && s === starts.length - 1 && cut === rows.length && !isComplete(line, ctx.kind)) {
+      carry = { rows: block, commodityGroup, page: page.pageNumber, set: ctx.set, kind: ctx.kind }
+      continue
+    }
     if (line) lines.push(line)
   }
-  return lines
+  return { lines, carry, group }
 }
 
 /**
  * The final line block on a page would otherwise run into the page footer, letting the
  * trade-terms text be mistaken for a commodity description. Cut the block at the totals row.
  */
+/** `(@ / 6)` — the figures beside it are the line total divided that many ways. */
+const DIVIDED_FIGURES = /^\(@\s*\/\s*(\d+)\)$/
+
+function scaleFigure(value: number, divisor: number): number {
+  return divisor === 1 ? value : Math.round(value * divisor * 1000) / 1000
+}
+
+function isTotalsRow(text: string): boolean {
+  return /^\s*TOTALS?:?\b/i.test(text) || /CARTONS ONLY/i.test(text) || /\bTOTALS\b/.test(text)
+}
+
 function truncateAtPageTotals(rows: TextRow[], from: number, to: number): number {
   for (let i = from + 1; i < to; i++) {
-    const text = rowText(rows[i])
-    if (/^\s*TOTALS?:?\b/i.test(text) || /CARTONS ONLY/i.test(text) || /\bTOTALS\b/.test(text)) return i
+    if (isTotalsRow(rowText(rows[i]))) return i
   }
   return to
 }
 
-/** The commodity heading (`Electrical Conductors`) printed just above a line block. */
+/**
+ * The commodity heading (`Electrical Conductors`) printed just above a line block.
+ *
+ * Constrained to the detail column. The first block on a page has the consignee's address
+ * directly above it, and its city — `Singapore` — is a single word that reads exactly like a
+ * heading. That text then becomes the commodity description on the generated form, which is
+ * how a shipment of cable ends up described as a country. Real headings are indented into
+ * the description column at x≈72; the address sits out at the x≈24 margin, and the page
+ * title further right again.
+ */
+const GROUP_COLUMN_MIN = 60
+const GROUP_COLUMN_MAX = 200
+
 function commodityGroupBefore(rows: TextRow[], startIdx: number): string {
   for (let i = startIdx - 1; i >= 0 && i >= startIdx - 4; i--) {
     const items = rows[i].items
     if (items.length !== 1) continue
-    const text = items[0].str
+    const { str: text, x } = items[0]
+    if (x < GROUP_COLUMN_MIN || x > GROUP_COLUMN_MAX) continue
     if (!text || text.endsWith(':') || CLASSIFICATION.test(text)) continue
     if (/^[A-Za-z][A-Za-z ,&/-]{2,}$/.test(text)) return text
   }
@@ -582,18 +711,29 @@ function parsePackingBlock(
   let grossWeightKg: number | undefined
   let measurementM3: number | undefined
 
+  let weightDivisor: number | undefined
+
   for (const row of block) {
     const open = row.items.findIndex((i) => i.str === '(')
     const close = row.items.findIndex((i) => i.str === ')')
     if (open === -1 || close === -1 || close < open) continue
+
+    // `(@ / 6)` to the left of the figures means they are the line total split six ways.
+    // K78541WH prints one such line: 1.240 / 1.364 / .333330 against a line whose true
+    // weight is 7.438 — the same part and quantity as the line above it, which prints
+    // 7.438 outright. Multiplying is what makes the document's own total add up.
+    const marker = row.items.slice(0, open).find((i) => DIVIDED_FIGURES.test(i.str))
+    const divisor = marker ? Number(DIVIDED_FIGURES.exec(marker.str)?.[1] ?? 1) : 1
+
     const inner = row.items
       .slice(open + 1, close)
       .map((i) => parseNumber(i.str))
       .filter((n): n is number => n !== null)
     if (inner.length >= 2) {
-      netWeightKg = inner[0]
-      grossWeightKg = inner[1]
-      measurementM3 = inner[2]
+      netWeightKg = scaleFigure(inner[0], divisor)
+      grossWeightKg = scaleFigure(inner[1], divisor)
+      measurementM3 = inner[2] === undefined ? undefined : scaleFigure(inner[2], divisor)
+      if (divisor !== 1) weightDivisor = divisor
     }
     break
   }
@@ -634,6 +774,7 @@ function parsePackingBlock(
     netWeightKg,
     grossWeightKg,
     measurementM3,
+    weightDivisor,
   }
 }
 

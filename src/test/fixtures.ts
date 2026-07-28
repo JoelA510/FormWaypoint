@@ -15,6 +15,10 @@ export const FIXTURES = {
   G78495IQ: 'G78495IQ_CIPL.pdf',
   K78464FJ: 'K78464FJ_CIPL.pdf',
   K78027EC: 'K78027EC_CIPL.pdf',
+  // FC/TP1 again, but with three things no other fixture has: a line block split by a
+  // page break, a line whose weights are printed divided (`(@ / 6)`), and a commodity
+  // heading stranded at the foot of a page.
+  K78541WH: 'K78541WH_CIPL.pdf',
   // "OMRON SHIPMENT#" format — no weights, carries an ECCN column.
   '278515': '278515_CIPL.pdf',
   '278514': '278514_CIPL.pdf',
