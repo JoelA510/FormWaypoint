@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeAll } from 'vitest'
 import { parseCipl, detectCiplFormat, extractTextPages } from '.'
-import { readFixture } from '../../test/fixtures'
+import { hasFixtures, readFixture } from '../../test/fixtures'
 import type { ParsedCipl, SourceLine } from '../types'
 
 /**
@@ -17,7 +17,9 @@ beforeAll(async () => {
 
 const invoiceLines = (p: ParsedCipl): SourceLine[] => p.lines.filter((l) => l.documentKind === 'INVOICE')
 
-describe('format detection', () => {
+// Shipment documents are customer data and are not committed. Without them this
+// suite cannot run; the assertions themselves are checked in and unaffected.
+describe.skipIf(!hasFixtures())('format detection', () => {
   it('routes each layout to its own parser', async () => {
     expect(parsed['vendorB1'].format).toBe('vendor-b')
     expect(parsed['vendorB2'].format).toBe('vendor-b')
@@ -39,7 +41,7 @@ describe('format detection', () => {
   })
 })
 
-describe('vendorB1 — six lines, mixed origins, one ECCN', () => {
+describe.skipIf(!hasFixtures())('vendorB1 — six lines, mixed origins, one ECCN', () => {
   it('reads the header', () => {
     const h = parsed['vendorB1'].headers.FC
     expect(h.invoiceNumber).toBe('vendorB1')
@@ -122,7 +124,7 @@ describe('vendorB1 — six lines, mixed origins, one ECCN', () => {
   })
 })
 
-describe('vendorB2 — single line, dual currency', () => {
+describe.skipIf(!hasFixtures())('vendorB2 — single line, dual currency', () => {
   it('takes the USD price, not the foreign one printed beneath it', () => {
     const lines = invoiceLines(parsed['vendorB2'])
     expect(lines).toHaveLength(1)
@@ -150,7 +152,7 @@ describe('vendorB2 — single line, dual currency', () => {
   })
 })
 
-describe('detectCiplFormat', () => {
+describe.skipIf(!hasFixtures())('detectCiplFormat', () => {
   it('is exported for callers that already have extracted pages', async () => {
     const pages = await extractTextPages(readFixture('vendorB2'))
     expect(detectCiplFormat(pages)?.id).toBe('vendor-b')

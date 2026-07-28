@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseCipl } from '../cipl'
-import { readFixture } from '../../test/fixtures'
+import { hasFixtures, readFixture } from '../../test/fixtures'
 import { createScheduleBIndex, type ScheduleBIndex } from '../schedule-b'
 import { reconcile, resolveDestinationCountry, selectDocumentSet } from '.'
 import type { ParsedCipl, SLILine } from '../types'
@@ -33,7 +33,9 @@ beforeAll(async () => {
 
 const byCode = (lines: SLILine[], code: string) => lines.find((l) => l.scheduleB === code)!
 
-describe('document set selection', () => {
+// Shipment documents are customer data and are not committed. Without them this
+// suite cannot run; the assertions themselves are checked in and unaffected.
+describe.skipIf(!hasFixtures())('document set selection', () => {
   it('always chooses the USD set, never the later destination-currency one', () => {
     for (const name of Object.keys(parsed)) {
       const { set, reason } = selectDocumentSet(parsed[name])
@@ -53,7 +55,7 @@ describe('document set selection', () => {
   })
 })
 
-describe('vendorA1 — merges two cable lines, keeps the motor separate', () => {
+describe.skipIf(!hasFixtures())('vendorA1 — merges two cable lines, keeps the motor separate', () => {
   it('produces the quantities, weights and values on the filed SLI', () => {
     const { sliLines } = reconcile(parsed.vendorA1, scheduleB, CONTROLLED)
     expect(sliLines).toHaveLength(2)
@@ -100,7 +102,7 @@ describe('vendorA1 — merges two cable lines, keeps the motor separate', () => 
   })
 })
 
-describe('vendorA2 — single line', () => {
+describe.skipIf(!hasFixtures())('vendorA2 — single line', () => {
   it('reproduces the filed row', () => {
     const { sliLines } = reconcile(parsed.vendorA2, scheduleB, CONTROLLED)
     expect(sliLines).toHaveLength(1)
@@ -117,7 +119,7 @@ describe('vendorA2 — single line', () => {
   })
 })
 
-describe('vendorA3 — CEVA, groups across different part numbers', () => {
+describe.skipIf(!hasFixtures())('vendorA3 — CEVA, groups across different part numbers', () => {
   it('reproduces all three filed rows exactly', () => {
     const { sliLines } = reconcile(parsed.vendorA3, scheduleB, CONTROLLED)
     expect(sliLines).toHaveLength(3)
@@ -165,7 +167,7 @@ describe('vendorA3 — CEVA, groups across different part numbers', () => {
   })
 })
 
-describe('Schedule B validation', () => {
+describe.skipIf(!hasFixtures())('Schedule B validation', () => {
   it('accepts the codes actually used and rejects a retired one', () => {
     const { checks } = reconcile(parsed.vendorA3, scheduleB, CONTROLLED)
     const active = checks.filter((c) => c.id.startsWith('sb-active'))
@@ -193,7 +195,7 @@ describe('Schedule B validation', () => {
   })
 })
 
-describe('form capacity', () => {
+describe.skipIf(!hasFixtures())('form capacity', () => {
   it('blocks when a shipment needs more rows than the form holds', () => {
     const tight = reconcile(parsed.vendorA3, scheduleB, { ...CONTROLLED, maxRows: 2 })
     const capacity = tight.checks.find((c) => c.id === 'row-capacity')
@@ -206,7 +208,7 @@ describe('form capacity', () => {
   })
 })
 
-describe('classification applicability', () => {
+describe.skipIf(!hasFixtures())('classification applicability', () => {
   it('accepts a correct code even when the group heading is worded differently', () => {
     // The row is headed "Power Supply" but its line reads "ASSY, J3 MOTOR, I4H", and
     // 8501.51.3040 is "ELECTRIC MOTORS...". Judging on the heading alone would flag it.

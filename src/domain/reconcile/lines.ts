@@ -98,6 +98,9 @@ export function joinInvoiceToPacking(invoiceLines: SourceLine[], packingLines: S
       netWeightKg: match?.netWeightKg,
       grossWeightKg: match?.grossWeightKg,
       measurementM3: match?.measurementM3,
+      // Travels with the weights it qualifies: the totals check needs to know a figure was
+      // reconstructed from a divided one, and only the packing-list side knows that.
+      weightDivisor: match?.weightDivisor,
       packingListLineId: match?.id,
       joinKey,
     }

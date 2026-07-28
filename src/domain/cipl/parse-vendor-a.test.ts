@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeAll } from 'vitest'
 import { parseCipl } from './parse-vendor-a'
-import { readFixture } from '../../test/fixtures'
+import { hasFixtures, readFixture } from '../../test/fixtures'
 import type { ParsedCipl, SourceLine } from '../types'
 
 /**
@@ -21,7 +21,9 @@ const fcInvoice = (p: ParsedCipl): SourceLine[] =>
 const fcPacking = (p: ParsedCipl): SourceLine[] =>
   p.lines.filter((l) => l.documentSet === 'FC' && l.documentKind === 'PACKING_LIST')
 
-describe('document set detection', () => {
+// Shipment documents are customer data and are not committed. Without them this
+// suite cannot run; the assertions themselves are checked in and unaffected.
+describe.skipIf(!hasFixtures())('document set detection', () => {
   it('finds both FC and TP1 in every fixture', () => {
     for (const name of Object.keys(parsed)) {
       expect(parsed[name].availableSets, name).toEqual(['FC', 'TP1'])
@@ -35,7 +37,7 @@ describe('document set detection', () => {
   })
 })
 
-describe('vendorA1 — Nippon Express, 3 pieces, two duplicate cable lines', () => {
+describe.skipIf(!hasFixtures())('vendorA1 — Nippon Express, 3 pieces, two duplicate cable lines', () => {
   it('reads the invoice header', () => {
     const h = parsed.vendorA1.headers.FC
     expect(h.invoiceNumber).toBe('vendorA1')
@@ -130,7 +132,7 @@ describe('vendorA1 — Nippon Express, 3 pieces, two duplicate cable lines', () 
   })
 })
 
-describe('vendorA2 — single line, consignee differs from buyer', () => {
+describe.skipIf(!hasFixtures())('vendorA2 — single line, consignee differs from buyer', () => {
   it('uses CONSIGNED TO for the receiving party', () => {
     const h = parsed.vendorA2.headers.FC
     expect(h.soldTo.name).toBe('vendor Corporation')
@@ -159,7 +161,7 @@ describe('vendorA2 — single line, consignee differs from buyer', () => {
   })
 })
 
-describe('vendorA3 — CEVA, 11 lines over 8 orders across page breaks', () => {
+describe.skipIf(!hasFixtures())('vendorA3 — CEVA, 11 lines over 8 orders across page breaks', () => {
   it('reads every line across both detail pages', () => {
     const lines = fcInvoice(parsed.vendorA3)
     expect(lines).toHaveLength(11)

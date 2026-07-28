@@ -13,3 +13,6 @@ legacy/venv
 # Tauri build output
 src-tauri/target
 src-tauri/gen
+
+# Shipment documents are never committed — they are customer data.
+src/test/fixtures/*.pdf

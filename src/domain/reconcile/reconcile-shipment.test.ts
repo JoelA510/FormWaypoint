@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseCipl } from '../cipl'
-import { readFixture } from '../../test/fixtures'
+import { hasFixtures, readFixture } from '../../test/fixtures'
 import { createScheduleBIndex, type ScheduleBIndex } from '../schedule-b'
 import { reconcile, resolveDestinationCountry } from '.'
 import { buildDraft, defaultShipmentSettings, EMPTY_PROFILE, type CompanyProfile } from '../draft'
@@ -45,7 +45,9 @@ const byCode = (lines: SLILine[], code: string) => lines.find((l) => l.scheduleB
 
 const PROFILE: CompanyProfile = { ...EMPTY_PROFILE, usppiName: 'vendor', pointOfOrigin: 'California' }
 
-describe('vendorB1 — reproduces the filed Nippon Express SLI', () => {
+// Shipment documents are customer data and are not committed. Without them this
+// suite cannot run; the assertions themselves are checked in and unaffected.
+describe.skipIf(!hasFixtures())('vendorB1 — reproduces the filed Nippon Express SLI', () => {
   const run = () =>
     reconcile(parsed['vendorB1'], scheduleB, { ...CONTROLLED, unitWeightsByPart: UNIT_WEIGHTS_vendorB1, maxRows: 8 })
 
@@ -127,7 +129,7 @@ describe('vendorB1 — reproduces the filed Nippon Express SLI', () => {
   })
 })
 
-describe('vendorB2 — reproduces the filed CEVA SLI', () => {
+describe.skipIf(!hasFixtures())('vendorB2 — reproduces the filed CEVA SLI', () => {
   it('produces the single row that was filed', () => {
     const { sliLines } = reconcile(parsed['vendorB2'], scheduleB, {
       ...CONTROLLED,
@@ -150,7 +152,7 @@ describe('vendorB2 — reproduces the filed CEVA SLI', () => {
   })
 })
 
-describe('sales orders and customer purchase orders stay apart', () => {
+describe.skipIf(!hasFixtures())('sales orders and customer purchase orders stay apart', () => {
   it('files the customer PO in the consignee-PO box, not vendor\'s sales order', () => {
     const lines = parsed['vendorB1'].lines.filter((l) => l.documentKind === 'INVOICE')
     const header = parsed['vendorB1'].headers.FC
@@ -173,7 +175,7 @@ describe('sales orders and customer purchase orders stay apart', () => {
   })
 })
 
-describe('the per-part weight table is scoped to formats that need it', () => {
+describe.skipIf(!hasFixtures())('the per-part weight table is scoped to formats that need it', () => {
   it('never fills a gap on a format that states its own weights', async () => {
     const fcTp1 = await parseCipl('vendorA1', readFixture('vendorA1'))
     // A saved weight for a part in this shipment must not be consulted: if the parser ever
@@ -186,7 +188,7 @@ describe('the per-part weight table is scoped to formats that need it', () => {
   })
 })
 
-describe('shipment reference', () => {
+describe.skipIf(!hasFixtures())('shipment reference', () => {
   const nippon = getAdapter('nippon-express')
   const ceva = getAdapter('ceva')
 
