@@ -1,0 +1,30 @@
+[package]
+name = "formwaypoint"
+version = "0.1.0"
+description = "Turns a CIPL into a completed carrier Shipper's Letter of Instruction"
+authors = ["FormWaypoint"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "formwaypoint_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+# native-tls, not the default bundled root list: on Windows this is schannel, which reads
+# the machine certificate store. Corporate networks that inspect TLS install their own CA
+# there, and an app carrying its own roots refuses those connections with an opaque
+# "UnknownIssuer" — which is exactly what happened the first time this was run.
+ureq = { version = "2.10", default-features = false, features = ["native-tls", "gzip"] }
+native-tls = "0.2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

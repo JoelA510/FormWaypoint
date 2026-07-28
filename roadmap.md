@@ -5,9 +5,10 @@
 ## Current focus
 
 Turning a combined commercial invoice & packing list into a completed carrier Shipper's
-Letter of Instruction, entirely in the browser. Two CIPL formats and two carriers are
-supported end to end, verified against real, manually-processed shipments. Next up: the
-Tauri desktop packaging.
+Letter of Instruction, on this machine. Two CIPL formats and two carriers are supported end
+to end, verified against real, manually-processed shipments. It ships as a web app and as a
+Windows desktop app; the desktop build adds the in-app Schedule B refresh, which cannot
+work in a browser.
 
 ## Milestone tracker
 
@@ -23,31 +24,25 @@ Tauri desktop packaging.
 | **Review screen** | ✅ Done | Per-field provenance, blocking/advisory checks, classification overrides with reason and approver. |
 | **FedEx / UPS** | ✅ Done | Keying sheets ordered the way Ship Manager and WorldShip prompt, for manual entry. |
 | **Local history** | ✅ Done | Exporter profile, per-consignee values, per-part weights, the item library, overrides and processed shipments in IndexedDB. |
-| **Regression suite** | ✅ Done | 154 tests over five real shipments across both formats, plus guards for the silent failure modes. |
+| **Regression suite** | ✅ Done | 197 TypeScript tests over five real shipments across both formats, plus Rust unit tests for the shell's path handling. |
 | **Desktop packaging seam** | ✅ Done | `localStore` is the single named implementation; a Tauri build replaces one assignment. Windows-only target; WebView2 covers every platform API the app uses. |
-| **Desktop build (.exe)** | 📅 Planned | Tauri packaging around the existing seam. Carries the in-app Schedule B refresh — see the spec below. |
+| **Desktop build (.exe)** | ✅ Done | Tauri v2 shell; the Windows installer is built by the `Desktop build` workflow. Four Rust commands and no decisions. TLS goes through the OS certificate store, so a corporate inspection CA is trusted, and an environment proxy is honoured. |
 | **Schedule B revision diff** | ✅ Done | `src/domain/schedule-b/revision.ts` — diffs two datasets, intersects the result with the item library by part, and renders the change log and CSV worklist. Pure logic, no filesystem or network. |
-| **In-app Schedule B refresh** | 📅 Planned | Remaining work is the Tauri shell only: fetch the concordance, call `diffScheduleB`, write the files. Confirmed desktop-only — census.gov serves no `access-control-allow-origin`, so a browser can never fetch it. Spec below. |
+| **In-app Schedule B refresh** | ✅ Done | Downloads the concordance, diffs it, writes the change log and CSV worklist, then replaces the dataset. Verified end to end against the live Census server in a packaged binary. |
 | **More carriers** | 📅 Planned | One adapter each. The parser and reconciler carry no carrier-specific logic. |
 | **More CIPL formats** | 📅 Planned | A detector and a parser behind the same `ParsedCipl` contract — the registry and everything downstream are already shared. |
 
-## Spec: in-app Schedule B refresh and change log
+## How the in-app Schedule B refresh works
 
-For the desktop build. The refresh must run in Rust, not in the webview —
+The refresh runs in Rust, not in the webview —
 `https://www.census.gov/.../expaes.txt` returns no `access-control-allow-origin` header, so
 a `fetch` from the page is blocked no matter how the app is packaged.
 
-**Already built.** `src/domain/schedule-b/revision.ts` holds every part of this with no
-filesystem or network in it — `diffScheduleB`, `affectedParts`, `renderChangeLog`,
-`renderAffectedCsv`, `changeLogFileName` — so the Tauri work is reduced to fetching the
-file, calling them, and writing the results. Proved at real scale: a five-code revision
-against the 9,746-code dataset and a 2,856-part item master resolved to 161 affected parts
-in 39 ms.
-
-**What it does.** Download the concordance, parse it with the logic currently in
-`scripts/build-schedule-b.mjs`, and write two files side by side in the app's data
-directory: the replacement `schedule-b.json`, and a change log recording what moved between
-the installed dataset and the new one. The dataset is only swapped in once both are written.
+**What it does.** Downloads the concordance, parses it with `parse-concordance.ts` (pinned
+against the checked-in raw file and the committed dataset, so it cannot drift from
+`scripts/build-schedule-b.mjs`), diffs it, and writes the change log and the CSV worklist
+into the app's data directory *before* replacing `schedule-b.json`. A refresh that failed
+mid-way can therefore never leave a swapped dataset with no record of what moved.
 
 **Why a change log, and what goes in it.** The log exists to be read by a person and then
 acted on by hand — reviewed, carried into a later Schedule B session, and used to correct
