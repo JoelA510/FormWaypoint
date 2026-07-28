@@ -9,8 +9,13 @@ call carrying shipment data.
 
 ```bash
 npm install
-npm run dev      # http://localhost:5173
+npm run dev            # browser, http://localhost:5173
+npm run desktop:dev    # desktop window (needs a Rust toolchain)
 ```
+
+A Windows installer is built by the **Desktop build** workflow — run it from the Actions
+tab and download the `FormWaypoint-windows-installer` artifact. It cannot be built anywhere
+but a Windows runner.
 
 ## Supported CIPL formats
 
@@ -109,7 +114,7 @@ manufacture the parts a document cannot support:
 
 ## Verification
 
-154 tests run against five real, manually-processed shipments across both CIPL formats. The expected values come from
+197 tests run against five real, manually-processed shipments across both CIPL formats. The expected values come from
 the completed SLIs that were filed for them, so a pass means the tool reproduces what a
 person produced by hand. A further set pins the failure modes that would otherwise be
 silent — a blank exporter profile, an unreadable weight total, a double-claimed packing
@@ -148,6 +153,16 @@ The app knows the revision calendar: once a 1 January or 1 July boundary passes 
 dataset's generation date, the header badge turns amber and a notice explains that retired
 codes will still pass as active until the dataset is rebuilt.
 
+**On the desktop the app refreshes it itself.** "Check for a new revision" downloads the
+concordance, diffs it against the installed dataset, and writes a change log beside it
+before the dataset is replaced — so a refresh can never leave you with codes you cannot
+account for. The log has two parts: the revision in full, and the parts in your item
+library it touches, which is the list to work through in the item master. A CSV of that
+worklist is written alongside it. Nothing is corrected automatically.
+
+This is desktop-only because it has to be: census.gov serves the file with no
+`access-control-allow-origin` header, so a browser can never fetch it.
+
 The dataset is the authority on three things the CIPL cannot tell you: whether a code is
 currently valid, its official description, and the unit of quantity AES requires. That last
 one matters more than it looks — `9031.90.0000` and `8483.10.5000` are reported in
@@ -173,6 +188,7 @@ a file-backed `LocalStore` and no calling code changes.
 
 ```
 src/
+  desktop/       the Tauri bridge; absent in the browser build
   domain/
     cipl/        PDF text extraction and the vendor CIPL parser
     reconcile/   document-set selection, line joining, grouping, checks
@@ -188,6 +204,7 @@ src/
 public/
   templates/     blank carrier forms
   data/          Schedule B dataset
+src-tauri/       the desktop shell: four commands, no decisions
 ```
 
 ## History

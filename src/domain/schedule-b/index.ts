@@ -145,19 +145,24 @@ export function scheduleBIsStale(generatedAt: string, today: Date = new Date()):
   return generated < latest
 }
 
+/**
+ * The dataset shipped inside the bundle.
+ *
+ * On the desktop this is the starting point rather than the last word — a refresh writes a
+ * newer one beside the app and that takes precedence. See `loadInstalledDataset`.
+ */
+export async function loadBundledPayload(): Promise<RawPayload> {
+  const res = await fetch(`${import.meta.env.BASE_URL}data/schedule-b.json`)
+  if (!res.ok) throw new Error(`Could not load the Schedule B dataset (${res.status}).`)
+  return (await res.json()) as RawPayload
+}
+
 let cached: Promise<ScheduleBIndex> | null = null
 
 /** Loads (and memoises) the dataset. In the browser it is fetched from /data. */
 export function loadScheduleB(fetchJson?: () => Promise<RawPayload>): Promise<ScheduleBIndex> {
   if (!cached) {
-    const loader =
-      fetchJson ??
-      (async () => {
-        const res = await fetch(`${import.meta.env.BASE_URL}data/schedule-b.json`)
-        if (!res.ok) throw new Error(`Could not load the Schedule B dataset (${res.status}).`)
-        return (await res.json()) as RawPayload
-      })
-    cached = loader().then(createScheduleBIndex)
+    cached = (fetchJson ?? loadBundledPayload)().then(createScheduleBIndex)
   }
   return cached
 }
