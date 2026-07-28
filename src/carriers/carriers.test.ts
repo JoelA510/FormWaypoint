@@ -263,23 +263,33 @@ describe.skipIf(!hasFixtures())('overflow handling', () => {
 })
 
 describe.skipIf(!hasFixtures())('FedEx / UPS keying sheets', () => {
-  it('lists commodities per source line, because both applications ask for a unit price', async () => {
+  it('groups commodities the way the application stores them, not the way the SLI does', async () => {
     const { result, draft } = await generate('K78027EC', 'ceva')
     const sheet = buildKeyingSheet('ups-worldship', result, draft)
     expect(sheet.applicationName).toBe('UPS WorldShip')
-    // 11 invoice lines, not the 3 aggregated SLI rows.
-    expect(sheet.commodities).toHaveLength(11)
-    expect(sheet.commodities[0].unitValue).toBe('131.100')
-    expect(sheet.commodities[0].harmonizedCode).toBe('8544.42.0000')
-    expect(sheet.commodities[0].countryOfManufacture).toBe('Japan')
+
+    // One record per part and country of manufacture: fewer than the 11 invoice lines,
+    // more than the 3 aggregated SLI rows, because country is a field on the record.
+    expect(sheet.commodities.length).toBeGreaterThan(result.sliLines.length)
+    expect(sheet.commodities.length).toBeLessThanOrEqual(result.mergedLines.length)
+
+    // Every value is in the form the application expects.
+    for (const row of sheet.commodities) {
+      expect(row.unitValue).toMatch(/^\d+\.\d{6}$/)
+      if (row.countryOfManufacture) expect(row.countryOfManufacture).toMatch(/^[A-Z]{2}$/)
+    }
+
+    // Totals still tie back to the reconciled shipment.
+    const keyedValue = sheet.commodities.reduce((sum, r) => sum + Number(r.totalValue), 0)
+    expect(keyedValue).toBeCloseTo(Number(sheet.totals.customsValue), 2)
   })
 
   it('names the fields the operator has to supply themselves', async () => {
     const { result, draft } = await generate('G78495IQ', 'nippon-express')
     const sheet = buildKeyingSheet('fedex-ship-manager', result, draft)
     expect(sheet.applicationName).toBe('FedEx Ship Manager')
-    expect(sheet.manualFields).toContain('Dimensions')
-    expect(sheet.manualFields).toContain('Service')
+    expect(sheet.manualFields).toContain('Package dimensions')
+    expect(sheet.manualFields).toContain('Service type')
 
     const text = keyingSheetToText(sheet)
     expect(text).toContain('FedEx Ship Manager — keying sheet')

@@ -12,6 +12,7 @@ export function OutputPanel({
   draft,
   canGenerate,
   onGenerated,
+  keyedCarrier = null,
 }: {
   adapter: CarrierAdapter
   reconciliation: Reconciliation
@@ -19,11 +20,20 @@ export function OutputPanel({
   /** Gated on the document checks *and* the draft checks — see App. */
   canGenerate: boolean
   onGenerated: () => void
+  /**
+   * Set when the shipment goes to a carrier that is keyed into its own software rather
+   * than sent a form. The SLI download is withheld entirely in that case: the adapter in
+   * play is only scaffolding for the draft, and offering its form would invite filling
+   * the wrong forwarder's paperwork.
+   */
+  keyedCarrier?: 'fedex' | 'ups' | null
 }) {
   const [busy, setBusy] = useState(false)
   const [warnings, setWarnings] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
-  const [target, setTarget] = useState<KeyingTarget>('fedex-ship-manager')
+  const [target, setTarget] = useState<KeyingTarget>(
+    keyedCarrier === 'ups' ? 'ups-worldship' : 'fedex-ship-manager',
+  )
 
   const { header } = reconciliation
 
@@ -65,25 +75,31 @@ export function OutputPanel({
     <Card>
       <CardHeader
         title="Generate"
-        description={`Fills the blank ${adapter.name} form (${adapter.templateVersion}) and downloads it.`}
+        description={
+          keyedCarrier
+            ? 'This carrier takes its shipment data through its own desktop application, not a form.'
+            : `Fills the blank ${adapter.name} form (${adapter.templateVersion}) and downloads it.`
+        }
         actions={canGenerate ? <Badge tone="pass">checks passed</Badge> : <Badge tone="block">blocked</Badge>}
       />
       <CardBody className="space-y-4">
         {!canGenerate ? (
           <p className="rounded-md border border-[var(--color-block)] bg-[var(--color-block-soft)] px-3 py-2 text-sm text-[var(--color-ink)]">
-            A blocking check has not passed, so the form cannot be generated. Resolve it above — the totals must
-            reconcile against the source document before anything is filed.
+            A blocking check has not passed{keyedCarrier ? '' : ', so the form cannot be generated'}. Resolve it
+            above — the totals must reconcile against the source document before anything is filed.
           </p>
         ) : null}
 
-        <div className="flex flex-wrap items-center gap-3">
-          <Button variant="primary" onClick={() => void generate()} disabled={!canGenerate || busy}>
-            {busy ? 'Generating…' : `Download completed ${adapter.name} SLI`}
-          </Button>
-          <span className="text-xs text-[var(--color-ink-faint)]">
-            Signature boxes are left blank for a person to sign.
-          </span>
-        </div>
+        {keyedCarrier ? null : (
+          <div className="flex flex-wrap items-center gap-3">
+            <Button variant="primary" onClick={() => void generate()} disabled={!canGenerate || busy}>
+              {busy ? 'Generating…' : `Download completed ${adapter.name} SLI`}
+            </Button>
+            <span className="text-xs text-[var(--color-ink-faint)]">
+              Signature boxes are left blank for a person to sign.
+            </span>
+          </div>
+        )}
 
         {error ? (
           <p className="rounded-md border border-[var(--color-block)] bg-[var(--color-block-soft)] px-3 py-2 text-sm">
@@ -102,10 +118,16 @@ export function OutputPanel({
           </div>
         ) : null}
 
-        <div className="border-t pt-4">
-          <p className="text-sm font-medium text-[var(--color-ink)]">FedEx and UPS</p>
+        <div className={keyedCarrier ? '' : 'border-t pt-4'}>
+          <p className="text-sm font-medium text-[var(--color-ink)]">
+            {keyedCarrier === 'fedex' ? 'FedEx Ship Manager' : keyedCarrier === 'ups' ? 'UPS WorldShip' : 'FedEx and UPS'}
+          </p>
           <p className="mt-0.5 mb-2 text-sm text-[var(--color-ink-soft)]">
-            A keying sheet laid out in the order the desktop application asks for each field, for manual entry.
+            {keyedCarrier
+              ? 'This carrier is keyed into its own software rather than sent a form. The sheet follows that ' +
+                'application\u2019s tabs and fields, with weights already in pounds, country of manufacture as a ' +
+                'two-letter code, and unit value to six decimals.'
+              : 'A keying sheet laid out in the order the desktop application asks for each field, for manual entry.'}
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <Select
