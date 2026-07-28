@@ -9,3 +9,7 @@ legacy/venv
 
 # TypeScript incremental build state
 *.tsbuildinfo
+
+# Tauri build output
+src-tauri/target
+src-tauri/gen

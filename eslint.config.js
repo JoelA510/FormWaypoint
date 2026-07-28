@@ -7,7 +7,8 @@ import tseslint from 'typescript-eslint'
 import { globalIgnores } from 'eslint/config'
 
 export default tseslint.config(
-  globalIgnores(['dist', 'public', 'scripts/*.mjs']),
+  // `src-tauri` is a Rust crate plus its icons; `cargo` lints it, not eslint.
+  globalIgnores(['dist', 'public', 'scripts/*.mjs', 'src-tauri']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [js.configs.recommended, ...tseslint.configs.recommended, jsxA11y.flatConfigs.recommended],

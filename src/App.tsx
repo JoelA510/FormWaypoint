@@ -7,7 +7,16 @@ import { ItemLibraryPanel, type ImportMode } from './features/item-library'
 import { HistoryPanel, OutputPanel } from './features/output-panel'
 import { reconcile, resolveDestinationCountry } from './domain/reconcile'
 import { indexByPart, libraryWeights, type ItemLibraryEntry } from './domain/item-library'
-import { loadScheduleB, scheduleBIsStale, type ScheduleBIndex } from './domain/schedule-b'
+import {
+  createScheduleBIndex,
+  loadBundledPayload,
+  scheduleBIsStale,
+  type RawPayload,
+  type ScheduleBIndex,
+} from './domain/schedule-b'
+import { loadInstalledDataset } from './domain/schedule-b/refresh'
+import { desktopBridge } from './desktop'
+import { ScheduleBRefreshPanel } from './features/schedule-b-refresh'
 import {
   applyCarrierDefaults,
   buildDraft,
@@ -43,17 +52,28 @@ export function App() {
   const [items, setItems] = useState<ItemLibraryEntry[]>([])
   const [shipments, setShipments] = useState<ShipmentRecord[]>([])
   const [scheduleB, setScheduleB] = useState<ScheduleBIndex | null>(null)
+  const [scheduleBPayload, setScheduleBPayload] = useState<RawPayload | null>(null)
   const [scheduleBError, setScheduleBError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   const adapter = useMemo(() => getAdapter(carrierId), [carrierId])
+  // Null in the browser build; the whole desktop surface keys off this.
+  const bridge = useMemo(() => desktopBridge(), [])
 
   // Load the Schedule B dataset and anything saved locally.
   useEffect(() => {
-    loadScheduleB()
-      .then(setScheduleB)
-      .catch((e: unknown) => setScheduleBError(e instanceof Error ? e.message : 'Schedule B data unavailable.'))
+    // On the desktop a previous refresh may have written a newer dataset beside the app;
+    // in the browser there is only ever the bundled one.
+    void (async () => {
+      try {
+        const payload = bridge ? await loadInstalledDataset(bridge, loadBundledPayload) : await loadBundledPayload()
+        setScheduleBPayload(payload)
+        setScheduleB(createScheduleBIndex(payload))
+      } catch (e: unknown) {
+        setScheduleBError(e instanceof Error ? e.message : 'Schedule B data unavailable.')
+      }
+    })()
 
     void (async () => {
       const [saved, savedOverrides, savedWeights, savedItems, history] = await Promise.all([
@@ -69,7 +89,7 @@ export function App() {
       setItems(savedItems)
       setShipments(history)
     })()
-  }, [])
+  }, [bridge])
 
   // Persist the profile as it is edited; it is reference data, not shipment data.
   useEffect(() => {
@@ -281,6 +301,18 @@ export function App() {
         {!parsed ? (
           <>
             <UploadPanel onParsed={(p) => void handleParsed(p)} onError={setError} busy={busy} />
+            {bridge ? (
+              <ScheduleBRefreshPanel
+                bridge={bridge}
+                installed={scheduleBPayload}
+                items={items}
+                libraryLoaded={items.length > 0}
+                onRefreshed={(payload) => {
+                  setScheduleBPayload(payload)
+                  setScheduleB(createScheduleBIndex(payload))
+                }}
+              />
+            ) : null}
             <ItemLibraryPanel
               entries={items}
               scheduleB={scheduleB}
