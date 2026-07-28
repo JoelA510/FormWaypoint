@@ -16,3 +16,11 @@ src-tauri/gen
 
 # Shipment documents are never committed — they are customer data.
 src/test/fixtures/*.pdf
+
+# What the app produces is customer data too, and on Linux the webview saves a
+# download into the working directory — which is this repository when run from
+# source. Named for what the app writes: `<invoice>_<target>.txt` for a keying
+# sheet, `<invoice>_SLI_<carrier>.pdf` for a filled form.
+*_fedex-ship-manager.txt
+*_ups-worldship.txt
+*_SLI_*.pdf

@@ -66,9 +66,20 @@ export function OutputPanel({
     }
   }
 
+  /**
+   * Held to the same gate as the SLI.
+   *
+   * For a carrier that is keyed rather than sent a form, this sheet *is* the output — the
+   * figures on it are typed straight into Ship Manager or WorldShip. Letting it download
+   * while a blocking check is unresolved would put unreconciled numbers on a shipment by a
+   * route the form can never take, which is the one thing the checks exist to prevent.
+   */
   function downloadKeyingSheet() {
     const sheet = buildKeyingSheet(target, reconciliation, draft)
     downloadText(keyingSheetToText(sheet), `${header.invoiceNumber || 'shipment'}_${target}.txt`)
+    // Recorded like a generated form: for FedEx and UPS this is the only artifact, and a
+    // shipment that left the tool with no history entry has no audit trail at all.
+    onGenerated()
   }
 
   return (
@@ -85,8 +96,9 @@ export function OutputPanel({
       <CardBody className="space-y-4">
         {!canGenerate ? (
           <p className="rounded-md border border-[var(--color-block)] bg-[var(--color-block-soft)] px-3 py-2 text-sm text-[var(--color-ink)]">
-            A blocking check has not passed{keyedCarrier ? '' : ', so the form cannot be generated'}. Resolve it
-            above — the totals must reconcile against the source document before anything is filed.
+            A blocking check has not passed, so {keyedCarrier ? 'the keying sheet' : 'the form'} cannot be
+            generated. Resolve it above — the totals must reconcile against the source document before
+            anything is filed.
           </p>
         ) : null}
 
@@ -139,7 +151,9 @@ export function OutputPanel({
               <option value="fedex-ship-manager">FedEx Ship Manager</option>
               <option value="ups-worldship">UPS WorldShip</option>
             </Select>
-            <Button onClick={downloadKeyingSheet}>Download keying sheet</Button>
+            <Button onClick={downloadKeyingSheet} disabled={!canGenerate}>
+              Download keying sheet
+            </Button>
           </div>
         </div>
       </CardBody>

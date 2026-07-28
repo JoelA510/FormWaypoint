@@ -11,6 +11,7 @@ import type { CarrierAdapter, ConsigneeType, SliDraft, TransportMode } from '../
 import { parseLooseDate } from '../carriers/form-utils'
 import type { CheckResult, Reconciliation } from './types'
 import { resolveDestinationCountry } from './reconcile'
+import { kgToLb } from './units'
 
 /** Stable facts about the exporter. Saved locally and reused across shipments. */
 export interface CompanyProfile {
@@ -339,8 +340,7 @@ function describePackages(reconciliation: Reconciliation): string {
   const parts: string[] = []
   if (header.cartons) parts.push(`${header.cartons} carton${header.cartons === 1 ? '' : 's'}`)
   if (header.totalGrossWeightKg != null) {
-    const lbs = header.totalGrossWeightKg / 0.4536
-    parts.push(`${lbs.toFixed(0)} lbs / ${header.totalGrossWeightKg.toFixed(3)} Kg gross`)
+    parts.push(`${kgToLb(header.totalGrossWeightKg).toFixed(0)} lbs / ${header.totalGrossWeightKg.toFixed(3)} Kg gross`)
   }
   return parts.join('\r')
 }

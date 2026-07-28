@@ -272,6 +272,46 @@ describe('UPS WorldShip sheet', () => {
   })
 })
 
+describe('address extraction', () => {
+  const at = (addressLines: string[]) =>
+    buildKeyingSheet(
+      'fedex-ship-manager',
+      fixture([line({})], [sli({})]),
+      draft({ ultimateConsignee: { name: 'X', addressLines } }),
+    ).sections[0].fields
+
+  const field = (addressLines: string[], label: string) =>
+    at(addressLines).find((f) => f.label === label)!.value
+
+  it('takes the postcode without the state placeholder printed in front of it', () => {
+    // The CIPL writes `city [state] postcode`, and the state is often a placeholder. The
+    // real Ship Manager entry for this consignee reads 498781, not "EX 498781".
+    expect(field(['2nd Floor 40 Alps Avenue', 'Singapore EX 498781'], 'Postal code')).toBe('498781')
+    expect(field(['Europalaan 20', "'s-Hertogenbosch NA 5234"], 'Postal code')).toBe('5234')
+  })
+
+  it('reads a hyphenated postcode', () => {
+    // 278514 shipped to Brazil, which writes them this way.
+    expect(field(['Rua Example 100', 'Sao Paulo SP 01310-100'], 'Postal code')).toBe('01310-100')
+  })
+
+  it('takes the city without the postcode or the state', () => {
+    expect(field(['2nd Floor 40 Alps Avenue', 'Singapore EX 498781'], 'City')).toBe('Singapore')
+    expect(field(['Europalaan 20', "'s-Hertogenbosch NA 5234"], 'City')).toBe("'s-Hertogenbosch")
+    expect(field(['Plot 12', 'Bangalore, KARNATAKA 562123'], 'City')).toBe('Bangalore')
+    expect(field(['Rua Example 100', 'Sao Paulo SP 01310-100'], 'City')).toBe('Sao Paulo')
+  })
+
+  it('keeps a city that is itself written in capitals', () => {
+    expect(field(['1 Example Road', 'SINGAPORE 498781'], 'City')).toBe('SINGAPORE')
+  })
+
+  it('leaves both blank rather than guessing when there is no postcode', () => {
+    expect(field(['Some Street', 'Some City'], 'Postal code')).toBe('')
+    expect(field(['Some Street', 'Some City'], 'City')).toBe('')
+  })
+})
+
 describe('rendered text', () => {
   it('states the totals the application shows back', () => {
     const text = keyingSheetToText(
