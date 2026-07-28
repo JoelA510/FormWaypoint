@@ -26,7 +26,8 @@ Tauri desktop packaging.
 | **Regression suite** | ✅ Done | 154 tests over five real shipments across both formats, plus guards for the silent failure modes. |
 | **Desktop packaging seam** | ✅ Done | `localStore` is the single named implementation; a Tauri build replaces one assignment. Windows-only target; WebView2 covers every platform API the app uses. |
 | **Desktop build (.exe)** | 📅 Planned | Tauri packaging around the existing seam. Carries the in-app Schedule B refresh — see the spec below. |
-| **In-app Schedule B refresh** | 📅 Planned | Fetch the Census concordance, diff it against the installed dataset, and write a reviewable change log alongside it. Confirmed desktop-only: census.gov serves no `access-control-allow-origin`, so a browser can never fetch it. Spec below. |
+| **Schedule B revision diff** | ✅ Done | `src/domain/schedule-b/revision.ts` — diffs two datasets, intersects the result with the item library by part, and renders the change log and CSV worklist. Pure logic, no filesystem or network. |
+| **In-app Schedule B refresh** | 📅 Planned | Remaining work is the Tauri shell only: fetch the concordance, call `diffScheduleB`, write the files. Confirmed desktop-only — census.gov serves no `access-control-allow-origin`, so a browser can never fetch it. Spec below. |
 | **More carriers** | 📅 Planned | One adapter each. The parser and reconciler carry no carrier-specific logic. |
 | **More CIPL formats** | 📅 Planned | A detector and a parser behind the same `ParsedCipl` contract — the registry and everything downstream are already shared. |
 
@@ -35,6 +36,13 @@ Tauri desktop packaging.
 For the desktop build. The refresh must run in Rust, not in the webview —
 `https://www.census.gov/.../expaes.txt` returns no `access-control-allow-origin` header, so
 a `fetch` from the page is blocked no matter how the app is packaged.
+
+**Already built.** `src/domain/schedule-b/revision.ts` holds every part of this with no
+filesystem or network in it — `diffScheduleB`, `affectedParts`, `renderChangeLog`,
+`renderAffectedCsv`, `changeLogFileName` — so the Tauri work is reduced to fetching the
+file, calling them, and writing the results. Proved at real scale: a five-code revision
+against the 9,746-code dataset and a 2,856-part item master resolved to 161 affected parts
+in 39 ms.
 
 **What it does.** Download the concordance, parse it with the logic currently in
 `scripts/build-schedule-b.mjs`, and write two files side by side in the app's data
