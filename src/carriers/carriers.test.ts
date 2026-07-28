@@ -10,7 +10,33 @@ import { reconcile } from '../domain/reconcile'
 import { buildDraft, defaultShipmentSettings, summariseReferences, type CompanyProfile } from '../domain/draft'
 import { getAdapter, detectCarrier } from './registry'
 import { buildKeyingSheet, keyingSheetToText } from './keying-sheet'
-import type { ParsedCipl } from '../domain/types'
+import type { ParsedCipl, ShipmentHeader, SLILine } from '../domain/types'
+import type { SliDraft } from './types'
+
+/** Enough of a header to build a draft from rows that were not parsed from a document. */
+const BLANK_HEADER: ShipmentHeader = {
+  invoiceNumber: 'SYNTHETIC',
+  invoiceDate: '2026-07-20',
+  onOrAboutDate: null,
+  soldTo: { name: 'Consignee', lines: ['Japan'], country: null },
+  consignedTo: { name: 'Consignee', lines: ['Japan'], country: null },
+  notifyTo: null,
+  shippedFrom: null,
+  dischargePort: null,
+  vesselAgent: null,
+  orderNumbers: [],
+  purchaseOrders: [],
+  tradeTerms: null,
+  incoterm: null,
+  freightTerms: null,
+  cartons: null,
+  documentCurrency: 'USD',
+  totalQuantity: 0,
+  totalValue: 0,
+  totalNetWeightKg: null,
+  totalGrossWeightKg: null,
+  totalMeasurementM3: null,
+}
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '../..')
@@ -38,9 +64,14 @@ let scheduleB: ScheduleBIndex
 const template = (name: string) => new Uint8Array(fs.readFileSync(path.join(ROOT, 'public/templates', name)))
 
 beforeAll(async () => {
-  parsed.G78495IQ = await parseCipl('G78495IQ', readFixture('G78495IQ'))
-  parsed.K78464FJ = await parseCipl('K78464FJ', readFixture('K78464FJ'))
-  parsed.K78027EC = await parseCipl('K78027EC', readFixture('K78027EC'))
+  // Guarded, not assumed. The suites keyed to real shipments skip without the documents,
+  // but this hook runs regardless of what is skipped, and reading a fixture that is not
+  // there would fail the whole file — including the tests that need no fixture at all.
+  if (hasFixtures()) {
+    parsed.G78495IQ = await parseCipl('G78495IQ', readFixture('G78495IQ'))
+    parsed.K78464FJ = await parseCipl('K78464FJ', readFixture('K78464FJ'))
+    parsed.K78027EC = await parseCipl('K78027EC', readFixture('K78027EC'))
+  }
   scheduleB = createScheduleBIndex(
     JSON.parse(fs.readFileSync(path.join(ROOT, 'public/data/schedule-b.json'), 'utf8')),
   )
@@ -346,5 +377,62 @@ describe.skipIf(!hasFixtures())('CEVA fields that were mapped but not written', 
     expect(values['DOES CONTAIN DANGEROUS GOODS']).toBe('JA')
     expect(values['DOES NOT CONTAIN DANGEROUS GOODS']).toBeUndefined()
     expect(hazardous.warnings.join(' ')).toMatch(/shipper’s declaration/)
+  })
+})
+
+/**
+ * The CEVA form has one ECCN box for the entire shipment, so a shipment whose rows are
+ * classified differently cannot be stated accurately in it. Needs no shipment document —
+ * the rows are built directly, because the point is the combination, not the parse.
+ */
+describe('CEVA — an ECCN box shared by every row', () => {
+  const row = (scheduleB: string, eccn: string | null): SLILine => ({
+    sourceLineIds: [`line:${scheduleB}`],
+    domesticForeign: 'F',
+    scheduleB,
+    description: 'Parts',
+    quantity: 1,
+    scheduleBUnit: 'NO',
+    sourceUom: 'EA',
+    weightKg: 1,
+    valueUsd: 100,
+    eccn,
+    sme: 'N',
+    license: 'NLR',
+    countriesOfOrigin: ['Japan'],
+  })
+
+  const fill = async (lines: SLILine[]) => {
+    const adapter = getAdapter('ceva')
+    const draft: SliDraft = {
+      ...buildDraft(
+        { header: BLANK_HEADER, sliLines: lines, mergedLines: [], checks: [], selectedSet: 'FC', canGenerate: true },
+        OMRON,
+        defaultShipmentSettings(adapter),
+        adapter,
+      ),
+    }
+    const result = await adapter.fill(template('ceva-sli.pdf'), draft)
+    return { values: await readBack(result.bytes), warnings: result.warnings }
+  }
+
+  it('leaves the box blank when every row is EAR99', async () => {
+    // The box is captioned "when required", and CEVA practice is NLR in the licence box.
+    const { values } = await fill([row('8544.42.0000', 'EAR99'), row('9031.49.8000', 'EAR99')])
+    expect(values.ECCN).toBeUndefined()
+    expect(values['License No']).toBe('NLR')
+  })
+
+  it('writes a single controlled ECCN on its own', async () => {
+    const { values } = await fill([row('8544.42.0000', '5A992.C'), row('9031.49.8000', '5A992.C')])
+    expect(values.ECCN).toBe('5A992.C')
+  })
+
+  it('writes every value, and warns, when the rows disagree', async () => {
+    // Shipment 278515 is this shape: a 5A992.C pendant kit beside EAR99 lines. Writing
+    // only the controlled code would read as though it covered the whole shipment.
+    const { values, warnings } = await fill([row('8544.42.0000', 'EAR99'), row('8537.10.9090', '5A992.C')])
+    expect(values.ECCN).toBe('EAR99 / 5A992.C')
+    expect(warnings.join(' ')).toMatch(/different ECCNs/)
   })
 })

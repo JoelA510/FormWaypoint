@@ -11,6 +11,10 @@ import type { ParsedCipl, SourceLine } from '../types'
 const parsed: Record<string, ParsedCipl> = {}
 
 beforeAll(async () => {
+  // Every suite in this file is gated on the shipment documents, but this hook is not
+  // gated by them skipping. Without the guard, adding one test that needs no fixture
+  // would fail the whole file wherever the documents are absent.
+  if (!hasFixtures()) return
   parsed.G78495IQ = await parseCipl('G78495IQ_CIPL.pdf', readFixture('G78495IQ'))
   parsed.K78464FJ = await parseCipl('K78464FJ_CIPL.pdf', readFixture('K78464FJ'))
   parsed.K78027EC = await parseCipl('K78027EC_CIPL.pdf', readFixture('K78027EC'))
