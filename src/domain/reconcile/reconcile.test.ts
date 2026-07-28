@@ -24,6 +24,10 @@ let scheduleB: ScheduleBIndex
 const CONTROLLED = { eccn: 'EAR99', sme: 'N', license: 'NLR' }
 
 beforeAll(async () => {
+  // Every suite in this file is gated on the shipment documents, but this hook is not
+  // gated by them skipping. Without the guard, adding one test that needs no fixture
+  // would fail the whole file wherever the documents are absent.
+  if (!hasFixtures()) return
   parsed.vendorA1 = await parseCipl('vendorA1', readFixture('vendorA1'))
   parsed.vendorA2 = await parseCipl('vendorA2', readFixture('vendorA2'))
   parsed.vendorA3 = await parseCipl('vendorA3', readFixture('vendorA3'))

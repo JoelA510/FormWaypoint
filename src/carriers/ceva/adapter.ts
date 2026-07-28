@@ -118,8 +118,22 @@ export function createCevaAdapter(): CarrierAdapter {
       // A single licence applies to the whole shipment on this form; ECCN stays blank
       // unless a row actually carries one, since the box is "when required".
       setText(ctx, F.license, firstDistinct(rows.map((l) => l.license)))
-      const eccns = rows.map((l) => l.eccn).filter((e): e is string => Boolean(e) && e !== 'EAR99')
-      if (eccns.length) setText(ctx, F.eccn, firstDistinct(eccns))
+
+      // This form has one ECCN box for the whole shipment, so a mixed shipment cannot be
+      // stated accurately in it. Every distinct value goes in — including EAR99 — because
+      // writing only the controlled one reads as though it covers every row. Shipment
+      // vendorB1 is exactly that shape: a 5A992.C pendant kit alongside EAR99 lines, and a
+      // box reading `5A992.C` alone would over-declare the rest.
+      const eccns = distinct(rows.map((l) => l.eccn))
+      if (eccns.length > 1) {
+        setText(ctx, F.eccn, eccns.join(' / '))
+        ctx.warnings.push(
+          `Rows on this shipment carry different ECCNs (${eccns.join(', ')}), but the form has one box for all ` +
+            'of them. Both were written; split the shipment or annotate box 24 before signing.',
+        )
+      } else if (eccns.length === 1 && eccns[0] !== 'EAR99') {
+        setText(ctx, F.eccn, eccns[0])
+      }
 
       // --- Signature block -------------------------------------------------
       setText(ctx, F.dulyAuthorized, draft.signerName)
@@ -146,5 +160,9 @@ function formatQuantity(quantity: number): string {
 }
 
 function firstDistinct(values: (string | null)[]): string {
-  return [...new Set(values.filter((v): v is string => Boolean(v)))].join(' / ')
+  return distinct(values).join(' / ')
+}
+
+function distinct(values: (string | null | undefined)[]): string[] {
+  return [...new Set(values.filter((v): v is string => Boolean(v)))]
 }

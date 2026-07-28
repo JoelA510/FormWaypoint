@@ -19,6 +19,7 @@
  * or, worse, transposes values.
  */
 import type { MergedLine, Reconciliation } from '../../domain/types'
+import { kgToLb as kilogramsToPounds } from '../../domain/units'
 import type { SliDraft } from '../types'
 import { toCountryPickerLabel, toIsoAlpha2 } from './countries'
 
@@ -72,10 +73,9 @@ const APPLICATION_NAMES: Record<KeyingTarget, string> = {
   'ups-worldship': 'UPS WorldShip',
 }
 
-const KG_TO_LB = 2.20462262
-
+/** Rounded to the two decimals both applications accept. */
 export function kgToLb(kg: number): number {
-  return Math.round(kg * KG_TO_LB * 100) / 100
+  return Math.round(kilogramsToPounds(kg) * 100) / 100
 }
 
 const MANUAL = 'Not on the CIPL — enter manually'
@@ -306,21 +306,38 @@ export function buildKeyingSheet(
   }
 }
 
-/** Last address line that looks like it carries a postcode. */
+/**
+ * The postcode is the trailing number, and nothing in front of it.
+ *
+ * These address lines read `city [state] postcode`, and the state is often a placeholder
+ * the CIPL prints rather than a real one — `Singapore EX 498781`, `'s-Hertogenbosch NA
+ * 5234`. Taking the letters with the digits puts `EX 498781` into a field that Ship Manager
+ * validates and a courier sorts on; the entry that shipment was actually keyed with reads
+ * `498781`. The hyphen is allowed because Brazil writes `01310-100`.
+ */
+const POSTCODE = /(\d{4,6}(?:-\d{2,4})?)\s*$/
+
 function postalCodeFrom(lines: string[]): string {
   for (const line of [...lines].reverse()) {
-    const match = line.match(/\b([A-Z]{0,2}\s?\d{4,6})\s*$/)
-    if (match) return match[1].trim()
+    const match = line.match(POSTCODE)
+    if (match) return match[1]
   }
   return ''
 }
 
-/** The address line carrying the postcode, with the postcode taken off, is the city. */
+/**
+ * The same line with the postcode, and any state, taken off it.
+ *
+ * The state is only removed when something is left afterwards, so a city that is itself
+ * written in capitals survives intact.
+ */
 function cityFrom(lines: string[]): string {
-  const index = lines.findIndex((l) => /\b[A-Z]{0,2}\s?\d{4,6}\s*$/.test(l))
+  const index = lines.findIndex((l) => POSTCODE.test(l))
   if (index === -1) return ''
-  const stripped = lines[index].replace(/\b[A-Z]{0,2}\s?\d{4,6}\s*$/, '').trim().replace(/[,;]+$/, '')
-  return stripped || lines[index - 1] || ''
+  const withoutPostcode = lines[index].replace(POSTCODE, '').trim()
+  const withoutState = withoutPostcode.replace(/[\s,]+[A-Z]{2,}$/, '').trim()
+  const city = (withoutState || withoutPostcode).replace(/[,;]+$/, '').trim()
+  return city || lines[index - 1] || ''
 }
 
 function describeShipment(rows: KeyingCommodityRow[]): string {

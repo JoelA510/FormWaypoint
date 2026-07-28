@@ -22,6 +22,10 @@ let parsed: ParsedCipl
 let scheduleB: ScheduleBIndex
 
 beforeAll(async () => {
+  // Every suite in this file is gated on the shipment documents, but this hook is not
+  // gated by them skipping. Without the guard, adding one test that needs no fixture
+  // would fail the whole file wherever the documents are absent.
+  if (!hasFixtures()) return
   parsed = await parseCipl('vendorA4_CIPL.pdf', readFixture('vendorA4'))
   scheduleB = createScheduleBIndex(
     JSON.parse(fs.readFileSync(path.join(HERE, '../../../public/data/schedule-b.json'), 'utf8')),

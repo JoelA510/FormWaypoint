@@ -54,7 +54,7 @@ export function parseVendorBPages(fileName: string, pages: TextPage[]): ParsedCi
       continue
     }
     if (!header) header = parseHeader(page)
-    lines.push(...parseLineBlocks(page, kind))
+    lines.push(...parseLineBlocks(page, kind, header.documentCurrency))
   }
 
   if (!header) {
@@ -219,7 +219,7 @@ function leftAddressBlock(rows: TextRow[], label: string): PartyAddress {
 // Line blocks
 // ---------------------------------------------------------------------------
 
-function parseLineBlocks(page: TextPage, kind: DocumentKind): SourceLine[] {
+function parseLineBlocks(page: TextPage, kind: DocumentKind, currency: string): SourceLine[] {
   const rows = page.rows
   const starts: number[] = []
   for (let i = 0; i < rows.length; i++) {
@@ -231,7 +231,7 @@ function parseLineBlocks(page: TextPage, kind: DocumentKind): SourceLine[] {
   for (let s = 0; s < starts.length; s++) {
     const from = starts[s]
     const to = s + 1 < starts.length ? starts[s + 1] : endOfTable(rows, from)
-    const line = parseBlock(rows.slice(from, to), page, kind)
+    const line = parseBlock(rows.slice(from, to), page, kind, currency)
     if (line) lines.push(line)
   }
   return lines
@@ -251,7 +251,7 @@ function endOfTable(rows: TextRow[], from: number): number {
 /** How far a continuation cell may sit from its column's anchor and still belong to it. */
 const COLUMN_TOLERANCE = 30
 
-function parseBlock(block: TextRow[], page: TextPage, kind: DocumentKind): SourceLine | null {
+function parseBlock(block: TextRow[], page: TextPage, kind: DocumentKind, currency: string): SourceLine | null {
   // The head row is the calibration: its cells are, left to right, the sales order, the
   // item number, the description, the shipping code, the quantity, then prices. Their x
   // positions define this page's columns, which matters because the commercial invoice and
@@ -352,7 +352,11 @@ function parseBlock(block: TextRow[], page: TextPage, kind: DocumentKind): Sourc
     purchaseOrder,
     ...(kind === 'INVOICE'
       ? {
-          currency: 'USD',
+          // Whatever the document declares, not an assumption. These prices are the
+          // left-hand column of a layout that can print a second currency underneath, and
+          // labelling them USD regardless would hide a foreign-priced invoice from the
+          // reconciliation's currency check rather than surface it.
+          currency,
           unitValue: prices[0]?.value,
           extendedValue: prices.length > 1 ? prices[1].value : prices[0]?.value,
         }

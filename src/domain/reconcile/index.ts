@@ -54,9 +54,16 @@ export interface ReconcileOptions extends AggregationOptions {
  * so the USD set is the only correct source. Picking TP1 because it appears later in the
  * file, or summing both, would misstate the shipment.
  */
-export function selectDocumentSet(parsed: ParsedCipl, force?: DocumentSet): { set: DocumentSet; reason: string } {
+export function selectDocumentSet(
+  parsed: ParsedCipl,
+  force?: DocumentSet,
+): { set: DocumentSet; reason: string; currency: string } {
   if (force && parsed.availableSets.includes(force)) {
-    return { set: force, reason: `Manually selected the ${force} document set.` }
+    return {
+      set: force,
+      reason: `Manually selected the ${force} document set.`,
+      currency: parsed.headers[force]?.documentCurrency ?? '',
+    }
   }
 
   const usdSet = parsed.availableSets.find((set) => parsed.headers[set]?.documentCurrency === 'USD')
@@ -70,13 +77,16 @@ export function selectDocumentSet(parsed: ParsedCipl, force?: DocumentSet): { se
       reason: other.length
         ? `Using the ${usdSet} set because it is priced in USD. ${otherDesc} describes the same goods and is excluded.`
         : `Using the ${usdSet} set, priced in USD.`,
+      currency: 'USD',
     }
   }
 
   const fallback = parsed.availableSets[0] ?? 'FC'
+  const currency = parsed.headers[fallback]?.documentCurrency ?? ''
   return {
     set: fallback,
-    reason: `No USD-priced document set was found. Falling back to ${fallback} (${parsed.headers[fallback]?.documentCurrency || 'unknown currency'}); box 31 requires US dollars, so this needs manual conversion.`,
+    reason: `No USD-priced document set was found. Falling back to ${fallback} (${currency || 'unknown currency'}); box 31 requires US dollars, so this needs manual conversion.`,
+    currency,
   }
 }
 
@@ -137,7 +147,7 @@ const UNREADABLE_HEADER: ShipmentHeader = {
 }
 
 export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, options: ReconcileOptions): Reconciliation {
-  const { set, reason } = selectDocumentSet(parsed, options.forceSet)
+  const { set, reason, currency } = selectDocumentSet(parsed, options.forceSet)
   // `selectDocumentSet` falls back to a set name when nothing was recognised, so the header
   // for it may genuinely not exist. Report that rather than dereferencing undefined.
   const header = parsed.headers[set] ?? UNREADABLE_HEADER
@@ -164,6 +174,7 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
 
   const checks: CheckResult[] = [
     { id: 'set-selection', severity: 'info', title: 'Controlling document set', detail: reason, passed: true },
+    ...currencyCheck(currency),
     {
       id: 'header-readable',
       severity: 'blocking',
@@ -196,6 +207,52 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
 // ---------------------------------------------------------------------------
 // Checks
 // ---------------------------------------------------------------------------
+
+/**
+ * The controlling set has to be priced in US dollars.
+ *
+ * Box 31 is "value at the port of export in US dollars", and every figure downstream — the
+ * row values, the invoice-total reconciliation, the keying sheets — is carried through as
+ * though it already is. Nothing in this tool converts a currency, so a set priced in
+ * anything else would be filed at face value in the wrong denomination: a €40,000 shipment
+ * declared as $40,000. `selectDocumentSet` already prefers the USD set where one exists, so
+ * reaching this at all means none was found.
+ *
+ * The two failures are told apart on purpose. A stated foreign currency is a fact about the
+ * document and blocks; a currency that could not be read is a fact about the parse, and
+ * blocking on it would stop a shipment whose figures may be perfectly correct.
+ */
+function currencyCheck(currency: string): CheckResult[] {
+  const code = currency.trim().toUpperCase()
+  if (code === 'USD') return []
+
+  return [
+    code
+      ? {
+          id: 'usd-values',
+          severity: 'blocking',
+          title: 'Commodity values are in US dollars',
+          detail:
+            `The controlling document set is priced in ${code}. Box 31 requires US dollars and this tool does ` +
+            'not convert currencies, so these figures cannot be filed as they stand. Use a USD-priced copy of ' +
+            'the invoice.',
+          passed: false,
+          expected: 'USD',
+          actual: code,
+        }
+      : {
+          id: 'usd-values',
+          severity: 'warning',
+          title: 'Commodity values are in US dollars',
+          detail:
+            'No currency could be read from the document, so it cannot be confirmed that these values are in ' +
+            'US dollars as box 31 requires. Check the invoice before filing.',
+          passed: false,
+          expected: 'USD',
+          actual: 'not stated',
+        },
+  ]
+}
 
 /**
  * Extra rounding the totals check must tolerate because of reconstructed line weights.
@@ -391,10 +448,12 @@ function partCodeChecks(
   if (!merged.length) return []
 
   // Keyed on part *and* code: one part can appear on two lines under two classifications,
-  // and screening only the first would pass a shipment carrying a bad second one.
+  // and screening only the first would pass a shipment carrying a bad second one. The
+  // separator stays written as an escape: a literal control character here makes this file
+  // binary to git, grep and anything else that sniffs for one.
   const seen = new Map<string, { part: string; code: string; description: string }>()
   for (const line of merged) {
-    const key = `${line.partNumber} ${line.classification}`
+    const key = `${line.partNumber}\u0000${line.classification}`
     if (!seen.has(key)) {
       seen.set(key, { part: line.partNumber, code: line.classification, description: line.description })
     }
