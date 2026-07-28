@@ -25,9 +25,42 @@ Tauri desktop packaging.
 | **Local history** | ✅ Done | Exporter profile, per-consignee values, per-part weights, the item library, overrides and processed shipments in IndexedDB. |
 | **Regression suite** | ✅ Done | 154 tests over five real shipments across both formats, plus guards for the silent failure modes. |
 | **Desktop packaging seam** | ✅ Done | `localStore` is the single named implementation; a Tauri build replaces one assignment. Windows-only target; WebView2 covers every platform API the app uses. |
-| **Desktop build (.exe)** | 📅 Planned | Tauri packaging around the existing seam. Decide there whether Schedule B refresh moves in-app (a filesystem makes it easy). |
+| **Desktop build (.exe)** | 📅 Planned | Tauri packaging around the existing seam. Carries the in-app Schedule B refresh — see the spec below. |
+| **In-app Schedule B refresh** | 📅 Planned | Fetch the Census concordance, diff it against the installed dataset, and write a reviewable change log alongside it. Confirmed desktop-only: census.gov serves no `access-control-allow-origin`, so a browser can never fetch it. Spec below. |
 | **More carriers** | 📅 Planned | One adapter each. The parser and reconciler carry no carrier-specific logic. |
 | **More CIPL formats** | 📅 Planned | A detector and a parser behind the same `ParsedCipl` contract — the registry and everything downstream are already shared. |
+
+## Spec: in-app Schedule B refresh and change log
+
+For the desktop build. The refresh must run in Rust, not in the webview —
+`https://www.census.gov/.../expaes.txt` returns no `access-control-allow-origin` header, so
+a `fetch` from the page is blocked no matter how the app is packaged.
+
+**What it does.** Download the concordance, parse it with the logic currently in
+`scripts/build-schedule-b.mjs`, and write two files side by side in the app's data
+directory: the replacement `schedule-b.json`, and a change log recording what moved between
+the installed dataset and the new one. The dataset is only swapped in once both are written.
+
+**Why a change log, and what goes in it.** The log exists to be read by a person and then
+acted on by hand — reviewed, carried into a later Schedule B session, and used to correct
+the JDE Item Tag. Those uses want two different scopes, so the log carries both, clearly
+separated:
+
+1. *The revision itself* — every code added, retired, or whose description or required unit
+   of quantity changed. Retirements and unit changes matter most: a retired code is a filing
+   AES will reject, and a changed unit silently invalidates how a line's quantity is
+   reported.
+2. *What it means for this item master* — the subset intersected with the imported item
+   library, keyed by part number. This is the actionable list, because a nationwide revision
+   touches hundreds of codes and only the handful held against real parts drive a JDE edit.
+
+**Format.** A dated, append-only file (`schedule-b-changes-YYYY-MM-DD.md` or a CSV
+companion) — never overwritten, so the history of revisions accumulates and an earlier one
+can still be consulted after a later refresh.
+
+**Boundaries, unchanged from the rest of the tool.** The refresh never edits the item
+library, never reclassifies a part, and never rewrites a code. It reports what Census
+changed and which of your parts that touches; every correction stays a human action.
 
 ## Open questions
 
