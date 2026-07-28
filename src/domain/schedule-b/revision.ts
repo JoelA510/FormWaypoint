@@ -71,6 +71,23 @@ function sameUnits(a: string[], b: string[]): boolean {
 }
 
 /**
+ * Re-keys a dataset on the bare ten digits.
+ *
+ * The current build script already writes unpunctuated keys, so on today's files this
+ * changes nothing. It is here because the alternative failure is severe and silent: diffing
+ * a dataset keyed `8544.42.0000` against one keyed `8544420000` would report every code as
+ * both retired and added, and a change log claiming 9,746 retirements would be acted on.
+ */
+function byDigits(codes: RawPayload['codes']): Map<string, { d: string; u: string[] }> {
+  const out = new Map<string, { d: string; u: string[] }>()
+  for (const [code, entry] of Object.entries(codes)) {
+    const digits = normalizeScheduleB(code)
+    if (digits) out.set(digits, entry)
+  }
+  return out
+}
+
+/**
  * Compares two datasets.
  *
  * Codes are compared on their ten digits, so a difference in how either file punctuates
@@ -82,8 +99,11 @@ export function diffScheduleB(previous: RawPayload, next: RawPayload): ScheduleB
   const changed: CodeChange[] = []
   let unchanged = 0
 
-  for (const [code, entry] of Object.entries(next.codes)) {
-    const before = previous.codes[code]
+  const before_ = byDigits(previous.codes)
+  const after = byDigits(next.codes)
+
+  for (const [code, entry] of after) {
+    const before = before_.get(code)
     if (!before) {
       added.push({ code, kind: 'added', description: entry.d, units: entry.u })
       continue
@@ -106,8 +126,8 @@ export function diffScheduleB(previous: RawPayload, next: RawPayload): ScheduleB
     })
   }
 
-  for (const [code, entry] of Object.entries(previous.codes)) {
-    if (next.codes[code]) continue
+  for (const [code, entry] of before_) {
+    if (after.has(code)) continue
     retired.push({ code, kind: 'retired', description: entry.d, units: entry.u })
   }
 
@@ -165,10 +185,19 @@ export function affectedParts(revision: ScheduleBRevision, entries: ItemLibraryE
 
 const describeUnits = (units: string[]) => (units.length ? units.join(' / ') : '—')
 
+/**
+ * Makes text safe to put in a markdown table cell.
+ *
+ * Item descriptions come from someone's ERP, not from this codebase — an unescaped `|` or a
+ * newline inside one silently breaks the table for every row after it, in the one file
+ * whose entire purpose is being read by a person.
+ */
+const cell = (text: string) => text.replace(/\s+/g, ' ').replace(/\|/g, '\\|').trim()
+
 function renderCodeTable(changes: CodeChange[]): string[] {
   const lines = ['| Code | Description | Units |', '| --- | --- | --- |']
   for (const change of changes) {
-    lines.push(`| ${formatScheduleB(change.code)} | ${change.description} | ${describeUnits(change.units)} |`)
+    lines.push(`| ${formatScheduleB(change.code)} | ${cell(change.description)} | ${describeUnits(change.units)} |`)
   }
   return lines
 }
@@ -183,7 +212,7 @@ function renderChangedTable(changes: CodeChange[]): string[] {
     }
     if (change.descriptionChanged) {
       lines.push(
-        `| ${formatScheduleB(change.code)} | Description | ${change.previousDescription ?? ''} | ${change.description} |`,
+        `| ${formatScheduleB(change.code)} | Description | ${cell(change.previousDescription ?? '')} | ${cell(change.description)} |`,
       )
     }
   }
@@ -235,7 +264,7 @@ export function renderChangeLog(
     )
     for (const part of affected) {
       lines.push(
-        `| ${part.partNumber} | ${part.itemDescription} | ${part.code} | ${SEVERITY_NOTE[part.severity]} |`,
+        `| ${cell(part.partNumber)} | ${cell(part.itemDescription)} | ${cell(part.code)} | ${SEVERITY_NOTE[part.severity]} |`,
       )
     }
     lines.push('')
