@@ -7,7 +7,7 @@ import { ItemLibraryPanel, type ImportMode } from './features/item-library'
 import { HistoryPanel, OutputPanel } from './features/output-panel'
 import { reconcile, resolveDestinationCountry } from './domain/reconcile'
 import { indexByPart, libraryWeights, type ItemLibraryEntry } from './domain/item-library'
-import { loadScheduleB, type ScheduleBIndex } from './domain/schedule-b'
+import { loadScheduleB, scheduleBIsStale, type ScheduleBIndex } from './domain/schedule-b'
 import {
   applyCarrierDefaults,
   buildDraft,
@@ -19,7 +19,7 @@ import {
 } from './domain/draft'
 import { detectCarrier, getAdapter, type CarrierId } from './carriers/registry'
 import {
-  indexedDbStore,
+  localStore,
   overridesToMap,
   partWeightsToMap,
   type OverrideRecord,
@@ -57,11 +57,11 @@ export function App() {
 
     void (async () => {
       const [saved, savedOverrides, savedWeights, savedItems, history] = await Promise.all([
-        indexedDbStore.getProfile(),
-        indexedDbStore.listOverrides(),
-        indexedDbStore.listPartWeights(),
-        indexedDbStore.listItems(),
-        indexedDbStore.listShipments(),
+        localStore.getProfile(),
+        localStore.listOverrides(),
+        localStore.listPartWeights(),
+        localStore.listItems(),
+        localStore.listShipments(),
       ])
       if (saved) setProfile(saved)
       setOverrides(savedOverrides)
@@ -74,7 +74,7 @@ export function App() {
   // Persist the profile as it is edited; it is reference data, not shipment data.
   useEffect(() => {
     if (profile === EMPTY_PROFILE) return
-    const timer = setTimeout(() => void indexedDbStore.saveProfile(profile), 400)
+    const timer = setTimeout(() => void localStore.saveProfile(profile), 400)
     return () => clearTimeout(timer)
   }, [profile])
 
@@ -91,7 +91,7 @@ export function App() {
 
       // Reuse what was learned about this consignee last time.
       const base = defaultShipmentSettings(getAdapter(nextCarrier))
-      const known = header ? await indexedDbStore.getConsignee(header.consignedTo.name) : null
+      const known = header ? await localStore.getConsignee(header.consignedTo.name) : null
       setSettings(
         known
           ? {
@@ -154,23 +154,23 @@ export function App() {
   )
 
   const saveOverride = useCallback(async (record: OverrideRecord) => {
-    await indexedDbStore.saveOverride(record)
-    setOverrides(await indexedDbStore.listOverrides())
+    await localStore.saveOverride(record)
+    setOverrides(await localStore.listOverrides())
   }, [])
 
   const removeOverride = useCallback(async (sourceCode: string) => {
-    await indexedDbStore.deleteOverride(sourceCode)
-    setOverrides(await indexedDbStore.listOverrides())
+    await localStore.deleteOverride(sourceCode)
+    setOverrides(await localStore.listOverrides())
   }, [])
 
   const savePartWeight = useCallback(async (partNumber: string, description: string, netWeightKg: number) => {
-    await indexedDbStore.savePartWeight({
+    await localStore.savePartWeight({
       partNumber,
       description,
       netWeightKg,
       updatedAt: new Date().toISOString(),
     })
-    setPartWeights(await indexedDbStore.listPartWeights())
+    setPartWeights(await localStore.listPartWeights())
   }, [])
 
   const handleGenerated = useCallback(async () => {
@@ -192,9 +192,9 @@ export function App() {
       checks,
       settings,
     }
-    await indexedDbStore.saveShipment(record)
+    await localStore.saveShipment(record)
     if (header.consignedTo.name) {
-      await indexedDbStore.saveConsignee({
+      await localStore.saveConsignee({
         name: header.consignedTo.name,
         consigneeId: settings.consigneeId,
         consigneeType: settings.consigneeType,
@@ -203,18 +203,18 @@ export function App() {
         lastUsed: new Date().toISOString(),
       })
     }
-    setShipments(await indexedDbStore.listShipments())
+    setShipments(await localStore.listShipments())
   }, [reconciliation, parsed, adapter, settings, draft])
 
   const importItemLibrary = useCallback(async (entries: ItemLibraryEntry[], mode: ImportMode) => {
-    if (mode === 'merge') await indexedDbStore.mergeItems(entries)
-    else await indexedDbStore.replaceItems(entries)
-    setItems(await indexedDbStore.listItems())
+    if (mode === 'merge') await localStore.mergeItems(entries)
+    else await localStore.replaceItems(entries)
+    setItems(await localStore.listItems())
   }, [])
 
   const clearItemLibrary = useCallback(async () => {
     if (!window.confirm('Remove the imported item library from this machine?')) return
-    await indexedDbStore.clearItems()
+    await localStore.clearItems()
     setItems([])
   }, [])
 
@@ -225,7 +225,7 @@ export function App() {
       )
     )
       return
-    await indexedDbStore.clearAll()
+    await localStore.clearAll()
     setProfile(EMPTY_PROFILE)
     setOverrides([])
     setPartWeights([])
@@ -246,7 +246,9 @@ export function App() {
           <div className="flex items-center gap-2">
             <Badge tone="pass">runs entirely on this machine</Badge>
             {scheduleB ? (
-              <Badge tone="neutral">Schedule B {scheduleB.generatedAt}</Badge>
+              <Badge tone={scheduleBIsStale(scheduleB.generatedAt) ? 'warn' : 'neutral'}>
+                Schedule B {scheduleB.generatedAt}
+              </Badge>
             ) : (
               <Badge tone="warn">loading Schedule B…</Badge>
             )}
@@ -259,6 +261,14 @@ export function App() {
           <p className="rounded-md border border-[var(--color-warn)] bg-[var(--color-warn-soft)] px-3 py-2 text-sm">
             {scheduleBError} Codes will not be checked for validity until it loads. Run{' '}
             <code className="font-mono text-xs">npm run data:schedule-b</code> to rebuild it.
+          </p>
+        ) : null}
+
+        {scheduleB && scheduleBIsStale(scheduleB.generatedAt) ? (
+          <p className="rounded-md border border-[var(--color-warn)] bg-[var(--color-warn-soft)] px-3 py-2 text-sm">
+            The Schedule B dataset was generated {scheduleB.generatedAt}, before the most recent
+            January/July revision. Codes retired since then will still pass as active. Rebuild it with{' '}
+            <code className="font-mono text-xs">npm run data:schedule-b -- --fetch</code> and redeploy.
           </p>
         ) : null}
 

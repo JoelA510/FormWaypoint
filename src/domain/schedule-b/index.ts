@@ -121,6 +121,24 @@ export function createScheduleBIndex(payload: RawPayload): ScheduleBIndex {
   }
 }
 
+/**
+ * Whether the dataset predates the most recent Schedule B revision window.
+ *
+ * The Census Bureau reissues the concordance when Schedule B changes, effective each
+ * 1 January and 1 July. A dataset generated before the latest of those boundaries can list
+ * retired codes as active — which silently defeats the "is this code current?" check, the
+ * one question this dataset exists to answer. An unreadable date is treated as stale,
+ * because "cannot tell how old" and "too old" call for the same response.
+ */
+export function scheduleBIsStale(generatedAt: string, today: Date = new Date()): boolean {
+  const generated = Date.parse(generatedAt)
+  if (Number.isNaN(generated)) return true
+  const year = today.getUTCFullYear()
+  const boundaries = [Date.UTC(year - 1, 6, 1), Date.UTC(year, 0, 1), Date.UTC(year, 6, 1)]
+  const latest = Math.max(...boundaries.filter((b) => b <= today.getTime()))
+  return generated < latest
+}
+
 let cached: Promise<ScheduleBIndex> | null = null
 
 /** Loads (and memoises) the dataset. In the browser it is fetched from /data. */

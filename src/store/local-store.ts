@@ -237,6 +237,15 @@ export const indexedDbStore: LocalStore = {
   },
 }
 
+/**
+ * The store the application talks to.
+ *
+ * This assignment is the entire desktop seam: a Tauri build replaces it with a
+ * file-backed `LocalStore` and no calling code changes, because nothing outside this
+ * module names an implementation.
+ */
+export const localStore: LocalStore = indexedDbStore
+
 /** Per-part weights in the shape the reconciliation engine expects. */
 export function partWeightsToMap(records: PartWeightRecord[]): Record<string, number> {
   return Object.fromEntries(records.map((r) => [r.partNumber, r.netWeightKg]))
