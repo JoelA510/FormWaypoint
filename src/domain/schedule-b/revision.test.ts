@@ -85,6 +85,20 @@ describe('diffScheduleB', () => {
     expect(diffScheduleB(BASE, next).changed.map((c) => c.code)).toEqual(['8544420000'])
   })
 
+  it('compares on the digits, so a punctuated dataset is not read as a total rewrite', () => {
+    // Diffing `8544.42.0000` against `8544420000` must not report every code as both
+    // retired and added — a change log claiming thousands of retirements would be acted on.
+    const punctuated = payload('2026-01-15', {
+      '8544.42.0000': BASE.codes['8544420000'],
+      '9031.90.0000': BASE.codes['9031900000'],
+      '8504.40.4000': BASE.codes['8504404000'],
+      '8483.10.5000': BASE.codes['8483105000'],
+    })
+    const revision = diffScheduleB(punctuated, payload('2026-07-01', BASE.codes))
+    expect(revision.empty).toBe(true)
+    expect(revision.unchanged).toBe(4)
+  })
+
   it('sorts each list by code so successive runs are comparable', () => {
     const next = payload('2026-07-01', {
       '9999999999': { d: 'Z', u: ['NO'] },
@@ -201,6 +215,21 @@ describe('renderChangeLog', () => {
     const log = render([], false)
     expect(log).toContain('No item library was loaded')
     expect(log).not.toContain('None. No part')
+  })
+
+  it('escapes a pipe in an item description instead of breaking the table', () => {
+    const log = renderChangeLog(
+      revision,
+      affectedParts(revision, [
+        item({ partNumber: 'P|1', exportCode: '8483.10.5000', description: 'Shaft | drive\nlong' }),
+      ]),
+      { source: next.source, libraryLoaded: true },
+    )
+    const row = log.split('\n').find((l) => l.includes('Shaft'))!
+    expect(row).toContain('Shaft \\| drive long')
+    expect(row).toContain('P\\|1')
+    // Four columns means four separators — an unescaped pipe would make more.
+    expect(row.split(/(?<!\\)\|/).filter(Boolean)).toHaveLength(4)
   })
 
   it('carries the counts and the source in the header', () => {
