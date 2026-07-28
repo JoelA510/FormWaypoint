@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeAll } from 'vitest'
 import { parseCipl, detectCiplFormat, extractTextPages } from '.'
-import { readFixture } from '../../test/fixtures'
+import { hasFixtures, readFixture } from '../../test/fixtures'
 import type { ParsedCipl, SourceLine } from '../types'
 
 /**
@@ -17,7 +17,9 @@ beforeAll(async () => {
 
 const invoiceLines = (p: ParsedCipl): SourceLine[] => p.lines.filter((l) => l.documentKind === 'INVOICE')
 
-describe('format detection', () => {
+// Shipment documents are customer data and are not committed. Without them this
+// suite cannot run; the assertions themselves are checked in and unaffected.
+describe.skipIf(!hasFixtures())('format detection', () => {
   it('routes each layout to its own parser', async () => {
     expect(parsed['278515'].format).toBe('omron-shipment')
     expect(parsed['278514'].format).toBe('omron-shipment')
@@ -39,7 +41,7 @@ describe('format detection', () => {
   })
 })
 
-describe('278515 — six lines, mixed origins, one ECCN', () => {
+describe.skipIf(!hasFixtures())('278515 — six lines, mixed origins, one ECCN', () => {
   it('reads the header', () => {
     const h = parsed['278515'].headers.FC
     expect(h.invoiceNumber).toBe('278515')
@@ -122,7 +124,7 @@ describe('278515 — six lines, mixed origins, one ECCN', () => {
   })
 })
 
-describe('278514 — single line, dual currency', () => {
+describe.skipIf(!hasFixtures())('278514 — single line, dual currency', () => {
   it('takes the USD price, not the foreign one printed beneath it', () => {
     const lines = invoiceLines(parsed['278514'])
     expect(lines).toHaveLength(1)
@@ -150,7 +152,7 @@ describe('278514 — single line, dual currency', () => {
   })
 })
 
-describe('detectCiplFormat', () => {
+describe.skipIf(!hasFixtures())('detectCiplFormat', () => {
   it('is exported for callers that already have extracted pages', async () => {
     const pages = await extractTextPages(readFixture('278514'))
     expect(detectCiplFormat(pages)?.id).toBe('omron-shipment')

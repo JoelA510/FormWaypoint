@@ -10,7 +10,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { parseCipl } from '.'
-import { readFixture } from '../../test/fixtures'
+import { hasFixtures, readFixture } from '../../test/fixtures'
 import { reconcile } from '../reconcile'
 import { createScheduleBIndex, type ScheduleBIndex } from '../schedule-b'
 import type { ParsedCipl, SourceLine } from '../types'
@@ -34,7 +34,9 @@ const fc = (kind: SourceLine['documentKind']) =>
 const byOrder = (kind: SourceLine['documentKind'], order: string) =>
   fc(kind).find((l) => l.orderNumber === order)!
 
-describe('a line block split by a page break', () => {
+// Shipment documents are customer data and are not committed. Without them this
+// suite cannot run; the assertions themselves are checked in and unaffected.
+describe.skipIf(!hasFixtures())('a line block split by a page break', () => {
   it('reads every invoice and packing line', () => {
     // 01004367OP0010 starts at the foot of one page and finishes on the next. Before this
     // was handled it parsed with quantity 0 and no weights at all.
@@ -59,7 +61,7 @@ describe('a line block split by a page break', () => {
   })
 })
 
-describe('weights printed divided', () => {
+describe.skipIf(!hasFixtures())('weights printed divided', () => {
   it('multiplies a `(@ / 6)` line back up to the whole line', () => {
     // Printed 1.240 / 1.364; the line above it is the same part at the same quantity and
     // prints 7.438 / 8.182 outright.
@@ -96,7 +98,7 @@ describe('weights printed divided', () => {
   })
 })
 
-describe('a commodity heading stranded at the foot of a page', () => {
+describe.skipIf(!hasFixtures())('a commodity heading stranded at the foot of a page', () => {
   it('carries the heading onto the line it governs', () => {
     // `Electrical Conductors` is the last row of one page; the line it heads is the first
     // block of the next. Left empty, that line reaches the form with no description.
@@ -113,7 +115,7 @@ describe('a commodity heading stranded at the foot of a page', () => {
   })
 })
 
-describe('the shipment as a whole', () => {
+describe.skipIf(!hasFixtures())('the shipment as a whole', () => {
   it('reconciles quantity and value against the printed totals', () => {
     const result = reconcile(parsed, scheduleB, CONTROLLED)
     for (const id of ['total-quantity', 'total-value', 'weights-present', 'line-coverage']) {
