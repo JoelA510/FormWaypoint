@@ -26,7 +26,14 @@ import {
   type CompanyProfile,
   type ShipmentSettings,
 } from './domain/draft'
-import { detectCarrier, getAdapter, type CarrierId } from './carriers/registry'
+import {
+  KEYED_CARRIERS,
+  detectCarrier,
+  getAdapter,
+  isKeyedCarrier,
+  type CarrierId,
+  type ShipmentCarrierId,
+} from './carriers/registry'
 import {
   localStore,
   overridesToMap,
@@ -37,14 +44,16 @@ import {
 } from './store/local-store'
 import type { ParsedCipl } from './domain/types'
 
-const CARRIER_LABELS: Record<CarrierId, string> = {
+const CARRIER_LABELS: Record<ShipmentCarrierId, string> = {
   'nippon-express': 'Nippon Express USA',
   ceva: 'CEVA Logistics',
+  fedex: 'FedEx — keyed into Ship Manager',
+  ups: 'UPS — keyed into WorldShip',
 }
 
 export function App() {
   const [parsed, setParsed] = useState<ParsedCipl | null>(null)
-  const [carrierId, setCarrierId] = useState<CarrierId>('nippon-express')
+  const [carrierId, setCarrierId] = useState<ShipmentCarrierId>('nippon-express')
   const [profile, setProfile] = useState<CompanyProfile>(EMPTY_PROFILE)
   const [settings, setSettings] = useState<ShipmentSettings>(() => defaultShipmentSettings(getAdapter('nippon-express')))
   const [overrides, setOverrides] = useState<OverrideRecord[]>([])
@@ -57,7 +66,13 @@ export function App() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  const adapter = useMemo(() => getAdapter(carrierId), [carrierId])
+  const keyedCarrier = isKeyedCarrier(carrierId) ? carrierId : null
+  // A keyed carrier has no form of its own. The draft still needs an adapter to assemble
+  // and check values, so one is used purely as scaffolding and never offered as output.
+  const adapter = useMemo(
+    () => getAdapter(isKeyedCarrier(carrierId) ? 'nippon-express' : (carrierId as CarrierId)),
+    [carrierId],
+  )
   // Null in the browser build; the whole desktop surface keys off this.
   const bridge = useMemo(() => desktopBridge(), [])
 
@@ -110,7 +125,9 @@ export function App() {
       setCarrierId(nextCarrier)
 
       // Reuse what was learned about this consignee last time.
-      const base = defaultShipmentSettings(getAdapter(nextCarrier))
+      const base = defaultShipmentSettings(
+        getAdapter(isKeyedCarrier(nextCarrier) ? 'nippon-express' : (nextCarrier as CarrierId)),
+      )
       const known = header ? await localStore.getConsignee(header.consignedTo.name) : null
       setSettings(
         known
@@ -327,9 +344,12 @@ export function App() {
               <CardHeader
                 title="Carrier"
                 description={
-                  parsed.headers[reconciliation.selectedSet]?.vesselAgent
-                    ? `The CIPL names ${parsed.headers[reconciliation.selectedSet].vesselAgent}.`
-                    : 'Choose the forwarder this shipment is going to.'
+                  keyedCarrier
+                    ? `The CIPL names ${parsed.headers[reconciliation.selectedSet]?.vesselAgent ?? KEYED_CARRIERS[keyedCarrier].label}. ` +
+                      `This shipment is keyed into ${KEYED_CARRIERS[keyedCarrier].application}; no SLI is generated.`
+                    : parsed.headers[reconciliation.selectedSet]?.vesselAgent
+                      ? `The CIPL names ${parsed.headers[reconciliation.selectedSet].vesselAgent}.`
+                      : 'Choose the forwarder this shipment is going to.'
                 }
                 actions={
                   <Button
@@ -350,12 +370,17 @@ export function App() {
                   aria-label="Carrier"
                   className="w-auto"
                   onChange={(e) => {
-                    const next = e.target.value as CarrierId
+                    const next = e.target.value as ShipmentCarrierId
                     setCarrierId(next)
-                    setSettings((prev) => applyCarrierDefaults(prev, getAdapter(next)))
+                    setSettings((prev) =>
+                      applyCarrierDefaults(
+                        prev,
+                        getAdapter(isKeyedCarrier(next) ? 'nippon-express' : (next as CarrierId)),
+                      ),
+                    )
                   }}
                 >
-                  {(Object.keys(CARRIER_LABELS) as CarrierId[]).map((id) => (
+                  {(Object.keys(CARRIER_LABELS) as ShipmentCarrierId[]).map((id) => (
                     <option key={id} value={id}>
                       {CARRIER_LABELS[id]}
                     </option>
@@ -393,6 +418,7 @@ export function App() {
               draft={draft}
               canGenerate={canGenerate}
               onGenerated={() => void handleGenerated()}
+              keyedCarrier={keyedCarrier}
             />
             <HistoryPanel shipments={shipments} onClear={() => void clearAll()} />
           </>

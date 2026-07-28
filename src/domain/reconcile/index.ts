@@ -197,6 +197,23 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
 // Checks
 // ---------------------------------------------------------------------------
 
+/**
+ * Extra rounding the totals check must tolerate because of reconstructed line weights.
+ *
+ * A packing list that prints a line's figures divided N ways rounds them to three decimals
+ * first, so multiplying back up re-inflates that rounding N-fold. Shipment K78541WH prints
+ * `(@ / 6) 1.240` for a line whose true weight is 7.438: the arithmetic gives 7.440, and
+ * the document's own total is 0.002 kg away — inside the error the division created, and
+ * outside the 0.001 kg the check normally allows.
+ *
+ * Deliberately proportional to the divisor rather than a blanket looser tolerance: a
+ * document with no divided lines is still held to the strict figure, so a genuinely dropped
+ * or double-counted line still fails.
+ */
+function reconstructionSlack(merged: MergedLine[]): number {
+  return merged.reduce((total, line) => total + (line.weightDivisor ? line.weightDivisor * 0.0005 : 0), 0)
+}
+
 function totalsChecks(
   header: ShipmentHeader,
   merged: MergedLine[],
@@ -264,13 +281,18 @@ function totalsChecks(
       actual: 'not found',
     })
   } else {
-    const weightOk = Math.abs(weight - header.totalNetWeightKg) <= WEIGHT_TOLERANCE
+    const slack = reconstructionSlack(merged)
+    const weightOk = Math.abs(weight - header.totalNetWeightKg) <= WEIGHT_TOLERANCE + slack
     results.push({
       id: 'total-weight',
       severity: 'blocking',
       title: 'Weights reconcile to the packing list total',
       detail: weightOk
-        ? `Rows total ${weight.toFixed(3)} kg net, matching the packing list.`
+        ? `Rows total ${weight.toFixed(3)} kg net, matching the packing list.` +
+          (slack
+            ? ' Some line weights were printed divided and multiplied back up, so this was allowed ' +
+              `${(WEIGHT_TOLERANCE + slack).toFixed(3)} kg of rounding rather than the usual ${WEIGHT_TOLERANCE.toFixed(3)}.`
+            : '')
         : `Rows total ${weight.toFixed(3)} kg but the packing list states ${header.totalNetWeightKg.toFixed(3)} kg.`,
       passed: weightOk,
       expected: header.totalNetWeightKg.toFixed(3),

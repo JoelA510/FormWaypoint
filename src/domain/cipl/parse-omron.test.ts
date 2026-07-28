@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeAll } from 'vitest'
 import { parseCipl } from './parse-omron'
-import { readFixture } from '../../test/fixtures'
+import { hasFixtures, readFixture } from '../../test/fixtures'
 import type { ParsedCipl, SourceLine } from '../types'
 
 /**
@@ -21,7 +21,9 @@ const fcInvoice = (p: ParsedCipl): SourceLine[] =>
 const fcPacking = (p: ParsedCipl): SourceLine[] =>
   p.lines.filter((l) => l.documentSet === 'FC' && l.documentKind === 'PACKING_LIST')
 
-describe('document set detection', () => {
+// Shipment documents are customer data and are not committed. Without them this
+// suite cannot run; the assertions themselves are checked in and unaffected.
+describe.skipIf(!hasFixtures())('document set detection', () => {
   it('finds both FC and TP1 in every fixture', () => {
     for (const name of Object.keys(parsed)) {
       expect(parsed[name].availableSets, name).toEqual(['FC', 'TP1'])
@@ -35,7 +37,7 @@ describe('document set detection', () => {
   })
 })
 
-describe('G78495IQ — Nippon Express, 3 pieces, two duplicate cable lines', () => {
+describe.skipIf(!hasFixtures())('G78495IQ — Nippon Express, 3 pieces, two duplicate cable lines', () => {
   it('reads the invoice header', () => {
     const h = parsed.G78495IQ.headers.FC
     expect(h.invoiceNumber).toBe('G78495IQ')
@@ -130,7 +132,7 @@ describe('G78495IQ — Nippon Express, 3 pieces, two duplicate cable lines', () 
   })
 })
 
-describe('K78464FJ — single line, consignee differs from buyer', () => {
+describe.skipIf(!hasFixtures())('K78464FJ — single line, consignee differs from buyer', () => {
   it('uses CONSIGNED TO for the receiving party', () => {
     const h = parsed.K78464FJ.headers.FC
     expect(h.soldTo.name).toBe('Omron Corporation')
@@ -159,7 +161,7 @@ describe('K78464FJ — single line, consignee differs from buyer', () => {
   })
 })
 
-describe('K78027EC — CEVA, 11 lines over 8 orders across page breaks', () => {
+describe.skipIf(!hasFixtures())('K78027EC — CEVA, 11 lines over 8 orders across page breaks', () => {
   it('reads every line across both detail pages', () => {
     const lines = fcInvoice(parsed.K78027EC)
     expect(lines).toHaveLength(11)

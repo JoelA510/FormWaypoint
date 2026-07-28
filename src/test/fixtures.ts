@@ -3,18 +3,28 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
+const DIR = path.join(HERE, 'fixtures')
 
 /**
  * Real, manually-processed shipments used as regression fixtures.
  *
- * Only the CIPLs (the pipeline's *input*) are committed. The completed SLIs they were
- * checked against are deliberately not, because they carry handwritten signatures; the
- * values read off them live in `expected/` as plain data instead.
+ * **These files are never committed.** They are a customer's commercial documents — part
+ * numbers, values, consignees, classifications — and they do not belong in a repository,
+ * least of all a public one. `src/test/fixtures/*.pdf` is gitignored, and the suites that
+ * need them skip when they are absent.
+ *
+ * To run the full suite, drop the CIPL PDFs into `src/test/fixtures/` under the names
+ * below. The expected values are checked in as plain data, so a fixture only ever supplies
+ * the input side; nothing about what the tests assert depends on having the file.
  */
 export const FIXTURES = {
   G78495IQ: 'G78495IQ_CIPL.pdf',
   K78464FJ: 'K78464FJ_CIPL.pdf',
   K78027EC: 'K78027EC_CIPL.pdf',
+  // FC/TP1 again, but with three things no other fixture has: a line block split by a
+  // page break, a line whose weights are printed divided (`(@ / 6)`), and a commodity
+  // heading stranded at the foot of a page.
+  K78541WH: 'K78541WH_CIPL.pdf',
   // "OMRON SHIPMENT#" format — no weights, carries an ECCN column.
   '278515': '278515_CIPL.pdf',
   '278514': '278514_CIPL.pdf',
@@ -22,6 +32,23 @@ export const FIXTURES = {
 
 export type FixtureName = keyof typeof FIXTURES
 
+export function hasFixture(name: FixtureName): boolean {
+  return fs.existsSync(path.join(DIR, FIXTURES[name]))
+}
+
+/** True when every fixture is present, so a suite can skip as a whole. */
+export function hasFixtures(...names: FixtureName[]): boolean {
+  const wanted = names.length ? names : (Object.keys(FIXTURES) as FixtureName[])
+  return wanted.every(hasFixture)
+}
+
 export function readFixture(name: FixtureName): Uint8Array {
-  return new Uint8Array(fs.readFileSync(path.join(HERE, 'fixtures', FIXTURES[name])))
+  const file = path.join(DIR, FIXTURES[name])
+  if (!fs.existsSync(file)) {
+    throw new Error(
+      `Fixture ${FIXTURES[name]} is not present. Shipment documents are not committed — ` +
+        `place it in src/test/fixtures/ to run this suite.`,
+    )
+  }
+  return new Uint8Array(fs.readFileSync(file))
 }
