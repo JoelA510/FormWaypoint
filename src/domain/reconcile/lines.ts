@@ -150,6 +150,16 @@ export interface AggregationOptions {
    */
   overrides?: Record<string, string>
   /**
+   * Per-part commodity numbers a reviewer entered, keyed by uppercased part number.
+   *
+   * Beats `overrides` where both apply. A code override says "this classification is wrong
+   * wherever it appears"; this says "this part is classified as X" — and the narrower
+   * statement is the one the person made about these goods specifically. Two parts sharing a
+   * bad code can therefore be corrected to different codes, which is the common case when
+   * one wrong number was copied across an item master.
+   */
+  codesByPart?: Record<string, string>
+  /**
    * Net weight per unit, keyed by part number, used when the document states no weights.
    *
    * The `omron-shipment` format prints none at all, so its SLIs have always been filled
@@ -176,7 +186,10 @@ export function aggregateLines(lines: MergedLine[], options: AggregationOptions)
 
   for (const line of lines) {
     const sourceCode = normalizeScheduleB(line.classification)
-    const code = options.overrides?.[sourceCode] ?? line.classification
+    const code =
+      options.codesByPart?.[line.partNumber.trim().toUpperCase()] ??
+      options.overrides?.[sourceCode] ??
+      line.classification
     const df = domesticForeign(line.countryOfOrigin)
     // An ECCN printed on the CIPL is authoritative and beats the blanket value. Filing
     // EAR99 over a stated 5A992.C would be a misdeclaration, and it is also part of the

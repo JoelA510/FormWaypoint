@@ -20,6 +20,7 @@
 import { screenCode, type CodeScreening, type ScheduleBIndex } from '../schedule-b'
 
 export * from './read-workbook'
+export * from './changes'
 
 /** One part as the item master describes it. */
 export interface ItemLibraryEntry {

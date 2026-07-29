@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Badge, Button, Card, CardBody, CardHeader, Select } from './components/ui'
 import { UploadPanel } from './features/upload-panel'
-import { ChecksPanel, CommodityTable, OverridesPanel, PartWeightsPanel, ShipmentSummary } from './features/review'
+import { ChecksPanel, CommodityTable, OverridesPanel, PartOverridesPanel, ShipmentSummary } from './features/review'
 import { ManualFieldsPanel } from './features/manual-fields'
-import { ItemLibraryPanel, type ImportMode } from './features/item-library'
+import { ItemLibraryPanel, ItemMasterUpdatesPanel, type ImportMode } from './features/item-library'
 import { HistoryPanel, OutputPanel } from './features/output-panel'
 import { reconcile, resolveDestinationCountry } from './domain/reconcile'
-import { indexByPart, libraryWeights, type ItemLibraryEntry } from './domain/item-library'
+import { indexByPart, libraryChanges, libraryWeights, type ItemLibraryEntry } from './domain/item-library'
 import {
   createScheduleBIndex,
   loadBundledPayload,
@@ -36,10 +36,11 @@ import {
 } from './carriers/registry'
 import {
   localStore,
+  overrideCodes,
+  overrideWeights,
   overridesToMap,
-  partWeightsToMap,
   type OverrideRecord,
-  type PartWeightRecord,
+  type PartOverrideRecord,
   type ShipmentRecord,
 } from './store/local-store'
 import type { ParsedCipl } from './domain/types'
@@ -57,7 +58,7 @@ export function App() {
   const [profile, setProfile] = useState<CompanyProfile>(EMPTY_PROFILE)
   const [settings, setSettings] = useState<ShipmentSettings>(() => defaultShipmentSettings(getAdapter('nippon-express')))
   const [overrides, setOverrides] = useState<OverrideRecord[]>([])
-  const [partWeights, setPartWeights] = useState<PartWeightRecord[]>([])
+  const [partOverrides, setPartOverrides] = useState<PartOverrideRecord[]>([])
   const [items, setItems] = useState<ItemLibraryEntry[]>([])
   const [shipments, setShipments] = useState<ShipmentRecord[]>([])
   const [scheduleB, setScheduleB] = useState<ScheduleBIndex | null>(null)
@@ -91,16 +92,16 @@ export function App() {
     })()
 
     void (async () => {
-      const [saved, savedOverrides, savedWeights, savedItems, history] = await Promise.all([
+      const [saved, savedOverrides, savedPartOverrides, savedItems, history] = await Promise.all([
         localStore.getProfile(),
         localStore.listOverrides(),
-        localStore.listPartWeights(),
+        localStore.listPartOverrides(),
         localStore.listItems(),
         localStore.listShipments(),
       ])
       if (saved) setProfile(saved)
       setOverrides(savedOverrides)
-      setPartWeights(savedWeights)
+      setPartOverrides(savedPartOverrides)
       setItems(savedItems)
       setShipments(history)
     })()
@@ -155,9 +156,19 @@ export function App() {
    * and a library row is a default.
    */
   const unitWeightsByPart = useMemo(
-    () => ({ ...libraryWeights(items), ...partWeightsToMap(partWeights) }),
-    [items, partWeights],
+    () => ({ ...libraryWeights(items), ...overrideWeights(partOverrides) }),
+    [items, partOverrides],
   )
+
+  /**
+   * Commodity numbers entered against a part.
+   *
+   * Unlike the weights this has no library layer beneath it. The item master's code is
+   * reference data the reconciliation *reports on* — where it disagrees with the CIPL that
+   * disagreement is the finding — so letting it silently change what gets filed would erase
+   * the very check that surfaces it. Only what a person typed goes in here.
+   */
+  const codesByPart = useMemo(() => overrideCodes(partOverrides), [partOverrides])
 
   const reconciliation = useMemo(() => {
     if (!parsed) return null
@@ -166,12 +177,13 @@ export function App() {
       sme: settings.sme || null,
       license: settings.license || null,
       overrides: overridesToMap(overrides),
+      codesByPart,
       // Only consulted for formats that state no weights; a printed weight always wins.
       unitWeightsByPart,
       itemsByPart,
       maxRows: adapter.maxCommodityRows,
     })
-  }, [parsed, scheduleB, settings.eccn, settings.sme, settings.license, overrides, unitWeightsByPart, itemsByPart, adapter])
+  }, [parsed, scheduleB, settings.eccn, settings.sme, settings.license, overrides, codesByPart, unitWeightsByPart, itemsByPart, adapter])
 
   const draft = useMemo(
     () => (reconciliation ? buildDraft(reconciliation, profile, settings, adapter) : null),
@@ -200,15 +212,80 @@ export function App() {
     setOverrides(await localStore.listOverrides())
   }, [])
 
-  const savePartWeight = useCallback(async (partNumber: string, description: string, netWeightKg: number) => {
-    await localStore.savePartWeight({
-      partNumber,
-      description,
-      netWeightKg,
-      updatedAt: new Date().toISOString(),
-    })
-    setPartWeights(await localStore.listPartWeights())
-  }, [])
+  /**
+   * Saves one field of a part's manual values without disturbing the other.
+   *
+   * One record holds both the weight and the code, so writing either has to merge rather than
+   * replace — entering a code for a part that already has a weight must not silently drop the
+   * weight and re-block the shipment. The existing record is matched case-insensitively and
+   * its own key reused, because a part whose casing differs between two documents is one part
+   * and must not end up as two rows.
+   */
+  const savePartOverride = useCallback(
+    async (partNumber: string, description: string, patch: Partial<PartOverrideRecord>) => {
+      const existing = partOverrides.find(
+        (r) => r.partNumber.trim().toUpperCase() === partNumber.trim().toUpperCase(),
+      )
+      await localStore.savePartOverride({
+        ...existing,
+        partNumber: existing?.partNumber ?? partNumber,
+        description: description || existing?.description || '',
+        netWeightKg: existing?.netWeightKg ?? null,
+        ...patch,
+        updatedAt: new Date().toISOString(),
+      })
+      setPartOverrides(await localStore.listPartOverrides())
+    },
+    [partOverrides],
+  )
+
+  const savePartWeight = useCallback(
+    (partNumber: string, description: string, netWeightKg: number) =>
+      savePartOverride(partNumber, description, { netWeightKg }),
+    [savePartOverride],
+  )
+
+  const savePartCode = useCallback(
+    (partNumber: string, description: string, exportCode: string, reason: string) =>
+      savePartOverride(partNumber, description, { exportCode, reason, enteredBy: profile.signerName.trim() }),
+    [savePartOverride, profile.signerName],
+  )
+
+  /**
+   * Drops the code override, keeping any weight.
+   *
+   * A part with neither left is deleted outright rather than kept as an empty row, so the
+   * item-master worklist does not carry an entry that says nothing.
+   */
+  const clearPartCode = useCallback(
+    async (partNumber: string) => {
+      const existing = partOverrides.find(
+        (r) => r.partNumber.trim().toUpperCase() === partNumber.trim().toUpperCase(),
+      )
+      if (!existing) return
+      if (existing.netWeightKg == null) {
+        await localStore.deletePartOverride(existing.partNumber)
+      } else {
+        await localStore.savePartOverride({
+          ...existing,
+          exportCode: '',
+          reason: '',
+          enteredBy: '',
+          updatedAt: new Date().toISOString(),
+        })
+      }
+      setPartOverrides(await localStore.listPartOverrides())
+    },
+    [partOverrides],
+  )
+
+  /** What the manual entries would change in the item master, for the export worklist. */
+  const pendingLibraryChanges = useMemo(() => libraryChanges(partOverrides, items), [partOverrides, items])
+
+  const librarySource = useMemo(() => {
+    const sources = [...new Set(items.map((e) => e.source).filter(Boolean))]
+    return sources.length ? sources.join(' + ') : null
+  }, [items])
 
   const handleGenerated = useCallback(async () => {
     if (!reconciliation || !parsed) return
@@ -265,7 +342,7 @@ export function App() {
     await localStore.clearAll()
     setProfile(EMPTY_PROFILE)
     setOverrides([])
-    setPartWeights([])
+    setPartOverrides([])
     setItems([])
     setShipments([])
   }, [])
@@ -336,6 +413,12 @@ export function App() {
               onImport={(entries, mode) => void importItemLibrary(entries, mode)}
               onClear={() => void clearItemLibrary()}
             />
+            <ItemMasterUpdatesPanel
+              changes={pendingLibraryChanges}
+              librarySource={librarySource}
+              today={new Date().toISOString().slice(0, 10)}
+              bridge={bridge}
+            />
             <HistoryPanel shipments={shipments} onClear={() => void clearAll()} />
           </>
         ) : reconciliation && draft ? (
@@ -390,13 +473,21 @@ export function App() {
             </Card>
 
             <ShipmentSummary parsed={parsed} reconciliation={reconciliation} />
-            {!parsed.providesWeights ? (
-              <PartWeightsPanel
-                reconciliation={reconciliation}
-                weights={unitWeightsByPart}
-                onSave={(part, description, weight) => void savePartWeight(part, description, weight)}
-              />
-            ) : null}
+            {/*
+              Always shown, unlike the weights-only panel it replaces. A code can need
+              correcting on any document, and the format that prints weights is the one whose
+              codes there is no library figure to check against.
+            */}
+            <PartOverridesPanel
+              reconciliation={reconciliation}
+              weights={unitWeightsByPart}
+              codes={codesByPart}
+              weightsNeeded={!parsed.providesWeights}
+              enteredBy={profile.signerName}
+              onSaveWeight={(part, description, weight) => void savePartWeight(part, description, weight)}
+              onSaveCode={(part, description, code, reason) => void savePartCode(part, description, code, reason)}
+              onClearCode={(part) => void clearPartCode(part)}
+            />
             <CommodityTable reconciliation={reconciliation} />
             <ChecksPanel checks={checks} canGenerate={canGenerate} />
             <OverridesPanel

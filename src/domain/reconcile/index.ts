@@ -15,7 +15,7 @@ import type {
   ShipmentHeader,
   SourceLine,
 } from '../types'
-import { checkClassification, normalizeScheduleB, screenCode, type ScheduleBIndex } from '../schedule-b'
+import { checkClassification, formatScheduleB, normalizeScheduleB, screenCode, type ScheduleBIndex } from '../schedule-b'
 import type { ItemLibraryEntry } from '../item-library'
 import {
   aggregateLines,
@@ -41,7 +41,8 @@ export interface ReconcileOptions extends AggregationOptions {
    * The imported item master, keyed by uppercased part number.
    *
    * Used to screen the commodity numbers held against the parts on this shipment, and to
-   * report where the master and the CIPL disagree. Never used to change a code.
+   * report where the master and the CIPL disagree. Never used to change a code — that is
+   * what `codesByPart` is, and it only ever holds what a person typed.
    */
   itemsByPart?: Map<string, ItemLibraryEntry>
 }
@@ -188,6 +189,7 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
     ...totalsChecks(header, mergedLines, sliLines, parsed.providesWeights),
     ...lineageChecks(mergedLines, packingLines, sliLines),
     ...partCodeChecks(mergedLines, index, options.itemsByPart),
+    ...partCodeOverrideChecks(mergedLines, options.codesByPart),
     ...classificationChecks(sliLines, mergedLines, index),
     ...exportControlChecks(options),
     ...sourceEccnChecks(sliLines, mergedLines),
@@ -545,6 +547,53 @@ function partCodeChecks(
   }
 
   return results
+}
+
+/**
+ * Parts filed under a commodity number a person entered rather than the one printed.
+ *
+ * Never silent. Substituting a classification is the single most consequential thing anyone
+ * can do on this screen, and the substitution is invisible by the time it reaches the
+ * commodity table — the row simply shows the new code as though the document said so. This
+ * says which parts were changed and away from what, every time, so signing the form is a
+ * decision taken with that in view.
+ *
+ * Reported where the code actually differs. A saved override that happens to match what this
+ * document prints changed nothing, and listing it would train the reader to skip the notice.
+ */
+function partCodeOverrideChecks(merged: MergedLine[], codesByPart?: Record<string, string>): CheckResult[] {
+  if (!codesByPart || !Object.keys(codesByPart).length) return []
+
+  const substituted = new Map<string, { part: string; from: string; to: string }>()
+  for (const line of merged) {
+    const entered = codesByPart[line.partNumber.trim().toUpperCase()]
+    if (!entered) continue
+    if (normalizeScheduleB(entered) === normalizeScheduleB(line.classification)) continue
+    substituted.set(line.partNumber, {
+      part: line.partNumber,
+      from: line.classification || '(blank)',
+      // Both codes punctuated the same way. The entered one is stored as ten bare digits, and
+      // printing it raw beside a dotted one reads as a different kind of value — the reader is
+      // being asked to compare two codes, so they have to look comparable.
+      to: formatScheduleB(entered),
+    })
+  }
+
+  if (!substituted.size) return []
+
+  return [
+    {
+      id: 'part-code-overrides',
+      severity: 'warning',
+      title: 'Some parts are filed under a manually entered commodity number',
+      detail:
+        [...substituted.values()]
+          .map((s) => `${s.part}: filing ${s.to} instead of the ${s.from} on the document`)
+          .join(' · ') + '. Confirm each before signing — this is a classification you are making.',
+      passed: false,
+      actual: `${substituted.size} part(s)`,
+    },
+  ]
 }
 
 function classificationChecks(
