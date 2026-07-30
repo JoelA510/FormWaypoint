@@ -213,6 +213,18 @@ export interface ParsedCipl {
   headers: Record<string, ShipmentHeader>
   /** Every source line from every set/kind. */
   lines: SourceLine[]
+  /**
+   * Quantity per part as the document itself totals it, keyed by uppercased part number.
+   *
+   * Only the `vendor-b` layout publishes this — its master packing list ends with a
+   * "SUMMARY INFORMATION" section listing every part and its shipment total. It is the one
+   * figure in that format not derived from the same line blocks the parser reads, which
+   * makes it the only true cross-check available: a line the parser drops still appears
+   * here, and the totals stop agreeing.
+   *
+   * Absent for layouts that print no such summary.
+   */
+  partTotals?: Record<string, number>
   /** Non-fatal parse observations surfaced in the UI. */
   warnings: string[]
 }

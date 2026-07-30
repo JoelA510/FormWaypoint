@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Field, Input, ProvenanceRow, Select, type Tone } from '../components/ui'
 import { resolveDestinationCountry } from '../domain/reconcile'
 import { formatScheduleB, normalizeScheduleB } from '../domain/schedule-b'
+import { partKey } from '../domain/part-key'
 import type { OverrideRecord } from '../store/local-store'
-import type { CheckResult, ParsedCipl, Reconciliation } from '../domain/types'
+import type { CheckResult, MergedLine, ParsedCipl, Reconciliation } from '../domain/types'
 
 const SEVERITY_TONE: Record<CheckResult['severity'], Tone> = {
   blocking: 'block',
@@ -345,68 +346,123 @@ export function OverridesPanel({
 }
 
 /**
- * Per-part net weights, for CIPL formats that state none.
+ * The two things a person can state about a part that the documents cannot settle.
  *
- * Shown only when the document cannot supply weights. Parts still missing a figure are
- * listed first, because each one blocks generation — a blank weight is never filed as zero.
+ * **Net weight**, because the `vendor-b` layout prints none and box 26 has to come from
+ * somewhere. Parts still missing a figure are listed first: each one blocks generation, since
+ * a blank weight is never filed as zero.
+ *
+ * **Commodity number**, because the number on the CIPL is sometimes simply wrong, and until
+ * the item master is corrected the only place to say so is here. This is narrower than the
+ * override below it — that one redirects a code everywhere it appears, this one speaks for a
+ * single part, which is what you want when one bad number was copied across an item master
+ * and the parts carrying it belong in different headings.
+ *
+ * A weight commits on its own; a code will not commit without a reason, and the reconciliation
+ * raises a warning naming every part whose code was changed. Substituting a classification is
+ * the most consequential thing on this screen and it does not happen quietly.
  */
-export function PartWeightsPanel({
+export function PartOverridesPanel({
   reconciliation,
   weights,
-  onSave,
+  codes,
+  weightsNeeded,
+  enteredBy,
+  onSaveWeight,
+  onSaveCode,
+  onClearCode,
 }: {
   reconciliation: Reconciliation
   weights: Record<string, number>
-  onSave: (partNumber: string, description: string, netWeightKg: number) => void
+  codes: Record<string, string>
+  /** True when the document states no weights, so the weight column is in play. */
+  weightsNeeded: boolean
+  /** Who is entering these — the signer, so nobody types their own name twice. */
+  enteredBy: string
+  onSaveWeight: (partNumber: string, description: string, netWeightKg: number) => void
+  onSaveCode: (partNumber: string, description: string, exportCode: string, reason: string) => void
+  onClearCode: (partNumber: string) => void
 }) {
   const parts = [...new Map(reconciliation.mergedLines.map((l) => [l.partNumber, l])).values()]
-  const missing = parts.filter((p) => weights[p.partNumber] == null)
+  const weightOf = (part: MergedLine) => weights[partKey(part.partNumber)]
+  const missing = weightsNeeded ? parts.filter((p) => weightOf(p) == null) : []
+  const ordered = weightsNeeded ? [...missing, ...parts.filter((p) => weightOf(p) != null)] : parts
+  // Counted the same way `partCodeOverrideChecks` counts them: a saved code that matches what
+  // this document prints substituted nothing, and badging it would contradict a checks panel
+  // that deliberately says nothing about it.
+  const overridden = parts.filter((p) => {
+    const entered = codes[partKey(p.partNumber)]
+    return entered && normalizeScheduleB(entered) !== normalizeScheduleB(p.classification)
+  }).length
 
   return (
     <Card>
       <CardHeader
-        title="Part weights"
-        description="This document states no weights. Enter the net weight of one unit; it is saved and reused."
+        title="Per-part values"
+        description={
+          weightsNeeded
+            ? 'This document states no weights. Enter the net weight of one unit, and a commodity number where the printed one is wrong. Both are saved and reused.'
+            : 'Enter a commodity number where the one printed on this document is wrong. Saved against the part and reused.'
+        }
         actions={
-          missing.length ? (
-            <Badge tone="block">{missing.length} missing</Badge>
-          ) : (
-            <Badge tone="pass">all supplied</Badge>
-          )
+          <div className="flex items-center gap-2">
+            {overridden ? <Badge tone="warn">{overridden} code{overridden === 1 ? '' : 's'} overridden</Badge> : null}
+            {weightsNeeded ? (
+              missing.length ? (
+                <Badge tone="block">{missing.length} weight{missing.length === 1 ? '' : 's'} missing</Badge>
+              ) : (
+                <Badge tone="pass">weights supplied</Badge>
+              )
+            ) : null}
+          </div>
         }
       />
       <CardBody className="px-0 py-0">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[620px] border-collapse text-sm">
+          <table className="w-full min-w-[860px] border-collapse text-sm">
             <thead>
               <tr className="border-b bg-[var(--color-sunken)] text-left text-xs tracking-wide text-[var(--color-ink-faint)] uppercase">
                 <th className="px-4 py-2.5 font-semibold">Part</th>
                 <th className="px-4 py-2.5 font-semibold">Description</th>
                 <th className="px-4 py-2.5 text-right font-semibold">Qty</th>
-                <th className="px-4 py-2.5 font-semibold">Net kg each</th>
-                <th className="px-4 py-2.5 text-right font-semibold">Line kg</th>
+                {weightsNeeded ? <th className="px-4 py-2.5 font-semibold">Net kg each</th> : null}
+                {weightsNeeded ? <th className="px-4 py-2.5 text-right font-semibold">Line kg</th> : null}
+                <th className="px-4 py-2.5 font-semibold">Schedule B</th>
               </tr>
             </thead>
             <tbody>
-              {[...missing, ...parts.filter((p) => weights[p.partNumber] != null)].map((part) => {
-                const unit = weights[part.partNumber]
+              {ordered.map((part) => {
+                const unit = weightOf(part)
                 return (
-                  <tr key={part.partNumber} className="border-b last:border-b-0">
+                  <tr key={part.partNumber} className="border-b align-top last:border-b-0">
                     <td className="tabular px-4 py-2.5 whitespace-nowrap">{part.partNumber}</td>
                     <td className="px-4 py-2.5 text-[var(--color-ink-soft)]">{part.description}</td>
                     <td className="tabular px-4 py-2.5 text-right">{part.quantity}</td>
+                    {weightsNeeded ? (
+                      <td className="px-4 py-2.5">
+                        <UnitWeightInput
+                          value={unit}
+                          onCommit={(next) => onSaveWeight(part.partNumber, part.description, next)}
+                        />
+                      </td>
+                    ) : null}
+                    {weightsNeeded ? (
+                      <td className="tabular px-4 py-2.5 text-right">
+                        {unit == null ? (
+                          <span className="text-[var(--color-block)]">needed</span>
+                        ) : (
+                          (unit * part.quantity).toFixed(3)
+                        )}
+                      </td>
+                    ) : null}
                     <td className="px-4 py-2.5">
-                      <UnitWeightInput
-                        value={unit}
-                        onCommit={(next) => onSave(part.partNumber, part.description, next)}
+                      <PartCodeInput
+                        documentCode={part.classification}
+                        value={codes[partKey(part.partNumber)]}
+                        enteredBy={enteredBy}
+                        onCommit={(code, reason) => onSaveCode(part.partNumber, part.description, code, reason)}
+                        onClear={() => onClearCode(part.partNumber)}
                       />
-                    </td>
-                    <td className="tabular px-4 py-2.5 text-right">
-                      {unit == null ? (
-                        <span className="text-[var(--color-block)]">needed</span>
-                      ) : (
-                        (unit * part.quantity).toFixed(3)
-                      )}
                     </td>
                   </tr>
                 )
@@ -443,5 +499,106 @@ function UnitWeightInput({ value, onCommit }: { value: number | undefined; onCom
         if (valid) onCommit(parsed)
       }}
     />
+  )
+}
+
+/**
+ * A commodity number for one part, with the reason it is being changed.
+ *
+ * The document's own code is the placeholder, so the box reads as "what would be filed" and
+ * typing over it is visibly a substitution rather than filling a blank. The reason field
+ * appears only once a different code is entered — asking for one up front would be noise on
+ * every row of a shipment where nothing needs changing — and nothing commits until both are
+ * present, because a code with no stated reason is the exact shape of a typo.
+ */
+function PartCodeInput({
+  documentCode,
+  value,
+  enteredBy,
+  onCommit,
+  onClear,
+}: {
+  documentCode: string
+  value: string | undefined
+  enteredBy: string
+  onCommit: (code: string, reason: string) => void
+  onClear: () => void
+}) {
+  const [draft, setDraft] = useState(value ? formatScheduleB(value) : '')
+  const [reason, setReason] = useState('')
+
+  useEffect(() => {
+    setDraft(value ? formatScheduleB(value) : '')
+  }, [value])
+
+  const normalised = normalizeScheduleB(draft)
+  const wellFormed = normalised.length === 10
+  const differs = wellFormed && normalised !== normalizeScheduleB(documentCode)
+  const saved = Boolean(value)
+  const dirty = normalised !== normalizeScheduleB(value ?? '')
+
+  return (
+    <div className="space-y-1.5">
+      <Input
+        value={draft}
+        aria-label="Schedule B number to file for this part"
+        placeholder={formatScheduleB(documentCode) || '0000.00.0000'}
+        className={draft.trim() === '' || wellFormed ? undefined : 'border-[var(--color-block)]'}
+        onChange={(e) => setDraft(e.target.value)}
+      />
+
+      {/*
+        Shown whenever an override is in force, not only while the box still matches it.
+        Gating on `!dirty` meant deleting one character removed the only way to undo the
+        override while it carried on substituting the code — and typing the document's own
+        number, the obvious way to ask for it back, offered neither revert nor apply.
+      */}
+      {saved ? (
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-[var(--color-warn)]">
+            overriding {formatScheduleB(documentCode)}
+            {dirty ? ` with ${formatScheduleB(value ?? '')} — not yet applied` : ''}
+          </span>
+          <button
+            type="button"
+            className="text-xs text-[var(--color-ink-faint)] underline"
+            onClick={() => {
+              setDraft('')
+              setReason('')
+              onClear()
+            }}
+          >
+            revert
+          </button>
+        </div>
+      ) : null}
+
+      {differs && dirty ? (
+        <>
+          <Input
+            value={reason}
+            aria-label="Reason for this classification"
+            placeholder="Why this code is correct for this part"
+            onChange={(e) => setReason(e.target.value)}
+          />
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={!reason.trim() || !enteredBy.trim()}
+              onClick={() => {
+                onCommit(normalised, reason.trim())
+                setReason('')
+              }}
+            >
+              Apply to this part
+            </Button>
+            <span className="text-xs text-[var(--color-ink-faint)]">
+              {enteredBy.trim() ? `as ${enteredBy}` : 'set the signer name first'}
+            </span>
+          </div>
+        </>
+      ) : null}
+    </div>
   )
 }

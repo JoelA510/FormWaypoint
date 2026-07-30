@@ -3,6 +3,7 @@
  */
 import type { MergedLine, SLILine, SourceLine } from '../types'
 import { canonicalUnit, formatScheduleB, normalizeScheduleB } from '../schedule-b'
+import { partKey } from '../part-key'
 
 /** Values that mean "made in the USA" on these documents. */
 const US_ORIGINS = new Set(['UNITED STATES', 'UNITED STATES OF AMERICA', 'USA', 'US', 'U.S.', 'U.S.A.'])
@@ -117,10 +118,10 @@ export function joinInvoiceToPacking(invoiceLines: SourceLine[], packingLines: S
  * block the shipment with no visible reason.
  */
 export function applyUnitWeights(lines: MergedLine[], unitWeightsByPart: Record<string, number>): MergedLine[] {
-  const byUpperPart = new Map(Object.entries(unitWeightsByPart).map(([part, weight]) => [part.trim().toUpperCase(), weight]))
+  const byPart = new Map(Object.entries(unitWeightsByPart).map(([part, weight]) => [partKey(part), weight]))
   return lines.map((line) => {
     if (line.netWeightKg != null) return line
-    const unit = unitWeightsByPart[line.partNumber] ?? byUpperPart.get(line.partNumber.trim().toUpperCase())
+    const unit = byPart.get(partKey(line.partNumber))
     if (unit == null) return line
     return { ...line, netWeightKg: roundTo(unit * line.quantity, 3) }
   })
@@ -150,6 +151,16 @@ export interface AggregationOptions {
    */
   overrides?: Record<string, string>
   /**
+   * Per-part commodity numbers a reviewer entered, keyed by uppercased part number.
+   *
+   * Beats `overrides` where both apply. A code override says "this classification is wrong
+   * wherever it appears"; this says "this part is classified as X" — and the narrower
+   * statement is the one the person made about these goods specifically. Two parts sharing a
+   * bad code can therefore be corrected to different codes, which is the common case when
+   * one wrong number was copied across an item master.
+   */
+  codesByPart?: Record<string, string>
+  /**
    * Net weight per unit, keyed by part number, used when the document states no weights.
    *
    * The `vendor-b` format prints none at all, so its SLIs have always been filled
@@ -176,7 +187,12 @@ export function aggregateLines(lines: MergedLine[], options: AggregationOptions)
 
   for (const line of lines) {
     const sourceCode = normalizeScheduleB(line.classification)
-    const code = options.overrides?.[sourceCode] ?? line.classification
+    // Truthiness, not `??`: an empty string in `codesByPart` is "no override", and taking
+    // it would group the row under a blank classification and write a blank Schedule B.
+    const code =
+      options.codesByPart?.[partKey(line.partNumber)] ||
+      options.overrides?.[sourceCode] ||
+      line.classification
     const df = domesticForeign(line.countryOfOrigin)
     // An ECCN printed on the CIPL is authoritative and beats the blanket value. Filing
     // EAR99 over a stated 5A992.C would be a misdeclaration, and it is also part of the

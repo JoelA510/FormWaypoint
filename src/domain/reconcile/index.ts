@@ -15,8 +15,9 @@ import type {
   ShipmentHeader,
   SourceLine,
 } from '../types'
-import { checkClassification, normalizeScheduleB, screenCode, type ScheduleBIndex } from '../schedule-b'
+import { checkClassification, formatScheduleB, normalizeScheduleB, screenCode, type ScheduleBIndex } from '../schedule-b'
 import type { ItemLibraryEntry } from '../item-library'
+import { partKey } from '../part-key'
 import {
   aggregateLines,
   applyUnitWeights,
@@ -41,7 +42,8 @@ export interface ReconcileOptions extends AggregationOptions {
    * The imported item master, keyed by uppercased part number.
    *
    * Used to screen the commodity numbers held against the parts on this shipment, and to
-   * report where the master and the CIPL disagree. Never used to change a code.
+   * report where the master and the CIPL disagree. Never used to change a code — that is
+   * what `codesByPart` is, and it only ever holds what a person typed.
    */
   itemsByPart?: Map<string, ItemLibraryEntry>
 }
@@ -186,8 +188,10 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
       passed: headerReadable,
     },
     ...totalsChecks(header, mergedLines, sliLines, parsed.providesWeights),
+    ...partTotalChecks(mergedLines, parsed.partTotals),
     ...lineageChecks(mergedLines, packingLines, sliLines),
     ...partCodeChecks(mergedLines, index, options.itemsByPart),
+    ...partCodeOverrideChecks(mergedLines, options.codesByPart),
     ...classificationChecks(sliLines, mergedLines, index),
     ...exportControlChecks(options),
     ...sourceEccnChecks(sliLines, mergedLines),
@@ -373,6 +377,65 @@ function totalsChecks(
   return results
 }
 
+/**
+ * Every part on the shipment, against the quantity the document totals for it.
+ *
+ * The strongest check available to the `vendor-b` layout, and the only one there that
+ * is not circular. Its other totals are sums of the same line blocks the parser reads, so
+ * they agree with the rows by construction however many lines were dropped; the packing
+ * list's summary section is written independently of them.
+ *
+ * Blocking in both directions. A part short of its summary means a line was missed — that is
+ * how shipment 278563's `REPL ACT’R MFS-11` went unnoticed. A part over it, or one that does
+ * not appear in the summary at all, means a line was double-counted or read wrong, which
+ * misstates the shipment just as badly in the other direction.
+ */
+function partTotalChecks(merged: MergedLine[], partTotals?: Record<string, number>): CheckResult[] {
+  // Deliberately not guarded on `merged.length`. A document whose every line block was
+  // refused produces no merged lines at all, and every other check then compares zero
+  // against zero and passes — which is precisely the shipment this must hold.
+  if (!partTotals || !Object.keys(partTotals).length) return []
+
+  const counted = new Map<string, number>()
+  for (const line of merged) {
+    const key = partKey(line.partNumber)
+    counted.set(key, roundTo((counted.get(key) ?? 0) + line.quantity, 3))
+  }
+
+  const discrepancies: string[] = []
+  for (const [part, expected] of Object.entries(partTotals)) {
+    const actual = counted.get(part) ?? 0
+    if (Math.abs(actual - expected) > 0.0005) {
+      discrepancies.push(
+        actual === 0
+          ? `${part}: the document totals ${expected} but no line for it was read at all`
+          : `${part}: rows total ${actual} against the document's ${expected}`,
+      )
+    }
+  }
+  for (const [part, actual] of counted) {
+    if (!(part in partTotals)) {
+      discrepancies.push(`${part}: rows total ${actual} but the document's summary does not list it`)
+    }
+  }
+
+  const parts = Object.keys(partTotals).length
+  return [
+    {
+      id: 'packing-summary',
+      severity: 'blocking',
+      title: 'Every part matches the packing list’s own summary',
+      detail: discrepancies.length
+        ? `${discrepancies.join(' · ')}. The summary is written independently of the line detail, so a ` +
+          'disagreement means a line was missed, duplicated, or misread.'
+        : `All ${parts} part(s) match the quantities the packing list summarises.`,
+      passed: discrepancies.length === 0,
+      expected: `${parts} part(s)`,
+      actual: discrepancies.length ? `${discrepancies.length} disagree` : 'all agree',
+    },
+  ]
+}
+
 function lineageChecks(merged: MergedLine[], packingLines: SourceLine[], sliLines: SLILine[]): CheckResult[] {
   const results: CheckResult[] = []
 
@@ -492,7 +555,7 @@ function partCodeChecks(
   const disagreeing: { part: string; document: string; library: string }[] = []
 
   for (const { part, code } of seen.values()) {
-    const entry = itemsByPart.get(part.trim().toUpperCase())
+    const entry = itemsByPart.get(partKey(part))
     if (!entry) continue
     const first = !covered.has(part)
     covered.add(part)
@@ -545,6 +608,53 @@ function partCodeChecks(
   }
 
   return results
+}
+
+/**
+ * Parts filed under a commodity number a person entered rather than the one printed.
+ *
+ * Never silent. Substituting a classification is the single most consequential thing anyone
+ * can do on this screen, and the substitution is invisible by the time it reaches the
+ * commodity table — the row simply shows the new code as though the document said so. This
+ * says which parts were changed and away from what, every time, so signing the form is a
+ * decision taken with that in view.
+ *
+ * Reported where the code actually differs. A saved override that happens to match what this
+ * document prints changed nothing, and listing it would train the reader to skip the notice.
+ */
+function partCodeOverrideChecks(merged: MergedLine[], codesByPart?: Record<string, string>): CheckResult[] {
+  if (!codesByPart || !Object.keys(codesByPart).length) return []
+
+  const substituted = new Map<string, { part: string; from: string; to: string }>()
+  for (const line of merged) {
+    const entered = codesByPart[partKey(line.partNumber)]
+    if (!entered) continue
+    if (normalizeScheduleB(entered) === normalizeScheduleB(line.classification)) continue
+    substituted.set(line.partNumber, {
+      part: line.partNumber,
+      from: line.classification || '(blank)',
+      // Both codes punctuated the same way. The entered one is stored as ten bare digits, and
+      // printing it raw beside a dotted one reads as a different kind of value — the reader is
+      // being asked to compare two codes, so they have to look comparable.
+      to: formatScheduleB(entered),
+    })
+  }
+
+  if (!substituted.size) return []
+
+  return [
+    {
+      id: 'part-code-overrides',
+      severity: 'warning',
+      title: 'Some parts are filed under a manually entered commodity number',
+      detail:
+        [...substituted.values()]
+          .map((s) => `${s.part}: filing ${s.to} instead of the ${s.from} on the document`)
+          .join(' · ') + '. Confirm each before signing — this is a classification you are making.',
+      passed: false,
+      actual: `${substituted.size} part(s)`,
+    },
+  ]
 }
 
 function classificationChecks(

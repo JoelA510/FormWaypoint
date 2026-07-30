@@ -190,16 +190,47 @@ export function valueRightOf(row: TextRow, label: string): string | undefined {
  * Text rendered in a barcode font, which extracts as mojibake.
  *
  * The `vendor-b` layout puts a Code-128 barcode under several columns; pdfjs reports
- * its glyphs as strings like `xiU&yzxÿÿÿÿÿ`. They sit in the same x-bands as real data, so
- * they have to be dropped before a column is read rather than after.
+ * its glyphs as strings like `xh!3<1B>c<00>1Myzx` followed by a run of `ÿ`. They sit in
+ * the same x-bands as real data, so they have to be dropped before a column is read rather
+ * than after.
+ *
+ * Matched on the font's actual signature — control characters and runs of `ÿ` padding —
+ * rather than on "not printable ASCII", which this used to do. That was far too wide: it
+ * discarded any cell containing a typographic apostrophe, an en dash, a degree sign, µ, Ω,
+ * or an accented letter, all of which occur in real part descriptions. Shipment 278563
+ * printed `REPL ACT’R MFS-11` with a curly apostrophe, and losing that cell shifted the
+ * whole block's columns and cost the line — see the note on `parseBlock`.
  */
 export function isLikelyBarcode(text: string): boolean {
   const trimmed = text.trim()
   if (!trimmed) return true
-  // Any character outside printable ASCII marks the barcode font.
-  if (/[^\x20-\x7E]/.test(trimmed)) return true
+  // Control characters. Nothing typed into an ERP contains one; the barcode font is riddled
+  // with them.
+  if (hasControlCharacter(trimmed)) return true
+  // The font pads with `ÿ`. Any of them, not a run: pdfjs splits the barcode into several
+  // items, and a fragment that happens to carry only one would otherwise pass as text and
+  // shift the block's columns by a cell. `ÿ` does not occur in these part descriptions, so
+  // this costs nothing that the old "any non-ASCII" rule was not already costing.
+  if (trimmed.includes('ÿ')) return true
   // Short leading fragments the font splits off, e.g. `xh"c` or `xh`.
   return /^x[hi][\s"'#&(]*[A-Za-z0-9]?$/.test(trimmed)
+}
+
+/**
+ * A C0 control character or DEL, written as a scan rather than a regex.
+ *
+ * The equivalent character class trips `no-control-regex`, and the rule is right in general —
+ * a control character in a pattern is nearly always a mistake. Here it is the entire point,
+ * so the intent is spelled out instead of suppressed. Tab, newline and carriage return are
+ * excluded: they are legitimate spacing, not font mojibake.
+ */
+function hasControlCharacter(text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i)
+    if (code === 0x09 || code === 0x0a || code === 0x0d) continue
+    if (code < 0x20 || code === 0x7f) return true
+  }
+  return false
 }
 
 /** Parse a report number like `1,113.140` or `.544`. Returns null when not numeric. */
