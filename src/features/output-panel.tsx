@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Select } from '../components/ui'
-import { downloadBytes, downloadText } from '../lib/utils'
+import { deliver, deliverText, open as openDelivery, type Delivery } from '../lib/deliver'
 import { buildKeyingSheet, keyingSheetToText, type KeyingTarget } from '../carriers/keying-sheet'
+import type { DesktopBridge } from '../desktop'
 import type { CarrierAdapter, SliDraft } from '../carriers/types'
 import type { Reconciliation } from '../domain/types'
 import type { ShipmentRecord } from '../store/local-store'
@@ -13,10 +14,13 @@ export function OutputPanel({
   canGenerate,
   onGenerated,
   keyedCarrier = null,
+  bridge,
 }: {
   adapter: CarrierAdapter
   reconciliation: Reconciliation
   draft: SliDraft
+  /** Absent in a browser, where a download is the only way out. */
+  bridge: DesktopBridge | null
   /** Gated on the document checks *and* the draft checks — see App. */
   canGenerate: boolean
   onGenerated: () => void
@@ -31,6 +35,7 @@ export function OutputPanel({
   const [busy, setBusy] = useState(false)
   const [warnings, setWarnings] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [saved, setSaved] = useState<Delivery | null>(null)
   const [target, setTarget] = useState<KeyingTarget>(
     keyedCarrier === 'ups' ? 'ups-worldship' : 'fedex-ship-manager',
   )
@@ -57,7 +62,11 @@ export function OutputPanel({
 
       const filled = await adapter.fill(templateBytes, draft)
       setWarnings(filled.warnings)
-      downloadBytes(filled.bytes, `${header.invoiceNumber || 'shipment'}_SLI_${adapter.id}.pdf`)
+      const delivery = await deliver(bridge, `${header.invoiceNumber || 'shipment'}_SLI_${adapter.id}.pdf`, filled.bytes)
+      setSaved(delivery)
+      // Opened straight away: the next thing anyone does with a filled SLI is read it and
+      // sign it, and the boxes this tool deliberately leaves blank are only fillable there.
+      await openDelivery(bridge, delivery)
       onGenerated()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'The form could not be generated.')
@@ -74,12 +83,23 @@ export function OutputPanel({
    * while a blocking check is unresolved would put unreconciled numbers on a shipment by a
    * route the form can never take, which is the one thing the checks exist to prevent.
    */
-  function downloadKeyingSheet() {
-    const sheet = buildKeyingSheet(target, reconciliation, draft)
-    downloadText(keyingSheetToText(sheet), `${header.invoiceNumber || 'shipment'}_${target}.txt`)
-    // Recorded like a generated form: for FedEx and UPS this is the only artifact, and a
-    // shipment that left the tool with no history entry has no audit trail at all.
-    onGenerated()
+  async function downloadKeyingSheet() {
+    setError(null)
+    try {
+      const sheet = buildKeyingSheet(target, reconciliation, draft)
+      const delivery = await deliverText(
+        bridge,
+        `${header.invoiceNumber || 'shipment'}_${target}.txt`,
+        keyingSheetToText(sheet),
+      )
+      setSaved(delivery)
+      await openDelivery(bridge, delivery)
+      // Recorded like a generated form: for FedEx and UPS this is the only artifact, and a
+      // shipment that left the tool with no history entry has no audit trail at all.
+      onGenerated()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'The keying sheet could not be saved.')
+    }
   }
 
   return (
@@ -119,6 +139,25 @@ export function OutputPanel({
           </p>
         ) : null}
 
+        {saved ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-[var(--color-pass)] bg-[var(--color-pass-soft)] px-3 py-2 text-sm">
+            {saved.path ? (
+              <span className="min-w-0">
+                Saved to <span className="tabular break-all">{saved.path}</span>
+              </span>
+            ) : (
+              <span>
+                <span className="tabular">{saved.fileName}</span> was downloaded — check your browser's downloads.
+              </span>
+            )}
+            {saved.path ? (
+              <Button size="sm" onClick={() => void openDelivery(bridge, saved)}>
+                Open
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+
         {warnings.length ? (
           <div className="rounded-md border border-[var(--color-warn)] bg-[var(--color-warn-soft)] px-3 py-2">
             <p className="text-xs font-semibold tracking-wide text-[var(--color-warn)] uppercase">While filling the form</p>
@@ -151,7 +190,7 @@ export function OutputPanel({
               <option value="fedex-ship-manager">FedEx Ship Manager</option>
               <option value="ups-worldship">UPS WorldShip</option>
             </Select>
-            <Button onClick={downloadKeyingSheet} disabled={!canGenerate}>
+            <Button onClick={() => void downloadKeyingSheet()} disabled={!canGenerate}>
               Download keying sheet
             </Button>
           </div>
