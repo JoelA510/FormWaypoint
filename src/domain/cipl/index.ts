@@ -9,7 +9,7 @@
  */
 import type { CiplFormat, ParsedCipl } from '../types'
 import { extractTextPages, rowText, type TextPage } from './extract-text'
-import { parseCiplPages as parseFcTp1Pages } from './parse-vendor-a'
+import { parseCiplPages as parseVendorAPages } from './parse-vendor-a'
 import { isVendorBFormat, parseVendorBPages } from './parse-vendor-b'
 
 export * from './extract-text'
@@ -24,24 +24,24 @@ export interface FormatDescriptor {
 
 /**
  * Order matters: the most specific detector runs first. `vendor-b` is identified by
- * its "SHIPMENT#" banner; the FC/TP1 layout by its currency-set marker plus the
+ * its shipment-number banner; the FC/TP1 layout by its currency-set marker plus the
  * invoice-number label.
  */
 export const CIPL_FORMATS: FormatDescriptor[] = [
   {
     id: 'vendor-b',
-    label: 'vendor shipment (commercial invoice + master packing list)',
+    label: 'Vendor B (commercial invoice + master packing list)',
     matches: isVendorBFormat,
     parse: parseVendorBPages,
   },
   {
     id: 'vendor-a',
-    label: 'Vendor A FC/TP1 (invoice + packing list, dual currency)',
+    label: 'Vendor A (FC/TP1 dual-currency) (invoice + packing list, dual currency)',
     matches: (pages) => {
       const text = pages[0] ? pages[0].rows.map(rowText).join(' ') : ''
       return /INVOICE NUMBER:/i.test(text)
     },
-    parse: parseFcTp1Pages,
+    parse: parseVendorAPages,
   },
 ]
 

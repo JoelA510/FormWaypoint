@@ -4,7 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PDFCheckBox, PDFDocument, PDFRadioGroup, PDFTextField } from 'pdf-lib'
 import { parseCipl } from '../domain/cipl'
-import { hasFixtures, readFixture } from '../test/fixtures'
+import { hasFixtures, readFixture, fixtureFile } from '../test/fixtures'
 import { createScheduleBIndex, type ScheduleBIndex } from '../domain/schedule-b'
 import { reconcile } from '../domain/reconcile'
 import { buildDraft, defaultShipmentSettings, summariseReferences, type CompanyProfile } from '../domain/draft'
@@ -44,7 +44,7 @@ const ROOT = path.resolve(HERE, '../..')
 const CONTROLLED = { eccn: 'EAR99', sme: 'N', license: 'NLR' }
 
 /** The exporter behind all three sample shipments. */
-const vendor: CompanyProfile = {
+const VENDOR: CompanyProfile = {
   usppiName: 'Vendor A Manufacturing, Inc.',
   usppiAddressLines: ['4225 Hacienda Drive', 'Pleasanton CA 94588', 'UNITED STATES OF AMERICA'],
   usppiZip: '94588',
@@ -68,9 +68,9 @@ beforeAll(async () => {
   // but this hook runs regardless of what is skipped, and reading a fixture that is not
   // there would fail the whole file — including the tests that need no fixture at all.
   if (hasFixtures()) {
-    parsed.vendorA1 = await parseCipl('vendorA1', readFixture('vendorA1'))
-    parsed.vendorA2 = await parseCipl('vendorA2', readFixture('vendorA2'))
-    parsed.vendorA3 = await parseCipl('vendorA3', readFixture('vendorA3'))
+    parsed.vendorA1 = await parseCipl(fixtureFile('vendorA1'), readFixture('vendorA1'))
+    parsed.vendorA2 = await parseCipl(fixtureFile('vendorA2'), readFixture('vendorA2'))
+    parsed.vendorA3 = await parseCipl(fixtureFile('vendorA3'), readFixture('vendorA3'))
   }
   scheduleB = createScheduleBIndex(
     JSON.parse(fs.readFileSync(path.join(ROOT, 'public/data/schedule-b.json'), 'utf8')),
@@ -100,7 +100,7 @@ async function generate(fixture: keyof typeof parsed, carrier: 'nippon-express' 
   const adapter = getAdapter(carrier)
   const result = reconcile(parsed[fixture], scheduleB, { ...CONTROLLED, maxRows: adapter.maxCommodityRows })
   const settings = defaultShipmentSettings(adapter)
-  const draft = buildDraft(result, vendor, settings, adapter)
+  const draft = buildDraft(result, VENDOR, settings, adapter)
   const filled = await adapter.fill(template(path.basename(adapter.templateUrl)), draft)
   return { adapter, result, draft, filled, values: await readBack(filled.bytes) }
 }
@@ -153,7 +153,7 @@ describe.skipIf(!hasFixtures())('Nippon Express — vendorA1', () => {
 
     // Consignee, not the buyer.
     const consignee = values['4a2 ULTIMATE CONSIGNEE Complete name  address and contact name  tel if available']
-    expect(consignee).toContain('vendor Automation Pvt. Ltd. - Edi')
+    expect(consignee).toContain('the vendor Automation Pvt. Ltd. - Edi')
     expect(consignee).toContain('Bangalore, KARNATAKA 562123')
   })
 
@@ -210,7 +210,7 @@ describe.skipIf(!hasFixtures())('Nippon Express — vendorA1', () => {
       nipponExpress: { useGrossWeight: true, grossWeightByRow: [1.518, 1.196] },
     })
     const result = reconcile(parsed.vendorA1, scheduleB, { ...CONTROLLED, maxRows: adapter.maxCommodityRows })
-    const draft = buildDraft(result, vendor, defaultShipmentSettings(adapter), adapter)
+    const draft = buildDraft(result, VENDOR, defaultShipmentSettings(adapter), adapter)
     const values = await readBack((await adapter.fill(template('nippon-express-sli.pdf'), draft)).bytes)
     expect(values['22.05 WEIGHT1']).toBe('1.518')
     expect(values['23.05WEIGHT2']).toBe('1.196')
@@ -247,7 +247,7 @@ describe.skipIf(!hasFixtures())('CEVA — vendorA3', () => {
     expect(values.ZipCode).toBe('94588')
     expect(values['Point of Origin']).toBe('California')
     expect(values['Country of Ultimate']).toBe('Netherlands')
-    expect(values['Ultimate Consignee']).toContain('vendor Europe B.V.')
+    expect(values['Ultimate Consignee']).toContain('the vendor Europe B.V.')
     expect(values.Date).toBe('04/24/2026')
     expect(values.Related).toBe('checked')
     expect(values.RESELLER).toBe('checked')
@@ -284,7 +284,7 @@ describe.skipIf(!hasFixtures())('overflow handling', () => {
   it('warns rather than silently dropping rows beyond the form capacity', async () => {
     const adapter = getAdapter('nippon-express')
     const result = reconcile(parsed.vendorA3, scheduleB, CONTROLLED)
-    const draft = buildDraft(result, vendor, defaultShipmentSettings(adapter), adapter)
+    const draft = buildDraft(result, VENDOR, defaultShipmentSettings(adapter), adapter)
     // Nine rows against an eight-row form.
     const overflowing = { ...draft, lines: [...draft.lines, ...draft.lines, ...draft.lines] }
     const filled = await adapter.fill(template('nippon-express-sli.pdf'), overflowing)
@@ -357,7 +357,7 @@ describe.skipIf(!hasFixtures())('CEVA fields that were mapped but not written', 
   it('writes the insurance box when the shipment is insured', async () => {
     const adapter = getAdapter('ceva')
     const result = reconcile(parsed.vendorA3, scheduleB, { ...CONTROLLED, maxRows: adapter.maxCommodityRows })
-    const draft = { ...buildDraft(result, vendor, defaultShipmentSettings(adapter), adapter), insured: true }
+    const draft = { ...buildDraft(result, VENDOR, defaultShipmentSettings(adapter), adapter), insured: true }
     const values = await readBack((await adapter.fill(template('ceva-sli.pdf'), draft)).bytes)
     expect(values.Insurance).toBe('YES')
   })
@@ -365,7 +365,7 @@ describe.skipIf(!hasFixtures())('CEVA fields that were mapped but not written', 
   it('always completes exactly one dangerous-goods declaration', async () => {
     const adapter = getAdapter('ceva')
     const result = reconcile(parsed.vendorA3, scheduleB, { ...CONTROLLED, maxRows: adapter.maxCommodityRows })
-    const base = buildDraft(result, vendor, defaultShipmentSettings(adapter), adapter)
+    const base = buildDraft(result, VENDOR, defaultShipmentSettings(adapter), adapter)
 
     const safe = await readBack((await adapter.fill(template('ceva-sli.pdf'), base)).bytes)
     expect(safe['DOES NOT CONTAIN DANGEROUS GOODS']).toBe('JA')
@@ -407,7 +407,7 @@ describe('CEVA — an ECCN box shared by every row', () => {
     const draft: SliDraft = {
       ...buildDraft(
         { header: BLANK_HEADER, sliLines: lines, mergedLines: [], checks: [], selectedSet: 'FC', canGenerate: true },
-        vendor,
+        VENDOR,
         defaultShipmentSettings(adapter),
         adapter,
       ),

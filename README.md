@@ -21,8 +21,8 @@ but a Windows runner.
 
 | Format | Shape | Weights | ECCN |
 | --- | --- | --- | --- |
-| Vendor A FC/TP1 | Invoice + packing list, printed twice (USD and destination currency) | per line | not stated |
-| vendor shipment (`SHIPMENT#`) | Commercial invoice + master packing list, single copy | **none — supplied per part** | stated per line |
+| Vendor A (FC/TP1 dual-currency) | Invoice + packing list, printed twice (USD and destination currency) | per line | not stated |
+| the vendor shipment (`SHIPMENT#`) | Commercial invoice + master packing list, single copy | **none — supplied per part** | stated per line |
 
 The format is detected from the document and dispatched to its own parser; everything
 downstream is shared. Adding a third means adding a detector and a parser, nothing else.
@@ -37,7 +37,7 @@ of defaulting to zero.
 
 1. **Reads the CIPL.** These are generated PDFs with a real text layer, so there is no OCR
    anywhere in the pipeline — the parser works from the text and its coordinates.
-2. **Picks the controlling document set.** vendor CIPLs contain the same shipment twice:
+2. **Picks the controlling document set.** Vendor A CIPLs contain the same shipment twice:
    `FC` priced in USD and `TP1` priced in the destination currency. Only the USD set is
    used, because SLI box 31 is "value at the port of export in US dollars".
 3. **Joins invoice lines to packing-list lines** by lot id, then order + sequence, then
@@ -45,8 +45,8 @@ of defaulting to zero.
 4. **Groups lines into commodity rows** keyed on Schedule B, D/F and the export-control
    triplet — matching how these shipments are actually filed.
 5. **Honours an ECCN the document states.** Where a CIPL prints one it wins over the blanket
-   value, and the reviewer is told — shipment vendorB1 states `ECCN: 5A992.C` on a line whose
-   filed SLI says EAR99.
+   value, and the reviewer is told, including when it disagrees with what was filed
+   previously.
 6. **Validates every Schedule B number** against the U.S. Census Bureau AES commodity file:
    ten digits, currently active, reported in the required unit of quantity, and plausibly
    describing the goods.
@@ -104,30 +104,33 @@ manufacture the parts a document cannot support:
 - It never assigns **EAR99** because no ECCN appears on the invoice, and never assigns
   **NLR** because EAR99 was chosen. Both are entered by the filer.
 - It never converts an **HTSUS** number into a Schedule B number.
-- It never adopts a classification from a historical form. One sample shipment was filed
-  with `8483.10.5000` ("transmission shafts and cranks") on a cable assembly; a tool that
-  learned from that would repeat the error forever. Changing a code requires an explicit,
-  recorded override — and the override is still challenged if it does not fit the goods.
+- It never adopts a classification from a historical form. Real filings contain codes that
+  do not fit the goods, and a tool that learned from them would repeat the error forever.
+  Changing a code requires an explicit, recorded override, and the override is still
+  challenged if it does not fit the goods.
 - It never infers **country of origin**, **hazardous-material status**, **routed-export
   status**, **consignee type** or **related-party status**.
 - It never treats a blank field as zero, and never applies a signature.
 
 ## Verification
 
-197 tests run against five real, manually-processed shipments across both CIPL formats. The expected values come from
-the completed SLIs that were filed for them, so a pass means the tool reproduces what a
-person produced by hand. A further set pins the failure modes that would otherwise be
-silent — a blank exporter profile, an unreadable weight total, a double-claimed packing
-line, an impossible date — because a form that looks complete and is wrong is the worst
-outcome this tool can produce.
+A clean checkout runs **200 tests**. They cover the parsers, the reconciliation engine, the
+Schedule B validator, the carrier adapters and the guards, using synthetic documents built
+to reproduce each supported layout without reproducing anyone's data.
 
-| Shipment | Carrier | Lines → rows | Quantity | Net weight | USD |
-| --- | --- | --- | ---: | ---: | ---: |
-| vendorA1 | Nippon Express | 3 → 2 | 3 | 2.468 kg | 1,113.14 |
-| vendorA2 | Nippon Express | 1 → 1 | 1 | 1.270 kg | 51.60 |
-| vendorA3 | CEVA | 11 → 3 | 97 | 138.841 kg | 129,999.10 |
-| vendorB1 | Nippon Express | 6 → 5 | 9 | supplied | 11,532.24 |
-| vendorB2 | CEVA | 1 → 1 | 2 | supplied | 1,251.37 |
+A further **122 tests are skipped unless real shipment documents are present**. Those are
+the regression suites: they run five real, manually-processed shipments across both layouts
+and check the result against the completed SLIs that were filed for them, so a pass means
+the tool reproduces what a person produced by hand. They also pin the failure modes that
+would otherwise be silent: a blank exporter profile, an unreadable weight total, a
+double-claimed packing line, an impossible date. A form that looks complete and is wrong is
+the worst outcome this tool can produce.
+
+Those documents are a customer's commercial paperwork and are not committed, so neither the
+files nor their document numbers appear in this repository. To run the full suite, place the
+CIPL PDFs in `src/test/fixtures/` with a `manifest.json` naming them; the format is
+documented in `src/test/fixtures.ts`. Everything the tests assert is checked in, so a
+fixture only ever supplies the input side.
 
 ```bash
 npm run check    # typecheck, lint, tests, production build
@@ -135,10 +138,6 @@ npm run check    # typecheck, lint, tests, production build
 
 CI runs exactly this command on every push and pull request, so it cannot drift from what
 you see locally.
-
-Only the CIPLs are committed as fixtures. The completed SLIs they were checked against are
-not, because they carry handwritten signatures; the values read off them live in the test
-expectations instead.
 
 ## Schedule B data
 
@@ -190,7 +189,7 @@ a file-backed `LocalStore` and no calling code changes.
 src/
   desktop/       the Tauri bridge; absent in the browser build
   domain/
-    cipl/        PDF text extraction and the vendor CIPL parser
+    cipl/        PDF text extraction and the vendor CIPL parsers
     reconcile/   document-set selection, line joining, grouping, checks
     schedule-b/  Census dataset lookup and validation
     item-library/  item-master import and commodity-number screening

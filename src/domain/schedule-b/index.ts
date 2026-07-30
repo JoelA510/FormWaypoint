@@ -172,7 +172,7 @@ export function loadScheduleB(fetchJson?: () => Promise<RawPayload>): Promise<Sc
 // ---------------------------------------------------------------------------
 
 /**
- * Unit names used on the CIPL mapped onto the Census vocabulary. `PCS` on an vendor invoice
+ * Unit names used on the CIPL mapped onto the Census vocabulary. `PCS` on an the vendor invoice
  * and `NO` in the Census file both mean "a count of items".
  */
 const UNIT_ALIASES: Record<string, string> = {

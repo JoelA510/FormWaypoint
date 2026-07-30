@@ -13,7 +13,7 @@
  */
 
 /**
- * vendor CIPLs contain the same shipment twice: an `FC` set priced in USD and a `TP1` set
+ * Vendor A CIPLs contain the same shipment twice: an `FC` set priced in USD and a `TP1` set
  * priced in the destination currency. Only one may be used, and for a US export
  * declaration it is always the USD one.
  */
@@ -26,7 +26,7 @@ export type DocumentKind = 'INVOICE' | 'PACKING_LIST'
  *
  * `vendor-a` — the Vendor A invoice/packing-list pair, printed twice (FC in USD,
  *   TP1 in the destination currency), with per-line net and gross weights.
- * `vendor-b` — the SAP-style "SHIPMENT#" commercial invoice and master packing
+ * `vendor-b` — the SAP-style shipment-banner commercial invoice and master packing
  *   list. Single currency, carries an ECCN column, and **has no weights at all**.
  */
 export type CiplFormat = 'vendor-a' | 'vendor-b'
@@ -86,7 +86,7 @@ export interface SourceLine {
    * The order this line belongs to.
    *
    * Which order depends on the format: `vendor-a` prints the *customer's* purchase
-   * order here, while `vendor-b` prints vendor's own sales order and carries the
+   * order here, while `vendor-b` prints the vendor's own sales order and carries the
    * customer PO separately in `purchaseOrder`. The distinction matters because the CEVA
    * form has a box for each.
    */

@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseCipl } from './cipl'
-import { hasFixtures, readFixture } from '../test/fixtures'
+import { hasFixtures, readFixture, fixtureFile } from '../test/fixtures'
 import { createScheduleBIndex, type ScheduleBIndex } from './schedule-b'
 import { reconcile, resolveDestinationCountry, joinInvoiceToPacking } from './reconcile'
 import { applyCarrierDefaults, buildDraft, checkDraft, defaultShipmentSettings, EMPTY_PROFILE, type CompanyProfile } from './draft'
@@ -42,7 +42,7 @@ beforeAll(async () => {
   // gated by them skipping. Without the guard, adding one test that needs no fixture
   // would fail the whole file wherever the documents are absent.
   if (!hasFixtures()) return
-  parsed = await parseCipl('vendorA1', readFixture('vendorA1'))
+  parsed = await parseCipl(fixtureFile('vendorA1'), readFixture('vendorA1'))
   scheduleB = createScheduleBIndex(
     JSON.parse(fs.readFileSync(path.join(HERE, '../../public/data/schedule-b.json'), 'utf8')),
   )

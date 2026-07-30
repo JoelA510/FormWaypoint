@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeAll } from 'vitest'
 import { parseCipl } from './parse-vendor-a'
-import { hasFixtures, readFixture } from '../../test/fixtures'
+import { hasFixtures, readFixture, fixtureFile, fixtureInvoiceNumber } from '../../test/fixtures'
 import type { ParsedCipl, SourceLine } from '../types'
 
 /**
@@ -15,9 +15,9 @@ beforeAll(async () => {
   // gated by them skipping. Without the guard, adding one test that needs no fixture
   // would fail the whole file wherever the documents are absent.
   if (!hasFixtures()) return
-  parsed.vendorA1 = await parseCipl('vendorA1_CIPL.pdf', readFixture('vendorA1'))
-  parsed.vendorA2 = await parseCipl('vendorA2_CIPL.pdf', readFixture('vendorA2'))
-  parsed.vendorA3 = await parseCipl('vendorA3_CIPL.pdf', readFixture('vendorA3'))
+  parsed.vendorA1 = await parseCipl(fixtureFile('vendorA1'), readFixture('vendorA1'))
+  parsed.vendorA2 = await parseCipl(fixtureFile('vendorA2'), readFixture('vendorA2'))
+  parsed.vendorA3 = await parseCipl(fixtureFile('vendorA3'), readFixture('vendorA3'))
 }, 60_000)
 
 const fcInvoice = (p: ParsedCipl): SourceLine[] =>
@@ -44,7 +44,7 @@ describe.skipIf(!hasFixtures())('document set detection', () => {
 describe.skipIf(!hasFixtures())('vendorA1 — Nippon Express, 3 pieces, two duplicate cable lines', () => {
   it('reads the invoice header', () => {
     const h = parsed.vendorA1.headers.FC
-    expect(h.invoiceNumber).toBe('vendorA1')
+    expect(h.invoiceNumber).toBe(fixtureInvoiceNumber('vendorA1'))
     expect(h.invoiceDate).toBe('July 20, 2026')
     // The later ship date must stay distinct from the invoice date — the SLI uses the
     // invoice date for box 2, and conflating them would put the wrong date on the form.
@@ -64,7 +64,7 @@ describe.skipIf(!hasFixtures())('vendorA1 — Nippon Express, 3 pieces, two dupl
 
   it('distinguishes SOLD TO from CONSIGNED TO', () => {
     const h = parsed.vendorA1.headers.FC
-    expect(h.consignedTo.name).toBe('vendor Automation Pvt. Ltd. - Edi')
+    expect(h.consignedTo.name).toBe('the vendor Automation Pvt. Ltd. - Edi')
     expect(h.consignedTo.lines).toContain('Bangalore, KARNATAKA 562123')
     expect(h.notifyTo).toBe('SAME AS BUYER')
   })
@@ -139,8 +139,8 @@ describe.skipIf(!hasFixtures())('vendorA1 — Nippon Express, 3 pieces, two dupl
 describe.skipIf(!hasFixtures())('vendorA2 — single line, consignee differs from buyer', () => {
   it('uses CONSIGNED TO for the receiving party', () => {
     const h = parsed.vendorA2.headers.FC
-    expect(h.soldTo.name).toBe('vendor Corporation')
-    expect(h.consignedTo.name).toBe('vendor Industrial Automation Ch')
+    expect(h.soldTo.name).toBe('the vendor Corporation')
+    expect(h.consignedTo.name).toBe('the vendor Industrial Automation Ch')
     expect(h.dischargePort).toBe('Shanghai, China')
   })
 

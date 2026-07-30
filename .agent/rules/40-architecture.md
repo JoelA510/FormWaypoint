@@ -12,7 +12,7 @@ the pre-2026 monorepo (`apps/`, `packages/`, `services/`) has been deleted.
 ```
 src/
   domain/
-    cipl/        PDF text extraction (pdfjs) and the vendor CIPL parser
+    cipl/        PDF text extraction (pdfjs) and the vendor CIPL parsers
     reconcile/   document-set selection, line joining, grouping, checks
     schedule-b/  Census AES dataset lookup and validation
     draft.ts     assembles reviewed values; checkDraft() gates on what a person supplies

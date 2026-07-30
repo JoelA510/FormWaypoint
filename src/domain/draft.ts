@@ -181,7 +181,7 @@ export function buildDraft(
         : ''),
     // The consignee's *purchase* orders. Layouts that print them separately from the
     // sales order supply `purchaseOrders`; where the two are the same column (FC/TP1), the
-    // order numbers already are the customer's POs. Filing vendor's own sales order in a box
+    // order numbers already are the customer's POs. Filing the vendor's own sales order in a box
     // labelled "Consignee PO#" would be wrong on both counts.
     consigneePo: summariseReferences(
       header.purchaseOrders.length ? header.purchaseOrders : header.orderNumbers,

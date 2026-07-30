@@ -51,7 +51,7 @@ export interface ReconcileOptions extends AggregationOptions {
 /**
  * Choose the controlling document set.
  *
- * vendor CIPLs carry the same goods twice: `FC` priced in USD and `TP1` priced in the
+ * Vendor A CIPLs carry the same goods twice: `FC` priced in USD and `TP1` priced in the
  * destination currency. Box 31 of the SLI is "value at the port of export in US dollars",
  * so the USD set is the only correct source. Picking TP1 because it appears later in the
  * file, or summing both, would misstate the shipment.
@@ -184,7 +184,7 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
       detail: headerReadable
         ? `Header read from the ${set} document set.`
         : `No header could be read for the ${set} set, so there are no document totals to reconcile against. ` +
-          'This file is probably not the vendor CIPL layout.',
+          'This file is probably not the the vendor CIPL layout.',
       passed: headerReadable,
     },
     ...totalsChecks(header, mergedLines, sliLines, parsed.providesWeights),

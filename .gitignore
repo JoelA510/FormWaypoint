@@ -15,7 +15,8 @@ src-tauri/target
 src-tauri/gen
 
 # Shipment documents are never committed — they are customer data.
-src/test/fixtures/*.pdf
+# Customer shipment documents and the manifest naming them. Never committed.
+src/test/fixtures/
 
 # What the app produces is customer data too, and on Linux the webview saves a
 # download into the working directory — which is this repository when run from

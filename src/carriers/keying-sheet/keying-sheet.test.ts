@@ -1,7 +1,7 @@
 /**
  * The keying sheets, checked against a real FedEx Ship Manager entry.
  *
- * The reference is shipment vendorA4 as it was actually keyed: seven commodities, weights
+ * The reference is a Vendor A shipment as it was actually keyed: seven commodities, weights
  * in pounds, countries as two-letter codes, unit values at six decimals. Those formats are
  * the whole reason this exists — the CIPL prints none of them that way, and every one of
  * them is a value the operator would otherwise convert by hand.
@@ -56,12 +56,12 @@ function fixture(lines: MergedLine[], rows: SLILine[]): Reconciliation {
   return {
     selectedSet: 'FC',
     header: {
-      invoiceNumber: 'vendorA4',
+      invoiceNumber: 'INV-0004',
       invoiceDate: 'July 28, 2026',
       onAboutDate: null,
-      soldTo: { name: 'vendor Corporation', lines: [], country: null },
+      soldTo: { name: 'the vendor Corporation', lines: [], country: null },
       consignedTo: {
-        name: 'vendor Asia Pacific Pte. Ltd.',
+        name: 'the vendor Asia Pacific Pte. Ltd.',
         lines: ['2nd Floor 40 Alps Avenue', 'Singapore EX 498781'],
         country: 'Singapore',
       },
@@ -99,7 +99,7 @@ const draft = (over: Partial<SliDraft> = {}): SliDraft =>
     usppiContactName: '',
     usppiContactPhone: '',
     ultimateConsignee: {
-      name: 'vendor Asia Pacific Pte. Ltd.',
+      name: 'the vendor Asia Pacific Pte. Ltd.',
       addressLines: ['2nd Floor 40 Alps Avenue', 'Singapore EX 498781'],
     },
     destinationCountry: 'Singapore',
@@ -236,7 +236,7 @@ describe('FedEx Ship Manager sheet', () => {
 
   it('carries the invoice and purchase order into Additional references', () => {
     const fields = sheet().sections[3].fields
-    expect(fields.find((f) => f.label === 'Invoice number')!.value).toBe('vendorA4')
+    expect(fields.find((f) => f.label === 'Invoice number')!.value).toBe('INV-0004')
     expect(fields.find((f) => f.label === 'P.O. number')!.value).toBe('00993549OP0010')
     expect(fields.find((f) => f.label === 'P.O. number')!.note).toContain('First of 2')
   })
@@ -268,7 +268,7 @@ describe('UPS WorldShip sheet', () => {
 
   it('puts the invoice number in Reference Number 1', () => {
     const refs = sheet().sections[3].fields
-    expect(refs[0]).toMatchObject({ label: 'Reference Number 1', value: 'vendorA4' })
+    expect(refs[0]).toMatchObject({ label: 'Reference Number 1', value: 'INV-0004' })
   })
 })
 

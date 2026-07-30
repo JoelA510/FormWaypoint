@@ -1,5 +1,5 @@
 /**
- * Parser for the SAP-style "SHIPMENT#" commercial invoice and master packing list.
+ * Parser for the SAP-style shipment-banner commercial invoice and master packing list.
  *
  * Structurally unlike the FC/TP1 layout in three ways that matter:
  *
@@ -33,6 +33,29 @@ const QUANTITY_UOM = /^([\d,]+\.?\d*)\s+([A-Z]{2,4})$/
 
 // Only the leftmost column is fixed; the rest are calibrated per block. See parseBlock.
 const COL_ORDER = { min: 0, max: 80 }
+/**
+ * Text printed on the source documents, kept in one place.
+ *
+ * These are layout markers, not a vendor endorsement, and they are deliberately generic so
+ * this repository carries no customer's name. A deployment whose documents need a stricter
+ * marker can supply one through the environment without editing code; see `.env.example`.
+ */
+const env: Record<string, string | undefined> =
+  (typeof import.meta !== 'undefined' && (import.meta as { env?: Record<string, string | undefined> }).env) || {}
+
+/** Label that precedes the shipment number in the header block. */
+export const SHIPMENT_NUMBER_LABEL = env.VITE_CIPL_SHIPMENT_LABEL || 'SHIPMENT#'
+
+/**
+ * Rows that mark the end of a line-item table. The first two are standard; the third is
+ * optional and exists for layouts that close the table with the exporter's own name.
+ */
+const TABLE_END_MARKERS = [
+  'TOTAL NET VALUE',
+  'SUMMARY INFORMATION',
+  ...(env.VITE_CIPL_TABLE_END_MARKER ? [env.VITE_CIPL_TABLE_END_MARKER.toUpperCase()] : []),
+]
+
 /** Right-hand header label column; the left address block must stop before it. */
 const HEADER_LABEL_X = 300
 
@@ -40,7 +63,7 @@ export function isVendorBFormat(pages: TextPage[]): boolean {
   const firstPage = pages[0]
   if (!firstPage) return false
   const text = firstPage.rows.map(rowText).join(' ')
-  return /SHIPMENT#/i.test(text)
+  return text.toUpperCase().includes(SHIPMENT_NUMBER_LABEL.toUpperCase())
 }
 
 export function parseVendorBPages(fileName: string, pages: TextPage[]): ParsedCipl {
@@ -106,7 +129,7 @@ export function parseVendorBPages(fileName: string, pages: TextPage[]): ParsedCi
 
     header.orderNumbers = distinct(invoiceLines.map((l) => l.orderNumber).filter(Boolean))
     // Sales orders and customer POs are different columns in this layout, and the CEVA form
-    // has a box for each. Keeping them apart is what stops vendor's own sales order being
+    // has a box for each. Keeping them apart is what stops the vendor's own sales order being
     // filed as the consignee's purchase order.
     header.purchaseOrders = distinct(invoiceLines.map((l) => l.purchaseOrder ?? '').filter(Boolean))
     // This layout prints no quantity total, so this is the sum of the lines and the
@@ -208,7 +231,7 @@ function pageKind(page: TextPage): DocumentKind | null {
 function parseHeader(page: TextPage): ShipmentHeader {
   const rows = page.rows
 
-  const shipmentNumber = rightOfLabel(rows, 'SHIPMENT#') ?? ''
+  const shipmentNumber = rightOfLabel(rows, SHIPMENT_NUMBER_LABEL) ?? ''
   const shipDate = rightOfLabel(rows, 'Ship Date:') ?? ''
   const currency = rightOfLabel(rows, 'Currency:') ?? ''
   const modeOfTransport = rightOfLabel(rows, 'Mode of Transport:') ?? null
@@ -260,14 +283,19 @@ function freightTermsFrom(handling: string | null): 'PREPAID' | 'COLLECT' | null
 function rightOfLabel(rows: TextRow[], label: string): string | undefined {
   const target = label.toLowerCase()
   for (const row of rows) {
-    const index = row.items.findIndex((item) => item.str.toLowerCase().startsWith(target))
+    const index = row.items.findIndex((item) => item.str.toLowerCase().includes(target))
     if (index === -1) continue
-    const value = row.items
+    // The label may sit mid-item ("<exporter> SHIPMENT# 12345"); take whatever follows it
+    // inside that item first, then continue with the rest of the row.
+    const matched = row.items[index].str
+    const inline = matched.slice(matched.toLowerCase().indexOf(target) + target.length).trim()
+    const rest = row.items
       .slice(index + 1)
       .filter((item) => !isLikelyBarcode(item.str))
       .map((item) => item.str)
       .join(' ')
       .trim()
+    const value = [inline, rest].filter(Boolean).join(' ').trim()
     if (value) return value
   }
   return undefined
@@ -351,7 +379,7 @@ function describeBlock(block: TextRow[]): string {
 function endOfTable(rows: TextRow[], from: number): number {
   for (let i = from + 1; i < rows.length; i++) {
     const text = rowText(rows[i]).toUpperCase()
-    if (text.includes('TOTAL NET VALUE') || text.includes('SUMMARY INFORMATION') || text.includes('Vendor A')) {
+    if (TABLE_END_MARKERS.some((marker) => text.includes(marker))) {
       return i
     }
   }

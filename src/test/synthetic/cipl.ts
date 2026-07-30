@@ -1,5 +1,5 @@
 /**
- * Builds CIPL PDFs that reproduce the vendor layouts without reproducing a customer's data.
+ * Builds CIPL PDFs that reproduce the supported layouts without reproducing a customer's data.
  *
  * Real shipment documents cannot be committed — they are part numbers, values, consignees
  * and classifications belonging to someone else — which left the parser suite unable to run

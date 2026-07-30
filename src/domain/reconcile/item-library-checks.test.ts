@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { reconcile } from '.'
 import { parseCipl } from '../cipl'
-import { hasFixtures, readFixture } from '../../test/fixtures'
+import { hasFixtures, readFixture, fixtureFile } from '../../test/fixtures'
 import { createScheduleBIndex, type ScheduleBIndex } from '../schedule-b'
 import { indexByPart, libraryWeights, type ItemLibraryEntry } from '../item-library'
 import type { CheckResult, ParsedCipl } from '../types'
@@ -24,8 +24,8 @@ beforeAll(async () => {
   // gated by them skipping. Without the guard, adding one test that needs no fixture
   // would fail the whole file wherever the documents are absent.
   if (!hasFixtures()) return
-  parsed['vendorB2'] = await parseCipl('vendorB2_CIPL.pdf', readFixture('vendorB2'))
-  parsed.vendorA1 = await parseCipl('vendorA1_CIPL.pdf', readFixture('vendorA1'))
+  parsed['vendorB2'] = await parseCipl(fixtureFile('vendorB2'), readFixture('vendorB2'))
+  parsed.vendorA1 = await parseCipl(fixtureFile('vendorA1'), readFixture('vendorA1'))
   scheduleB = createScheduleBIndex(
     JSON.parse(fs.readFileSync(path.join(HERE, '../../../public/data/schedule-b.json'), 'utf8')),
   )

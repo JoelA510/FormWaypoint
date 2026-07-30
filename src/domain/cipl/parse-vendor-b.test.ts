@@ -1,11 +1,11 @@
 import { describe, expect, it, beforeAll } from 'vitest'
 import { parseCipl, detectCiplFormat, extractTextPages } from '.'
-import { hasFixtures, readFixture } from '../../test/fixtures'
+import { hasFixtures, readFixture, fixtureFile, fixtureInvoiceNumber } from '../../test/fixtures'
 import type { ParsedCipl, SourceLine } from '../types'
 
 /**
- * The "SHIPMENT#" layout. Expected values are read off the source PDFs; the SLI
- * mapping they feed is asserted in reconcile-shipment.test.ts.
+ * The Vendor B layout. Expected values are read off the source PDFs; the SLI
+ * mapping they feed is asserted in reconcile-vendor-b.test.ts.
  */
 
 const parsed: Record<string, ParsedCipl> = {}
@@ -15,8 +15,8 @@ beforeAll(async () => {
   // gated by them skipping. Without the guard, adding one test that needs no fixture
   // would fail the whole file wherever the documents are absent.
   if (!hasFixtures()) return
-  parsed['vendorB1'] = await parseCipl('vendorB1_CIPL.pdf', readFixture('vendorB1'))
-  parsed['vendorB2'] = await parseCipl('vendorB2_CIPL.pdf', readFixture('vendorB2'))
+  parsed['vendorB1'] = await parseCipl(fixtureFile('vendorB1'), readFixture('vendorB1'))
+  parsed['vendorB2'] = await parseCipl(fixtureFile('vendorB2'), readFixture('vendorB2'))
 }, 60_000)
 
 const invoiceLines = (p: ParsedCipl): SourceLine[] => p.lines.filter((l) => l.documentKind === 'INVOICE')
@@ -28,7 +28,7 @@ describe.skipIf(!hasFixtures())('format detection', () => {
     expect(parsed['vendorB1'].format).toBe('vendor-b')
     expect(parsed['vendorB2'].format).toBe('vendor-b')
 
-    const fcTp1 = await parseCipl('vendorA1', readFixture('vendorA1'))
+    const fcTp1 = await parseCipl(fixtureFile('vendorA1'), readFixture('vendorA1'))
     expect(fcTp1.format).toBe('vendor-a')
   })
 
@@ -48,7 +48,7 @@ describe.skipIf(!hasFixtures())('format detection', () => {
 describe.skipIf(!hasFixtures())('vendorB1 — six lines, mixed origins, one ECCN', () => {
   it('reads the header', () => {
     const h = parsed['vendorB1'].headers.FC
-    expect(h.invoiceNumber).toBe('vendorB1')
+    expect(h.invoiceNumber).toBe(fixtureInvoiceNumber('vendorB1'))
     expect(h.invoiceDate).toBe('07/22/26')
     expect(h.documentCurrency).toBe('USD')
     expect(h.vesselAgent).toBe('NIPPON AIR FREIGHT')
@@ -63,9 +63,9 @@ describe.skipIf(!hasFixtures())('vendorB1 — six lines, mixed origins, one ECCN
 
   it('separates Sold To from Ship To', () => {
     const h = parsed['vendorB1'].headers.FC
-    expect(h.soldTo.name).toBe('vendor Corporation')
+    expect(h.soldTo.name).toBe('the vendor Corporation')
     expect(h.soldTo.lines).toContain('KYOTO 600-8530')
-    expect(h.consignedTo.name).toBe('vendor Corporation')
+    expect(h.consignedTo.name).toBe('the vendor Corporation')
     expect(h.consignedTo.lines).toContain('1 Minamishosakai Sho')
     expect(h.consignedTo.lines).toContain('Kyoto 615-0803')
     // Header labels from the right-hand column must not leak into the address.

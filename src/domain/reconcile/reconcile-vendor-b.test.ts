@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseCipl } from '../cipl'
-import { hasFixtures, readFixture } from '../../test/fixtures'
+import { hasFixtures, readFixture, fixtureFile } from '../../test/fixtures'
 import { createScheduleBIndex, type ScheduleBIndex } from '../schedule-b'
 import { reconcile, resolveDestinationCountry } from '.'
 import { buildDraft, defaultShipmentSettings, EMPTY_PROFILE, type CompanyProfile } from '../draft'
@@ -38,8 +38,8 @@ beforeAll(async () => {
   // gated by them skipping. Without the guard, adding one test that needs no fixture
   // would fail the whole file wherever the documents are absent.
   if (!hasFixtures()) return
-  parsed['vendorB1'] = await parseCipl('vendorB1_CIPL.pdf', readFixture('vendorB1'))
-  parsed['vendorB2'] = await parseCipl('vendorB2_CIPL.pdf', readFixture('vendorB2'))
+  parsed['vendorB1'] = await parseCipl(fixtureFile('vendorB1'), readFixture('vendorB1'))
+  parsed['vendorB2'] = await parseCipl(fixtureFile('vendorB2'), readFixture('vendorB2'))
   scheduleB = createScheduleBIndex(
     JSON.parse(fs.readFileSync(path.join(HERE, '../../../public/data/schedule-b.json'), 'utf8')),
   )
@@ -47,7 +47,7 @@ beforeAll(async () => {
 
 const byCode = (lines: SLILine[], code: string) => lines.find((l) => l.scheduleB === code)!
 
-const PROFILE: CompanyProfile = { ...EMPTY_PROFILE, usppiName: 'vendor', pointOfOrigin: 'California' }
+const PROFILE: CompanyProfile = { ...EMPTY_PROFILE, usppiName: 'the vendor', pointOfOrigin: 'California' }
 
 // Shipment documents are customer data and are not committed. Without them this
 // suite cannot run; the assertions themselves are checked in and unaffected.
@@ -157,7 +157,7 @@ describe.skipIf(!hasFixtures())('vendorB2 — reproduces the filed CEVA SLI', ()
 })
 
 describe.skipIf(!hasFixtures())('sales orders and customer purchase orders stay apart', () => {
-  it('files the customer PO in the consignee-PO box, not vendor\'s sales order', () => {
+  it('files the customer PO in the consignee-PO box, not the vendor\'s sales order', () => {
     const lines = parsed['vendorB1'].lines.filter((l) => l.documentKind === 'INVOICE')
     const header = parsed['vendorB1'].headers.FC
 
@@ -173,7 +173,7 @@ describe.skipIf(!hasFixtures())('sales orders and customer purchase orders stay 
   })
 
   it('leaves purchaseOrders empty where the order number already is the customer PO', async () => {
-    const fcTp1 = await parseCipl('vendorA1', readFixture('vendorA1'))
+    const fcTp1 = await parseCipl(fixtureFile('vendorA1'), readFixture('vendorA1'))
     expect(fcTp1.headers.FC.purchaseOrders).toEqual([])
     expect(fcTp1.headers.FC.orderNumbers[0]).toBe('00299378OP0080')
   })
@@ -181,7 +181,7 @@ describe.skipIf(!hasFixtures())('sales orders and customer purchase orders stay 
 
 describe.skipIf(!hasFixtures())('the per-part weight table is scoped to formats that need it', () => {
   it('never fills a gap on a format that states its own weights', async () => {
-    const fcTp1 = await parseCipl('vendorA1', readFixture('vendorA1'))
+    const fcTp1 = await parseCipl(fixtureFile('vendorA1'), readFixture('vendorA1'))
     // A saved weight for a part in this shipment must not be consulted: if the parser ever
     // failed to read a printed weight, the saved figure would hide the failure.
     const withTable = reconcile(fcTp1, scheduleB, {
@@ -212,7 +212,7 @@ describe.skipIf(!hasFixtures())('shipment reference', () => {
   })
 
   it('is left empty on a layout whose order numbers are customer POs', async () => {
-    const fcTp1 = await parseCipl('vendorA1', readFixture('vendorA1'))
+    const fcTp1 = await parseCipl(fixtureFile('vendorA1'), readFixture('vendorA1'))
     const result = reconcile(fcTp1, scheduleB, CONTROLLED)
     const draft = buildDraft(result, PROFILE, defaultShipmentSettings(nippon), nippon)
     // Those SO numbers appear nowhere in an FC/TP1 CIPL, so nothing is invented.
