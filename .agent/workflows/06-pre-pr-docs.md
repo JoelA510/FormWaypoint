@@ -37,7 +37,7 @@ If any non-trivial bugs were fixed or new patterns were established:
 
 1. Add a new entry using the format: `## [CATEGORY-NNN] Title`
 2. Include:
-   - **Tags**: Relevant hashtags (e.g., #database, #react, #rls)
+   - **Tags**: Relevant hashtags (e.g., #parser, #carrier-adapter, #schedule-b, #desktop)
    - **Date**: Current date
    - **Context & Problem**: What went wrong or what challenge was faced
    - **Solution & Pattern**: What fixed it and why

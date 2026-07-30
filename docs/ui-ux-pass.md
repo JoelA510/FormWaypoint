@@ -1,5 +1,11 @@
-```markdown
 # UI / UX Pass Checklist (Canonical)
+
+
+> **Scope note.** This is a generic UI/UX checklist, not a description of FormWaypoint. It
+> predates the client-side rewrite and still refers to flows this app does not have
+> (authentication, CRUD, settings). Read it as a lens, and take the project's actual design
+> rules from [`.agent/rules/30-design-standards.md`](../.agent/rules/30-design-standards.md),
+> which is authoritative on the token palette and status colours.
 
 ## 0. Purpose and Scope
 
@@ -499,4 +505,3 @@ If the product includes tables or grids:
    - P2: visual polish and minor issues.
 
 This document is the source of truth for UI/UX passes.
-```

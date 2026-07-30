@@ -5,7 +5,7 @@ description: Log a recent technical lesson or fix to Engineering Knowledge
 1.  **Synthesize Lesson**
     - Review the recent conversation history or the specific problem context provided by the user.
     - Draft a standard "Knowledge Entry" with:
-      - **Problem**: What failed? (e.g., "Supabase RLS Policy recursion").
+      - **Problem**: What failed? (e.g., "a line block split by a page break was silently dropped").
       - **Context**: Under what conditions? (e.g., "When querying `tasks` with `select=*`").
       - **Solution**: How was it fixed? (e.g., "Added `!inner` join or refactored policy").
       - **Prevention**: Rule to follow in the future.

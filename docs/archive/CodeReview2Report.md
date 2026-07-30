@@ -1,3 +1,11 @@
+> **Superseded — archived 2026-07-30.**
+>
+> This usability evaluation reads the React components in the monorepo's `apps/web` folder, which no longer exists. Its findings are about a UI that has been fully replaced.
+>
+> The current design is in [`README.md`](../../README.md) and
+> [`roadmap.md`](../../roadmap.md). This file is kept for history; nothing in it describes
+> the tool as it exists.
+
 # Usability Evaluation of FormWaypoint Web Application
 
 ## Assumptions

@@ -12,20 +12,12 @@ Before writing anything, systematically review the codebase:
 
 1. **Map the file structure** — Identify all directories and their purposes
 2. **Identify entry points** — Find main/index files, routing, app initialization
-
-- **Frontend**: React 19, Vite, Tailwind CSS v4, `dnd-kit`.
-- **Testing**: Vitest (`npm test`).
-- **Backend**: Supabase (PostgreSQL 15+), Edge Functions.
-- **Database**:
-  - Row Level Security (RLS) for multi-tenancy.
-  - Recursive CTEs for hierarchy traversal.
-  - **Strict PL/pgSQL**: No ambiguous column references allowed.
-
-1. **Trace data flow** — Follow how data moves from UI → state → persistence
-2. **Catalog components** — List every component/module and what it owns
-3. **Extract the domain model** — What are the core entities? How do they relate?
-4. **Review database/API layer** — What's the schema? What services exist?
-5. **Note security boundaries** — Auth, permissions, access control
+3. **Trace data flow** — Follow the document: PDF bytes → parse → reconcile → draft →
+   adapter → filled form, and what persists locally along the way
+4. **Catalog components** — List every component/module and what it owns
+5. **Extract the domain model** — What are the core entities? How do they relate?
+6. **Note the refusals** — Which compliance values the tool declines to infer, and where
+   that is enforced. Those matter more than the feature list.
 
 ### Phase 2: Generate README
 
@@ -73,15 +65,13 @@ Using ONLY what you found in the code (never invent or assume), produce a README
 
 ### Environment Requirements
 
-**Required env vars**
+FormWaypoint reads no environment variables and calls no external service: no API, no
+database, no auth, no keys. If that ever stops being true, this section is where it gets
+recorded — and per rule 00, it is a product decision before it is an implementation detail.
 
-```text
-<ENV_VAR_NAME>=<what it is used for + where read in code>
-```
+**Local inputs**
 
-**External dependencies**
-
-- <DB/Auth/Storage/etc> -> <what> (refer to config file(s): `<path>`)
+- <blank carrier form / dataset / imported file> -> <what it supplies> (`<path>`)
 
 ---
 
@@ -132,29 +122,32 @@ flowchart LR
 | ---------------- | ----------------------- | ------------------ |
 | `<Name>`         | <what it owns and does> | `<path>`, `<path>` |
 
-### 4.3 Database Schema
+### 4.3 Local Persistence
 
-| Table/Collection | Purpose          | Key fields                      |
-| ---------------- | ---------------- | ------------------------------- |
-| `<name>`         | <what it stores> | `<field>`, `<field>`, `<field>` |
+There is no database. State lives in IndexedDB behind the `LocalStore` interface, which a
+desktop build swaps for a file-backed implementation without touching callers.
 
-**Relationships / constraints**
+| Store    | Purpose          | Key fields                      |
+| -------- | ---------------- | ------------------------------- |
+| `<name>` | <what it stores> | `<field>`, `<field>`, `<field>` |
 
-- <relationship> -> <how enforced> (migration: `<path>` / code: `<path>`)
+**Constraints**
 
-### 4.4 Security Model
+- <invariant> -> <how enforced> (code: `<path>`)
 
-**Authentication**
+### 4.4 Trust Model
 
-- Method -> <e.g., Supabase Auth / JWT / OAuth> (code: `<path>`)
+**What never leaves the machine**
 
-**Authorization**
+- <data> -> <why no path off the machine exists> (code: `<path>`)
 
-- Roles/permissions -> <summary> (code/policies: `<path>`)
+**What the tool refuses to infer**
 
-**Data isolation**
+- <compliance value> -> <what it does instead> (code: `<path>`)
 
-- RLS / tenant scoping -> <how enforced> (policies/migrations: `<path>`)
+**What gates generation**
+
+- <blocking check> -> <what it proves against the source document> (code: `<path>`)
 
 ---
 

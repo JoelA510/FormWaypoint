@@ -7,10 +7,13 @@ Everything runs in the browser. The CIPL is parsed locally, the carrier's blank 
 filled locally, and nothing is uploaded — there is no backend, no account, and no network
 call carrying shipment data.
 
+Node 22.12 or newer (CI runs 24).
+
 ```bash
 npm install
 npm run dev            # browser, http://localhost:5173
 npm run desktop:dev    # desktop window (needs a Rust toolchain)
+npm run check          # typecheck, lint, tests, production build — the one gate
 ```
 
 A Windows installer is built by the **Desktop build** workflow — run it from the Actions
@@ -52,7 +55,8 @@ of defaulting to zero.
    describing the goods.
 7. **Proves the arithmetic** before generating anything. Quantities, weights and values must
    sum back to the totals printed on the source document.
-8. **Fills the carrier's real blank form** and downloads it, still editable and unsigned.
+8. **Fills the carrier's real blank form** and hands it back still editable and unsigned:
+   a download in the browser, a saved file with its path reported on the desktop.
 
 ## Supported carriers
 
@@ -114,12 +118,12 @@ manufacture the parts a document cannot support:
 
 ## Verification
 
-197 tests run against five real, manually-processed shipments across both CIPL formats. The expected values come from
-the completed SLIs that were filed for them, so a pass means the tool reproduces what a
-person produced by hand. A further set pins the failure modes that would otherwise be
-silent — a blank exporter profile, an unreadable weight total, a double-claimed packing
-line, an impossible date — because a form that looks complete and is wrong is the worst
-outcome this tool can produce.
+322 tests, of which 122 replay six real, manually-processed shipments across both CIPL
+formats. The expected values come from the completed SLIs that were filed for them, so a
+pass means the tool reproduces what a person produced by hand. The other 200 pin the
+failure modes that would otherwise be silent — a blank exporter profile, an unreadable
+weight total, a double-claimed packing line, an impossible date — because a form that looks
+complete and is wrong is the worst outcome this tool can produce.
 
 | Shipment | Carrier | Lines → rows | Quantity | Net weight | USD |
 | --- | --- | --- | ---: | ---: | ---: |
@@ -128,6 +132,13 @@ outcome this tool can produce.
 | K78027EC | CEVA | 11 → 3 | 97 | 138.841 kg | 129,999.10 |
 | 278515 | Nippon Express | 6 → 5 | 9 | supplied | 11,532.24 |
 | 278514 | CEVA | 1 → 1 | 2 | supplied | 1,251.37 |
+| K78541WH | FedEx / UPS | 7 rows keyed | | | |
+
+K78541WH is checked differently from the rest. It is the parser's hardest document — a line
+block split by a page break, weights printed divided (`(@ / 6)`), a commodity heading
+stranded at the foot of a page — and it is the reference for the FedEx and UPS keying
+sheets, checked against how that shipment was actually keyed rather than against a filed
+PDF form.
 
 ```bash
 npm run check    # typecheck, lint, tests, production build
@@ -136,14 +147,20 @@ npm run check    # typecheck, lint, tests, production build
 CI runs exactly this command on every push and pull request, so it cannot drift from what
 you see locally.
 
-Only the CIPLs are committed as fixtures. The completed SLIs they were checked against are
-not, because they carry handwritten signatures; the values read off them live in the test
-expectations instead.
+**No shipment document is committed.** The CIPLs are a customer's commercial paperwork —
+part numbers, values, consignees, classifications — so `src/test/fixtures/*.pdf` is
+gitignored; the filed SLIs are not committed either, because they carry handwritten
+signatures. Only the expected values live in the repository, as plain data in the test
+files, so a fixture supplies the input side and nothing else. The 122 tests that need those
+documents skip when they are absent, which is what a clean checkout sees: 200 pass, 122
+skip. To run the whole suite, drop the CIPLs into `src/test/fixtures/` under the names in
+[`src/test/fixtures.ts`](src/test/fixtures.ts).
 
 ## Schedule B data
 
 `public/data/schedule-b.json` is built from the Census Bureau's AES commodity concordance
-(9,746 codes). Refresh it when Schedule B changes — typically each January and July:
+(9,746 codes, built 2026-07-27). Refresh it when Schedule B changes — typically each
+January and July:
 
 ```bash
 node scripts/build-schedule-b.mjs --fetch
@@ -177,12 +194,27 @@ Kept in IndexedDB on this machine only, and clearable from the History panel:
 - net weight per part, for the format that states none,
 - approved classification overrides with their reason and approver,
 - processed shipments, for autofill and audit,
-
 - the imported item library.
 
 `localStore` in `src/store/local-store.ts` is the seam for a desktop build: it is the one
 place an implementation is named, so a Tauri packaging replaces that single assignment with
 a file-backed `LocalStore` and no calling code changes.
+
+## Where the finished form goes
+
+In the browser the filled SLI is a download, because a download is the only route a browser
+has. That route tells the app nothing back: not the folder, not the final name, not whether
+the write succeeded.
+
+On the desktop the shell writes it instead. `save_output` writes into the user's Downloads
+folder and returns the full path, so the panel can say **Saved to `<path>`** and offer an
+**Open** button; `open_output` then hands that path to whatever the system opens PDFs with.
+The file opens straight away, because the next thing anyone does with a filled SLI is read
+it and sign it, and the boxes deliberately left blank are only fillable in a reader. The
+same applies to the FedEx and UPS keying sheets.
+
+Regenerating a shipment never overwrites the copy already saved — the earlier file may
+already have been signed — so `unique_path` suffixes instead.
 
 ## Project layout
 
@@ -192,20 +224,31 @@ src/
   domain/
     cipl/        PDF text extraction and the Omron CIPL parser
     reconcile/   document-set selection, line joining, grouping, checks
-    schedule-b/  Census dataset lookup and validation
+    schedule-b/  Census dataset lookup, validation, and revision diffing
     item-library/  item-master import and commodity-number screening
     draft.ts     assembles reviewed values for a carrier form
   carriers/
-    nippon-express/   field map + adapter
-    ceva/             field map + adapter
+    nippon-express/   field map + adapter (8 commodity rows)
+    ceva/             field map + adapter (12 commodity rows)
     keying-sheet/     FedEx Ship Manager / UPS WorldShip
   features/      upload, review, manual fields, output
+  components/    shared UI primitives
   store/         local persistence
+  lib/           small shared helpers
+  styles/        Tailwind v4 theme, configured CSS-first
+  test/          fixture registry; the shipment PDFs are not committed
 public/
   templates/     blank carrier forms
   data/          Schedule B dataset
-src-tauri/       the desktop shell: four commands, no decisions
+src-tauri/       the desktop shell: seven commands, no decisions
 ```
+
+The shell's seven commands are the whole native surface, auditable in one file
+(`src-tauri/src/lib.rs`): `fetch_concordance`, `read_data_file`, `write_data_file`,
+`data_dir`, `save_output`, `open_output`, `output_dir`. No Tauri plugins — the opening is
+one `std::process::Command` per platform with the path as a single argument and no shell,
+so a space in `C:\Users\Firstname Lastname\Downloads` is quoted by the standard library
+rather than resplit by an interpreter.
 
 ## History
 

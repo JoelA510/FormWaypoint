@@ -1,3 +1,11 @@
+> **Superseded — archived 2026-07-30.**
+>
+> This review covers commit 6a39c2f of the monorepo — a Node/Express API, ingestion modules, document generator services and Python OCR services. All of it has since been deleted. The findings are about code that is no longer in the repository.
+>
+> The current design is in [`README.md`](../../README.md) and
+> [`roadmap.md`](../../roadmap.md). This file is kept for history; nothing in it describes
+> the tool as it exists.
+
 # FormWaypoint Repository Code Review
 
 ## Assumptions

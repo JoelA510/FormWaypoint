@@ -1,14 +1,18 @@
 # FormWaypoint Roadmap
 
-**Last Updated**: 2026-07-28
+**Last Updated**: 2026-07-30
 
 ## Current focus
 
 Turning a combined commercial invoice & packing list into a completed carrier Shipper's
 Letter of Instruction, on this machine. Two CIPL formats and two carriers are supported end
 to end, verified against real, manually-processed shipments. It ships as a web app and as a
-Windows desktop app; the desktop build adds the in-app Schedule B refresh, which cannot
-work in a browser.
+Windows desktop app; the desktop build adds the in-app Schedule B refresh, which cannot work
+in a browser, and writes the finished form to a path it can report back rather than handing
+the bytes to the webview and losing track of them.
+
+Both remaining items are the same shape of work: a new format or carrier is a detector, a
+parser, or an adapter, and nothing downstream changes. There is no known blocker in either.
 
 ## Milestone tracker
 
@@ -24,11 +28,12 @@ work in a browser.
 | **Review screen** | ✅ Done | Per-field provenance, blocking/advisory checks, classification overrides with reason and approver. |
 | **FedEx / UPS** | ✅ Done | Keying sheets ordered the way Ship Manager and WorldShip prompt, for manual entry. |
 | **Local history** | ✅ Done | Exporter profile, per-consignee values, per-part weights, the item library, overrides and processed shipments in IndexedDB. |
-| **Regression suite** | ✅ Done | 197 TypeScript tests over five real shipments across both formats, plus Rust unit tests for the shell's path handling. |
+| **Regression suite** | ✅ Done | 322 TypeScript tests, 122 of them over six real shipments across both formats, plus Rust unit tests for the shell's path handling. A clean checkout runs 200 and skips the 122 that need the uncommitted shipment documents. |
 | **Desktop packaging seam** | ✅ Done | `localStore` is the single named implementation; a Tauri build replaces one assignment. Windows-only target; WebView2 covers every platform API the app uses. |
-| **Desktop build (.exe)** | ✅ Done | Tauri v2 shell; the Windows installer is built by the `Desktop build` workflow. Four Rust commands and no decisions. TLS goes through the OS certificate store, so a corporate inspection CA is trusted, and an environment proxy is honoured. |
+| **Desktop build (.exe)** | ✅ Done | Tauri v2 shell; the Windows installer is built by the `Desktop build` workflow. Seven Rust commands and no decisions. TLS goes through the OS certificate store, so a corporate inspection CA is trusted, and an environment proxy is honoured. |
 | **Schedule B revision diff** | ✅ Done | `src/domain/schedule-b/revision.ts` — diffs two datasets, intersects the result with the item library by part, and renders the change log and CSV worklist. Pure logic, no filesystem or network. |
 | **In-app Schedule B refresh** | ✅ Done | Downloads the concordance, diffs it, writes the change log and CSV worklist, then replaces the dataset. Verified end to end against the live Census server in a packaged binary. |
+| **Saved output** | ✅ Done | `save_output` writes the filled SLI or keying sheet into Downloads and returns the path, `open_output` opens it; the panel reports where the file landed. Regenerating suffixes rather than overwriting, because the earlier copy may already be signed. Browser builds keep the blob download, which is all a browser can do. |
 | **More carriers** | 📅 Planned | One adapter each. The parser and reconciler carry no carrier-specific logic. |
 | **More CIPL formats** | 📅 Planned | A detector and a parser behind the same `ParsedCipl` contract — the registry and everything downstream are already shared. |
 
@@ -74,7 +79,8 @@ changed and which of your parts that touches; every correction stays a human act
   provided, so its totals are unverified and it is not a fixture.
 - **Item-master cleanup.** One imported library flags 1,456 of 2,856 rows — import-HTS
   numbers filed where Schedule B numbers belong. The tool lists them by part; correcting
-  them in the source system is a separate effort.
+  them in the source system is a separate effort, and one it deliberately does not do for
+  you.
 
 ## Known residue
 
@@ -89,6 +95,7 @@ changed and which of your parts that touches; every correction stays a human act
 
 | Date | Milestone | Details |
 | :--- | :--- | :--- |
+| 2026-07-30 | **Saved output** | `save_output`/`open_output` on the shell: the app learns where the finished form landed and opens it, instead of losing the blob to the webview. |
 | 2026-07-28 | **Pre-packaging pass** | Store seam narrowed to one assignment, Schedule B staleness warning, toolchain bumps (vite 8, vitest 4), monorepo leftovers removed. |
 | 2026-07-27 | **Item library** | Dependency-free .xlsx/.csv import, per-part weights, commodity-number screening. |
 | 2026-07-27 | **Second CIPL format** | `OMRON SHIPMENT#` parser behind a format registry; sales order vs customer PO separated. |

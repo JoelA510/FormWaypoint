@@ -39,9 +39,9 @@ Generate the response in Markdown using **specifically** the following template.
 
 **Example:**
 
-- **Major UI/State Refactor:** The monolithic `MasterLibraryList` component has been decomposed into a dedicated `useTreeState` hook, and `TaskList` now utilizes a new `useTaskBoard` hook, centralizing complex logic for improved maintainability.
-- **Database Hardening:** The database layer has been significantly hardened with robust recursion guards in PostgreSQL triggers, idempotent migration scripts, and refined Row Level Security (RLS) policies for enhanced security and data integrity.
-- **Performance & UX Improvements:** Introduced paginated project loading and on-demand hydration for joined projects, significantly enhancing application performance and responsiveness.
+- **Second CIPL format:** The SAP-style `OMRON SHIPMENT#` layout now sits behind a format registry that detects the document and dispatches to its own parser; everything downstream is unchanged, so a third format is a detector and a parser.
+- **Weights the document does not state:** That format prints no weights, so box 26 is supplied from the item library or a per-part table. The reconciliation reports those figures as *supplied* rather than *proved*, because there is nothing in the document to prove them against.
+- **A part with no known weight blocks generation** rather than defaulting to zero. A form that looks complete and is wrong is the worst outcome this tool can produce.
 
 ## 🗺️ Roadmap Progress
 
@@ -54,7 +54,7 @@ Generate the response in Markdown using **specifically** the following template.
 ### Key Patterns & Decisions
 
 - **Pattern A:** [Explanation of why we chose this approach]
-- **Tech Debt:** [e.g., Deep clone logic lives in TaskList.jsx for now; needs extraction to hook later.]
+- **Tech Debt:** [e.g., The overflow warning names the row count but not which rows were dropped; a continuation sheet would replace it.]
 
 ### Logic Flow / State Changes
 
@@ -70,24 +70,28 @@ graph TD
 
 ### 🚨 High Risk / Security Sensitive
 
-- `path/to/policies.sql` - [Why is this risky? e.g., RLS Policy Change]
-- `path/to/auth_service.js` - [Authentication logic]
+- `src/domain/reconcile/*` - [Changes what is proved against the source document]
+- `src/carriers/*/adapter.ts` - [Changes what lands in a box on a signed form]
+- `src-tauri/src/*.rs` - [Native surface: filesystem paths, network fetch, process spawn]
 
 ### 🧠 Medium Complexity
 
-- `path/to/feature_component.jsx` - [Core logic implementation]
+- `src/domain/cipl/*` - [Parsing a document shape]
+- `src/features/*` - [Review and output UI]
 
 ### 🟢 Low Risk / Boilerplate
 
-- `path/to/styles.css`
-- `path/to/fixtures.json`
+- `src/styles/globals.css`
+- `src/components/ui.tsx`
 
 ## 🧪 Verification Plan
 
 ### 1. Environment Setup
 
 - [ ] Run `npm install` (New dependencies added: `[package-name]`)
-- [ ] Run migration: `[filename].sql`
+- [ ] Run `npm run check` — typecheck, lint, tests, production build. CI runs exactly this.
+- [ ] Note whether any change needs the uncommitted shipment fixtures to verify; a clean
+      checkout runs 200 tests and skips 122.
 
 ### 2. Manual Verification
 
@@ -110,7 +114,7 @@ npm run lint
 <details>
 <summary><strong>📉 Detailed Changelog (Collapsible)</strong></summary>
 
-- `src/components/TaskItem.jsx`: Added `data-testid` for selection
+- `src/features/review.tsx`: Added the provenance badge to each commodity row
 - `src/utils/dateUtils.js`: Fixed offset calculation bug
 - ...
 

@@ -9,7 +9,7 @@ description: Start working on a GitHub Issue (Branch, Plan, Assign)
       - Ask them for their GitHub username if needed for assignment planning.
 
 2. **Create Feature Branch**
-    - Generate a branch name: `feat/<issue-number>-<short-description>` (e.g., `feat/12-add-login`).
+    - Generate a branch name: `feat/<issue-number>-<short-description>` (e.g., `feat/12-ceva-continuation-sheet`).
     - Call `create_branch(branch=..., from_branch="main")`.
     - _Note: If the branch exists, ask the user if they want to reuse it or create a new one._
 
@@ -17,7 +17,7 @@ description: Start working on a GitHub Issue (Branch, Plan, Assign)
     - Create or Overwrite `implementation_plan.md` with the standard template.
     - **Goal**: Summarize the Issue Body.
     - **Proposed Changes**: List likely file modifications based on your knowledge of the codebase.
-    - **Verification**: Define how you will prove it works (e.g., "Add test case to `auth.test.jsx`").
+    - **Verification**: Define how you will prove it works (e.g., "Add a case to `src/carriers/carriers.test.ts`"), and say whether it needs an uncommitted shipment fixture to run.
 
 4. **Admin Housekeeping**
     - **Attempt**: Call `issue_write(method="update", issue_number=..., assignees=["<current-user-login>"])` and update project status.

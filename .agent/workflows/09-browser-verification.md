@@ -1,97 +1,80 @@
 ---
-description: Exhaustive verification of app functionality via virtual browser tests (Golden Paths).
+description: Verify the golden path end to end in a real browser, and check the UI against Rule 30.
 trigger: After any UI refactor, feature addition, or manual request to 'Verify App'.
 ---
 
-# Workflow: Browser Verification & Golden Path Testing
+# Workflow: Browser Verification & Golden Path
 
-## Phase 1: Infrastructure Readiness
+## Phase 0: Know what this project tests with
 
-**Goal**: Ensure the testing environment is capable of simulating a browser.
+Before touching anything, understand the existing setup rather than assuming a stack:
 
-1. **Dependency Check**:
-   - Verify `package.json` contains `vitest` (or `jest`), `@testing-library/react`, and `@testing-library/user-event`.
-   - **Action**: If missing, install them immediately.
+- Vitest runs in the **`node`** environment (`vitest.config.ts`). The domain layer is pure
+  TypeScript and the PDF parser runs against pdfjs' Node build. A test that needs a DOM
+  opts in per-file with `// @vitest-environment jsdom`.
+- There are **no component tests and no `@testing-library` dependency**, and that is a
+  choice, not a gap. The risk in this tool is a wrong value on a signed form, not a
+  mis-rendered button, so the test budget goes to the domain layer.
+- **Do not install a testing-library stack, switch the global environment to jsdom, or
+  scaffold a `golden-paths.test.tsx` to satisfy this workflow.** If a UI behaviour
+  genuinely needs a regression test, add one jsdom-scoped file and say why.
 
-2. **Environment Setup**:
-   - Ensure `vite.config.js` is configured for test environments (JSDOM environment).
-   - Verify `src/setupTests.js` imports `@testing-library/jest-dom`.
+## Phase 1: The golden path
 
-## Phase 2: The "Golden Path" Definition
+There is one journey and it is linear. No login, no dashboard, no routing — the app is a
+single screen that advances.
 
-**Goal**: Define the critical user journeys that must never break.
+| Step | Feature | What must hold |
+| :--- | :--- | :--- |
+| 1. Upload | `src/features/upload-panel.tsx` | A CIPL is accepted, its format is detected, and the detected format is named on screen. A PDF matching no format fails loudly. |
+| 2. Review | `src/features/review.tsx` | Every commodity row shows its provenance: proved against the document, or supplied. Blocking and advisory checks are visually distinct (Rule 30). |
+| 3. Manual fields | `src/features/manual-fields.tsx` | The values no document carries — consignee type, routed-export status, origin — are asked for, never guessed. A blank one blocks. |
+| 4. Output | `src/features/output-panel.tsx` | Generation is refused while any blocking check stands. On success the form downloads (browser) or reports its saved path with an Open button (desktop). |
 
-The agent must verify these paths exists in `src/tests/integration/golden-paths.test.jsx`. If the file is missing or incomplete, create/update it.
+Two side paths, each reachable from the main screen:
 
-### Path A: The "Planter" Journey (Dashboard Load)
+- **Item library** (`src/features/item-library.tsx`) — import, weight-unit confirmation,
+  and the bad-commodity-number list by part number.
+- **Schedule B refresh** (`src/features/schedule-b-refresh.tsx`) — desktop only; the
+  staleness badge, and the change log written before the dataset is replaced.
 
-- **Context**: User logs in and lands on Dashboard.
-- **Checks**:
-  - Sidebar renders with correct navigational items.
-  - `DashboardLayout` wraps the content (verifying layout CSS).
-  - "New Project" button is visible and uses `bg-brand-500` (Design System check).
-  - Project list loads (handling empty states gracefully).
+## Phase 2: Execution
 
-### Path B: The "Task" Journey (Board Interaction)
+1. **Run the gate**: `npm run check` — typecheck, lint, tests, production build.
+2. **Expect skips.** A clean checkout runs 200 tests and skips 122; those need the shipment
+   PDFs, which are never committed. Skips here are a pass, not a failure to chase.
+3. **Serve it**: `npm run dev` (browser) or `npm run desktop:dev` (needs a Rust toolchain).
+   The desktop-only behaviours — Schedule B refresh, saved output paths — cannot be
+   verified in a browser at all. Say so rather than reporting them as passing.
 
-- **Context**: User navigates to a Project Board.
-- **Checks**:
-  - Task Columns (Todo, Doing, Done) render.
-  - Task Cards render within columns.
-  - Cards have `rounded-xl` and `shadow-sm` (Design System check).
-  - Clicking a task opens the Detail Panel (Modal/Slide-over).
+## Phase 3: Adversarial pass
 
-### Path C: The "Navigation" Journey
+Drive the running app and look for what a headless run cannot see: overlapping text, broken
+z-index, unclickable controls, layout shift when a long consignee address wraps, a check
+badge whose colour does not survive dark mode.
 
-- **Context**: Switching views.
-- **Checks**:
-  - Clicking "Reports" updates the route to `/reports`.
-  - Reports page renders without crashing.
-  - Breadcrumbs update to reflect current path.
+Walk it as a filer, not as a developer: upload a CIPL, correct something on the review
+screen, try to generate with a required field blank, then fill it and generate.
 
-## Phase 3: Execution & Analysis
+## Phase 4: Design regression check
 
-**Goal**: Run the suite and interpret results.
+Scan changed components for the failure Rule 30 exists to prevent — a raw Tailwind colour
+class where a token belongs:
 
-1. **Run Command**: `npm test` (or `npx vitest run`).
+```bash
+grep -rnE "\b(text|bg|border|ring)-(slate|zinc|gray|blue|red|amber|emerald|green)-[0-9]{2,3}\b" src --include="*.tsx"
+```
 
-2. **Analyze Failures**:
-   - **Render Error**: Often caused by missing Context Providers (`AuthContext`, `ToastContext`) in the test wrapper.
-     - **Fix**: Wrap test components in `<AppProviders>`.
-   - **Selector Error**: Button text changed?
-     - **Fix**: Update test expectation or restore UI label.
-   - **Style Error**: Class name missing?
-     - **Fix**: Re-apply Design System utility classes.
-
-## Phase 4: Adversarial Browser Agent (The "Real" Test)
-
-**Goal**: Use the `browser_subagent` to physically interact with the running application, detecting visual bugs, layout shifts, or broken interactions that headless tests miss.
-
-1. **Start Server**: Ensure app is running (`npm run dev`).
-2. **Launch Agent**:
-   - **Task**: "Act as a new user. Log in (if needed), navigate to the Dashboard, create a project, move a task. Report any visual glitches, confusing UI, or errors."
-   - **Focus**: Look for overlapping text, broken z-indices, unclickable buttons, or "jank".
-3. **Record**: Capture the session and note any "Human Experience" failures.
-
-## Phase 5: Design Regression Check (Static Analysis)
-
-**Goal**: Prevent "Design Drift" in the compiled output.
-
-1. **Class Audit**:
-   - Scan critical components (`TaskItem.jsx`, `SideNav.jsx`) for forbidden classes:
-     - `bg-blue-500` (Should be `bg-brand-500`)
-     - `shadow-lg` (Should be `shadow-sm`)
-     - `text-black` (Should be `text-slate-900`)
-
-2. **Correction**:
-   - If forbidden classes are found, strictly verify against `.agent/rules/30-design-standards.md` and auto-correct.
+Any hit is a defect: raw palette classes are invisible to the dark-scheme block in
+`src/styles/globals.css` and will read correctly in one scheme and wrongly in the other. The
+correct form is `text-[var(--color-ink-soft)]`, `bg-[var(--color-surface)]`,
+`border-[var(--color-block)]`. Verify against
+[`.agent/rules/30-design-standards.md`](../rules/30-design-standards.md) before correcting.
 
 ## Phase 5: Reporting
 
-**Goal**: Provide the user with confidence.
-
-Output a summary:
-
-- ✅ **Golden Paths**: [Pass/Fail]
-- ✅ **Design Compliance**: [Pass/Fail]
-- 📝 **Fixes Applied**: List of any auto-corrections made during the run.
+- ✅ **Golden path**: [Pass/Fail] — which steps were walked, in which build
+- ✅ **`npm run check`**: [Pass/Fail] — tests run / skipped
+- ✅ **Design compliance**: [Pass/Fail] — raw-palette hits found
+- 📝 **Fixes applied**: what was corrected during the run
+- ⚠️ **Not verified**: anything desktop-only that was skipped, said plainly

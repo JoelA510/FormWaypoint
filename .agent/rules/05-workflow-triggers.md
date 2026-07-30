@@ -10,14 +10,13 @@ trigger: always_on
 | :--- | :--- | :--- |
 | **New Task / Roadmap**<br>User says "What's next?" or finishes a task. | /00-auto-roadmap | Enforces roadmap priority; prevents "cherry-picking". |
 | **New Feature Request**<br>User asks to "Add X" or "Implement Y". | /01-feature-injection | Ensures architecture constraints are checked *before* coding. |
-| **High Risk Change**<br>Task involves Auth, RLS, Migrations, or Payment logic. | /02-test-plan | "Measure twice, cut once" for critical systems. |
-| **"Clean up the mess"**<br>User notes quality issues or requests a health check. | /03-debt-audit | Separates discovery (Audit) from action (Fix). |
-| **Fixing a Debt Item**<br>Addressing a specific line from DEBT_REPORT.md. | /04-surgical-refactor | Keeps refactors atomic and reversible. |
+| **High Risk Change**<br>Task touches `src/domain/`, a carrier adapter, or `src-tauri/`. | /02-test-plan | A wrong value on a signed export declaration is the worst outcome this tool has. |
+| **Cleanup / refactor**<br>User notes quality issues or names something to fix. | /04-surgical-refactor | Keeps refactors atomic and reversible. |
 | **Persistent Failure**<br>A test or build command fails 2+ times in a row. | /05-debug-loop-5 | Prevents infinite context loops/hallucinations. |
 | **Pre-PR / "I'm Done"**<br>Feature is complete, verified, and ready for review. | /06-pre-pr-docs | Ensures docs (README/Roadmap) never drift from code. |
 | **Self-Review**<br>Before asking User to review or merge. | /07-pre-pr-review | Catches low-hanging fruit (console.log, types) early. |
-| **UI/CSS Work**<br>After touching .jsx or .css files. | /08-design-system-migration | Enforces Rule 30 (Design Standards) programmatically. |
-| **Frontend Logic Change**<br>After modifying React components or Hooks. | /09-browser-verification | Verifies "Golden Paths" (Login -> Dash -> Board) still work. |
+| **UI/CSS Work**<br>After touching .tsx or .css files. | Rule 30 + /07-pre-pr-review | Token palette only; no raw Tailwind colour classes. |
+| **Frontend Logic Change**<br>After modifying React components or hooks. | /09-browser-verification | Verifies the golden path (upload -> review -> generate) still works. |
 | **"Big Release" / Converge**<br>Preparing for major version or full cleanup. | /10-master-review-orchestrator | Runs the full loop: Audit -> Fix -> Design -> Verify -> Docs. |
 | **Reviewing External PR**<br>User asks you to review a GitHub PR. | /11-remote-pr-review | Applies internal Engineering Standards to external code. |
 | **Starting GitHub Issue**<br>User links an Issue # or asks to start one. | /12-start-feature | Reduces admin overhead (Branch, Assign, Plan). |

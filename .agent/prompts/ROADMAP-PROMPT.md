@@ -13,14 +13,14 @@ You are a Technical Product Manager updating the project roadmap based on recent
    - Change 📅 to 🚧 (In Progress) if partial work is committed.
 4. **Refine "Current Focus"**: Update the header summary to reflect what the team should look at next.
 5. **Add History**: If a major milestone was reached, consider adding a row to "Project History".
-6. **Verify Workflows**: Check section "2. UX Workflows & Status". If a previously broken or partial workflow is now working, update it.
+6. **Check the tail sections**: "Open questions" and "Known residue" go stale quietly. If a change resolved one, remove it and say so in Project History; if it changed the trade-off, rewrite the reasoning.
 
 ## Output Requirements
 
 - [x] **Update discipline**: Ensure the "Last Updated" date is changed.
 - [x] **Strict Adherence**: Follow the definitions in the template below.
 - [x] **No Optimism**: Do not mark things as "Done" unless they are in the codebase.
-- [x] **ID Consistency**: Do not change the IDs (e.g., `P5-REPORT-UI`) of existing items so we can track them.
+- [x] **Name consistency**: Do not rename existing milestone rows; a reader tracking a feature across revisions needs the name to hold still.
 
 ---
 
@@ -35,49 +35,49 @@ Scope:
 Update discipline:
 - Update "Last Updated" date on every edit.
 - Mark items as ✅ (Done), 🚧 (In Progress), 📅 (Planned), or ❌ (Skipped).
+- Numbers are claims: test counts, dataset sizes and command counts must be checked
+  against the code before they are written down, not carried forward from the last edit.
 - Do not remove completed items; keep history visible (or move to a History section).
 -->
 
-# FormWaypoint Roadmap & History
+# FormWaypoint Roadmap
 
-**Last Updated:** YYYY-MM-DD
-**Current Focus:** <One-line summary of current priority>
+**Last Updated**: YYYY-MM-DD
 
----
+## Current focus
 
-## 1. Project History
+<Two short paragraphs: what the tool does today and how far it goes, then what the
+remaining planned work has in common and whether anything blocks it.>
 
-A chronological overview of major eras.
+## Milestone tracker
 
-| Era        | Timeline | Key Milestones                                 |
-| :--------- | :------- | :--------------------------------------------- |
-| **<Name>** | <Date>   | **<Theme>**: Summary of valid accomplishments. |
+One row per capability, in the order it was built. Never delete a row; a shipped feature
+stays visible.
 
----
+| Feature | Status | Description |
+| :--- | :--- | :--- |
+| **<Name>** | ✅ Done / 🚧 In Progress / 📅 Planned | <What it does, and the detail that makes it non-obvious.> |
 
-## 2. UX Workflows & Status
+## <Deep dive sections, as needed>
 
-The core user journeys identified in the codebase.
+Where a mechanism needs more than a table row to be understood — how the Schedule B refresh
+works, why a change log has two scopes — give it its own section. Explain the reasoning,
+not just the behaviour.
 
-### <Category Name>
+## Open questions
 
-| Workflow            | Status               | Notes                               |
-| :------------------ | :------------------- | :---------------------------------- |
-| **<Workflow Name>** | <Emoji> **<Status>** | Key technical detail or limitation. |
+Decisions deliberately left open, with the reason. Not a to-do list.
 
----
+- **<Question>.** <What is unresolved, what the current default is, and why.>
 
-## 3. Future Roadmap
+## Known residue
 
-Remaining phases from the original plan.
+Things that are wrong or unresolved and are staying that way for now, with the reasoning
+that makes it a defensible trade rather than neglect.
 
-### Phase X: <Theme>
+## Project history
 
-_Goal: <One sentence goal>_
-
-#### X.1 <Feature Name>
-
-- **ID:** `<ID-TAG>`
-- **Goal**: <Specific outcome>
-- **Status**: <Emoji status>
+| Date | Milestone | Details |
+| :--- | :--- | :--- |
+| YYYY-MM-DD | **<Name>** | <What shipped.> |
 ```

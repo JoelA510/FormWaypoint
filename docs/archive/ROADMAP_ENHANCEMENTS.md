@@ -1,3 +1,11 @@
+> **Superseded — archived 2026-07-30.**
+>
+> These proposals were written for the pre-2026 monorepo: a Hono API with Postgres, carrier rate shopping, booking and label printing, ERP sync and a denied-party screening service. That product was removed in full once the client-side CIPL to SLI pipeline was verified, and none of it applies to a tool with no backend, no account and no carrier API. Several items reference components that no longer exist (`ProfitabilityCard`).
+>
+> The current design is in [`README.md`](../../README.md) and
+> [`roadmap.md`](../../roadmap.md). This file is kept for history; nothing in it describes
+> the tool as it exists.
+
 # FormWaypoint: Strategic Roadmap & Enhancement Proposals
 
 ## 1. Advanced Workflow Orchestration (The "Power User" Suite)
