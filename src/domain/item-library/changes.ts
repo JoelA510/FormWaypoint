@@ -17,7 +17,9 @@
  * check exists to surface.
  */
 import { formatScheduleB, normalizeScheduleB } from '../schedule-b'
+import { cell, csvRows, datedFileName } from '../../lib/report'
 import type { ItemLibraryEntry } from '.'
+import { partKey } from '../part-key'
 
 /** A field the item master holds and a person overrode. */
 export type ChangedField = 'weight' | 'code'
@@ -65,7 +67,7 @@ export interface EnteredValues {
   updatedAt: string
 }
 
-const key = (part: string) => part.trim().toUpperCase()
+
 
 /**
  * Weights are compared at three decimals.
@@ -78,11 +80,11 @@ const key = (part: string) => part.trim().toUpperCase()
 const sameWeight = (a: number, b: number) => Math.abs(a - b) < 0.0005
 
 export function libraryChanges(entered: EnteredValues[], library: ItemLibraryEntry[]): LibraryChangeSet {
-  const byPart = new Map(library.map((entry) => [key(entry.partNumber), entry]))
+  const byPart = new Map(library.map((entry) => [partKey(entry.partNumber), entry]))
   const changes: LibraryChange[] = []
 
   for (const value of entered) {
-    const entry = byPart.get(key(value.partNumber))
+    const entry = byPart.get(partKey(value.partNumber))
     const partInLibrary = Boolean(entry)
     const common = {
       partNumber: value.partNumber,
@@ -164,10 +166,8 @@ const ACTION_NOTES: Record<ChangeAction, string> = {
   matches: 'The item master already agrees.',
 }
 
-/** Safe inside a markdown table cell — descriptions come from an ERP, not from this code. */
-const cell = (text: string) => text.replace(/\s+/g, ' ').replace(/\|/g, '\\|').trim()
-
-const shown = (value: string | null) => value ?? '—'
+/** The library's value, escaped: it is verbatim spreadsheet text and may contain a pipe. */
+const shown = (value: string | null) => (value == null ? '—' : cell(value))
 
 export function renderLibraryChangeLog(
   set: LibraryChangeSet,
@@ -220,7 +220,7 @@ export function renderLibraryChangeLog(
     )
     for (const c of codes) {
       lines.push(
-        `| ${cell(c.partNumber)} | ${cell(c.description)} | ${shown(c.libraryValue)} | ${c.enteredValue} | ` +
+        `| ${cell(c.partNumber)} | ${cell(c.description)} | ${shown(c.libraryValue)} | ${cell(c.enteredValue)} | ` +
           `${cell(c.reason) || '—'} | ${cell(c.enteredBy) || '—'} | ${c.updatedAt.slice(0, 10)} |`,
       )
     }
@@ -238,7 +238,7 @@ export function renderLibraryChangeLog(
     )
     for (const c of weights) {
       lines.push(
-        `| ${cell(c.partNumber)} | ${cell(c.description)} | ${shown(c.libraryValue)} | ${c.enteredValue} | ` +
+        `| ${cell(c.partNumber)} | ${cell(c.description)} | ${shown(c.libraryValue)} | ${cell(c.enteredValue)} | ` +
           `${c.updatedAt.slice(0, 10)} |`,
       )
     }
@@ -263,43 +263,24 @@ export function renderLibraryChangeLog(
 
 /** The same worklist as CSV, for sorting and filtering in a spreadsheet. */
 export function renderLibraryChangesCsv(set: LibraryChangeSet): string {
-  const escape = (value: string) => (/[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value)
-  const rows = [
-    [
-      'Part Number',
-      'Item Description',
-      'Field',
-      'In The Master',
-      'New Value',
-      'Action',
-      'Part In Master',
-      'Reason',
-      'Entered By',
-      'Date',
-    ].join(','),
-  ]
-  for (const c of set.actionable) {
-    rows.push(
-      [
-        c.partNumber,
-        c.description,
-        FIELD_LABELS[c.field],
-        c.libraryValue ?? '',
-        c.enteredValue,
-        ACTION_NOTES[c.action],
-        c.partInLibrary ? 'yes' : 'no',
-        c.reason,
-        c.enteredBy,
-        c.updatedAt.slice(0, 10),
-      ]
-        .map(escape)
-        .join(','),
-    )
-  }
-  return rows.join('\n')
+  return csvRows(
+    ['Part Number', 'Item Description', 'Field', 'In The Master', 'New Value', 'Action', 'Part In Master', 'Reason', 'Entered By', 'Date'],
+    set.actionable.map((c) => [
+      c.partNumber,
+      c.description,
+      FIELD_LABELS[c.field],
+      c.libraryValue ?? '',
+      c.enteredValue,
+      ACTION_NOTES[c.action],
+      c.partInLibrary ? 'yes' : 'no',
+      c.reason,
+      c.enteredBy,
+      c.updatedAt.slice(0, 10),
+    ]),
+  )
 }
 
 /** `item-master-updates-2026-07-29.csv` — dated, so successive exports never overwrite. */
 export function libraryChangesFileName(today: string, extension = 'md'): string {
-  return `item-master-updates-${today}.${extension}`
+  return datedFileName('item-master-updates', today, extension)
 }

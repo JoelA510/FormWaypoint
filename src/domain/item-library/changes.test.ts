@@ -198,3 +198,19 @@ describe('rendering', () => {
     expect(libraryChangesFileName('2026-07-29', 'csv')).toBe('item-master-updates-2026-07-29.csv')
   })
 })
+
+describe('values that came out of a spreadsheet', () => {
+  it('escapes a pipe in the library’s own value, not just the description', () => {
+    // `exportCode` is verbatim spreadsheet text and is never rewritten, so it can carry
+    // anything. Unescaped it adds a column and corrupts the table from that row down.
+    const set = libraryChanges(
+      [entered({ exportCode: '8536.50.9065', reason: 'r' })],
+      [entry({ exportCode: '8544.42.0000 | see note' })],
+    )
+    const log = renderLibraryChangeLog(set, { today: '2026-07-30', librarySource: 'x' })
+    expect(log).toContain('8544.42.0000 \\| see note')
+    // Still seven columns: splitting on unescaped pipes only, since `\\|` keeps the character.
+    const dataRow = log.split('\n').find((l) => l.includes('8536.50.9065') && l.startsWith('| AAA-1'))!
+    expect(dataRow.split(/(?<!\\)\|/)).toHaveLength(9)
+  })
+})

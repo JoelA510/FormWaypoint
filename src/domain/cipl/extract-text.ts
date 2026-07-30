@@ -207,9 +207,11 @@ export function isLikelyBarcode(text: string): boolean {
   // Control characters. Nothing typed into an ERP contains one; the barcode font is riddled
   // with them.
   if (hasControlCharacter(trimmed)) return true
-  // The font pads to a fixed width with `ÿ`. Two in a row is padding; a single one could
-  // conceivably be a real letter, so it is left alone.
-  if (/ÿ{2,}/.test(trimmed)) return true
+  // The font pads with `ÿ`. Any of them, not a run: pdfjs splits the barcode into several
+  // items, and a fragment that happens to carry only one would otherwise pass as text and
+  // shift the block's columns by a cell. `ÿ` does not occur in these part descriptions, so
+  // this costs nothing that the old "any non-ASCII" rule was not already costing.
+  if (trimmed.includes('ÿ')) return true
   // Short leading fragments the font splits off, e.g. `xh"c` or `xh`.
   return /^x[hi][\s"'#&(]*[A-Za-z0-9]?$/.test(trimmed)
 }

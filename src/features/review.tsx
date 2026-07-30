@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Field, Input, ProvenanceRow, Select, type Tone } from '../components/ui'
 import { resolveDestinationCountry } from '../domain/reconcile'
 import { formatScheduleB, normalizeScheduleB } from '../domain/schedule-b'
+import { partKey } from '../domain/part-key'
 import type { OverrideRecord } from '../store/local-store'
-import type { CheckResult, ParsedCipl, Reconciliation } from '../domain/types'
+import type { CheckResult, MergedLine, ParsedCipl, Reconciliation } from '../domain/types'
 
 const SEVERITY_TONE: Record<CheckResult['severity'], Tone> = {
   blocking: 'block',
@@ -383,9 +384,16 @@ export function PartOverridesPanel({
   onClearCode: (partNumber: string) => void
 }) {
   const parts = [...new Map(reconciliation.mergedLines.map((l) => [l.partNumber, l])).values()]
-  const missing = weightsNeeded ? parts.filter((p) => weights[p.partNumber] == null) : []
-  const ordered = weightsNeeded ? [...missing, ...parts.filter((p) => weights[p.partNumber] != null)] : parts
-  const overridden = parts.filter((p) => codes[p.partNumber.trim().toUpperCase()]).length
+  const weightOf = (part: MergedLine) => weights[partKey(part.partNumber)]
+  const missing = weightsNeeded ? parts.filter((p) => weightOf(p) == null) : []
+  const ordered = weightsNeeded ? [...missing, ...parts.filter((p) => weightOf(p) != null)] : parts
+  // Counted the same way `partCodeOverrideChecks` counts them: a saved code that matches what
+  // this document prints substituted nothing, and badging it would contradict a checks panel
+  // that deliberately says nothing about it.
+  const overridden = parts.filter((p) => {
+    const entered = codes[partKey(p.partNumber)]
+    return entered && normalizeScheduleB(entered) !== normalizeScheduleB(p.classification)
+  }).length
 
   return (
     <Card>
@@ -424,7 +432,7 @@ export function PartOverridesPanel({
             </thead>
             <tbody>
               {ordered.map((part) => {
-                const unit = weights[part.partNumber]
+                const unit = weightOf(part)
                 return (
                   <tr key={part.partNumber} className="border-b align-top last:border-b-0">
                     <td className="tabular px-4 py-2.5 whitespace-nowrap">{part.partNumber}</td>
@@ -450,7 +458,7 @@ export function PartOverridesPanel({
                     <td className="px-4 py-2.5">
                       <PartCodeInput
                         documentCode={part.classification}
-                        value={codes[part.partNumber.trim().toUpperCase()]}
+                        value={codes[partKey(part.partNumber)]}
                         enteredBy={enteredBy}
                         onCommit={(code, reason) => onSaveCode(part.partNumber, part.description, code, reason)}
                         onClear={() => onClearCode(part.partNumber)}
@@ -539,9 +547,18 @@ function PartCodeInput({
         onChange={(e) => setDraft(e.target.value)}
       />
 
-      {saved && !dirty ? (
+      {/*
+        Shown whenever an override is in force, not only while the box still matches it.
+        Gating on `!dirty` meant deleting one character removed the only way to undo the
+        override while it carried on substituting the code — and typing the document's own
+        number, the obvious way to ask for it back, offered neither revert nor apply.
+      */}
+      {saved ? (
         <div className="flex items-center gap-2">
-          <span className="text-xs text-[var(--color-warn)]">overriding {formatScheduleB(documentCode)}</span>
+          <span className="text-xs text-[var(--color-warn)]">
+            overriding {formatScheduleB(documentCode)}
+            {dirty ? ` with ${formatScheduleB(value ?? '')} — not yet applied` : ''}
+          </span>
           <button
             type="button"
             className="text-xs text-[var(--color-ink-faint)] underline"

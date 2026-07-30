@@ -20,6 +20,7 @@
  */
 import type { DocumentKind, ParsedCipl, PartyAddress, ShipmentHeader, SourceLine } from '../types'
 import { extractTextPages, isLikelyBarcode, parseNumber, rowText, type TextPage, type TextRow } from './extract-text'
+import { partKey } from '../part-key'
 
 /**
  * `13383820.1.000` — sales order, line, schedule line. The master packing list appends the
@@ -85,7 +86,15 @@ export function parseOmronShipmentPages(fileName: string, pages: TextPage[]): Pa
      * be read leaves zero, which fails the check loudly — an unproved total is not the same
      * as a proved one.
      */
-    const printedTotal = pages.map((page) => parseNumber(rightOfLabel(page.rows, 'Total Net Value:'))).find((v) => v != null)
+    // The *last* invoice page, not the first match anywhere. A layout that prints a
+    // carried-forward subtotal per page would otherwise hand back page one's subtotal as the
+    // shipment total and fail a correctly parsed document; a packing-list page carrying the
+    // label would otherwise outrank the invoice's own figure.
+    const printedTotal = pages
+      .filter((page) => pageKind(page) === 'INVOICE')
+      .map((page) => parseNumber(rightOfLabel(page.rows, 'Total Net Value:')))
+      .filter((value): value is number => value != null)
+      .at(-1)
     if (printedTotal != null) {
       header.totalValue = printedTotal
     } else {
@@ -120,6 +129,16 @@ export function parseOmronShipmentPages(fileName: string, pages: TextPage[]): Pa
 
   const partTotals = parsePartTotals(pages)
 
+  // A summary section the parser could not read is worse than none at all: the check it
+  // feeds simply disappears, and the two totals left for this format are — by their own
+  // comments — sums of the very lines they are meant to prove. So say so.
+  if (!Object.keys(partTotals).length && pages.some(hasSummarySection)) {
+    warnings.push(
+      'The packing list has a summary section but none of its per-part totals could be read, so the parts on ' +
+        'this shipment could not be checked against it. Compare them by hand before filing.',
+    )
+  }
+
   return {
     fileName,
     format: 'omron-shipment',
@@ -147,6 +166,11 @@ export function parseOmronShipmentPages(fileName: string, pages: TextPage[]): Pa
  */
 const SUMMARY_LINE = /Item Number:\s*(\S+)\s+Total Qty:\s*([\d,]+\.?\d*)/i
 
+/** The marker `endOfTable` already keys off, so the parser knows the section exists. */
+function hasSummarySection(page: TextPage): boolean {
+  return page.rows.some((row) => rowText(row).toUpperCase().includes('SUMMARY INFORMATION'))
+}
+
 function parsePartTotals(pages: TextPage[]): Record<string, number> {
   const totals: Record<string, number> = {}
   for (const page of pages) {
@@ -155,7 +179,7 @@ function parsePartTotals(pages: TextPage[]): Record<string, number> {
       if (!match) continue
       const quantity = parseNumber(match[2])
       if (quantity == null) continue
-      const part = match[1].trim().toUpperCase()
+      const part = partKey(match[1])
       totals[part] = round((totals[part] ?? 0) + quantity, 3)
     }
   }

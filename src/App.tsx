@@ -16,6 +16,7 @@ import {
 } from './domain/schedule-b'
 import { loadInstalledDataset } from './domain/schedule-b/refresh'
 import { desktopBridge } from './desktop'
+import { localDate } from './lib/report'
 import { ScheduleBRefreshPanel } from './features/schedule-b-refresh'
 import {
   applyCarrierDefaults,
@@ -41,6 +42,7 @@ import {
   overridesToMap,
   type OverrideRecord,
   type PartOverrideRecord,
+  type PartOverridePatch,
   type ShipmentRecord,
 } from './store/local-store'
 import type { ParsedCipl } from './domain/types'
@@ -213,30 +215,19 @@ export function App() {
   }, [])
 
   /**
-   * Saves one field of a part's manual values without disturbing the other.
+   * Saves one field of a part's manual values.
    *
-   * One record holds both the weight and the code, so writing either has to merge rather than
-   * replace — entering a code for a part that already has a weight must not silently drop the
-   * weight and re-block the shipment. The existing record is matched case-insensitively and
-   * its own key reused, because a part whose casing differs between two documents is one part
-   * and must not end up as two rows.
+   * The merge happens inside the store's transaction, not here. Both fields are edited by two
+   * controls in the same table row, and a blur and a click land milliseconds apart — merging
+   * against this component's `partOverrides` would build the second write from a snapshot
+   * taken before the first landed and silently erase it.
    */
   const savePartOverride = useCallback(
-    async (partNumber: string, description: string, patch: Partial<PartOverrideRecord>) => {
-      const existing = partOverrides.find(
-        (r) => r.partNumber.trim().toUpperCase() === partNumber.trim().toUpperCase(),
-      )
-      await localStore.savePartOverride({
-        ...existing,
-        partNumber: existing?.partNumber ?? partNumber,
-        description: description || existing?.description || '',
-        netWeightKg: existing?.netWeightKg ?? null,
-        ...patch,
-        updatedAt: new Date().toISOString(),
-      })
+    async (partNumber: string, description: string, patch: PartOverridePatch) => {
+      await localStore.savePartOverride(partNumber, description, patch)
       setPartOverrides(await localStore.listPartOverrides())
     },
-    [partOverrides],
+    [],
   )
 
   const savePartWeight = useCallback(
@@ -254,29 +245,12 @@ export function App() {
   /**
    * Drops the code override, keeping any weight.
    *
-   * A part with neither left is deleted outright rather than kept as an empty row, so the
-   * item-master worklist does not carry an entry that says nothing.
+   * The store deletes a record left with neither field rather than keeping an empty row, so
+   * clearing the code off a code-only part removes it entirely.
    */
   const clearPartCode = useCallback(
-    async (partNumber: string) => {
-      const existing = partOverrides.find(
-        (r) => r.partNumber.trim().toUpperCase() === partNumber.trim().toUpperCase(),
-      )
-      if (!existing) return
-      if (existing.netWeightKg == null) {
-        await localStore.deletePartOverride(existing.partNumber)
-      } else {
-        await localStore.savePartOverride({
-          ...existing,
-          exportCode: '',
-          reason: '',
-          enteredBy: '',
-          updatedAt: new Date().toISOString(),
-        })
-      }
-      setPartOverrides(await localStore.listPartOverrides())
-    },
-    [partOverrides],
+    (partNumber: string) => savePartOverride(partNumber, '', { exportCode: '', reason: '', enteredBy: '' }),
+    [savePartOverride],
   )
 
   /** What the manual entries would change in the item master, for the export worklist. */
@@ -416,7 +390,7 @@ export function App() {
             <ItemMasterUpdatesPanel
               changes={pendingLibraryChanges}
               librarySource={librarySource}
-              today={new Date().toISOString().slice(0, 10)}
+              today={localDate()}
               bridge={bridge}
             />
             <HistoryPanel shipments={shipments} onClear={() => void clearAll()} />

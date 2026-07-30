@@ -13,6 +13,7 @@ import { openDB, type IDBPDatabase } from 'idb'
 import type { CompanyProfile, ShipmentSettings } from '../domain/draft'
 import type { ItemLibraryEntry } from '../domain/item-library'
 import type { CheckResult, SLILine } from '../domain/types'
+import { partKey } from '../domain/part-key'
 
 const DB_NAME = 'formwaypoint'
 const DB_VERSION = 4
@@ -81,6 +82,9 @@ export interface PartOverrideRecord {
   updatedAt: string
 }
 
+/** The fields of a part's record that a caller may set. */
+export type PartOverridePatch = Partial<Pick<PartOverrideRecord, 'netWeightKg' | 'exportCode' | 'reason' | 'enteredBy'>>
+
 /** One processed shipment, kept for autofill and as an audit trail. */
 export interface ShipmentRecord {
   /**
@@ -119,7 +123,16 @@ export interface LocalStore {
   deleteOverride(sourceCode: string): Promise<void>
 
   listPartOverrides(): Promise<PartOverrideRecord[]>
-  savePartOverride(record: PartOverrideRecord): Promise<void>
+  /**
+   * Merges a patch into one part's record, reading and writing in a single transaction.
+   *
+   * A patch rather than a whole record, and merged here rather than by the caller, because
+   * the two fields are edited by two controls in the same table row. A blur and a click land
+   * within a few milliseconds of each other, and a caller merging against its own React state
+   * would have the second write built from a snapshot taken before the first landed — sending
+   * back `netWeightKg: null` and silently erasing the weight just typed.
+   */
+  savePartOverride(partNumber: string, description: string, patch: PartOverridePatch): Promise<void>
   deletePartOverride(partNumber: string): Promise<void>
 
   listItems(): Promise<ItemLibraryEntry[]>
@@ -212,11 +225,35 @@ export const indexedDbStore: LocalStore = {
   async listPartOverrides() {
     return (await (await db()).getAll('partWeights')) as PartOverrideRecord[]
   },
-  async savePartOverride(record) {
-    await (await db()).put('partWeights', record)
+  async savePartOverride(partNumber, description, patch) {
+    const tx = (await db()).transaction('partWeights', 'readwrite')
+    const held = (await tx.store.getAll()) as PartOverrideRecord[]
+    // Matched on the normalised part number, not the stored key: a part whose casing differs
+    // between two documents is one part and must not become two rows.
+    const existing = held.find((r) => partKey(r.partNumber) === partKey(partNumber))
+    const merged: PartOverrideRecord = {
+      ...existing,
+      partNumber: existing?.partNumber ?? partNumber,
+      description: description || existing?.description || '',
+      netWeightKg: existing?.netWeightKg ?? null,
+      ...patch,
+      updatedAt: new Date().toISOString(),
+    }
+    // A record with neither field left says nothing, and would put an empty row in the
+    // item-master worklist.
+    if (merged.netWeightKg == null && !merged.exportCode?.trim()) {
+      if (existing) await tx.store.delete(existing.partNumber)
+    } else {
+      await tx.store.put(merged)
+    }
+    await tx.done
   },
   async deletePartOverride(partNumber) {
-    await (await db()).delete('partWeights', partNumber)
+    const tx = (await db()).transaction('partWeights', 'readwrite')
+    const held = (await tx.store.getAll()) as PartOverrideRecord[]
+    const existing = held.find((r) => partKey(r.partNumber) === partKey(partNumber))
+    if (existing) await tx.store.delete(existing.partNumber)
+    await tx.done
   },
 
   async listItems() {
@@ -267,7 +304,7 @@ export const localStore: LocalStore = indexedDbStore
 /** Manually entered weights in the shape the reconciliation engine expects. */
 export function overrideWeights(records: PartOverrideRecord[]): Record<string, number> {
   return Object.fromEntries(
-    records.filter((r) => r.netWeightKg != null).map((r) => [r.partNumber, r.netWeightKg as number]),
+    records.filter((r) => r.netWeightKg != null).map((r) => [partKey(r.partNumber), r.netWeightKg as number]),
   )
 }
 
@@ -281,7 +318,7 @@ export function overrideCodes(records: PartOverrideRecord[]): Record<string, str
   return Object.fromEntries(
     records
       .filter((r) => r.exportCode?.trim())
-      .map((r) => [r.partNumber.trim().toUpperCase(), (r.exportCode as string).trim()]),
+      .map((r) => [partKey(r.partNumber), (r.exportCode as string).trim()]),
   )
 }
 

@@ -3,6 +3,7 @@
  */
 import type { MergedLine, SLILine, SourceLine } from '../types'
 import { canonicalUnit, formatScheduleB, normalizeScheduleB } from '../schedule-b'
+import { partKey } from '../part-key'
 
 /** Values that mean "made in the USA" on these documents. */
 const US_ORIGINS = new Set(['UNITED STATES', 'UNITED STATES OF AMERICA', 'USA', 'US', 'U.S.', 'U.S.A.'])
@@ -117,10 +118,10 @@ export function joinInvoiceToPacking(invoiceLines: SourceLine[], packingLines: S
  * block the shipment with no visible reason.
  */
 export function applyUnitWeights(lines: MergedLine[], unitWeightsByPart: Record<string, number>): MergedLine[] {
-  const byUpperPart = new Map(Object.entries(unitWeightsByPart).map(([part, weight]) => [part.trim().toUpperCase(), weight]))
+  const byPart = new Map(Object.entries(unitWeightsByPart).map(([part, weight]) => [partKey(part), weight]))
   return lines.map((line) => {
     if (line.netWeightKg != null) return line
-    const unit = unitWeightsByPart[line.partNumber] ?? byUpperPart.get(line.partNumber.trim().toUpperCase())
+    const unit = byPart.get(partKey(line.partNumber))
     if (unit == null) return line
     return { ...line, netWeightKg: roundTo(unit * line.quantity, 3) }
   })
@@ -186,9 +187,11 @@ export function aggregateLines(lines: MergedLine[], options: AggregationOptions)
 
   for (const line of lines) {
     const sourceCode = normalizeScheduleB(line.classification)
+    // Truthiness, not `??`: an empty string in `codesByPart` is "no override", and taking
+    // it would group the row under a blank classification and write a blank Schedule B.
     const code =
-      options.codesByPart?.[line.partNumber.trim().toUpperCase()] ??
-      options.overrides?.[sourceCode] ??
+      options.codesByPart?.[partKey(line.partNumber)] ||
+      options.overrides?.[sourceCode] ||
       line.classification
     const df = domesticForeign(line.countryOfOrigin)
     // An ECCN printed on the CIPL is authoritative and beats the blanket value. Filing

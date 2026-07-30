@@ -17,6 +17,7 @@ import type {
 } from '../types'
 import { checkClassification, formatScheduleB, normalizeScheduleB, screenCode, type ScheduleBIndex } from '../schedule-b'
 import type { ItemLibraryEntry } from '../item-library'
+import { partKey } from '../part-key'
 import {
   aggregateLines,
   applyUnitWeights,
@@ -390,11 +391,14 @@ function totalsChecks(
  * misstates the shipment just as badly in the other direction.
  */
 function partTotalChecks(merged: MergedLine[], partTotals?: Record<string, number>): CheckResult[] {
-  if (!partTotals || !Object.keys(partTotals).length || !merged.length) return []
+  // Deliberately not guarded on `merged.length`. A document whose every line block was
+  // refused produces no merged lines at all, and every other check then compares zero
+  // against zero and passes — which is precisely the shipment this must hold.
+  if (!partTotals || !Object.keys(partTotals).length) return []
 
   const counted = new Map<string, number>()
   for (const line of merged) {
-    const key = line.partNumber.trim().toUpperCase()
+    const key = partKey(line.partNumber)
     counted.set(key, roundTo((counted.get(key) ?? 0) + line.quantity, 3))
   }
 
@@ -551,7 +555,7 @@ function partCodeChecks(
   const disagreeing: { part: string; document: string; library: string }[] = []
 
   for (const { part, code } of seen.values()) {
-    const entry = itemsByPart.get(part.trim().toUpperCase())
+    const entry = itemsByPart.get(partKey(part))
     if (!entry) continue
     const first = !covered.has(part)
     covered.add(part)
@@ -623,7 +627,7 @@ function partCodeOverrideChecks(merged: MergedLine[], codesByPart?: Record<strin
 
   const substituted = new Map<string, { part: string; from: string; to: string }>()
   for (const line of merged) {
-    const entered = codesByPart[line.partNumber.trim().toUpperCase()]
+    const entered = codesByPart[partKey(line.partNumber)]
     if (!entered) continue
     if (normalizeScheduleB(entered) === normalizeScheduleB(line.classification)) continue
     substituted.set(line.partNumber, {

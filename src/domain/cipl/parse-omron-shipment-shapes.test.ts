@@ -284,3 +284,62 @@ describe('the shipment as a whole', () => {
     }
   })
 })
+
+describe('when nothing at all could be parsed', () => {
+  /** Every detail row stripped of its description — the whole document refused. */
+  const allRefused = () => {
+    const pages = wholeShipment()
+    for (const page of pages) {
+      for (const r of page.rows) {
+        r.items = r.items.filter((i) => !LINES.some((l) => l.description === i.str))
+      }
+    }
+    return pages
+  }
+
+  it('still holds the shipment, because the summary does not depend on the lines', () => {
+    // Every other check compares zero against zero here and passes. This one has an
+    // independent figure to compare against, which is the entire reason it exists.
+    const parsed = parse(allRefused())
+    expect(parsed.lines.filter((l) => l.documentKind === 'INVOICE')).toHaveLength(0)
+    const result = reconcile(parsed, null, CONTROLLED)
+    expect(result.checks.find((c) => c.id === 'packing-summary')).toMatchObject({
+      severity: 'blocking',
+      passed: false,
+    })
+    expect(result.canGenerate).toBe(false)
+  })
+})
+
+describe('a summary section that cannot be read', () => {
+  it('warns rather than dropping the check silently', () => {
+    // `Item Nbr:` instead of `Item Number:` — the section is plainly there, but no row
+    // matches, so the check would simply vanish and nothing else would notice.
+    const pages = wholeShipment()
+    for (const r of pages[2].rows) {
+      r.items = r.items.map((i) => ({ ...i, str: i.str.replace('Item Number:', 'Item Nbr:') }))
+    }
+    const parsed = parse(pages)
+    expect(parsed.partTotals).toBeUndefined()
+    expect(parsed.warnings.some((w) => /summary section/i.test(w))).toBe(true)
+  })
+})
+
+describe('which page the total comes from', () => {
+  it('takes the last invoice page when each page prints a running subtotal', () => {
+    // Taking the first match would hand back page one's subtotal as the shipment total and
+    // fail a document that parsed perfectly.
+    const pages = [
+      invoicePage(1, LINES.slice(0, 2), { total: ext(LINES[0]) + ext(LINES[1]) }),
+      invoicePage(2, LINES.slice(2), { total: printedTotal() }),
+      packingPage(3, LINES, { summary: LINES }),
+    ]
+    expect(parse(pages).headers.FC.totalValue).toBeCloseTo(printedTotal(), 2)
+  })
+
+  it('ignores a total printed on a packing-list page', () => {
+    const pages = wholeShipment()
+    pages[2].rows.push(row(100, [[400, 'Total Net Value:'], [X.extended, '99999.00']]))
+    expect(parse(pages).headers.FC.totalValue).toBeCloseTo(printedTotal(), 2)
+  })
+})

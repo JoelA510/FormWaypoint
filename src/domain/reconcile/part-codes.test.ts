@@ -5,9 +5,10 @@
  * codes wins for a given part, and no document shape influences that.
  */
 import { describe, expect, it } from 'vitest'
-import { aggregateLines } from './lines'
+import { aggregateLines, applyUnitWeights } from './lines'
 import { reconcile } from '.'
 import { overrideCodes, overrideWeights, type PartOverrideRecord } from '../../store/local-store'
+import { libraryWeights } from '../item-library'
 import { buildSyntheticCipl, simpleShipment } from '../../test/synthetic/cipl'
 import { parseCipl } from '../cipl'
 import type { CheckResult, MergedLine } from '../types'
@@ -175,4 +176,64 @@ describe('reading the saved records', () => {
       overrideWeights([record({ partNumber: 'AAA-1', exportCode: '8544.42.0000' }), record({ partNumber: 'BBB-2', netWeightKg: 1.25 })]),
     ).toEqual({ 'BBB-2': 1.25 })
   })
+})
+
+describe('part numbers as map keys', () => {
+  const line = (partNumber: string, classification: string): MergedLine => ({
+    id: `INV:${partNumber}`,
+    documentSet: 'FC',
+    documentKind: 'INVOICE',
+    page: 1,
+    orderNumber: '1',
+    sequence: '1',
+    lineNumber: '1',
+    itemId: '',
+    partNumber,
+    model: '',
+    description: 'Parts',
+    commodityGroup: '',
+    countryOfOrigin: 'Japan',
+    classification,
+    quantity: 2,
+    uom: 'PCS',
+    extendedValue: 100,
+  })
+
+  it('lets a hand-entered weight beat the library when their casing differs', () => {
+    // These are merged into one map by spreading. Keyed differently, both survived and the
+    // exact-match lookup found the library's — filing half the real weight in box 26.
+    const merged = { ...libraryWeights([libraryEntry('40649-0300A', 0.25)]), ...overrideWeights([weightRecord('40649-0300a', 0.5)]) }
+    expect(Object.keys(merged)).toHaveLength(1)
+    const [applied] = applyUnitWeights([line('40649-0300A', '8544.42.0000')], merged)
+    expect(applied.netWeightKg).toBeCloseTo(1.0, 3)
+  })
+
+  it('applies a saved weight to a document that prints the part in another case', () => {
+    const [applied] = applyUnitWeights([line('abc-100', '8544.42.0000')], overrideWeights([weightRecord('ABC-100', 0.4)]))
+    expect(applied.netWeightKg).toBeCloseTo(0.8, 3)
+  })
+
+  it('never files a blank code from an empty override entry', () => {
+    // `??` accepted an empty string as an override and grouped the row under no code at all.
+    const [row] = aggregateLines([line('AAA-1', '8544.42.0000')], { ...CONTROLLED, codesByPart: { 'AAA-1': '' } })
+    expect(row.scheduleB).toBe('8544.42.0000')
+  })
+})
+
+const libraryEntry = (partNumber: string, netWeightKg: number) => ({
+  partNumber,
+  displayPartNumber: partNumber,
+  description: '',
+  exportCode: '',
+  importCode: '',
+  netWeightKg,
+  source: 'x.xlsx',
+  importedAt: '2026-07-30T00:00:00.000Z',
+})
+
+const weightRecord = (partNumber: string, netWeightKg: number): PartOverrideRecord => ({
+  partNumber,
+  netWeightKg,
+  description: '',
+  updatedAt: '2026-07-30T00:00:00.000Z',
 })

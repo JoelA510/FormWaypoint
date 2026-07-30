@@ -18,6 +18,7 @@
  * position, and the weight unit is taken from the header only when the header states one.
  */
 import { screenCode, type CodeScreening, type ScheduleBIndex } from '../schedule-b'
+import { partKey } from '../part-key'
 
 export * from './read-workbook'
 export * from './changes'
@@ -339,7 +340,7 @@ export function indexByPart(entries: ItemLibraryEntry[]): Map<string, ItemLibrar
 export function libraryWeights(entries: ItemLibraryEntry[]): Record<string, number> {
   const weights: Record<string, number> = {}
   for (const entry of entries) {
-    if (entry.netWeightKg != null) weights[entry.partNumber] = entry.netWeightKg
+    if (entry.netWeightKg != null) weights[partKey(entry.partNumber)] = entry.netWeightKg
   }
   return weights
 }
