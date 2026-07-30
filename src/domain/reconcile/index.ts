@@ -187,6 +187,7 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
       passed: headerReadable,
     },
     ...totalsChecks(header, mergedLines, sliLines, parsed.providesWeights),
+    ...partTotalChecks(mergedLines, parsed.partTotals),
     ...lineageChecks(mergedLines, packingLines, sliLines),
     ...partCodeChecks(mergedLines, index, options.itemsByPart),
     ...partCodeOverrideChecks(mergedLines, options.codesByPart),
@@ -373,6 +374,62 @@ function totalsChecks(
   })
 
   return results
+}
+
+/**
+ * Every part on the shipment, against the quantity the document totals for it.
+ *
+ * The strongest check available to the `omron-shipment` layout, and the only one there that
+ * is not circular. Its other totals are sums of the same line blocks the parser reads, so
+ * they agree with the rows by construction however many lines were dropped; the packing
+ * list's summary section is written independently of them.
+ *
+ * Blocking in both directions. A part short of its summary means a line was missed — that is
+ * how shipment 278563's `REPL ACT’R MFS-11` went unnoticed. A part over it, or one that does
+ * not appear in the summary at all, means a line was double-counted or read wrong, which
+ * misstates the shipment just as badly in the other direction.
+ */
+function partTotalChecks(merged: MergedLine[], partTotals?: Record<string, number>): CheckResult[] {
+  if (!partTotals || !Object.keys(partTotals).length || !merged.length) return []
+
+  const counted = new Map<string, number>()
+  for (const line of merged) {
+    const key = line.partNumber.trim().toUpperCase()
+    counted.set(key, roundTo((counted.get(key) ?? 0) + line.quantity, 3))
+  }
+
+  const discrepancies: string[] = []
+  for (const [part, expected] of Object.entries(partTotals)) {
+    const actual = counted.get(part) ?? 0
+    if (Math.abs(actual - expected) > 0.0005) {
+      discrepancies.push(
+        actual === 0
+          ? `${part}: the document totals ${expected} but no line for it was read at all`
+          : `${part}: rows total ${actual} against the document's ${expected}`,
+      )
+    }
+  }
+  for (const [part, actual] of counted) {
+    if (!(part in partTotals)) {
+      discrepancies.push(`${part}: rows total ${actual} but the document's summary does not list it`)
+    }
+  }
+
+  const parts = Object.keys(partTotals).length
+  return [
+    {
+      id: 'packing-summary',
+      severity: 'blocking',
+      title: 'Every part matches the packing list’s own summary',
+      detail: discrepancies.length
+        ? `${discrepancies.join(' · ')}. The summary is written independently of the line detail, so a ` +
+          'disagreement means a line was missed, duplicated, or misread.'
+        : `All ${parts} part(s) match the quantities the packing list summarises.`,
+      passed: discrepancies.length === 0,
+      expected: `${parts} part(s)`,
+      actual: discrepancies.length ? `${discrepancies.length} disagree` : 'all agree',
+    },
+  ]
 }
 
 function lineageChecks(merged: MergedLine[], packingLines: SourceLine[], sliLines: SLILine[]): CheckResult[] {

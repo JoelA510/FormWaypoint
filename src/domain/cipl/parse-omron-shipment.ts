@@ -54,7 +54,14 @@ export function parseOmronShipmentPages(fileName: string, pages: TextPage[]): Pa
       continue
     }
     if (!header) header = parseHeader(page)
-    lines.push(...parseLineBlocks(page, kind, header.documentCurrency))
+    const block = parseLineBlocks(page, kind, header.documentCurrency)
+    lines.push(...block.lines)
+    for (const refusal of block.refused) {
+      warnings.push(
+        `Page ${page.pageNumber}: a line block could not be read and was left out — ${refusal}. ` +
+          'Check this line against the document before filing.',
+      )
+    }
   }
 
   if (!header) {
@@ -65,16 +72,39 @@ export function parseOmronShipmentPages(fileName: string, pages: TextPage[]): Pa
   const packingLines = lines.filter((l) => l.documentKind === 'PACKING_LIST')
 
   if (header) {
+    /**
+     * The printed total is on the *last* invoice page, not the first.
+     *
+     * The header is read from the first page, which on a multi-page invoice carries no total
+     * at all — so this used to find nothing and fall back to summing the very lines the
+     * total-value check then compared it against. That made the check self-referential: it
+     * could never fail, however many lines the parser had dropped. Shipment 278563 lost a
+     * line and reconciled perfectly at 8,445.61 against a document that says 8,483.88.
+     *
+     * So every page is searched, and no line-derived fallback is used. A total that cannot
+     * be read leaves zero, which fails the check loudly — an unproved total is not the same
+     * as a proved one.
+     */
+    const printedTotal = pages.map((page) => parseNumber(rightOfLabel(page.rows, 'Total Net Value:'))).find((v) => v != null)
+    if (printedTotal != null) {
+      header.totalValue = printedTotal
+    } else {
+      warnings.push(
+        'No "Total Net Value" could be read from this invoice, so the commodity values cannot be proved ' +
+          'against the document. Check the total by hand before filing.',
+      )
+    }
+
     header.orderNumbers = distinct(invoiceLines.map((l) => l.orderNumber).filter(Boolean))
     // Sales orders and customer POs are different columns in this layout, and the CEVA form
     // has a box for each. Keeping them apart is what stops Omron's own sales order being
     // filed as the consignee's purchase order.
     header.purchaseOrders = distinct(invoiceLines.map((l) => l.purchaseOrder ?? '').filter(Boolean))
+    // This layout prints no quantity total, so this is the sum of the lines and the
+    // `total-quantity` check that compares against it is therefore self-referential — it
+    // proves only that addition works. The real quantity check for this format is
+    // `packing-summary` below, which uses the per-part totals the document does print.
     header.totalQuantity = round(invoiceLines.reduce((sum, l) => sum + l.quantity, 0), 3)
-    // The printed "Total Net Value" is authoritative; fall back to the sum of the lines.
-    if (!header.totalValue) {
-      header.totalValue = round(invoiceLines.reduce((sum, l) => sum + (l.extendedValue ?? 0), 0), 2)
-    }
   }
 
   if (invoiceLines.length && packingLines.length && invoiceLines.length !== packingLines.length) {
@@ -88,6 +118,8 @@ export function parseOmronShipmentPages(fileName: string, pages: TextPage[]): Pa
     'This format prints no weights. Box 26 must be supplied from the saved per-part weights or entered by hand.',
   )
 
+  const partTotals = parsePartTotals(pages)
+
   return {
     fileName,
     format: 'omron-shipment',
@@ -96,8 +128,38 @@ export function parseOmronShipmentPages(fileName: string, pages: TextPage[]): Pa
     availableSets: ['FC'],
     headers: header ? { FC: header } : {},
     lines,
+    ...(Object.keys(partTotals).length ? { partTotals } : {}),
     warnings,
   }
+}
+
+/**
+ * `Item Number: 44508-0711 Total Qty: 2.00`, from the packing list's summary section.
+ *
+ * The one figure in this layout that is not derived from the line blocks the parser reads,
+ * which is what makes it worth having: a line that fails to parse still appears here, so the
+ * totals stop agreeing and the shipment is held. Everything else this format prints is
+ * either a line or a sum of the lines.
+ *
+ * A part listed twice is summed rather than overwritten — the summary is keyed on the item
+ * number and should not repeat, but a repeat that silently replaced the earlier figure would
+ * understate the shipment, and understating is the failure that matters here.
+ */
+const SUMMARY_LINE = /Item Number:\s*(\S+)\s+Total Qty:\s*([\d,]+\.?\d*)/i
+
+function parsePartTotals(pages: TextPage[]): Record<string, number> {
+  const totals: Record<string, number> = {}
+  for (const page of pages) {
+    for (const row of page.rows) {
+      const match = rowText(row).match(SUMMARY_LINE)
+      if (!match) continue
+      const quantity = parseNumber(match[2])
+      if (quantity == null) continue
+      const part = match[1].trim().toUpperCase()
+      totals[part] = round((totals[part] ?? 0) + quantity, 3)
+    }
+  }
+  return totals
 }
 
 export async function parseOmronShipment(fileName: string, data: ArrayBuffer | Uint8Array): Promise<ParsedCipl> {
@@ -219,22 +281,46 @@ function leftAddressBlock(rows: TextRow[], label: string): PartyAddress {
 // Line blocks
 // ---------------------------------------------------------------------------
 
-function parseLineBlocks(page: TextPage, kind: DocumentKind, currency: string): SourceLine[] {
+/**
+ * Every line block on a page, plus the ones that could not be read.
+ *
+ * Refusals are returned rather than dropped. `parseBlock` declines a block whose columns do
+ * not line up, which is the right call — filing a shipping code as a commodity description
+ * would be worse than not filing the line. But a refusal that nobody hears is just a missing
+ * line, and on shipment 278563 that is exactly what happened: one block was refused, the
+ * line vanished, and the only way to notice was to read the PDF beside the screen.
+ */
+function parseLineBlocks(
+  page: TextPage,
+  kind: DocumentKind,
+  currency: string,
+): { lines: SourceLine[]; refused: string[] } {
   const rows = page.rows
   const starts: number[] = []
   for (let i = 0; i < rows.length; i++) {
     if (rows[i].items.some((item) => item.x < COL_ORDER.max && SALES_ORDER_LINE.test(item.str))) starts.push(i)
   }
-  if (!starts.length) return []
+  if (!starts.length) return { lines: [], refused: [] }
 
   const lines: SourceLine[] = []
+  const refused: string[] = []
   for (let s = 0; s < starts.length; s++) {
     const from = starts[s]
     const to = s + 1 < starts.length ? starts[s + 1] : endOfTable(rows, from)
-    const line = parseBlock(rows.slice(from, to), page, kind, currency)
+    const block = rows.slice(from, to)
+    const line = parseBlock(block, page, kind, currency)
     if (line) lines.push(line)
+    else refused.push(describeBlock(block))
   }
-  return lines
+  return { lines, refused }
+}
+
+/** Enough of a refused block to find it in the PDF: its sales order, and the part if legible. */
+function describeBlock(block: TextRow[]): string {
+  const cells = block[0].items.map((i) => i.str)
+  const order = cells.find((c) => SALES_ORDER_LINE.test(c)) ?? '(unidentified)'
+  const part = cells.find((c) => c !== order && !isLikelyBarcode(c) && !isStructuralCell(c))
+  return part ? `${order} (${part})` : order
 }
 
 /** The last block runs to the totals row or the summary section, not to the page footer. */
