@@ -11,8 +11,11 @@ Windows desktop app; the desktop build adds the in-app Schedule B refresh, which
 in a browser, and writes the finished form to a path it can report back rather than handing
 the bytes to the webview and losing track of them.
 
-Both remaining items are the same shape of work: a new format or carrier is a detector, a
-parser, or an adapter, and nothing downstream changes. There is no known blocker in either.
+Two of the three planned items are the same shape of work: a new format or carrier is a
+detector, a parser, or an adapter, and nothing downstream changes. Denied-party screening is
+the one that adds a capability rather than a variant, and it is deliberately modelled on
+Schedule B validation — a published list, shipped with the app and refreshable, checked
+against rather than inferred from.
 
 ## Milestone tracker
 
@@ -35,6 +38,7 @@ parser, or an adapter, and nothing downstream changes. There is no known blocker
 | **In-app Schedule B refresh** | ✅ Done | Downloads the concordance, diffs it, writes the change log and CSV worklist, then replaces the dataset. Verified end to end against the live Census server in a packaged binary. |
 | **Saved output** | ✅ Done | `save_output` writes the filled SLI or keying sheet into Downloads and returns the path, `open_output` opens it; the panel reports where the file landed. Regenerating suffixes rather than overwriting, because the earlier copy may already be signed. Browser builds keep the blob download, which is all a browser can do. |
 | **More carriers** | 📅 Planned | One adapter each. The parser and reconciler carry no carrier-specific logic. |
+| **Denied-party screening** | 📅 Planned | The consignee checked against the Consolidated Screening List, shipped and refreshed the way `schedule-b.json` is. A match is reported with the list and the matched field, never scored into a pass/fail the filer cannot inspect. No decision is made for them. |
 | **More CIPL formats** | 📅 Planned | A detector and a parser behind the same `ParsedCipl` contract — the registry and everything downstream are already shared. |
 
 ## How the in-app Schedule B refresh works
@@ -69,6 +73,20 @@ can still be consulted after a later refresh.
 **Boundaries, unchanged from the rest of the tool.** The refresh never edits the item
 library, never reclassifies a part, and never rewrites a code. It reports what Census
 changed and which of your parts that touches; every correction stays a human action.
+
+## Considered and not planned
+
+An earlier set of enhancement proposals was written for the monorepo — a Hono API with
+Postgres, carrier rate shopping, booking and label printing. Recording why they do not
+apply, so they are not re-proposed as though nothing had changed:
+
+| Proposal | Why not |
+| :--- | :--- |
+| Rate shopping, landed cost, carrier scorecards, carbon estimates | All need live carrier rate APIs and an account relationship. This tool talks to no carrier; it fills the form the carrier already gave you. |
+| Bulk booking, batch label printing, mass status updates | These assume a shipment lifecycle — booked, in transit, delivered — that does not exist here. A shipment is a document in and a form out. |
+| Vendor portal for suppliers | Needs a server, accounts and someone else's data on it. That is a different product, and rule 1 makes it a product decision rather than a feature. |
+| ERP sync heartbeat | The item-master import already covers the part that mattered: getting weights and codes out of the ERP. A live connection buys nothing a periodic export does not. |
+| Auto-archiving generated documents | Largely done. Processed shipments are kept locally for autofill and audit, and the desktop build reports the path it saved to. |
 
 ## Open questions
 
