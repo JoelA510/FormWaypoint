@@ -484,6 +484,7 @@ export function App() {
               canGenerate={canGenerate}
               onGenerated={() => void handleGenerated()}
               keyedCarrier={keyedCarrier}
+              bridge={bridge}
             />
             <HistoryPanel shipments={shipments} onClear={() => void clearAll()} />
           </>

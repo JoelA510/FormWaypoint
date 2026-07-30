@@ -45,6 +45,11 @@ function fakeBridge(body: string) {
     }),
     readDataFile: vi.fn(async (name: string) => files.get(name) ?? null),
     dataDir: vi.fn(async () => '/data'),
+    // Unused by the refresh, which writes through `writeDataFile`; present so the fake
+    // satisfies the interface.
+    saveOutput: vi.fn(async (name: string) => `/downloads/${name}`),
+    openOutput: vi.fn(async () => {}),
+    outputDir: vi.fn(async () => '/downloads'),
   }
   return { bridge, files }
 }

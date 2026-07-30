@@ -1,10 +1,15 @@
 //! The desktop shell.
 //!
-//! Four commands, and no decisions. Everything that judges anything — what the concordance
+//! Six commands, and no decisions. Everything that judges anything — what the concordance
 //! says, what changed, which parts that touches, what the change log reads like — is in
 //! TypeScript, where it is covered by the test suite. This layer exists only because a
 //! webview cannot reach census.gov (no CORS header on that host) and cannot write a file
 //! the operator can open afterwards.
+//!
+//! No plugins, deliberately. Everything the shell can do is one of the commands below, so
+//! the whole native surface of an application that holds shipment data is auditable in one
+//! file — which matters more than the convenience of a dependency on a machine somebody's
+//! IT department is responsible for.
 //!
 //! Keeping it this thin is the point: the packaged binary is the one artifact that cannot
 //! be verified from a test run here, so as little as possible depends on it being right.
@@ -34,6 +39,50 @@ fn data_directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .map_err(|e| format!("Could not locate the application data directory: {e}"))?;
     fs::create_dir_all(&dir).map_err(|e| format!("Could not create {}: {e}", dir.display()))?;
     Ok(dir)
+}
+
+/// Where generated documents go: the user's Downloads folder.
+///
+/// A blob download from the webview was landing somewhere the app could not name — on Linux
+/// the process working directory, on Windows wherever WebView2 decided — and the operator
+/// was told nothing either way. Writing it here means the app knows the full path and can
+/// say it, and can open the file afterwards.
+///
+/// Falls back to the data directory, which is not where anyone would look but is at least a
+/// place that certainly exists and is certainly writable.
+fn output_directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = match app.path().download_dir() {
+        Ok(dir) => dir,
+        Err(_) => return data_directory(app),
+    };
+    fs::create_dir_all(&dir).map_err(|e| format!("Could not create {}: {e}", dir.display()))?;
+    Ok(dir)
+}
+
+/// `name.pdf`, or `name (2).pdf` when that is taken.
+///
+/// Regenerating a shipment must not overwrite the copy already saved: it may have been
+/// signed, annotated or filed. Browsers do this for the same reason, and an operator who
+/// has just clicked the button twice should end up with two files rather than a silently
+/// replaced one.
+fn unique_path(dir: &PathBuf, name: &str) -> Result<PathBuf, String> {
+    let first = safe_join(dir, name)?;
+    if !first.exists() {
+        return Ok(first);
+    }
+    let path = PathBuf::from(name);
+    let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let suffix = path
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_default();
+    for n in 2..1000 {
+        let candidate = safe_join(dir, &format!("{stem} ({n}){suffix}"))?;
+        if !candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+    Err(format!("Too many files named {name} already exist."))
 }
 
 /// Rejects anything that is not a plain file name.
@@ -121,6 +170,56 @@ fn read_data_file(app: tauri::AppHandle, name: String) -> Result<Option<String>,
     }
 }
 
+/// Writes a generated document and returns where it went, for the caller to show.
+#[tauri::command]
+fn save_output(app: tauri::AppHandle, name: String, bytes: Vec<u8>) -> Result<String, String> {
+    let dir = output_directory(&app)?;
+    let path = unique_path(&dir, &name)?;
+    fs::write(&path, bytes).map_err(|e| format!("Could not write {}: {e}", path.display()))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// Hands a file we just wrote to whatever the system opens that type with.
+///
+/// Takes a path rather than a name because the caller has one — `save_output` returned it,
+/// possibly with a `(2)` the caller did not choose. It is checked to sit inside the output
+/// directory and to exist before anything is launched, so this cannot be pointed at an
+/// arbitrary file on the machine by a bug in the page.
+///
+/// No shell in either branch: the path is passed as a single argument, so a space in
+/// `C:\Users\Firstname Lastname\Downloads` is quoted by the standard library rather than
+/// resplit by a command interpreter.
+#[tauri::command]
+fn open_output(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let target = PathBuf::from(&path);
+    let dir = output_directory(&app)?;
+    let inside = target.parent().map(|p| p == dir.as_path()).unwrap_or(false);
+    if !inside {
+        return Err(format!("{path} is not a file this application wrote."));
+    }
+    if !target.is_file() {
+        return Err(format!("{path} is no longer there."));
+    }
+
+    #[cfg(target_os = "windows")]
+    let launched = std::process::Command::new("explorer.exe").arg(&target).spawn();
+    #[cfg(target_os = "macos")]
+    let launched = std::process::Command::new("open").arg(&target).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let launched = std::process::Command::new("xdg-open").arg(&target).spawn();
+
+    // `explorer.exe` exits non-zero even when it has opened the file, so the spawn
+    // succeeding is as much as can be checked without waiting on the reader itself.
+    launched
+        .map(|_| ())
+        .map_err(|e| format!("Could not open {}: {e}", target.display()))
+}
+
+#[tauri::command]
+fn output_dir(app: tauri::AppHandle) -> Result<String, String> {
+    Ok(output_directory(&app)?.to_string_lossy().into_owned())
+}
+
 #[tauri::command]
 fn data_dir(app: tauri::AppHandle) -> Result<String, String> {
     Ok(data_directory(&app)?.to_string_lossy().into_owned())
@@ -133,7 +232,10 @@ pub fn run() {
             fetch_concordance,
             write_data_file,
             read_data_file,
-            data_dir
+            data_dir,
+            save_output,
+            open_output,
+            output_dir
         ])
         .run(tauri::generate_context!())
         .expect("error while running FormWaypoint");
@@ -141,8 +243,34 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::safe_join;
+    use super::{safe_join, unique_path};
     use std::path::PathBuf;
+
+    #[test]
+    fn uniquifies_rather_than_overwriting() {
+        let dir = std::env::temp_dir().join("formwaypoint-unique-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let first = unique_path(&dir, "S1_SLI_ceva.pdf").unwrap();
+        assert_eq!(first.file_name().unwrap(), "S1_SLI_ceva.pdf");
+        std::fs::write(&first, b"x").unwrap();
+
+        let second = unique_path(&dir, "S1_SLI_ceva.pdf").unwrap();
+        assert_eq!(second.file_name().unwrap(), "S1_SLI_ceva (2).pdf");
+        std::fs::write(&second, b"x").unwrap();
+
+        let third = unique_path(&dir, "S1_SLI_ceva.pdf").unwrap();
+        assert_eq!(third.file_name().unwrap(), "S1_SLI_ceva (3).pdf");
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_uniquified_name_still_cannot_escape_the_directory() {
+        let dir = PathBuf::from("/data");
+        assert!(unique_path(&dir, "../evil.pdf").is_err());
+    }
 
     #[test]
     fn accepts_a_plain_file_name() {
