@@ -185,14 +185,16 @@ jobs:
               diagnostics.push('cargo test --manifest-path src-tauri/Cargo.toml', 'npm run desktop:build');
             }
             if (changeTypes.has('compliance-critical')) {
-              diagnostics.push('# a clean checkout runs 200 tests and skips the 122 needing shipment fixtures');
+              // A comment is not a runnable step, and pushing one would satisfy the
+              // length check below while leaving the plan with nothing to run.
+              diagnostics.push('npm ci', 'npm run check');
             }
 
             if (diagnostics.length === 0) {
               diagnostics.push('npm ci');
             }
 
-            const diagnosticsBlock = diagnostics.join('\n');
+            const diagnosticsBlock = [...new Set(diagnostics)].join('\n');
 
             let ciSection = '_CI status pending._';
             if (ciState === 'success') {

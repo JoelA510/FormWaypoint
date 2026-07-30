@@ -62,8 +62,12 @@ Scan changed components for the failure Rule 30 exists to prevent — a raw Tail
 class where a token belongs:
 
 ```bash
-grep -rnE "\b(text|bg|border|ring)-(slate|zinc|gray|blue|red|amber|emerald|green)-[0-9]{2,3}\b" src --include="*.tsx"
+grep -rnE "\b(text|bg|border|ring|outline|divide|from|via|to|fill|stroke|shadow|accent|caret|decoration)-(slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-[0-9]{2,3}\b" src --include="*.tsx" --include="*.ts" --include="*.css"
 ```
+
+Every Tailwind palette is listed on purpose, including `teal` and `cyan` — the accent token
+is hue 195, so those are exactly the classes someone reaches for when they want "the
+existing accent colour" and bypass the token by accident.
 
 Any hit is a defect: raw palette classes are invisible to the dark-scheme block in
 `src/styles/globals.css` and will read correctly in one scheme and wrongly in the other. The

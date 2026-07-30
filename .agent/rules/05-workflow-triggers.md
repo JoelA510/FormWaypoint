@@ -15,7 +15,7 @@ trigger: always_on
 | **Persistent Failure**<br>A test or build command fails 2+ times in a row. | /05-debug-loop-5 | Prevents infinite context loops/hallucinations. |
 | **Pre-PR / "I'm Done"**<br>Feature is complete, verified, and ready for review. | /06-pre-pr-docs | Ensures docs (README/Roadmap) never drift from code. |
 | **Self-Review**<br>Before asking User to review or merge. | /07-pre-pr-review | Catches low-hanging fruit (console.log, types) early. |
-| **UI/CSS Work**<br>After touching .tsx or .css files. | Rule 30 + /07-pre-pr-review | Token palette only; no raw Tailwind colour classes. |
+| **UI/CSS Work**<br>After touching .tsx or .css files. | /09-browser-verification (Phase 4) | The token-palette check lives there; a raw Tailwind colour class survives light mode and breaks dark. |
 | **Frontend Logic Change**<br>After modifying React components or hooks. | /09-browser-verification | Verifies the golden path (upload -> review -> generate) still works. |
 | **"Big Release" / Converge**<br>Preparing for major version or full cleanup. | /10-master-review-orchestrator | Runs the full loop: Audit -> Fix -> Design -> Verify -> Docs. |
 | **Reviewing External PR**<br>User asks you to review a GitHub PR. | /11-remote-pr-review | Applies internal Engineering Standards to external code. |

@@ -115,7 +115,7 @@ npm run lint
 <summary><strong>📉 Detailed Changelog (Collapsible)</strong></summary>
 
 - `src/features/review.tsx`: Added the provenance badge to each commodity row
-- `src/utils/dateUtils.js`: Fixed offset calculation bug
+- `src/domain/reconcile/index.ts`: Fixed the line join for repeated purchase orders
 - ...
 
 </details>

@@ -6,13 +6,13 @@ description: Log a recent technical lesson or fix to Engineering Knowledge
     - Review the recent conversation history or the specific problem context provided by the user.
     - Draft a standard "Knowledge Entry" with:
       - **Problem**: What failed? (e.g., "a line block split by a page break was silently dropped").
-      - **Context**: Under what conditions? (e.g., "When querying `tasks` with `select=*`").
-      - **Solution**: How was it fixed? (e.g., "Added `!inner` join or refactored policy").
+      - **Context**: Under what conditions? (e.g., "only when a line block spans a page boundary").
+      - **Solution**: How was it fixed? (e.g., "carry the open block across the page break before flushing it").
       - **Prevention**: Rule to follow in the future.
 
 2.  **Append to Knowledge Base**
     - Read `docs/operations/ENGINEERING_KNOWLEDGE.md`.
-    - Append the new entry under the appropriate Category Header (e.g., `## Database`, `## React Patterns`).
+    - Append the new entry under the appropriate category (`PARSE`, `DESKTOP`, `COMPLIANCE`, `DOCS`), following the format the file documents at the top.
     - _Note: If checks fail, ensure you are not duplicating an existing entry._
 
 3.  **Commit Documentation**
