@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Turns a commercial invoice & packing list (CIPL) into a completed carrier Shipper's Letter of Instruction. Runs entirely in the browser — documents never leave the machine.",
+  "description": "Turns a commercial invoice & packing list (CIPL) into a completed carrier Shipper's Letter of Instruction. Runs entirely in the browser \u2014 documents never leave the machine.",
   "engines": {
-    "node": "^20.19.0 || >=22.12.0"
+    "node": ">=22.12.0"
   },
   "scripts": {
     "dev": "vite",
