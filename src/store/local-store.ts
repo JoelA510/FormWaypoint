@@ -13,6 +13,7 @@ import { openDB, type IDBPDatabase } from 'idb'
 import type { CompanyProfile, ShipmentSettings } from '../domain/draft'
 import type { ItemLibraryEntry } from '../domain/item-library'
 import type { CheckResult, SLILine } from '../domain/types'
+import { partKey } from '../domain/part-key'
 
 const DB_NAME = 'formwaypoint'
 const DB_VERSION = 4
@@ -48,20 +49,41 @@ export interface OverrideRecord {
 }
 
 /**
- * Net weight of one unit of a part.
+ * What a person entered by hand about one part, kept and reused.
  *
- * The `omron-shipment` CIPL format prints no weights at all, so box 26 has to come from
- * somewhere. Entered once per part and reused, which is why this is reference data rather
- * than shipment data. Never inferred: an unknown part blocks generation instead of
- * defaulting to zero.
+ * Two fields, for two different reasons the item master cannot answer:
+ *
+ *   - **`netWeightKg`** — the `omron-shipment` CIPL format prints no weights at all, so
+ *     box 26 has to come from somewhere. Never inferred: an unknown part blocks generation
+ *     instead of defaulting to zero.
+ *   - **`exportCode`** — the commodity number to file for this part instead of the one the
+ *     document prints. Narrower than an `OverrideRecord`, which redirects a code wherever it
+ *     appears; this says nothing about other parts sharing that code.
+ *
+ * A weight is a measurement and needs no justification. A code is a classification decision,
+ * so `reason` and `enteredBy` are required alongside one and are carried into the item-master
+ * worklist — an override nobody can account for later is indistinguishable from a typo.
+ *
+ * Stored under the object store still named `partWeights`. Renaming it would mean migrating
+ * saved rows for no functional gain; a record written before codes existed simply has none,
+ * which reads correctly as "weight entered, code untouched".
  */
-export interface PartWeightRecord {
+export interface PartOverrideRecord {
   partNumber: string
-  netWeightKg: number
+  /** Null when only the code was overridden. */
+  netWeightKg: number | null
+  /** Normalised ten digits, or absent when only the weight was entered. */
+  exportCode?: string
+  /** Why this code, required with one. Empty for a weight-only record. */
+  reason?: string
+  enteredBy?: string
   /** Description as last seen, purely to make the saved list readable. */
   description: string
   updatedAt: string
 }
+
+/** The fields of a part's record that a caller may set. */
+export type PartOverridePatch = Partial<Pick<PartOverrideRecord, 'netWeightKg' | 'exportCode' | 'reason' | 'enteredBy'>>
 
 /** One processed shipment, kept for autofill and as an audit trail. */
 export interface ShipmentRecord {
@@ -100,9 +122,18 @@ export interface LocalStore {
   saveOverride(record: OverrideRecord): Promise<void>
   deleteOverride(sourceCode: string): Promise<void>
 
-  listPartWeights(): Promise<PartWeightRecord[]>
-  savePartWeight(record: PartWeightRecord): Promise<void>
-  deletePartWeight(partNumber: string): Promise<void>
+  listPartOverrides(): Promise<PartOverrideRecord[]>
+  /**
+   * Merges a patch into one part's record, reading and writing in a single transaction.
+   *
+   * A patch rather than a whole record, and merged here rather than by the caller, because
+   * the two fields are edited by two controls in the same table row. A blur and a click land
+   * within a few milliseconds of each other, and a caller merging against its own React state
+   * would have the second write built from a snapshot taken before the first landed — sending
+   * back `netWeightKg: null` and silently erasing the weight just typed.
+   */
+  savePartOverride(partNumber: string, description: string, patch: PartOverridePatch): Promise<void>
+  deletePartOverride(partNumber: string): Promise<void>
 
   listItems(): Promise<ItemLibraryEntry[]>
   /** Replaces the whole library — a refreshed extract of the same item master. */
@@ -191,14 +222,38 @@ export const indexedDbStore: LocalStore = {
     await (await db()).delete('overrides', sourceCode)
   },
 
-  async listPartWeights() {
-    return (await (await db()).getAll('partWeights')) as PartWeightRecord[]
+  async listPartOverrides() {
+    return (await (await db()).getAll('partWeights')) as PartOverrideRecord[]
   },
-  async savePartWeight(record) {
-    await (await db()).put('partWeights', record)
+  async savePartOverride(partNumber, description, patch) {
+    const tx = (await db()).transaction('partWeights', 'readwrite')
+    const held = (await tx.store.getAll()) as PartOverrideRecord[]
+    // Matched on the normalised part number, not the stored key: a part whose casing differs
+    // between two documents is one part and must not become two rows.
+    const existing = held.find((r) => partKey(r.partNumber) === partKey(partNumber))
+    const merged: PartOverrideRecord = {
+      ...existing,
+      partNumber: existing?.partNumber ?? partNumber,
+      description: description || existing?.description || '',
+      netWeightKg: existing?.netWeightKg ?? null,
+      ...patch,
+      updatedAt: new Date().toISOString(),
+    }
+    // A record with neither field left says nothing, and would put an empty row in the
+    // item-master worklist.
+    if (merged.netWeightKg == null && !merged.exportCode?.trim()) {
+      if (existing) await tx.store.delete(existing.partNumber)
+    } else {
+      await tx.store.put(merged)
+    }
+    await tx.done
   },
-  async deletePartWeight(partNumber) {
-    await (await db()).delete('partWeights', partNumber)
+  async deletePartOverride(partNumber) {
+    const tx = (await db()).transaction('partWeights', 'readwrite')
+    const held = (await tx.store.getAll()) as PartOverrideRecord[]
+    const existing = held.find((r) => partKey(r.partNumber) === partKey(partNumber))
+    if (existing) await tx.store.delete(existing.partNumber)
+    await tx.done
   },
 
   async listItems() {
@@ -246,9 +301,25 @@ export const indexedDbStore: LocalStore = {
  */
 export const localStore: LocalStore = indexedDbStore
 
-/** Per-part weights in the shape the reconciliation engine expects. */
-export function partWeightsToMap(records: PartWeightRecord[]): Record<string, number> {
-  return Object.fromEntries(records.map((r) => [r.partNumber, r.netWeightKg]))
+/** Manually entered weights in the shape the reconciliation engine expects. */
+export function overrideWeights(records: PartOverrideRecord[]): Record<string, number> {
+  return Object.fromEntries(
+    records.filter((r) => r.netWeightKg != null).map((r) => [partKey(r.partNumber), r.netWeightKg as number]),
+  )
+}
+
+/**
+ * Manually entered commodity numbers, keyed by uppercased part number.
+ *
+ * A record with no code is skipped rather than mapped to an empty string: an empty code
+ * would look like an override to a blank classification and wipe out what the document says.
+ */
+export function overrideCodes(records: PartOverrideRecord[]): Record<string, string> {
+  return Object.fromEntries(
+    records
+      .filter((r) => r.exportCode?.trim())
+      .map((r) => [partKey(r.partNumber), (r.exportCode as string).trim()]),
+  )
 }
 
 /** Overrides in the shape the reconciliation engine expects. */

@@ -15,13 +15,19 @@ import {
   flagEntries,
   importItems,
   inspectWorkbook,
+  libraryChangesFileName,
   readWorkbook,
+  renderLibraryChangeLog,
+  renderLibraryChangesCsv,
   type FlaggedItem,
   type ImportSummary,
   type ItemLibraryEntry,
+  type LibraryChangeSet,
   type WeightUnit,
   type WorkbookInspection,
 } from '../domain/item-library'
+import type { DesktopBridge } from '../desktop'
+import { downloadText } from '../lib/utils'
 import type { ScheduleBIndex } from '../domain/schedule-b'
 
 const ROLE_LABELS: Record<string, string> = {
@@ -383,5 +389,156 @@ function FlaggedList({ flagged }: { flagged: FlaggedItem[] }) {
         </p>
       ) : null}
     </div>
+  )
+}
+
+/**
+ * Writes out what has been entered by hand that the item master does not hold.
+ *
+ * The point of the panel is that these figures should not stay on one machine. A weight typed
+ * because a CIPL printed none, or a code entered because the printed one was wrong, is
+ * knowledge the item master is missing — and until it gets there, the next shipment of the
+ * same part needs the same typing, which is the manual step this tool exists to remove.
+ *
+ * Two files, because they are read differently: a CSV to sort and work through against JDE,
+ * and a markdown log that keeps the reason and the name against every code change so the edit
+ * can still be justified months later. On the desktop build they land beside the Schedule B
+ * change logs; in a browser they download, since there is nowhere else to put them.
+ */
+export function ItemMasterUpdatesPanel({
+  changes,
+  librarySource,
+  today,
+  bridge,
+}: {
+  changes: LibraryChangeSet
+  librarySource: string | null
+  today: string
+  bridge: DesktopBridge | null
+}) {
+  const [written, setWritten] = useState<{ names: string[]; directory: string | null } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const codes = changes.actionable.filter((c) => c.field === 'code')
+  const weights = changes.actionable.filter((c) => c.field === 'weight')
+
+  async function write() {
+    setBusy(true)
+    setError(null)
+    setWritten(null)
+    try {
+      const log = renderLibraryChangeLog(changes, { today, librarySource })
+      const csv = renderLibraryChangesCsv(changes)
+      const logName = libraryChangesFileName(today)
+      const csvName = libraryChangesFileName(today, 'csv')
+
+      if (bridge) {
+        await bridge.writeDataFile(logName, log)
+        await bridge.writeDataFile(csvName, csv)
+        setWritten({ names: [logName, csvName], directory: await bridge.dataDir() })
+      } else {
+        downloadText(log, logName)
+        downloadText(csv, csvName)
+        setWritten({ names: [logName, csvName], directory: null })
+      }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'The updates could not be written.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader
+        title="Item master updates"
+        description="Values entered by hand that your item master does not hold yet. Export them, then make the edits in JDE."
+        actions={
+          changes.actionable.length ? (
+            <Badge tone="warn">{changes.actionable.length} to key</Badge>
+          ) : (
+            <Badge tone="pass">nothing outstanding</Badge>
+          )
+        }
+      />
+      <CardBody className="space-y-3">
+        {error ? (
+          <p className="rounded-md border border-[var(--color-block)] bg-[var(--color-block-soft)] px-3 py-2 text-sm">
+            {error}
+          </p>
+        ) : null}
+
+        {!changes.actionable.length ? (
+          <EmptyState title="Nothing to carry over">
+            {changes.matching
+              ? `All ${changes.matching} value(s) entered by hand already match the item master.`
+              : 'Weights and commodity numbers you enter on the review screen will be listed here.'}
+          </EmptyState>
+        ) : (
+          <>
+            <p className="text-sm text-[var(--color-ink-soft)]">
+              <strong className="tabular">{codes.length}</strong> commodity number
+              {codes.length === 1 ? '' : 's'} and <strong className="tabular">{weights.length}</strong> weight
+              {weights.length === 1 ? '' : 's'} differ from the master
+              {changes.matching ? `, with a further ${changes.matching} already matching` : ''}.
+              {changes.libraryMissing
+                ? ' No library is imported, so every value is reported as an addition.'
+                : ''}
+            </p>
+
+            <ul className="space-y-1.5">
+              {changes.actionable.slice(0, 8).map((change) => (
+                <li
+                  key={`${change.partNumber}:${change.field}`}
+                  className="flex flex-wrap items-baseline justify-between gap-2 rounded-md border bg-[var(--color-sunken)] px-3 py-2 text-xs"
+                >
+                  <span className="min-w-0">
+                    <span className="tabular font-medium">{change.partNumber}</span>
+                    <span className="text-[var(--color-ink-faint)]">
+                      {' '}
+                      — {change.field === 'code' ? 'Schedule B' : 'net kg'}
+                    </span>
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <span className="tabular text-[var(--color-ink-faint)]">{change.libraryValue ?? 'not held'}</span>
+                    <span aria-hidden>→</span>
+                    <span className="tabular">{change.enteredValue}</span>
+                    <Badge tone={change.action === 'add' ? 'neutral' : 'warn'}>{change.action}</Badge>
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {changes.actionable.length > 8 ? (
+              <p className="text-xs text-[var(--color-ink-faint)]">
+                Showing 8 of {changes.actionable.length}; the export has all of them.
+              </p>
+            ) : null}
+
+            <div className="flex flex-wrap items-center gap-3">
+              <Button variant="primary" onClick={() => void write()} disabled={busy}>
+                {busy ? 'Writing…' : 'Export item master updates'}
+              </Button>
+              <span className="text-xs text-[var(--color-ink-faint)]">
+                Nothing is applied automatically — this is a worklist.
+              </span>
+            </div>
+          </>
+        )}
+
+        {written ? (
+          <div className="rounded-md border border-[var(--color-pass)] bg-[var(--color-pass-soft)] px-3 py-2 text-xs">
+            <p>{written.directory ? `Written to ${written.directory}:` : 'Downloaded:'}</p>
+            <ul className="mt-0.5 space-y-0.5">
+              {written.names.map((name) => (
+                <li key={name} className="tabular">
+                  {name}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </CardBody>
+    </Card>
   )
 }

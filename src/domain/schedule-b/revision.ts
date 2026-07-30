@@ -13,6 +13,7 @@
  * Nothing here edits anything. It reports what Census changed and which parts that touches;
  * every correction stays a human action, exactly as with the rest of the tool.
  */
+import { cell, csvRows, datedFileName } from '../../lib/report'
 import { formatScheduleB, normalizeScheduleB, type RawPayload } from '.'
 import type { ItemLibraryEntry } from '../item-library'
 
@@ -185,14 +186,6 @@ export function affectedParts(revision: ScheduleBRevision, entries: ItemLibraryE
 
 const describeUnits = (units: string[]) => (units.length ? units.join(' / ') : '—')
 
-/**
- * Makes text safe to put in a markdown table cell.
- *
- * Item descriptions come from someone's ERP, not from this codebase — an unescaped `|` or a
- * newline inside one silently breaks the table for every row after it, in the one file
- * whose entire purpose is being read by a person.
- */
-const cell = (text: string) => text.replace(/\s+/g, ' ').replace(/\|/g, '\\|').trim()
 
 function renderCodeTable(changes: CodeChange[]): string[] {
   const lines = ['| Code | Description | Units |', '| --- | --- | --- |']
@@ -287,22 +280,18 @@ export function renderChangeLog(
 
 /** The affected-parts worklist as CSV, for working through in a spreadsheet. */
 export function renderAffectedCsv(affected: AffectedPart[]): string {
-  const escape = (value: string) => (/[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value)
-  const rows = [['Part Number', 'Item Description', 'Code', 'Change', 'Was', 'Now', 'Action'].join(',')]
-  for (const part of affected) {
-    const { change } = part
-    const was = change.kind === 'retired' ? describeUnits(change.units) : describeUnits(change.previousUnits ?? [])
-    const now = change.kind === 'retired' ? '(retired)' : describeUnits(change.units)
-    rows.push(
-      [part.partNumber, part.itemDescription, part.code, part.severity, was, now, SEVERITY_NOTE[part.severity]]
-        .map(escape)
-        .join(','),
-    )
-  }
-  return rows.join('\n')
+  return csvRows(
+    ['Part Number', 'Item Description', 'Code', 'Change', 'Was', 'Now', 'Action'],
+    affected.map((part) => {
+      const { change } = part
+      const was = change.kind === 'retired' ? describeUnits(change.units) : describeUnits(change.previousUnits ?? [])
+      const now = change.kind === 'retired' ? '(retired)' : describeUnits(change.units)
+      return [part.partNumber, part.itemDescription, part.code, part.severity, was, now, SEVERITY_NOTE[part.severity]]
+    }),
+  )
 }
 
 /** `schedule-b-changes-2026-07-28.md` — dated, so successive refreshes never overwrite. */
 export function changeLogFileName(revision: ScheduleBRevision, extension = 'md'): string {
-  return `schedule-b-changes-${revision.to}.${extension}`
+  return datedFileName('schedule-b-changes', revision.to, extension)
 }
