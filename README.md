@@ -7,10 +7,13 @@ Everything runs in the browser. The CIPL is parsed locally, the carrier's blank 
 filled locally, and nothing is uploaded — there is no backend, no account, and no network
 call carrying shipment data.
 
+Node 22.12 or newer (CI runs 24).
+
 ```bash
 npm install
 npm run dev            # browser, http://localhost:5173
 npm run desktop:dev    # desktop window (needs a Rust toolchain)
+npm run check          # typecheck, lint, tests, production build — the one gate
 ```
 
 A Windows installer is built by the **Desktop build** workflow — run it from the Actions
@@ -52,7 +55,8 @@ of defaulting to zero.
    describing the goods.
 7. **Proves the arithmetic** before generating anything. Quantities, weights and values must
    sum back to the totals printed on the source document.
-8. **Fills the carrier's real blank form** and downloads it, still editable and unsigned.
+8. **Fills the carrier's real blank form** and hands it back still editable and unsigned:
+   a download in the browser, a saved file with its path reported on the desktop.
 
 ## Supported carriers
 
@@ -119,7 +123,7 @@ Schedule B validator, the carrier adapters and the guards, using synthetic docum
 to reproduce each supported layout without reproducing anyone's data.
 
 A further **122 tests are skipped unless real shipment documents are present**. Those are
-the regression suites: they run five real, manually-processed shipments across both layouts
+the regression suites: they run six real, manually-processed shipments across both layouts
 and check the result against the completed SLIs that were filed for them, so a pass means
 the tool reproduces what a person produced by hand. They also pin the failure modes that
 would otherwise be silent: a blank exporter profile, an unreadable weight total, a
@@ -142,7 +146,8 @@ you see locally.
 ## Schedule B data
 
 `public/data/schedule-b.json` is built from the Census Bureau's AES commodity concordance
-(9,746 codes). Refresh it when Schedule B changes — typically each January and July:
+(9,746 codes, built 2026-07-27). Refresh it when Schedule B changes — typically each
+January and July:
 
 ```bash
 node scripts/build-schedule-b.mjs --fetch
@@ -176,12 +181,27 @@ Kept in IndexedDB on this machine only, and clearable from the History panel:
 - net weight per part, for the format that states none,
 - approved classification overrides with their reason and approver,
 - processed shipments, for autofill and audit,
-
 - the imported item library.
 
 `localStore` in `src/store/local-store.ts` is the seam for a desktop build: it is the one
 place an implementation is named, so a Tauri packaging replaces that single assignment with
 a file-backed `LocalStore` and no calling code changes.
+
+## Where the finished form goes
+
+In the browser the filled SLI is a download, because a download is the only route a browser
+has. That route tells the app nothing back: not the folder, not the final name, not whether
+the write succeeded.
+
+On the desktop the shell writes it instead. `save_output` writes into the user's Downloads
+folder and returns the full path, so the panel can say **Saved to `<path>`** and offer an
+**Open** button; `open_output` then hands that path to whatever the system opens PDFs with.
+The file opens straight away, because the next thing anyone does with a filled SLI is read
+it and sign it, and the boxes deliberately left blank are only fillable in a reader. The
+same applies to the FedEx and UPS keying sheets.
+
+Regenerating a shipment never overwrites the copy already saved — the earlier file may
+already have been signed — so `unique_path` suffixes instead.
 
 ## Project layout
 
@@ -191,20 +211,31 @@ src/
   domain/
     cipl/        PDF text extraction and the vendor CIPL parsers
     reconcile/   document-set selection, line joining, grouping, checks
-    schedule-b/  Census dataset lookup and validation
+    schedule-b/  Census dataset lookup, validation, and revision diffing
     item-library/  item-master import and commodity-number screening
     draft.ts     assembles reviewed values for a carrier form
   carriers/
-    nippon-express/   field map + adapter
-    ceva/             field map + adapter
+    nippon-express/   field map + adapter (8 commodity rows)
+    ceva/             field map + adapter (12 commodity rows)
     keying-sheet/     FedEx Ship Manager / UPS WorldShip
   features/      upload, review, manual fields, output
+  components/    shared UI primitives
   store/         local persistence
+  lib/           small shared helpers
+  styles/        Tailwind v4 theme, configured CSS-first
+  test/          fixture registry; the shipment PDFs are not committed
 public/
   templates/     blank carrier forms
   data/          Schedule B dataset
-src-tauri/       the desktop shell: four commands, no decisions
+src-tauri/       the desktop shell: seven commands, no decisions
 ```
+
+The shell's seven commands are the whole native surface, auditable in one file
+(`src-tauri/src/lib.rs`): `fetch_concordance`, `read_data_file`, `write_data_file`,
+`data_dir`, `save_output`, `open_output`, `output_dir`. No Tauri plugins — the opening is
+one `std::process::Command` per platform with the path as a single argument and no shell,
+so a space in `C:\Users\Firstname Lastname\Downloads` is quoted by the standard library
+rather than resplit by an interpreter.
 
 ## History
 

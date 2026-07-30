@@ -14,8 +14,11 @@ This workflow acts as the "Manager," orchestrating the execution of specialized 
 **Goal:** Identify and fix all technical debt items before attempting validation.
 
 1. **Run Debt Audit:**
-   - Execute **Workflow 03** (`.agent/workflows/03-debt-audit.md`).
-   - **Output:** `DEBT_REPORT.md`.
+   - There is no separate audit workflow. Sweep the repo yourself against the always-on
+     rules — `20-engineering-standards` (no `any`, no unjustified `@ts-ignore`),
+     `40-architecture` (import direction, adapters own carrier quirks, shell decides
+     nothing) and `30-design-standards` (tokens, not raw palette classes).
+   - **Output:** `DEBT_REPORT.md`, one line per finding with a file path.
 
 2. **Surgical Remediation Cycle:**
    - **Read** `DEBT_REPORT.md`.
@@ -32,9 +35,9 @@ This workflow acts as the "Manager," orchestrating the execution of specialized 
 
 **Start Loop:**
 
-1. **Design Standardization (Workflow 08):**
+1. **Design Standardization:**
    - _Condition:_ Run this step **ONLY IF** the Debt Audit or Remediation involved changes to UI components or CSS.
-   - Execute **Workflow 08** (`.agent/workflows/08-design-system-migration.md`) to align UI with Rule 30.
+   - Run the design regression check in **Workflow 09** (Phase 4) to align UI with Rule 30.
    - Auto-correct any detected "drift" (e.g., hardcoded hex values, wrong shadows).
 
 2. **Browser Verification (Workflow 09):**

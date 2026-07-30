@@ -29,7 +29,7 @@ Manually inspect the diff for:
 - [ ] **Secrets**: Ensure no `.env` values, keys, or tokens are hardcoded.
 - [ ] **Injections**: Check SQL/Shell inputs are sanitized.
 - [ ] **Data Loss**: Verify destructive actions (DELETE/DROP) have safeguards.
-- [ ] **Auth**: Ensure new endpoints/actions check for authentication/authorization.
+- [ ] **Refusals**: No compliance value is inferred that the document does not state — no EAR99 from a missing ECCN, no NLR from EAR99, no origin, hazmat, routed-export or related-party status.
 
 ## 4. Engineering Standards Review
 

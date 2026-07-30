@@ -96,11 +96,11 @@ jobs:
               if (filename.startsWith('.github/') || filename.startsWith('infra/') || filename.includes('workflow')) {
                 changeTypes.add('config/CI');
               }
-              if (/migrations?\//.test(filename) && /\.sql$/i.test(filename)) {
-                changeTypes.add('db/migrations');
+              if (filename.startsWith('src-tauri/')) {
+                changeTypes.add('desktop-shell');
               }
-              if (/security/i.test(filename) || filename.includes('supabase/sec')) {
-                changeTypes.add('security');
+              if (filename.startsWith('src/domain/') || filename.startsWith('src/carriers/')) {
+                changeTypes.add('compliance-critical');
               }
               if (!/\.md$/i.test(filename) && !filename.endsWith('.lock') && !filename.endsWith('.json') && !filename.startsWith('.github/')) {
                 changeTypes.add('code');
@@ -173,7 +173,7 @@ jobs:
 
             const diagnostics = [];
             if (changeTypes.has('code')) {
-              diagnostics.push('npm ci', 'npm run lint', 'npm test -- --watch=false', 'npm run build');
+              diagnostics.push('npm ci', 'npm run check');
             }
             if (changeTypes.has('docs-only')) {
               diagnostics.push('npx --yes markdown-link-check <changed-docs>', 'npx --yes cspell <changed-docs>');
@@ -181,18 +181,20 @@ jobs:
             if (changeTypes.has('config/CI')) {
               diagnostics.push('act --list');
             }
-            if (changeTypes.has('db/migrations')) {
-              diagnostics.push('supabase db lint', 'supabase db reset --preview');
+            if (changeTypes.has('desktop-shell')) {
+              diagnostics.push('cargo test --manifest-path src-tauri/Cargo.toml', 'npm run desktop:build');
             }
-            if (changeTypes.has('security')) {
-              diagnostics.push('npm run lint:security');
+            if (changeTypes.has('compliance-critical')) {
+              // A comment is not a runnable step, and pushing one would satisfy the
+              // length check below while leaving the plan with nothing to run.
+              diagnostics.push('npm ci', 'npm run check');
             }
 
             if (diagnostics.length === 0) {
               diagnostics.push('npm ci');
             }
 
-            const diagnosticsBlock = diagnostics.join('\n');
+            const diagnosticsBlock = [...new Set(diagnostics)].join('\n');
 
             let ciSection = '_CI status pending._';
             if (ciState === 'success') {

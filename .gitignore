@@ -25,3 +25,10 @@ src/test/fixtures/
 *_fedex-ship-manager.txt
 *_ups-worldship.txt
 *_SLI_*.pdf
+
+# Workflow scratch output. 06-pre-pr-docs tells an agent these are gitignored and safe to
+# leave in the tree; without these lines a trusting `git add -A` commits internal drafts.
+PR_DESCRIPTION_DRAFT.md
+code_review_draft.md
+implementation_plan.md
+DEBT_REPORT.md

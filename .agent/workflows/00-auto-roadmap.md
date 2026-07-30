@@ -10,7 +10,7 @@ Use this workflow to automatically identify and begin the next priority item fro
 2. **Select Item**:
    - Look for the first item marked `🚧 In Progress`.
    - If none, look for the first item marked `📅 Planned` in the earliest active Phase.
-3. **Confirm**: State the selected Item ID and Name (e.g., `P6-DASH-PAGINATION: Dashboard Pagination`) to the user.
+3. **Confirm**: State the selected milestone name (e.g., `More CIPL formats`) to the user.
 
 ## 2. Execute Feature Injection
 
@@ -18,7 +18,7 @@ Use this workflow to automatically identify and begin the next priority item fro
 
 1. **Clarify Scope**:
    - Read `docs/operations/ENGINEERING_KNOWLEDGE.md`.
-   - **Architecture Check**: Does this item (`[Selected Item]`) affect Schema, RLS, or Optimistic UI?
+   - **Architecture Check**: Does this item (`[Selected Item]`) affect what is proved against the source document, what a carrier adapter writes into a box, or the shell's native surface?
    - drafted Consistency Plan if needed.
 2. **Plan**:
    - Create `implementation_plan.md`.

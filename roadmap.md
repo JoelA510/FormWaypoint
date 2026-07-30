@@ -1,14 +1,21 @@
 # FormWaypoint Roadmap
 
-**Last Updated**: 2026-07-28
+**Last Updated**: 2026-07-30
 
 ## Current focus
 
 Turning a combined commercial invoice & packing list into a completed carrier Shipper's
 Letter of Instruction, on this machine. Two CIPL formats and two carriers are supported end
 to end, verified against real, manually-processed shipments. It ships as a web app and as a
-Windows desktop app; the desktop build adds the in-app Schedule B refresh, which cannot
-work in a browser.
+Windows desktop app; the desktop build adds the in-app Schedule B refresh, which cannot work
+in a browser, and writes the finished form to a path it can report back rather than handing
+the bytes to the webview and losing track of them.
+
+Two of the three planned items are the same shape of work: a new format or carrier is a
+detector, a parser, or an adapter, and nothing downstream changes. Denied-party screening is
+the one that adds a capability rather than a variant, and it is deliberately modelled on
+Schedule B validation — a published list, shipped with the app and refreshable, checked
+against rather than inferred from.
 
 ## Milestone tracker
 
@@ -24,12 +31,14 @@ work in a browser.
 | **Review screen** | ✅ Done | Per-field provenance, blocking/advisory checks, classification overrides with reason and approver. |
 | **FedEx / UPS** | ✅ Done | Keying sheets ordered the way Ship Manager and WorldShip prompt, for manual entry. |
 | **Local history** | ✅ Done | Exporter profile, per-consignee values, per-part weights, the item library, overrides and processed shipments in IndexedDB. |
-| **Regression suite** | ✅ Done | 197 TypeScript tests over five real shipments across both formats, plus Rust unit tests for the shell's path handling. |
+| **Regression suite** | ✅ Done | 322 TypeScript tests, plus Rust unit tests for the shell's path handling. A clean checkout runs 200 against synthetic documents and skips the 122 regression tests that need real shipment documents. |
 | **Desktop packaging seam** | ✅ Done | `localStore` is the single named implementation; a Tauri build replaces one assignment. Windows-only target; WebView2 covers every platform API the app uses. |
-| **Desktop build (.exe)** | ✅ Done | Tauri v2 shell; the Windows installer is built by the `Desktop build` workflow. Four Rust commands and no decisions. TLS goes through the OS certificate store, so a corporate inspection CA is trusted, and an environment proxy is honoured. |
+| **Desktop build (.exe)** | ✅ Done | Tauri v2 shell; the Windows installer is built by the `Desktop build` workflow. Seven Rust commands and no decisions. TLS goes through the OS certificate store, so a corporate inspection CA is trusted, and an environment proxy is honoured. |
 | **Schedule B revision diff** | ✅ Done | `src/domain/schedule-b/revision.ts` — diffs two datasets, intersects the result with the item library by part, and renders the change log and CSV worklist. Pure logic, no filesystem or network. |
 | **In-app Schedule B refresh** | ✅ Done | Downloads the concordance, diffs it, writes the change log and CSV worklist, then replaces the dataset. Verified end to end against the live Census server in a packaged binary. |
+| **Saved output** | ✅ Done | `save_output` writes the filled SLI or keying sheet into Downloads and returns the path, `open_output` opens it; the panel reports where the file landed. Regenerating suffixes rather than overwriting, because the earlier copy may already be signed. Browser builds keep the blob download, which is all a browser can do. |
 | **More carriers** | 📅 Planned | One adapter each. The parser and reconciler carry no carrier-specific logic. |
+| **Denied-party screening** | 📅 Planned | The consignee checked against the Consolidated Screening List, shipped and refreshed the way `schedule-b.json` is. A match is reported with the list and the matched field, never scored into a pass/fail the filer cannot inspect. No decision is made for them. |
 | **More CIPL formats** | 📅 Planned | A detector and a parser behind the same `ParsedCipl` contract — the registry and everything downstream are already shared. |
 
 ## How the in-app Schedule B refresh works
@@ -65,6 +74,20 @@ can still be consulted after a later refresh.
 library, never reclassifies a part, and never rewrites a code. It reports what Census
 changed and which of your parts that touches; every correction stays a human action.
 
+## Considered and not planned
+
+An earlier set of enhancement proposals was written for the monorepo — a Hono API with
+Postgres, carrier rate shopping, booking and label printing. Recording why they do not
+apply, so they are not re-proposed as though nothing had changed:
+
+| Proposal | Why not |
+| :--- | :--- |
+| Rate shopping, landed cost, carrier scorecards, carbon estimates | All need live carrier rate APIs and an account relationship. This tool talks to no carrier; it fills the form the carrier already gave you. |
+| Bulk booking, batch label printing, mass status updates | These assume a shipment lifecycle — booked, in transit, delivered — that does not exist here. A shipment is a document in and a form out. |
+| Vendor portal for suppliers | Needs a server, accounts and someone else's data on it. That is a different product, and rule 1 makes it a product decision rather than a feature. |
+| ERP sync heartbeat | The item-master import already covers the part that mattered: getting weights and codes out of the ERP. A live connection buys nothing a periodic export does not. |
+| Auto-archiving generated documents | Largely done. Processed shipments are kept locally for autofill and audit, and the desktop build reports the path it saved to. |
+
 ## Open questions
 
 - **Box 26 net vs gross.** All historical shipments enter net weight into a box captioned
@@ -89,6 +112,7 @@ changed and which of your parts that touches; every correction stays a human act
 
 | Date | Milestone | Details |
 | :--- | :--- | :--- |
+| 2026-07-30 | **Saved output** | `save_output`/`open_output` on the shell: the app learns where the finished form landed and opens it, instead of losing the blob to the webview. |
 | 2026-07-28 | **Pre-packaging pass** | Store seam narrowed to one assignment, Schedule B staleness warning, toolchain bumps (vite 8, vitest 4), monorepo leftovers removed. |
 | 2026-07-27 | **Item library** | Dependency-free .xlsx/.csv import, per-part weights, commodity-number screening. |
 | 2026-07-27 | **Second CIPL format** | `SHIPMENT#` parser behind a format registry; sales order vs customer PO separated. |
