@@ -21,6 +21,18 @@ export interface DesktopBridge {
   readDataFile(name: string): Promise<string | null>
   /** Absolute path of the data directory, for showing the user where things landed. */
   dataDir(): Promise<string>
+  /**
+   * Writes a generated document to the Downloads folder and returns its full path.
+   *
+   * Not a webview download. A blob download goes wherever the webview decides — the process
+   * working directory on Linux, somewhere unannounced on Windows — and the page is told
+   * neither the folder nor the final name, so it cannot say where the file went or open it.
+   */
+  saveOutput(name: string, bytes: Uint8Array): Promise<string>
+  /** Opens a path `saveOutput` returned with whatever the system opens that type with. */
+  openOutput(path: string): Promise<void>
+  /** Absolute path of the output directory, for naming it before anything is written. */
+  outputDir(): Promise<string>
 }
 
 interface TauriInternals {
@@ -67,5 +79,10 @@ export function desktopBridge(): DesktopBridge | null {
     writeDataFile: (name, contents) => call<string>(tauri, 'write_data_file', { name, contents }),
     readDataFile: (name) => call<string | null>(tauri, 'read_data_file', { name }),
     dataDir: () => call<string>(tauri, 'data_dir'),
+    // Sent as a plain array: Tauri's JSON transport cannot carry a `Uint8Array`, and a
+    // filled SLI is a couple of hundred kilobytes on a button press, not a hot path.
+    saveOutput: (name, bytes) => call<string>(tauri, 'save_output', { name, bytes: Array.from(bytes) }),
+    openOutput: (path) => call<void>(tauri, 'open_output', { path }),
+    outputDir: () => call<string>(tauri, 'output_dir'),
   }
 }
