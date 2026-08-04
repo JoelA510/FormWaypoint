@@ -386,7 +386,7 @@ function totalsChecks(
  * list's summary section is written independently of them.
  *
  * Blocking in both directions. A part short of its summary means a line was missed — that is
- * how shipment 278563's `REPL ACT’R MFS-11` went unnoticed. A part over it, or one that does
+ * how shipment vendorB3's `REPL ACT’R MFS-11` went unnoticed. A part over it, or one that does
  * not appear in the summary at all, means a line was double-counted or read wrong, which
  * misstates the shipment just as badly in the other direction.
  */
