@@ -102,7 +102,7 @@ export function parseVendorBPages(fileName: string, pages: TextPage[]): ParsedCi
      * The header is read from the first page, which on a multi-page invoice carries no total
      * at all — so this used to find nothing and fall back to summing the very lines the
      * total-value check then compared it against. That made the check self-referential: it
-     * could never fail, however many lines the parser had dropped. Shipment 278563 lost a
+     * could never fail, however many lines the parser had dropped. Shipment vendorB3 lost a
      * line and reconciled perfectly at 8,445.61 against a document that says 8,483.88.
      *
      * So every page is searched, and no line-derived fallback is used. A total that cannot
@@ -339,7 +339,7 @@ function leftAddressBlock(rows: TextRow[], label: string): PartyAddress {
  * Refusals are returned rather than dropped. `parseBlock` declines a block whose columns do
  * not line up, which is the right call — filing a shipping code as a commodity description
  * would be worse than not filing the line. But a refusal that nobody hears is just a missing
- * line, and on shipment 278563 that is exactly what happened: one block was refused, the
+ * line, and on shipment vendorB3 that is exactly what happened: one block was refused, the
  * line vanished, and the only way to notice was to read the PDF beside the screen.
  */
 function parseLineBlocks(

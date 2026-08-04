@@ -38,6 +38,7 @@ import {
 import {
   localStore,
   overrideCodes,
+  overrideDescriptions,
   overrideWeights,
   overridesToMap,
   type OverrideRecord,
@@ -172,6 +173,9 @@ export function App() {
    */
   const codesByPart = useMemo(() => overrideCodes(partOverrides), [partOverrides])
 
+  /** Commodity wording the operator saved, for the keying sheets. Never generated. */
+  const descriptionsByPart = useMemo(() => overrideDescriptions(partOverrides), [partOverrides])
+
   const reconciliation = useMemo(() => {
     if (!parsed) return null
     return reconcile(parsed, scheduleB, {
@@ -233,6 +237,12 @@ export function App() {
   const savePartWeight = useCallback(
     (partNumber: string, description: string, netWeightKg: number) =>
       savePartOverride(partNumber, description, { netWeightKg }),
+    [savePartOverride],
+  )
+
+  const savePartDescription = useCallback(
+    (partNumber: string, description: string, sliDescription: string) =>
+      savePartOverride(partNumber, description, { sliDescription }),
     [savePartOverride],
   )
 
@@ -456,10 +466,12 @@ export function App() {
               reconciliation={reconciliation}
               weights={unitWeightsByPart}
               codes={codesByPart}
+              descriptions={descriptionsByPart}
               weightsNeeded={!parsed.providesWeights}
               enteredBy={profile.signerName}
               onSaveWeight={(part, description, weight) => void savePartWeight(part, description, weight)}
               onSaveCode={(part, description, code, reason) => void savePartCode(part, description, code, reason)}
+              onSaveDescription={(part, description, text) => void savePartDescription(part, description, text)}
               onClearCode={(part) => void clearPartCode(part)}
             />
             <CommodityTable reconciliation={reconciliation} />
@@ -485,6 +497,9 @@ export function App() {
               onGenerated={() => void handleGenerated()}
               keyedCarrier={keyedCarrier}
               bridge={bridge}
+              descriptionsByPart={descriptionsByPart}
+              sourceFile={parsed.fileName}
+              excludedSets={parsed.availableSets.filter((set) => set !== reconciliation.selectedSet)}
             />
             <HistoryPanel shipments={shipments} onClear={() => void clearAll()} />
           </>

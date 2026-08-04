@@ -59,6 +59,11 @@ export interface OverrideRecord {
  *   - **`exportCode`** — the commodity number to file for this part instead of the one the
  *     document prints. Narrower than an `OverrideRecord`, which redirects a code wherever it
  *     appears; this says nothing about other parts sharing that code.
+ *   - **`sliDescription`** — the wording to key into a carrier's commodity record. The CIPL
+ *     prints whatever the ERP holds, which is often a group heading (`Elect. Apparatus,
+ *     Other`) or an internal code (`SA34-F1`). The app will not compose a better one — a
+ *     commodity description is part of what is being declared — but it will remember the
+ *     operator's, so it is written once and reused on every future shipment of that part.
  *
  * A weight is a measurement and needs no justification. A code is a classification decision,
  * so `reason` and `enteredBy` are required alongside one and are carried into the item-master
@@ -74,6 +79,11 @@ export interface PartOverrideRecord {
   netWeightKg: number | null
   /** Normalised ten digits, or absent when only the weight was entered. */
   exportCode?: string
+  /**
+   * Commodity wording for a carrier's own software. Distinct from `description` below,
+   * which is only ever what the document last called this part.
+   */
+  sliDescription?: string
   /** Why this code, required with one. Empty for a weight-only record. */
   reason?: string
   enteredBy?: string
@@ -83,7 +93,9 @@ export interface PartOverrideRecord {
 }
 
 /** The fields of a part's record that a caller may set. */
-export type PartOverridePatch = Partial<Pick<PartOverrideRecord, 'netWeightKg' | 'exportCode' | 'reason' | 'enteredBy'>>
+export type PartOverridePatch = Partial<
+  Pick<PartOverrideRecord, 'netWeightKg' | 'exportCode' | 'sliDescription' | 'reason' | 'enteredBy'>
+>
 
 /** One processed shipment, kept for autofill and as an audit trail. */
 export interface ShipmentRecord {
@@ -241,7 +253,7 @@ export const indexedDbStore: LocalStore = {
     }
     // A record with neither field left says nothing, and would put an empty row in the
     // item-master worklist.
-    if (merged.netWeightKg == null && !merged.exportCode?.trim()) {
+    if (merged.netWeightKg == null && !merged.exportCode?.trim() && !merged.sliDescription?.trim()) {
       if (existing) await tx.store.delete(existing.partNumber)
     } else {
       await tx.store.put(merged)
@@ -305,6 +317,15 @@ export const localStore: LocalStore = indexedDbStore
 export function overrideWeights(records: PartOverrideRecord[]): Record<string, number> {
   return Object.fromEntries(
     records.filter((r) => r.netWeightKg != null).map((r) => [partKey(r.partNumber), r.netWeightKg as number]),
+  )
+}
+
+/** Commodity wording the operator saved, keyed by uppercased part number. */
+export function overrideDescriptions(records: PartOverrideRecord[]): Record<string, string> {
+  return Object.fromEntries(
+    records
+      .filter((r) => r.sliDescription?.trim())
+      .map((r) => [partKey(r.partNumber), (r.sliDescription as string).trim()]),
   )
 }
 

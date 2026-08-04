@@ -366,21 +366,25 @@ export function PartOverridesPanel({
   reconciliation,
   weights,
   codes,
+  descriptions,
   weightsNeeded,
   enteredBy,
   onSaveWeight,
   onSaveCode,
+  onSaveDescription,
   onClearCode,
 }: {
   reconciliation: Reconciliation
   weights: Record<string, number>
   codes: Record<string, string>
+  descriptions: Record<string, string>
   /** True when the document states no weights, so the weight column is in play. */
   weightsNeeded: boolean
   /** Who is entering these — the signer, so nobody types their own name twice. */
   enteredBy: string
   onSaveWeight: (partNumber: string, description: string, netWeightKg: number) => void
   onSaveCode: (partNumber: string, description: string, exportCode: string, reason: string) => void
+  onSaveDescription: (partNumber: string, description: string, sliDescription: string) => void
   onClearCode: (partNumber: string) => void
 }) {
   const parts = [...new Map(reconciliation.mergedLines.map((l) => [l.partNumber, l])).values()]
@@ -428,6 +432,7 @@ export function PartOverridesPanel({
                 {weightsNeeded ? <th className="px-4 py-2.5 font-semibold">Net kg each</th> : null}
                 {weightsNeeded ? <th className="px-4 py-2.5 text-right font-semibold">Line kg</th> : null}
                 <th className="px-4 py-2.5 font-semibold">Schedule B</th>
+                <th className="px-4 py-2.5 font-semibold">Commodity wording</th>
               </tr>
             </thead>
             <tbody>
@@ -462,6 +467,13 @@ export function PartOverridesPanel({
                         enteredBy={enteredBy}
                         onCommit={(code, reason) => onSaveCode(part.partNumber, part.description, code, reason)}
                         onClear={() => onClearCode(part.partNumber)}
+                      />
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <CommodityWordingInput
+                        documentWording={part.description || part.commodityGroup}
+                        value={descriptions[partKey(part.partNumber)]}
+                        onCommit={(text) => onSaveDescription(part.partNumber, part.description, text)}
                       />
                     </td>
                   </tr>
@@ -599,6 +611,49 @@ function PartCodeInput({
           </div>
         </>
       ) : null}
+    </div>
+  )
+}
+
+/**
+ * The wording to key into a carrier's commodity record, for one part.
+ *
+ * The document's own wording is the placeholder, so leaving this alone keeps what the CIPL
+ * says. Typing over it is the operator writing a commodity description — which is why the
+ * app will not write one itself, and why what is typed here carries across every future
+ * shipment of the part rather than being asked for again.
+ *
+ * Commits on blur, like the weight: this is a description, not a classification, and
+ * demanding a justification for wording would be friction with nothing behind it.
+ */
+function CommodityWordingInput({
+  documentWording,
+  value,
+  onCommit,
+}: {
+  documentWording: string
+  value: string | undefined
+  onCommit: (text: string) => void
+}) {
+  const [draft, setDraft] = useState(value ?? '')
+
+  useEffect(() => {
+    setDraft(value ?? '')
+  }, [value])
+
+  return (
+    <div className="space-y-1">
+      <Input
+        value={draft}
+        aria-label="Commodity description to key into the carrier's software"
+        placeholder={documentWording || 'as printed'}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => {
+          const next = draft.trim()
+          if (next !== (value ?? '')) onCommit(next)
+        }}
+      />
+      {value ? <span className="text-xs text-[var(--color-warn)]">yours, not the document's</span> : null}
     </div>
   )
 }

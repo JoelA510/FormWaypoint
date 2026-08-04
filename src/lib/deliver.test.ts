@@ -12,8 +12,10 @@
  * half the behaviour and it is an anchor element.
  */
 import { describe, expect, it, vi } from 'vitest'
-import { deliver, deliverText, open } from './deliver'
+import { deliver, open } from './deliver'
 import type { DesktopBridge } from '../desktop'
+
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
 const fakeBridge = (savedAs: (name: string) => string): DesktopBridge => ({
   fetchConcordance: vi.fn(async () => ''),
@@ -49,11 +51,10 @@ describe('on the desktop', () => {
     expect((await deliver(bridge, 'vendorA3_SLI_ceva.pdf', bytes)).fileName).toBe('vendorA3_SLI_ceva.pdf')
   })
 
-  it('encodes text before handing it over', async () => {
+  it('hands the bridge the bytes it was given', async () => {
     const bridge = fakeBridge((name) => `/downloads/${name}`)
-    await deliverText(bridge, 'sheet.txt', 'FedEx Ship Manager')
-    const sent = vi.mocked(bridge.saveOutput).mock.calls[0][1]
-    expect(new TextDecoder().decode(sent)).toBe('FedEx Ship Manager')
+    await deliver(bridge, 'sheet.xlsx', bytes, XLSX_MIME)
+    expect(vi.mocked(bridge.saveOutput).mock.calls[0][1]).toBe(bytes)
   })
 
   it('opens the path it was given', async () => {

@@ -19,8 +19,12 @@
  * or, worse, transposes values.
  */
 import type { MergedLine, Reconciliation } from '../../domain/types'
-import { kgToLb as kilogramsToPounds } from '../../domain/units'
+import { KG_PER_LB, kgToLb as kilogramsToPounds } from '../../domain/units'
+import { buildXlsx, type CellValue, type Sheet } from '../../lib/xlsx'
 import type { SliDraft } from '../types'
+import { normalizeScheduleB } from '../../domain/schedule-b'
+import { partKey } from '../../domain/part-key'
+import { roundTo } from '../../domain/reconcile'
 import { toCountryPickerLabel, toIsoAlpha2 } from './countries'
 
 export * from './countries'
@@ -43,15 +47,25 @@ export interface KeyingSection {
 
 export interface KeyingCommodityRow {
   description: string
+  /** True when the wording came from a saved per-part override rather than the document. */
+  describedByOperator?: boolean
+  /**
+   * Other wordings the document used for this part. Printed beside the row so the choice is
+   * visible: the CIPL describes one part more than one way and does not say which is meant.
+   */
+  otherDescriptions: string[]
   harmonizedCode: string
   /** ISO alpha-2, as the commodity record stores it. */
   countryOfManufacture: string
+  /** `DO - Dominican Republic`: the code the record stores, and the name the picker lists. */
+  countryLabel: string
   quantity: string
   unitOfMeasure: string
   /** Six decimal places, as Ship Manager displays and stores it. */
   unitValue: string
   totalValue: string
   weightLb: string
+  weightKg: string
   partNumber: string
   /** Set when the country name could not be resolved to a code. */
   needsCountryCode?: boolean
@@ -63,7 +77,20 @@ export interface KeyingSheet {
   shipmentReference: string
   sections: KeyingSection[]
   commodities: KeyingCommodityRow[]
-  totals: { commodities: number; customsValue: string; shipmentWeightLb: string }
+  totals: {
+    commodities: number
+    quantity: number
+    customsValue: string
+    shipmentWeightLb: string
+    shipmentWeightKg: string
+  }
+  /** Where the figures came from, so the sheet can account for itself months later. */
+  provenance: {
+    sourceFile: string
+    documentSet: string
+    documentCurrency: string
+    excludedSets: string
+  }
   /** Values the operator must supply; the CIPL does not contain them. */
   manualFields: string[]
 }
@@ -78,22 +105,32 @@ export function kgToLb(kg: number): number {
   return Math.round(kilogramsToPounds(kg) * 100) / 100
 }
 
+/** Printed in the notes so the conversion can be checked by hand. */
+const KG_PER_LB_LABEL = (1 / KG_PER_LB).toFixed(9)
+
 const MANUAL = 'Not on the CIPL — enter manually'
 const CHOOSE = 'Not on the CIPL — choose in the application'
 
 /**
- * One commodity record per description *and* country of manufacture.
+ * One commodity record per part, country of manufacture *and* commodity number.
  *
  * Country is a field on the commodity record, so two origins cannot share one: a real entry
  * for shipment vendorA4 splits its cable line into 4 from MY and 2 from JP, where the SLI
  * holds a single row of 6 under one Schedule B number. Grouping the way the SLI does would
  * make the operator take that row apart again at the keyboard, which is the manual step
  * this exists to remove.
+ *
+ * The description is deliberately *not* in the key, though it used to be. The CIPL prints a
+ * commodity-group heading against some lines and the part's own description against others,
+ * so one part came out as two identical records differing only in wording — shipment
+ * vendorA5 keyed as eight commodities where six were called for, two of its parts each
+ * appearing twice at the same code, country and unit price. The same part number is the same
+ * goods; the wording is a property of how the document was printed.
  */
-function groupForKeying(lines: MergedLine[]): KeyingCommodityRow[] {
+function groupForKeying(lines: MergedLine[], descriptions: Record<string, string>): KeyingCommodityRow[] {
   const groups = new Map<string, MergedLine[]>()
   for (const line of lines) {
-    const key = `${line.partNumber}|${line.description}|${line.countryOfOrigin}`
+    const key = [partKey(line.partNumber), partKey(line.countryOfOrigin), normalizeScheduleB(line.classification)].join('|')
     const bucket = groups.get(key)
     if (bucket) bucket.push(line)
     else groups.set(key, [line])
@@ -103,33 +140,89 @@ function groupForKeying(lines: MergedLine[]): KeyingCommodityRow[] {
     const first = group[0]
     const quantity = group.reduce((sum, l) => sum + l.quantity, 0)
     const total = group.reduce((sum, l) => sum + (l.extendedValue ?? 0), 0)
+    // Summed in kilograms and converted once. Converting each line and adding the rounded
+    // pounds accumulates the rounding: the same shipment came out 0.005 lb heavy that way.
     const weightKg = group.reduce((sum, l) => sum + (l.netWeightKg ?? 0), 0)
     const country = toIsoAlpha2(first.countryOfOrigin)
+    const saved = descriptions[partKey(first.partNumber)]
+    const chosen = describeGroup(group)
     return {
-      description: first.description || first.commodityGroup,
+      description: saved || chosen.description,
+      describedByOperator: Boolean(saved),
+      // Only meaningful when the app chose; the operator's own wording replaces all of them.
+      otherDescriptions: saved ? [] : chosen.alternatives,
       harmonizedCode: first.classification,
       countryOfManufacture: country.code,
+      countryLabel: toCountryPickerLabel(first.countryOfOrigin),
       needsCountryCode: !country.known && Boolean(first.countryOfOrigin),
-      quantity: String(quantity),
+      quantity: String(roundTo(quantity, 3)),
       unitOfMeasure: first.uom,
       // Derived from the group's own total rather than copied off one line, so the unit
       // price and the total beside it can never disagree.
       unitValue: quantity ? (total / quantity).toFixed(6) : '',
       totalValue: total.toFixed(2),
       weightLb: weightKg ? kgToLb(weightKg).toFixed(2) : '',
+      weightKg: weightKg ? roundTo(weightKg, 3).toFixed(3) : '',
       partNumber: first.partNumber,
     }
   })
+}
+
+/**
+ * The description to key, chosen from the wordings the document already carries.
+ *
+ * Never written. A commodity description is part of what is being declared, so the app picks
+ * between what is on the CIPL rather than composing something better — an operator who wants
+ * better wording saves their own against the part, and the row says so.
+ *
+ * Choosing is harder than it looks, and the first attempt here was wrong. The plan was to
+ * prefer the line's own description over the commodity-group heading, on the theory that the
+ * heading describes a section of the invoice and the description describes these goods.
+ * Shipment vendorA5 falsified it: part 44534-0730 is described as `Elect. Apparatus, Other`
+ * on two lines and `44534-0730 SA34-F1` on a third, with the group heading column *empty* on
+ * all three. Nothing in the document says which of those is a heading. Any rule that picks
+ * the prettier one is guessing at the shape of the words.
+ *
+ * So the rule is one the document does support: the wording most of these goods were invoiced
+ * under, by quantity, ties going to the first line. Where a part carried more than one, the
+ * others travel with the row and are printed beside it — the operator sees that a choice was
+ * made and what the alternatives were, instead of a silent pick.
+ *
+ * A leading repeat of the part number is dropped: it is already its own column, and
+ * `44534-0730 SA34-F1` in a description field is half a column of noise.
+ */
+function describeGroup(group: MergedLine[]): { description: string; alternatives: string[] } {
+  const byText = new Map<string, number>()
+  for (const line of group) {
+    const text = (line.description || line.commodityGroup || '').trim()
+    if (text) byText.set(text, (byText.get(text) ?? 0) + line.quantity)
+  }
+  if (!byText.size) return { description: '', alternatives: [] }
+
+  const ranked = [...byText.entries()].sort((a, b) => b[1] - a[1])
+  const part = group[0].partNumber.trim()
+  const strip = (text: string) =>
+    part && text.toUpperCase().startsWith(part.toUpperCase())
+      ? text.slice(part.length).replace(/^[\s:,-]+/, '').trim() || text
+      : text
+
+  return { description: strip(ranked[0][0]), alternatives: ranked.slice(1).map(([text]) => strip(text)) }
 }
 
 export function buildKeyingSheet(
   target: KeyingTarget,
   reconciliation: Reconciliation,
   draft: SliDraft,
+  /** Commodity wording the operator saved against a part, keyed by normalised part number. */
+  descriptionsByPart: Record<string, string> = {},
+  /** The document these figures were read from, for the provenance block. */
+  sourceFile?: string,
+  /** Document sets present but not used, e.g. a TP1 copy priced in another currency. */
+  excludedSets: string[] = [],
 ): KeyingSheet {
   const { header, mergedLines, sliLines } = reconciliation
   const isFedex = target === 'fedex-ship-manager'
-  const commodities = groupForKeying(mergedLines)
+  const commodities = groupForKeying(mergedLines, descriptionsByPart)
 
   const customsValue = sliLines.reduce((sum, l) => sum + l.valueUsd, 0)
   const netKg = sliLines.reduce((sum, l) => sum + l.weightKg, 0)
@@ -296,8 +389,21 @@ export function buildKeyingSheet(
     commodities,
     totals: {
       commodities: commodities.length,
+      // Rounded like the figures beside it. A fractional UOM sums to a binary tail —
+      // 0.1 + 0.2 — and this one is written into the workbook as a number, not a string.
+      quantity: roundTo(
+        commodities.reduce((sum, c) => sum + Number(c.quantity || 0), 0),
+        3,
+      ),
       customsValue: customsValue.toFixed(2),
       shipmentWeightLb: kgToLb(netKg).toFixed(2),
+      shipmentWeightKg: roundTo(netKg, 3).toFixed(3),
+    },
+    provenance: {
+      sourceFile: sourceFile ?? '',
+      documentSet: reconciliation.selectedSet,
+      documentCurrency: header.documentCurrency,
+      excludedSets: excludedSets.join(', '),
     },
     manualFields: sections
       .flatMap((s) => s.fields)
@@ -346,56 +452,114 @@ function describeShipment(rows: KeyingCommodityRow[]): string {
   return joined.length <= 50 ? joined : `${joined.slice(0, 47)}...`
 }
 
-/** Plain-text rendering, for clipboard and print. */
-export function keyingSheetToText(sheet: KeyingSheet): string {
-  const out: string[] = [
-    `${sheet.applicationName} — keying sheet`,
-    `Shipment ${sheet.shipmentReference}`,
-    '',
-    'Values are already in the units this application expects: weights in pounds,',
-    'country of manufacture as a two-letter code, unit value to six decimals.',
-    '',
+/**
+ * The keying sheet as a workbook.
+ *
+ * A grid, because that is what the work is: six rows of eight fields, keyed one after
+ * another into a table on the other screen. The outline this replaced spent nine lines on
+ * each commodity, so a six-commodity shipment ran to fifty-four lines of scrolling and gave
+ * no way to check a column at a glance.
+ *
+ * Three sheets, kept apart because they are read at different moments. **Commodities** is
+ * the table being typed, ending in a TOTAL row to check the application's own running total
+ * against. **Shipment details** is the form above it — labels and values, in the order the
+ * application asks for them, each saying where it came from or that it needs entering by
+ * hand. **Notes** is what the sheet would need to account for itself later: which document,
+ * which copy of it, and how the weights were converted.
+ */
+export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
+  const commodities: CellValue[][] = [
+    [
+      'Part Number',
+      'Country of Manufacture',
+      'Harmonized Code',
+      'Qty',
+      'UOM',
+      'Unit Value (USD)',
+      'Total Customs Value (USD)',
+      'Weight (lb)',
+      'Weight (kg)',
+      'Commodity Description',
+      'Note',
+    ],
+    ...sheet.commodities.map((row): CellValue[] => [
+      row.partNumber,
+      // The code the commodity record stores, and the name the picker lists, together: an
+      // operator given only one of the two has to translate before they can type anything.
+      row.needsCountryCode ? `${row.countryOfManufacture} — no code found, enter it` : row.countryLabel,
+      row.harmonizedCode,
+      numberOr(row.quantity),
+      row.unitOfMeasure,
+      numberOr(row.unitValue),
+      numberOr(row.totalValue),
+      numberOr(row.weightLb),
+      numberOr(row.weightKg),
+      row.description,
+      row.describedByOperator
+        ? 'your wording'
+        : row.otherDescriptions.length
+          ? `document also said: ${row.otherDescriptions.join('; ')}`
+          : '',
+    ]),
+    // Blank cells rather than zeroes in the columns a total is meaningless for.
+    ['TOTAL', null, null, sheet.totals.quantity, null, null, numberOr(sheet.totals.customsValue), numberOr(sheet.totals.shipmentWeightLb), numberOr(sheet.totals.shipmentWeightKg), null, null],
   ]
 
-  let tab = ''
+  const details: CellValue[][] = [['Tab', 'Section', 'Field', 'Value', 'Where it came from']]
   for (const section of sheet.sections) {
-    if (section.tab !== tab) {
-      tab = section.tab
-      out.push(`── ${tab} tab ──`)
-    }
-    out.push(`  ${section.title}`)
     for (const field of section.fields) {
-      out.push(`    ${field.label.padEnd(34)} ${field.value || '—'}${field.note ? `   (${field.note})` : ''}`)
+      details.push([section.tab, section.title, field.label, field.value || '—', field.note ?? ''])
     }
-    out.push('')
   }
 
-  out.push('── Commodity/Merchandise ──')
-  out.push(
-    `  ${sheet.totals.commodities} commodit${sheet.totals.commodities === 1 ? 'y' : 'ies'} · ` +
-      `total customs value ${sheet.totals.customsValue} · total shipment weight ${sheet.totals.shipmentWeightLb} lb`,
-  )
-  out.push('')
-  for (const [i, row] of sheet.commodities.entries()) {
-    out.push(`  Commodity ${i + 1}`)
-    out.push(`    Commodity description          ${row.description}`)
-    out.push(
-      `    Country of manufacture         ${row.countryOfManufacture}` +
-        (row.needsCountryCode ? '   (not recognised — enter the two-letter code)' : ''),
-    )
-    out.push(`    Quantity                       ${row.quantity}`)
-    out.push(`    Unit of measure                ${row.unitOfMeasure}`)
-    out.push(`    Unit value                     ${row.unitValue}`)
-    out.push(`    Total customs value            ${row.totalValue}`)
-    out.push(`    Total commodity weight (lbs)   ${row.weightLb}`)
-    out.push(`    Harmonized code                ${row.harmonizedCode}`)
-    out.push(`    Part number                    ${row.partNumber}`)
-  }
+  const notes: CellValue[][] = [
+    ['Note', 'Detail'],
+    ['Application', sheet.applicationName],
+    ['Shipment', sheet.shipmentReference],
+    ['Source document', sheet.provenance.sourceFile || '—'],
+    [
+      'Document basis',
+      sheet.provenance.excludedSets
+        ? `Used the ${sheet.provenance.documentSet} set, priced in ${sheet.provenance.documentCurrency}. ${sheet.provenance.excludedSets} describes the same goods and was excluded.`
+        : `Used the ${sheet.provenance.documentSet} set, priced in ${sheet.provenance.documentCurrency}.`,
+    ],
+    [
+      'Grouping',
+      'One row per part number, country of manufacture and commodity number. Lines the document split by wording were combined; a part shipped from two countries, or carrying two commodity numbers, stays on separate rows because those are fields on the record.',
+    ],
+    ['Weight basis', `Net weights summed in kilograms and converted once at 1 kg = ${KG_PER_LB_LABEL} lb.`],
+    [
+      'Descriptions',
+      'Chosen from the wordings already on the document — the one most of the goods were invoiced under, by quantity. Where a part was described more than one way the alternatives are printed in the Note column, because the document does not say which is meant. Rows noted "your wording" carry a description saved against that part. Nothing here is composed by the application.',
+    ],
+    ['Check', `${sheet.totals.commodities} commodities · ${sheet.totals.quantity} pcs · ${sheet.totals.customsValue} USD · ${sheet.totals.shipmentWeightLb} lb · ${sheet.totals.shipmentWeightKg} kg`],
+  ]
 
   if (sheet.manualFields.length) {
-    out.push('', 'Enter manually — not present on the CIPL:')
-    for (const label of sheet.manualFields) out.push(`  • ${label}`)
+    notes.push(['Enter manually', sheet.manualFields.join(', ')])
   }
 
-  return out.join('\n')
+  return [
+    { name: 'Commodities', rows: commodities },
+    { name: 'Shipment details', rows: details },
+    { name: 'Notes', rows: notes, columnWidths: [22, 100] },
+  ]
+}
+
+/**
+ * A formatted figure back to a number, so the column totals in the spreadsheet.
+ *
+ * The rest of this module formats for display — six decimals on a unit value, two on a
+ * weight — and those strings are exactly right in a text sheet and exactly wrong in a
+ * workbook, where a right-aligned summable number is the entire point.
+ */
+function numberOr(text: string): CellValue {
+  if (!text) return null
+  const value = Number(text)
+  return Number.isFinite(value) ? value : text
+}
+
+/** The workbook as bytes, ready to write. */
+export function keyingSheetToXlsx(sheet: KeyingSheet): Uint8Array {
+  return buildXlsx(keyingSheetToWorkbook(sheet))
 }

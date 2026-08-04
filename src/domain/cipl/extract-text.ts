@@ -197,7 +197,7 @@ export function valueRightOf(row: TextRow, label: string): string | undefined {
  * Matched on the font's actual signature — control characters and runs of `ÿ` padding —
  * rather than on "not printable ASCII", which this used to do. That was far too wide: it
  * discarded any cell containing a typographic apostrophe, an en dash, a degree sign, µ, Ω,
- * or an accented letter, all of which occur in real part descriptions. Shipment 278563
+ * or an accented letter, all of which occur in real part descriptions. Shipment vendorB3
  * printed `REPL ACT’R MFS-11` with a curly apostrophe, and losing that cell shifted the
  * whole block's columns and cost the line — see the note on `parseBlock`.
  */
