@@ -9,7 +9,7 @@ import { createScheduleBIndex, type ScheduleBIndex } from '../domain/schedule-b'
 import { reconcile } from '../domain/reconcile'
 import { buildDraft, defaultShipmentSettings, summariseReferences, type CompanyProfile } from '../domain/draft'
 import { getAdapter, detectCarrier } from './registry'
-import { buildKeyingSheet, keyingSheetToText } from './keying-sheet'
+import { buildKeyingSheet, keyingSheetToWorkbook } from './keying-sheet'
 import type { ParsedCipl, ShipmentHeader, SLILine } from '../domain/types'
 import type { SliDraft } from './types'
 
@@ -322,10 +322,9 @@ describe.skipIf(!hasFixtures())('FedEx / UPS keying sheets', () => {
     expect(sheet.manualFields).toContain('Package dimensions')
     expect(sheet.manualFields).toContain('Service type')
 
-    const text = keyingSheetToText(sheet)
-    expect(text).toContain('FedEx Ship Manager — keying sheet')
-    expect(text).toContain('Enter manually — not present on the CIPL:')
-    expect(text).toContain('8501.51.3040')
+    const [commodities, , notes] = keyingSheetToWorkbook(sheet)
+    expect(commodities.rows.flat()).toContain('8501.51.3040')
+    expect(notes.rows.find((r) => r[0] === 'Enter manually')?.[1]).toContain('Package dimensions')
   })
 })
 

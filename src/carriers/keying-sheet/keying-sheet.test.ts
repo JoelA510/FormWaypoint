@@ -7,7 +7,7 @@
  * them is a value the operator would otherwise convert by hand.
  */
 import { describe, expect, it } from 'vitest'
-import { buildKeyingSheet, keyingSheetToText, kgToLb, toCountryPickerLabel, toIsoAlpha2 } from '.'
+import { buildKeyingSheet, keyingSheetToWorkbook, kgToLb, toCountryPickerLabel, toIsoAlpha2 } from '.'
 import type { MergedLine, Reconciliation, SLILine } from '../../domain/types'
 import type { SliDraft } from '../types'
 
@@ -127,12 +127,12 @@ describe('country codes', () => {
   })
 
   it('passes through a value that is already a code', () => {
-    expect(toIsoAlpha2('GB')).toEqual({ code: 'GB', known: true })
+    expect(toIsoAlpha2('GB')).toEqual({ code: 'GB', known: true, name: 'United Kingdom' })
   })
 
   it('never guesses at a name it does not know', () => {
     const unknown = toIsoAlpha2('Ruritania')
-    expect(unknown).toEqual({ code: 'Ruritania', known: false })
+    expect(unknown).toEqual({ code: 'Ruritania', known: false, name: '' })
   })
 
   it('renders the picker label the country dropdown shows', () => {
@@ -199,7 +199,8 @@ describe('commodity grouping', () => {
       draft(),
     )
     expect(sheet.commodities[0]).toMatchObject({ countryOfManufacture: 'Ruritania', needsCountryCode: true })
-    expect(keyingSheetToText(sheet)).toContain('enter the two-letter code')
+    const [, row] = keyingSheetToWorkbook(sheet)[0].rows
+    expect(String(row[1])).toContain('no code found, enter it')
   })
 })
 
@@ -312,13 +313,173 @@ describe('address extraction', () => {
   })
 })
 
-describe('rendered text', () => {
-  it('states the totals the application shows back', () => {
-    const text = keyingSheetToText(
-      buildKeyingSheet('fedex-ship-manager', fixture([line({})], [sli({})]), draft()),
-    )
-    expect(text).toContain('total customs value 749.40')
-    expect(text).toMatch(/total shipment weight 17\.90 lb/)
-    expect(text).toContain('── Shipment details tab ──')
+describe('the workbook', () => {
+  const workbook = () =>
+    keyingSheetToWorkbook(buildKeyingSheet('fedex-ship-manager', fixture([line({})], [sli({})]), draft()))
+
+  it('is three sheets: the grid, the form above it, and where the figures came from', () => {
+    expect(workbook().map((s) => s.name)).toEqual(['Commodities', 'Shipment details', 'Notes'])
+  })
+
+  it('ends the grid with a TOTAL row to check the application against', () => {
+    const rows = workbook()[0].rows
+    const total = rows[rows.length - 1]
+    expect(total[0]).toBe('TOTAL')
+    expect(total[6]).toBe(749.4)
+    expect(total[7]).toBe(17.9)
+    // No country, code or unit value on a total — those columns stay empty rather than
+    // carrying a number that means nothing.
+    expect([total[1], total[2], total[5]]).toEqual([null, null, null])
+  })
+
+  it('writes the figures as numbers, so a column can be totalled and checked', () => {
+    const [, row] = workbook()[0].rows
+    expect(typeof row[3]).toBe('number')
+    expect(typeof row[6]).toBe('number')
+    expect(typeof row[7]).toBe('number')
+  })
+
+  it('accounts for itself on the Notes sheet', () => {
+    const notes = Object.fromEntries(workbook()[2].rows.map((r) => [String(r[0]), String(r[1])]))
+    expect(notes.Application).toBe('FedEx Ship Manager')
+    expect(notes['Weight basis']).toContain('summed in kilograms and converted once')
+    expect(notes.Grouping).toContain('One row per part number, country of manufacture and commodity number')
+    expect(notes.Check).toContain('749.40 USD')
+  })
+})
+
+describe('every country, not the ones someone remembered', () => {
+  it('resolves an origin the short list had never heard of', () => {
+    // Two of shipment vendorA5's six commodity rows came out as
+    // "(not recognised — enter the two-letter code)" because the map held about fifty names.
+    expect(toIsoAlpha2('Dominican Republic')).toMatchObject({ code: 'DO', known: true })
+  })
+
+  it('covers the whole register, including places nobody would think to add', () => {
+    for (const [name, code] of [
+      ['Lesotho', 'LS'],
+      ['Turkmenistan', 'TM'],
+      ['Saint Kitts and Nevis', 'KN'],
+      ['Faroe Islands', 'FO'],
+      ['Wallis and Futuna', 'WF'],
+      ['Bhutan', 'BT'],
+    ] as const) {
+      expect(toIsoAlpha2(name), name).toMatchObject({ code, known: true })
+    }
+  })
+
+  it('answers to the everyday name as well as the register’s', () => {
+    for (const [name, code] of [
+      ['Netherlands', 'NL'],
+      ['Netherlands, Kingdom of the', 'NL'],
+      ['South Korea', 'KR'],
+      ['Korea, Republic of', 'KR'],
+      ['Korea', 'KR'],
+      ['Ivory Coast', 'CI'],
+      ['Taiwan', 'TW'],
+      ['Vietnam', 'VN'],
+      ['Viet Nam', 'VN'],
+      ['Czech Republic', 'CZ'],
+    ] as const) {
+      expect(toIsoAlpha2(name), name).toMatchObject({ code, known: true })
+    }
+  })
+
+  it('labels with the code and the name, since the record wants one and the picker lists the other', () => {
+    expect(toCountryPickerLabel('Dominican Republic')).toBe('DO - Dominican Republic')
+    expect(toCountryPickerLabel('DE')).toBe('DE - Germany')
+    // A formal register name still labels as the name a picker shows.
+    expect(toCountryPickerLabel('United Kingdom of Great Britain and Northern Ireland')).toBe('GB - United Kingdom')
+  })
+
+  it('still refuses to guess', () => {
+    expect(toCountryPickerLabel('Ruritania')).toBe('Ruritania')
+    expect(toIsoAlpha2('Ruritania').known).toBe(false)
+  })
+})
+
+describe('one part is one commodity record', () => {
+  /**
+   * Shipment vendorA5, reduced to the two parts that exposed the split. Each was printed on
+   * two invoice lines — one carrying the part's own description, one carrying the
+   * commodity-group heading — and came out as two identical records at the same code,
+   * country and unit price.
+   */
+  const at = (over: Partial<MergedLine>): MergedLine =>
+    line({ countryOfOrigin: 'Germany', classification: '8538.90.7080', uom: 'PCS', ...over })
+
+  const vendorA5 = [
+    at({ partNumber: '44534-0730', description: 'Elect. Apparatus, Other', commodityGroup: 'Elect. Apparatus, Other', quantity: 7, extendedValue: 106.68, netWeightKg: 0.28 }),
+    at({ partNumber: '44534-0730', description: '44534-0730 SA34-F1', commodityGroup: 'Elect. Apparatus, Other', quantity: 6, extendedValue: 91.44, netWeightKg: 0.24 }),
+    at({ partNumber: '44536-0105', description: 'CM-S1 SWITCH 5M CABLE', commodityGroup: 'electrical boards, panels', classification: '8536.50.9065', quantity: 13, extendedValue: 662.87, netWeightKg: 3.81 }),
+    at({ partNumber: '44536-0105', description: 'electrical boards, panels', commodityGroup: 'electrical boards, panels', classification: '8536.50.9065', quantity: 5, extendedValue: 254.95, netWeightKg: 1.464 }),
+  ]
+
+  const build = (lines: MergedLine[], descriptions: Record<string, string> = {}) =>
+    buildKeyingSheet('fedex-ship-manager', fixture(lines, []), draft(), descriptions).commodities
+
+  it('merges the lines the document split by wording', () => {
+    const rows = build(vendorA5)
+    expect(rows).toHaveLength(2)
+    expect(rows.map((r) => [r.partNumber, r.quantity, r.totalValue])).toEqual([
+      ['44534-0730', '13', '198.12'],
+      ['44536-0105', '18', '917.82'],
+    ])
+  })
+
+  it('still splits a part shipped from two countries', () => {
+    // Country is a field on the commodity record; two origins cannot share one.
+    const rows = build([
+      at({ partNumber: 'AAA-1', countryOfOrigin: 'Malaysia', quantity: 4, extendedValue: 40 }),
+      at({ partNumber: 'AAA-1', countryOfOrigin: 'Japan', quantity: 2, extendedValue: 20 }),
+    ])
+    expect(rows).toHaveLength(2)
+    expect(rows.map((r) => r.countryOfManufacture).sort()).toEqual(['JP', 'MY'])
+  })
+
+  it('still splits a part carrying two commodity numbers', () => {
+    const rows = build([
+      at({ partNumber: 'AAA-1', classification: '8536.50.9065', quantity: 1, extendedValue: 10 }),
+      at({ partNumber: 'AAA-1', classification: '8538.90.7080', quantity: 1, extendedValue: 10 }),
+    ])
+    expect(rows).toHaveLength(2)
+  })
+
+  it('keys the wording most of the goods were invoiced under', () => {
+    // 7 pieces went out as `Elect. Apparatus, Other` against 6 as `44534-0730 SA34-F1`;
+    // 13 as `CM-S1 SWITCH 5M CABLE` against 5 as `electrical boards, panels`.
+    expect(build(vendorA5).map((r) => r.description)).toEqual(['Elect. Apparatus, Other', 'CM-S1 SWITCH 5M CABLE'])
+  })
+
+  it('carries the wordings it did not choose, rather than picking silently', () => {
+    // The document describes one part more than one way and does not mark which is a
+    // heading. Showing the alternatives is the honest version of choosing.
+    expect(build(vendorA5).map((r) => r.otherDescriptions)).toEqual([['SA34-F1'], ['electrical boards, panels']])
+  })
+
+  it('drops a part number repeated into its own description', () => {
+    // `44534-0730 SA34-F1` in a description field is half a column of noise; the part
+    // number is already its own column.
+    const rows = build([at({ partNumber: '44534-0730', description: '44534-0730 SA34-F1', quantity: 6, extendedValue: 91.44 })])
+    expect(rows[0].description).toBe('SA34-F1')
+  })
+
+  it('uses the operator’s own wording when they have saved some', () => {
+    const rows = build(vendorA5, { '44536-0105': 'Coded safety switches with 5 m cable' })
+    expect(rows[1]).toMatchObject({
+      description: 'Coded safety switches with 5 m cable',
+      describedByOperator: true,
+      // The operator's wording replaces every one the document offered.
+      otherDescriptions: [],
+    })
+    expect(rows[0].describedByOperator).toBeFalsy()
+  })
+
+  it('sums weight in kilograms and converts once', () => {
+    // Converting each line and adding the rounded pounds runs 0.005 lb heavy on this
+    // shipment: 0.62 + 0.53 against 1.146.
+    const rows = build(vendorA5)
+    expect(rows[0]).toMatchObject({ weightKg: '0.520', weightLb: '1.15' })
+    expect(rows[1]).toMatchObject({ weightKg: '5.274', weightLb: '11.63' })
   })
 })

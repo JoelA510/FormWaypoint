@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Select } from '../components/ui'
-import { deliver, deliverText, open as openDelivery, type Delivery } from '../lib/deliver'
-import { buildKeyingSheet, keyingSheetToText, type KeyingTarget } from '../carriers/keying-sheet'
+import { deliver, open as openDelivery, type Delivery } from '../lib/deliver'
+import { buildKeyingSheet, keyingSheetToXlsx, type KeyingTarget } from '../carriers/keying-sheet'
 import type { DesktopBridge } from '../desktop'
 import type { CarrierAdapter, SliDraft } from '../carriers/types'
 import type { Reconciliation } from '../domain/types'
@@ -15,12 +15,21 @@ export function OutputPanel({
   onGenerated,
   keyedCarrier = null,
   bridge,
+  descriptionsByPart = {},
+  sourceFile,
+  excludedSets = [],
 }: {
   adapter: CarrierAdapter
   reconciliation: Reconciliation
   draft: SliDraft
   /** Absent in a browser, where a download is the only way out. */
   bridge: DesktopBridge | null
+  /** Commodity wording saved against a part, for the keying sheet. */
+  descriptionsByPart?: Record<string, string>
+  /** The document these figures were read from, for the workbook's Notes sheet. */
+  sourceFile?: string
+  /** Document sets present but not used, for the same. */
+  excludedSets?: string[]
   /** Gated on the document checks *and* the draft checks — see App. */
   canGenerate: boolean
   onGenerated: () => void
@@ -86,11 +95,12 @@ export function OutputPanel({
   async function downloadKeyingSheet() {
     setError(null)
     try {
-      const sheet = buildKeyingSheet(target, reconciliation, draft)
-      const delivery = await deliverText(
+      const sheet = buildKeyingSheet(target, reconciliation, draft, descriptionsByPart, sourceFile, excludedSets)
+      const delivery = await deliver(
         bridge,
-        `${header.invoiceNumber || 'shipment'}_${target}.txt`,
-        keyingSheetToText(sheet),
+        `${header.invoiceNumber || 'shipment'}_${target}.xlsx`,
+        keyingSheetToXlsx(sheet),
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       )
       setSaved(delivery)
       await openDelivery(bridge, delivery)
@@ -175,10 +185,11 @@ export function OutputPanel({
           </p>
           <p className="mt-0.5 mb-2 text-sm text-[var(--color-ink-soft)]">
             {keyedCarrier
-              ? 'This carrier is keyed into its own software rather than sent a form. The sheet follows that ' +
-                'application\u2019s tabs and fields, with weights already in pounds, country of manufacture as a ' +
-                'two-letter code, and unit value to six decimals.'
-              : 'A keying sheet laid out in the order the desktop application asks for each field, for manual entry.'}
+              ? 'This carrier is keyed into its own software rather than sent a form. A workbook: one row per ' +
+                'commodity record with a total to check against, the shipment fields in the order the ' +
+                'application asks for them, and a note of where every figure came from.'
+              : 'A workbook laid out as the desktop application stores it — one row per commodity record, plus ' +
+                'the shipment fields in the order it asks for them.'}
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <Select
