@@ -29,10 +29,27 @@ export interface Sheet {
 
 const XML_HEADER = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
 
-/** Excel rejects a tab name containing any of these, or one longer than 31 characters. */
-function safeSheetName(name: string, index: number): string {
-  const cleaned = name.replace(/[[\]:*?/\\]/g, ' ').trim().slice(0, 31)
-  return cleaned || `Sheet${index + 1}`
+/**
+ * Excel rejects a tab name containing `[]:*?/\`, one longer than 31 characters, or one that
+ * repeats another tab's — and in every case it reports only that the file is corrupt, with
+ * nothing pointing at the name.
+ *
+ * The last of those is the one worth guarding, because truncating to 31 characters can
+ * *create* it out of two names that were distinct when they were handed in. The suffix eats
+ * into the 31 rather than extending past it.
+ */
+function safeSheetNames(sheets: Sheet[]): string[] {
+  const taken = new Set<string>()
+  return sheets.map((sheet, index) => {
+    const cleaned = sheet.name.replace(/[[\]:*?/\\]/g, ' ').trim().slice(0, 31) || `Sheet${index + 1}`
+    let name = cleaned
+    for (let n = 2; taken.has(name.toLowerCase()); n++) {
+      const suffix = ` (${n})`
+      name = cleaned.slice(0, 31 - suffix.length).trimEnd() + suffix
+    }
+    taken.add(name.toLowerCase())
+    return name
+  })
 }
 
 /**
@@ -104,7 +121,8 @@ const STYLES = `${XML_HEADER}<styleSheet xmlns="http://schemas.openxmlformats.or
 
 export function buildXlsx(sheets: Sheet[]): Uint8Array {
   if (!sheets.length) throw new Error('A workbook needs at least one sheet.')
-  const named = sheets.map((s, i) => ({ ...s, name: safeSheetName(s.name, i) }))
+  const names = safeSheetNames(sheets)
+  const named = sheets.map((s, i) => ({ ...s, name: names[i] }))
 
   const files: [string, string][] = [
     [

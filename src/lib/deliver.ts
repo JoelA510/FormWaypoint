@@ -36,9 +36,6 @@ export async function deliver(
   return { fileName: path.split(/[\\/]/).pop() || fileName, path }
 }
 
-export const deliverText = (bridge: DesktopBridge | null, fileName: string, text: string) =>
-  deliver(bridge, fileName, new TextEncoder().encode(text), 'text/plain')
-
 /**
  * Hands the file to the system's default application for its type.
  *

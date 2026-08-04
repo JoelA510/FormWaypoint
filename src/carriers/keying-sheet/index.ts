@@ -173,7 +173,7 @@ function groupForKeying(lines: MergedLine[], descriptions: Record<string, string
  *
  * Never written. A commodity description is part of what is being declared, so the app picks
  * between what is on the CIPL rather than composing something better — an operator who wants
- * better wording saves their own against the part, which is theirs and carries their name.
+ * better wording saves their own against the part, and the row says so.
  *
  * Choosing is harder than it looks, and the first attempt here was wrong. The plan was to
  * prefer the line's own description over the commodity-group heading, on the theory that the
@@ -389,7 +389,12 @@ export function buildKeyingSheet(
     commodities,
     totals: {
       commodities: commodities.length,
-      quantity: commodities.reduce((sum, c) => sum + Number(c.quantity || 0), 0),
+      // Rounded like the figures beside it. A fractional UOM sums to a binary tail —
+      // 0.1 + 0.2 — and this one is written into the workbook as a number, not a string.
+      quantity: roundTo(
+        commodities.reduce((sum, c) => sum + Number(c.quantity || 0), 0),
+        3,
+      ),
       customsValue: customsValue.toFixed(2),
       shipmentWeightLb: kgToLb(netKg).toFixed(2),
       shipmentWeightKg: roundTo(netKg, 3).toFixed(3),
@@ -508,7 +513,7 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
   }
 
   const notes: CellValue[][] = [
-    ['', ''],
+    ['Note', 'Detail'],
     ['Application', sheet.applicationName],
     ['Shipment', sheet.shipmentReference],
     ['Source document', sheet.provenance.sourceFile || '—'],
@@ -529,7 +534,6 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
     ],
     ['Check', `${sheet.totals.commodities} commodities · ${sheet.totals.quantity} pcs · ${sheet.totals.customsValue} USD · ${sheet.totals.shipmentWeightLb} lb · ${sheet.totals.shipmentWeightKg} kg`],
   ]
-  notes[0] = ['Note', 'Detail']
 
   if (sheet.manualFields.length) {
     notes.push(['Enter manually', sheet.manualFields.join(', ')])

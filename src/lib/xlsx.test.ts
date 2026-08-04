@@ -65,6 +65,32 @@ describe('a workbook', () => {
     expect(workbook).toContain('name="Sheet2"')
   })
 
+  it('keeps two tabs apart rather than writing a workbook Excel calls corrupt', () => {
+    const workbook = new TextDecoder().decode(
+      buildXlsx([
+        { name: 'Commodities', rows: [['a']] },
+        { name: 'Commodities', rows: [['b']] },
+        { name: 'Commodities', rows: [['c']] },
+      ]),
+    )
+    expect(workbook).toContain('name="Commodities"')
+    expect(workbook).toContain('name="Commodities (2)"')
+    expect(workbook).toContain('name="Commodities (3)"')
+  })
+
+  it('stays inside 31 characters when it has to disambiguate a truncated name', () => {
+    const long = 'A commodity description far too long for a tab'
+    const workbook = new TextDecoder().decode(
+      buildXlsx([
+        { name: long, rows: [['a']] },
+        { name: long, rows: [['b']] },
+      ]),
+    )
+    const names = [...workbook.matchAll(/<sheet name="([^"]+)"/g)].map((m) => m[1])
+    expect(names).toEqual(['A commodity description far too', 'A commodity description far (2)'])
+    for (const name of names) expect(name.length).toBeLessThanOrEqual(31)
+  })
+
   it('names columns past Z', async () => {
     const header = Array.from({ length: 30 }, (_, i) => `c${i}`)
     const sheet = new TextDecoder().decode(buildXlsx([{ name: 'S', rows: [header] }]))
