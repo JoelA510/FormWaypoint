@@ -1,0 +1,517 @@
+/**
+ * Lithium and sodium battery classification for air transport (IATA DGR).
+ *
+ * This module is the regulatory table, and nothing else. It takes what is knowable about a
+ * battery — chemistry, whether it is a cell or a battery, how it travels, and its energy
+ * content — and returns the UN number, proper shipping name, packing instruction and section
+ * that follow from those facts, together with the limits and hazard communication that
+ * section carries.
+ *
+ * Every figure here is stated in the Labelmaster *Shipping Lithium Batteries — Excepted &
+ * Fully Regulated, Multimodal* course materials (Student Guide rev. 02/01/2026 and the
+ * Supplemental Appendix rev. 01/01/2025), and each is cited against the figure it came from
+ * so it can be re-checked when the DGR is revised. Nothing is interpolated: where the
+ * materials state no limit, this module says so rather than inventing one.
+ *
+ * Two boundaries are worth stating up front, because they are the difference between a tool
+ * that helps and one that gets a shipment rejected on the ramp:
+ *
+ *  - **Air only.** The ground (49 CFR) "medium" band — ion cells >20 and ≤60 Wh, batteries
+ *    >100 and ≤300 Wh — does not exist for air, and neither does its packaging relief. A
+ *    battery this module calls large is large because it is large *by air*.
+ *  - **State and operator variations are not encoded.** IATA 2.8.1 and 2.8.3 let a country
+ *    or an airline be more restrictive than the DGR, and they routinely are — the materials
+ *    cite UPS 5X-08 requiring a `P.I. 966-II` marking and Saudi Arabia SAG-06 requiring the
+ *    consignee's telephone number on every package. No published dataset of those travels
+ *    with this app, so it says which ones to look up rather than pretending to have applied
+ *    them.
+ */
+
+/** What the cells are made of. Determines which energy measure applies. */
+export type Chemistry = 'lithium-ion' | 'lithium-metal' | 'sodium-ion'
+
+/**
+ * A single encased electrochemical unit, or two or more connected together.
+ *
+ * The distinction is not cosmetic: the thresholds differ by a factor of five (20 Wh against
+ * 100 Wh), and the UN Manual of Tests and Criteria treats a unit sold as a "single cell
+ * battery" as a *cell*, whatever the label on it says (Student Guide p. 22).
+ */
+export type CellOrBattery = 'cell' | 'battery'
+
+/** How the cells travel relative to the equipment they power (Student Guide fig. 2-8). */
+export type Configuration = 'standalone' | 'packed-with-equipment' | 'contained-in-equipment'
+
+/**
+ * IATA packing instruction section.
+ *
+ * `null` for PI 976, which has no sections — every standalone sodium ion battery is fully
+ * regulated (Student Guide fig. 5-5 note 3, fig. 5-30 note).
+ */
+export type PackingSection = 'IA' | 'IB' | 'I' | 'II' | null
+
+/** Which aircraft the consignment may travel on. */
+export type AircraftLimitation = 'passenger-and-cargo' | 'cargo-aircraft-only'
+
+/**
+ * The facts about one battery type that the regulations key on.
+ *
+ * `wattHours` and `lithiumContentG` are per cell or per battery — whichever `form` says —
+ * because that is how every threshold in the DGR is written. Both are nullable and neither
+ * is inferred from the other: a watt-hour rating cannot be converted into a lithium content
+ * without knowing the cell chemistry and count, and guessing one would silently move a
+ * shipment across the Section II boundary.
+ */
+export interface BatterySpec {
+  chemistry: Chemistry
+  form: CellOrBattery
+  configuration: Configuration
+  /** Per cell or per battery, for lithium ion and sodium ion. */
+  wattHours: number | null
+  /** Per cell or per battery, in grams, for lithium metal. */
+  lithiumContentG: number | null
+}
+
+/** Whether the energy content puts this battery inside or outside the Section II/IB relief. */
+export type EnergyBand = 'small' | 'large' | 'unknown'
+
+/**
+ * Air energy thresholds (Student Guide figs. 5-9, 5-10, 5-30, 5-31).
+ *
+ * Small is *at or below*; large is strictly above. The ground "medium" band is deliberately
+ * absent — it does not apply to air, and a value that would be medium by ground is simply
+ * large here.
+ */
+export const AIR_THRESHOLDS = {
+  /** Watt-hours, lithium ion and sodium ion. */
+  wattHours: { cell: 20, battery: 100 },
+  /** Grams of lithium content, lithium metal. */
+  lithiumContentG: { cell: 1, battery: 2 },
+} as const
+
+/**
+ * The state-of-charge ceiling for lithium ion cells and batteries, as a percentage of rated
+ * capacity (special provisions A331/A100, Student Guide p. 55).
+ */
+export const STATE_OF_CHARGE_LIMIT = 30
+
+/**
+ * The watt-hour rating below which the 30% state of charge is advisory rather than mandatory
+ * for cells packed with equipment (Student Guide fig. 5-26 note, effective 1 January 2026).
+ */
+export const SOC_ADVISORY_WH = 2.7
+
+/**
+ * Whether a battery's energy content is inside the small-battery relief, by air.
+ *
+ * Returns `unknown` when the figure that decides it is absent. That is a third answer on
+ * purpose. A missing watt-hour rating is not evidence of a small battery, and treating it as
+ * one would move a fully regulated shipment onto an air waybill statement and no declaration
+ * — the single most consequential mistake this module could make.
+ */
+export function energyBand(spec: BatterySpec): EnergyBand {
+  if (spec.chemistry === 'lithium-metal') {
+    if (spec.lithiumContentG == null) return 'unknown'
+    return spec.lithiumContentG <= AIR_THRESHOLDS.lithiumContentG[spec.form] ? 'small' : 'large'
+  }
+  if (spec.wattHours == null) return 'unknown'
+  return spec.wattHours <= AIR_THRESHOLDS.wattHours[spec.form] ? 'small' : 'large'
+}
+
+/** The threshold that decided the band, for display beside it. */
+export function energyThreshold(spec: BatterySpec): { limit: number; unit: 'Wh' | 'g' } {
+  return spec.chemistry === 'lithium-metal'
+    ? { limit: AIR_THRESHOLDS.lithiumContentG[spec.form], unit: 'g' }
+    : { limit: AIR_THRESHOLDS.wattHours[spec.form], unit: 'Wh' }
+}
+
+/** UN number and proper shipping name, by chemistry and configuration (Student Guide fig. 5-4). */
+interface Identity {
+  unNumber: string
+  properShippingName: string
+  packingInstruction: number
+}
+
+const IDENTITIES: Record<Chemistry, Record<Configuration, Identity>> = {
+  'lithium-ion': {
+    standalone: { unNumber: 'UN3480', properShippingName: 'Lithium ion batteries', packingInstruction: 965 },
+    'packed-with-equipment': {
+      unNumber: 'UN3481',
+      properShippingName: 'Lithium ion batteries packed with equipment',
+      packingInstruction: 966,
+    },
+    'contained-in-equipment': {
+      unNumber: 'UN3481',
+      properShippingName: 'Lithium ion batteries contained in equipment',
+      packingInstruction: 967,
+    },
+  },
+  'lithium-metal': {
+    standalone: { unNumber: 'UN3090', properShippingName: 'Lithium metal batteries', packingInstruction: 968 },
+    'packed-with-equipment': {
+      unNumber: 'UN3091',
+      properShippingName: 'Lithium metal batteries packed with equipment',
+      packingInstruction: 969,
+    },
+    'contained-in-equipment': {
+      unNumber: 'UN3091',
+      properShippingName: 'Lithium metal batteries contained in equipment',
+      packingInstruction: 970,
+    },
+  },
+  'sodium-ion': {
+    standalone: { unNumber: 'UN3551', properShippingName: 'Sodium ion batteries', packingInstruction: 976 },
+    'packed-with-equipment': {
+      unNumber: 'UN3552',
+      properShippingName: 'Sodium ion batteries packed with equipment',
+      packingInstruction: 977,
+    },
+    'contained-in-equipment': {
+      unNumber: 'UN3552',
+      properShippingName: 'Sodium ion batteries contained in equipment',
+      packingInstruction: 978,
+    },
+  },
+}
+
+/**
+ * The maximum net battery weight one package may hold, in kilograms.
+ *
+ * `null` means the aircraft type is forbidden outright, not that the limit is unknown; a
+ * limit that is genuinely unstated is absent from the table rather than null.
+ */
+export interface QuantityLimits {
+  /** Passenger and cargo aircraft. Null where the entry is forbidden on passenger aircraft. */
+  passengerKg: number | null
+  /** Cargo aircraft only. */
+  cargoKg: number
+  /** Where the figures came from, printed beside them on the review screen. */
+  source: string
+}
+
+/**
+ * The full regulatory picture for one battery type travelling by air.
+ *
+ * This is what the rest of the application consumes: the UI renders it, the assessment
+ * engine checks a package against it, and the Shipper's Declaration is written from it.
+ */
+export interface AirClassification {
+  spec: BatterySpec
+  unNumber: string
+  properShippingName: string
+  /** Class 9 for every entry in scope here. Sub-risk and packing group do not apply. */
+  hazardClass: '9'
+  subsidiaryRisk: null
+  packingGroup: null
+  packingInstruction: number
+  section: PackingSection
+  band: EnergyBand
+  /** `965 IB`, `966`, `976` — the wording that goes in DGD box 16. */
+  packingInstructionLabel: string
+  /** True for Sections I, IA, IB and PI 976; false for Section II. */
+  declarationRequired: boolean
+  /** Section II is "excepted Class 9"; everything else is fully regulated. */
+  fullyRegulated: boolean
+  aircraft: AircraftLimitation
+  limits: QuantityLimits
+  /** UN specification packaging meeting Packing Group II performance is required. */
+  unSpecificationPackagingRequired: boolean
+  /** Inner packaging that completely encloses each cell or battery is required. */
+  innerPackagingRequired: boolean
+  /** The package must be capable of a 1.2 m drop test (Student Guide p. 60). */
+  dropTestRequired: boolean
+  /** The package must be capable of a 3 m, 24-hour stack test (Student Guide p. 60). */
+  stackTestRequired: boolean
+  /** The state of charge rule that applies, or null where none does. */
+  stateOfCharge: StateOfChargeRule | null
+  /** Marks and labels the package carries, before the per-consignment exemptions. */
+  hazardCommunication: string[]
+  /** The training the person preparing this shipment must hold. */
+  training: 'dangerous-goods' | 'adequate-instruction'
+  /** Special provisions from column M of the List of Dangerous Goods that bear on this entry. */
+  specialProvisions: string[]
+  /** Human-readable citation of the figure these values were taken from. */
+  basis: string
+}
+
+export interface StateOfChargeRule {
+  limitPercent: number
+  /** `must` is a requirement; `should` is a recommendation the materials state as such. */
+  strength: 'must' | 'should'
+  detail: string
+}
+
+/**
+ * Section, from configuration and energy band (Student Guide fig. 5-5).
+ *
+ * Standalone batteries have no Section II at all — the relief for small standalone cells was
+ * withdrawn, and what remains is Section IB, which is fully regulated with a declaration and
+ * a lower package limit. That asymmetry is the single most misunderstood part of these rules
+ * and the reason a "small" battery can still need a Shipper's Declaration.
+ */
+function sectionFor(configuration: Configuration, band: EnergyBand, chemistry: Chemistry): PackingSection {
+  // PI 976 has no sections: every standalone sodium ion cell and battery is fully regulated.
+  if (chemistry === 'sodium-ion' && configuration === 'standalone') return null
+  if (band === 'unknown') return null
+  if (configuration === 'standalone') return band === 'small' ? 'IB' : 'IA'
+  return band === 'small' ? 'II' : 'I'
+}
+
+/**
+ * Package net-quantity limits, by packing instruction and section.
+ *
+ * Sourced twice over where the materials allow it: the Section I and Section II figures are
+ * columns I–L of the List of Dangerous Goods (figs. 5-1, 5-2, 5-3) *and* the per-section
+ * requirement tables (figs. 5-26, 5-27, 5-33, 5-34), which agree. The Section IB figures come
+ * only from fig. 5-29, because the List of Dangerous Goods defers to the packing instruction
+ * for UN3480 and UN3090 ("See 965", "See 968").
+ */
+function limitsFor(pi: number, section: PackingSection): QuantityLimits {
+  // Standalone lithium: forbidden on passenger aircraft in every section.
+  if (pi === 965 || pi === 968) {
+    if (section === 'IB') {
+      return {
+        passengerKg: null,
+        cargoKg: pi === 965 ? 10 : 2.5,
+        source: 'Student Guide fig. 5-29 (PI 965 / PI 968 Section IB)',
+      }
+    }
+    return {
+      passengerKg: null,
+      cargoKg: 35,
+      source: pi === 965 ? 'Student Guide fig. 5-33 (PI 965 Section IA)' : 'Student Guide fig. 5-34 (PI 968 Section IA)',
+    }
+  }
+  // Standalone sodium ion: PI 976, forbidden on passenger aircraft, 35 kg cargo.
+  if (pi === 976) {
+    return { passengerKg: null, cargoKg: 35, source: 'Student Guide fig. 5-3 (UN3551, columns I–L)' }
+  }
+  // Packed with / contained in, every chemistry: 5 kg passenger, 35 kg cargo.
+  return {
+    passengerKg: 5,
+    cargoKg: 35,
+    source:
+      section === 'II'
+        ? 'Student Guide figs. 5-26 and 5-27 (Section II)'
+        : 'Student Guide figs. 5-1 to 5-3, columns I–L',
+  }
+}
+
+/**
+ * The state of charge rule for this entry.
+ *
+ * Three cases, and the materials are careful about which verb each one takes:
+ *
+ *  - standalone lithium ion — **must not** exceed 30% (A331, Student Guide p. 55);
+ *  - packed with equipment — **must** not exceed 30% from 1 January 2026, except that cells
+ *    rated at or below 2.7 Wh **should** not (fig. 5-26 note);
+ *  - contained in equipment — **should** not exceed 30%, or an indicated capacity of 25%
+ *    (fig. 5-27 note).
+ *
+ * Lithium metal has no state of charge; it is not rechargeable.
+ */
+function stateOfChargeFor(spec: BatterySpec): StateOfChargeRule | null {
+  if (spec.chemistry === 'lithium-metal') return null
+  if (spec.configuration === 'standalone') {
+    return {
+      limitPercent: STATE_OF_CHARGE_LIMIT,
+      strength: 'must',
+      detail:
+        'Standalone lithium ion cells and batteries must be offered at a state of charge not exceeding 30% of ' +
+        'rated capacity. Above 30% needs approval from the State of Origin and the State of the Operator ' +
+        '(special provision A331).',
+    }
+  }
+  if (spec.chemistry === 'sodium-ion') return null
+  if (spec.configuration === 'packed-with-equipment') {
+    const advisory = spec.wattHours != null && spec.wattHours <= SOC_ADVISORY_WH
+    return {
+      limitPercent: STATE_OF_CHARGE_LIMIT,
+      strength: advisory ? 'should' : 'must',
+      detail: advisory
+        ? `Rated at ${spec.wattHours} Wh, at or below the 2.7 Wh threshold, so from 1 January 2026 a state of ` +
+          'charge not exceeding 30% is recommended rather than required.'
+        : 'From 1 January 2026 lithium ion cells and batteries packed with equipment must be offered at a state ' +
+          'of charge not exceeding 30% of rated capacity. Above 30% needs approval from the State of Origin and ' +
+          'the State of the Operator.',
+    }
+  }
+  return {
+    limitPercent: STATE_OF_CHARGE_LIMIT,
+    strength: 'should',
+    detail:
+      'Lithium ion cells and batteries contained in equipment should be offered at a state of charge not ' +
+      'exceeding 30% of rated capacity, or an indicated battery capacity not exceeding 25%.',
+  }
+}
+
+/**
+ * Marks and labels for a package prepared to this section.
+ *
+ * The per-consignment exemptions are *not* applied here — whether the battery mark may be
+ * left off a package of equipment depends on how many packages are in the consignment, which
+ * this function cannot see. `assess.ts` applies them.
+ */
+function hazardCommunicationFor(section: PackingSection, aircraft: AircraftLimitation, id: Identity): string[] {
+  const marks = ['Shipper and consignee name and address']
+
+  if (section === 'II') {
+    // Excepted Class 9: the battery mark is the whole of the hazard communication.
+    return [...marks, `Lithium battery mark bearing ${id.unNumber}`]
+  }
+
+  marks.push(`${id.unNumber} and proper shipping name mark ("${id.properShippingName}")`)
+  marks.push('Class 9 lithium battery hazard label')
+  if (aircraft === 'cargo-aircraft-only') marks.push('Cargo Aircraft Only label, on the same surface as the Class 9 label')
+  // Section IB alone carries both the Class 9 label and the lithium battery mark (fig. 5-28);
+  // Sections I and IA carry the label without the mark (figs. 5-32, 5-33, 5-34).
+  if (section === 'IB') marks.push(`Lithium battery mark bearing ${id.unNumber}`)
+  marks.push('Net quantity mark, where multiple non-identical packages are offered in the consignment')
+  return marks
+}
+
+/**
+ * Special provisions from column M that bear on a lithium or sodium battery air shipment.
+ *
+ * A working subset, not the column verbatim: these are the ones that change what a shipper
+ * does. The rest of column M is reproduced in the Supplemental Appendix and still has to be
+ * read for every shipment, which is why the assessment engine says so.
+ */
+function specialProvisionsFor(spec: BatterySpec, section: PackingSection): string[] {
+  const provisions = ['A154 — damaged or defective cells and batteries are forbidden for transport by air']
+  if (spec.chemistry === 'lithium-ion' || spec.chemistry === 'sodium-ion') {
+    if (spec.configuration === 'standalone') {
+      provisions.push('A331 — state approval required above 30% state of charge')
+      provisions.push('A334 — state approval required to carry standalone batteries on passenger aircraft')
+    }
+  }
+  if (spec.configuration === 'standalone') {
+    provisions.push('A183 — waste batteries for recycling or disposal are forbidden without competent authority approval')
+  }
+  if (section === 'I' || section === 'IA') {
+    provisions.push('A802 — UN specification packaging meeting Packing Group II performance is required')
+  }
+  provisions.push('A99 — an exception to the 35 kg limit needs competent authority approval')
+  provisions.push('A181 — a package holding both packed-with and contained-in batteries is described as packed with equipment')
+  if (spec.chemistry === 'sodium-ion') {
+    provisions.push('A228 — sodium ion cells with an aqueous alkali electrolyte travel as UN2795, not UN3551/UN3552')
+  }
+  return provisions
+}
+
+/**
+ * Classifies one battery type for air transport.
+ *
+ * Total, by construction: every combination of chemistry, form and configuration produces an
+ * answer, including the one where the energy content is unknown. In that case the section is
+ * `null`, `declarationRequired` is true and the limits are the fully regulated ones — the
+ * conservative reading, with the assessment engine raising a blocking check that says the
+ * rating has to be supplied before anything can be generated.
+ */
+export function classifyForAir(spec: BatterySpec): AirClassification {
+  const id = IDENTITIES[spec.chemistry][spec.configuration]
+  const band = energyBand(spec)
+  const section = sectionFor(spec.configuration, band, spec.chemistry)
+  const limits = limitsFor(id.packingInstruction, section)
+
+  // Standalone cells and batteries of every chemistry are cargo aircraft only. Everything
+  // else may go on a passenger aircraft up to 5 kg.
+  const aircraft: AircraftLimitation =
+    limits.passengerKg === null ? 'cargo-aircraft-only' : 'passenger-and-cargo'
+
+  const isSectionII = section === 'II'
+  // Section I and IA are the fully regulated sections that demand performance packaging;
+  // IB is fully regulated but takes a strong rigid outer packaging instead.
+  const isSectionIOrIA = section === 'IA' || section === 'I'
+  // Equipment is its own enclosure, so contained-in never takes performance packaging.
+  const unSpecificationPackaging = isSectionIOrIA && spec.configuration !== 'contained-in-equipment'
+
+  return {
+    spec,
+    unNumber: id.unNumber,
+    properShippingName: id.properShippingName,
+    hazardClass: '9',
+    subsidiaryRisk: null,
+    packingGroup: null,
+    packingInstruction: id.packingInstruction,
+    section,
+    band,
+    packingInstructionLabel: section ? `${id.packingInstruction} ${section}` : String(id.packingInstruction),
+    declarationRequired: !isSectionII,
+    fullyRegulated: !isSectionII,
+    aircraft,
+    limits,
+    // Only the standalone and packed-with instructions at Section I/IA demand UN specification
+    // packaging; contained-in equipment takes a strong rigid outer packaging in every section.
+    unSpecificationPackagingRequired: unSpecificationPackaging,
+    // Equipment is not placed in an inner packaging — the equipment itself is the enclosure.
+    innerPackagingRequired: spec.configuration !== 'contained-in-equipment',
+    // The 1.2 m drop applies to standalone and packed with; the 3 m stack applies to all
+    // three (Student Guide p. 60), except that the stack test is not applied to sodium ion.
+    //
+    // Both are capability standards for packaging that is *not* performance-tested. Where UN
+    // specification packaging is required, the Packing Group II test regime supersedes them,
+    // and restating them there would read as two separate obligations on one box.
+    dropTestRequired: !unSpecificationPackaging && spec.configuration !== 'contained-in-equipment',
+    stackTestRequired: !unSpecificationPackaging && spec.chemistry !== 'sodium-ion',
+    stateOfCharge: stateOfChargeFor(spec),
+    hazardCommunication: hazardCommunicationFor(section, aircraft, id),
+    training: isSectionII ? 'adequate-instruction' : 'dangerous-goods',
+    specialProvisions: specialProvisionsFor(spec, section),
+    basis: section
+      ? `PI ${id.packingInstruction} Section ${section} · ${limits.source}`
+      : `PI ${id.packingInstruction} · ${limits.source}`,
+  }
+}
+
+/**
+ * The air waybill handling-information statement this entry requires.
+ *
+ * Two families, and they are not interchangeable. A fully regulated consignment points the
+ * operator at the declaration that travels with it; a Section II consignment has no
+ * declaration, so the statement *is* the notification, and it names the packing instruction
+ * so the operator knows what it is accepting (Student Guide figs. 5-23 to 5-25, 5-38).
+ */
+export function airWaybillStatement(classification: AirClassification): string {
+  const { section, packingInstruction, spec, aircraft } = classification
+  if (section === 'II') {
+    const chemistry =
+      spec.chemistry === 'lithium-ion' ? 'Lithium ion' : spec.chemistry === 'lithium-metal' ? 'Lithium metal' : 'Sodium ion'
+    return `${chemistry} batteries in compliance with Section II of PI${packingInstruction}`
+  }
+  return aircraft === 'cargo-aircraft-only'
+    ? 'Dangerous goods as per associated Shipper’s Declaration — Cargo Aircraft Only'
+    : 'Dangerous goods as per associated Shipper’s Declaration'
+}
+
+/**
+ * One statement covering several Section II entries.
+ *
+ * The DGR allows the compliance statements to be combined where a consignment holds packages
+ * prepared to more than one Section II packing instruction, provided the combined statement
+ * still identifies the battery types and instructions involved (Student Guide fig. 5-24).
+ * Written as separate sentences rather than a merged clause, because a reader has to be able
+ * to match each instruction to its chemistry.
+ */
+export function combinedSectionIIStatement(classifications: AirClassification[]): string {
+  const statements = [...new Set(classifications.filter((c) => c.section === 'II').map(airWaybillStatement))]
+  return statements.join('. ')
+}
+
+/** Human labels, kept beside the codes so the UI and the reports cannot drift apart. */
+export const CHEMISTRY_LABELS: Record<Chemistry, string> = {
+  'lithium-ion': 'Lithium ion',
+  'lithium-metal': 'Lithium metal',
+  'sodium-ion': 'Sodium ion',
+}
+
+export const CONFIGURATION_LABELS: Record<Configuration, string> = {
+  standalone: 'Standalone — batteries alone, no equipment',
+  'packed-with-equipment': 'Packed with equipment — in the box, not installed',
+  'contained-in-equipment': 'Contained in equipment — installed in what they power',
+}
+
+export const FORM_LABELS: Record<CellOrBattery, string> = {
+  cell: 'Cell',
+  battery: 'Battery',
+}

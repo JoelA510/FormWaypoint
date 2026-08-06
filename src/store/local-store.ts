@@ -12,11 +12,12 @@
 import { openDB, type IDBPDatabase } from 'idb'
 import type { CompanyProfile, ShipmentSettings } from '../domain/draft'
 import type { ItemLibraryEntry } from '../domain/item-library'
+import type { DgConsignment } from '../domain/dangerous-goods/types'
 import type { CheckResult, SLILine } from '../domain/types'
 import { partKey } from '../domain/part-key'
 
 const DB_NAME = 'formwaypoint'
-const DB_VERSION = 4
+const DB_VERSION = 5
 
 /** Saved per consignee so the values that are not on the CIPL only get typed once. */
 export interface ConsigneeRecord {
@@ -122,6 +123,45 @@ export interface ShipmentRecord {
   settings: ShipmentSettings
 }
 
+/**
+ * One dangerous goods consignment, kept because the regulations say to keep it.
+ *
+ * Every other record in this store is here for convenience — so a weight is typed once, so a
+ * consignee's EORI is remembered. This one is here because a copy of the Shipper's
+ * Declaration must be retained for a minimum of two years and be producible, at the shipment
+ * location, on an authorised official's request. `retainUntil` is that date, computed once at
+ * preparation rather than derived on the fly, so a record still says how long it is owed even
+ * if the rule around it changes.
+ *
+ * The record is not the declaration. The declaration is the signed paper; this is what was
+ * declared, what was checked, and what the checks said — the thing that answers "why was this
+ * shipment prepared this way" when the paper alone cannot.
+ */
+export interface DgConsignmentRecord {
+  /** `${air waybill or reference or 'consignment'}@${preparedAt}`, keyed per run like shipments. */
+  id: string
+  preparedAt: string
+  /** Two years on from preparation, as `YYYY-MM-DD`. */
+  retainUntil: string
+  airWaybillNumber: string
+  shippersReference: string
+  consigneeName: string
+  airportOfDeparture: string
+  airportOfDestination: string
+  aircraft: DgConsignment['aircraft']
+  /** False for a consignment that was entirely Section II and produced no declaration. */
+  declarationRequired: boolean
+  /** Distinct UN numbers, for the history list. */
+  unNumbers: string[]
+  /** Distinct packing instructions and sections, e.g. `965 IB`. */
+  packingInstructions: string[]
+  packages: number
+  netWeightKg: number
+  /** Everything that was entered, so the declaration can be reproduced exactly. */
+  consignment: DgConsignment
+  checks: CheckResult[]
+}
+
 export interface LocalStore {
   getProfile(): Promise<CompanyProfile | null>
   saveProfile(profile: CompanyProfile): Promise<void>
@@ -157,6 +197,9 @@ export interface LocalStore {
   listShipments(limit?: number): Promise<ShipmentRecord[]>
   saveShipment(record: ShipmentRecord): Promise<void>
 
+  listDgConsignments(limit?: number): Promise<DgConsignmentRecord[]>
+  saveDgConsignment(record: DgConsignmentRecord): Promise<void>
+
   /** Removes everything. Exposed in the UI so a shared machine can be wiped. */
   clearAll(): Promise<void>
 }
@@ -183,6 +226,12 @@ function db(): Promise<Schema> {
         // v4 adds the imported item master.
         if (!database.objectStoreNames.contains('items')) {
           database.createObjectStore('items', { keyPath: 'partNumber' })
+        }
+        // v5 adds dangerous goods consignments, which are kept to satisfy the two-year
+        // retention rule rather than for autofill.
+        if (!database.objectStoreNames.contains('dgConsignments')) {
+          const dg = database.createObjectStore('dgConsignments', { keyPath: 'id' })
+          dg.createIndex('preparedAt', 'preparedAt')
         }
         // v1 keyed shipments on invoiceNumber, which silently overwrote re-runs. v2 keys
         // on a per-run id; the old store is dropped rather than migrated because it only
@@ -296,10 +345,20 @@ export const indexedDbStore: LocalStore = {
     await (await db()).put('shipments', record)
   },
 
+  async listDgConsignments(limit = 50) {
+    const all = (await (await db()).getAll('dgConsignments')) as DgConsignmentRecord[]
+    return all.sort((a, b) => b.preparedAt.localeCompare(a.preparedAt)).slice(0, limit)
+  },
+  async saveDgConsignment(record) {
+    await (await db()).put('dgConsignments', record)
+  },
+
   async clearAll() {
     const database = await db()
     await Promise.all(
-      ['profile', 'consignees', 'overrides', 'shipments', 'partWeights', 'items'].map((name) => database.clear(name)),
+      ['profile', 'consignees', 'overrides', 'shipments', 'partWeights', 'items', 'dgConsignments'].map((name) =>
+        database.clear(name),
+      ),
     )
   },
 }

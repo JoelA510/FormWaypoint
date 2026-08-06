@@ -1,14 +1,23 @@
 # FormWaypoint Roadmap
 
-**Last Updated**: 2026-07-28
+**Last Updated**: 2026-08-06
 
 ## Current focus
 
-Turning a combined commercial invoice & packing list into a completed carrier Shipper's
-Letter of Instruction, on this machine. Two CIPL formats and two carriers are supported end
-to end, verified against real, manually-processed shipments. It ships as a web app and as a
-Windows desktop app; the desktop build adds the in-app Schedule B refresh, which cannot
-work in a browser.
+Two workflows, deliberately separate.
+
+**Standard shipping** turns a combined commercial invoice & packing list into a completed
+carrier Shipper's Letter of Instruction, on this machine. Two CIPL formats and two carriers
+are supported end to end, verified against real, manually-processed shipments.
+
+**Dangerous goods — air** classifies lithium, lithium metal and sodium ion batteries under the
+IATA DGR, checks a consignment against the limits its classification carries, and produces the
+Shipper's Declaration for Dangerous Goods and the package checklist. Conventional shipping
+stays free of hazard questions, because a hazard question asked of every shipment is a hazard
+question nobody reads.
+
+It ships as a web app and as a Windows desktop app; the desktop build adds the in-app Schedule
+B refresh, which cannot work in a browser.
 
 ## Milestone tracker
 
@@ -24,13 +33,20 @@ work in a browser.
 | **Review screen** | ✅ Done | Per-field provenance, blocking/advisory checks, classification overrides with reason and approver. |
 | **FedEx / UPS** | ✅ Done | Keying sheets ordered the way Ship Manager and WorldShip prompt, for manual entry. |
 | **Local history** | ✅ Done | Exporter profile, per-consignee values, per-part weights, the item library, overrides and processed shipments in IndexedDB. |
-| **Regression suite** | ✅ Done | 197 TypeScript tests over five real shipments across both formats, plus Rust unit tests for the shell's path handling. |
+| **Lithium battery classification (air)** | ✅ Done | UN3480/3481/3090/3091/3551/3552, PI 965–970 and 976–978, Sections IA/IB/I/II from chemistry, cell-or-battery, configuration and energy content. Per-package limits, state of charge, marks and labels, air waybill statements. Every figure cited against the training material it came from. |
+| **Consignment assessment (air)** | ✅ Done | Package limits per regulatory entry and A181 totals, aircraft type, UN specification packaging, the battery-mark exemption and its two-package consignment ceiling, forbidden conditions (A154, A183), state and operator variation confirmation. |
+| **Shipper's Declaration** | ✅ Done | Drawn to the IATA layout rather than filled, since no blank form exists to fetch. Red hatched margins, struck-out aircraft and shipment type, real page x of y, overpack wording in all three of its forms, forwarder boxes left fillable, signature block empty. |
+| **Package checklist** | ✅ Done | Markdown to print and work through — the only deliverable for a Section II consignment, where the battery mark and the air waybill statement carry the whole of the hazard communication. |
+| **DG retention** | ✅ Done | Prepared consignments recorded locally with the date the two-year retention obligation runs to. |
+| **Regression suite** | ✅ Done | 313 TypeScript tests: five real shipments across both CIPL formats, plus the lithium battery course's own worked scenarios, plus Rust unit tests for the shell's path handling. |
 | **Desktop packaging seam** | ✅ Done | `localStore` is the single named implementation; a Tauri build replaces one assignment. Windows-only target; WebView2 covers every platform API the app uses. |
 | **Desktop build (.exe)** | ✅ Done | Tauri v2 shell; the Windows installer is built by the `Desktop build` workflow. Four Rust commands and no decisions. TLS goes through the OS certificate store, so a corporate inspection CA is trusted, and an environment proxy is honoured. |
 | **Schedule B revision diff** | ✅ Done | `src/domain/schedule-b/revision.ts` — diffs two datasets, intersects the result with the item library by part, and renders the change log and CSV worklist. Pure logic, no filesystem or network. |
 | **In-app Schedule B refresh** | ✅ Done | Downloads the concordance, diffs it, writes the change log and CSV worklist, then replaces the dataset. Verified end to end against the live Census server in a packaged binary. |
 | **More carriers** | 📅 Planned | One adapter each. The parser and reconciler carry no carrier-specific logic. |
 | **More CIPL formats** | 📅 Planned | A detector and a parser behind the same `ParsedCipl` contract — the registry and everything downstream are already shared. |
+| **DG by ground and vessel** | 📅 Planned | The classification module is air-only by design. Ground adds the 49 CFR "medium" band and its own shipping paper; vessel adds IMDG special provision 188 and the multimodal dangerous goods form. Both reuse the consignment model unchanged. |
+| **State and operator variations** | 📅 Planned | Currently a confirmation the reviewer ticks, because no dataset ships with the app. A per-operator table — UPS 5X-08 and the rest — would turn the reminder into a check. |
 
 ## How the in-app Schedule B refresh works
 
@@ -65,6 +81,29 @@ can still be consulted after a later refresh.
 library, never reclassifies a part, and never rewrites a code. It reports what Census
 changed and which of your parts that touches; every correction stays a human action.
 
+## Where the dangerous goods figures come from
+
+Every threshold, limit, packing instruction and statement in
+`src/domain/dangerous-goods/lithium.ts` is cited against the figure it was taken from in the
+Labelmaster *Shipping Lithium Batteries — Excepted & Fully Regulated* multimodal course
+(Student Guide rev. 02/01/2026; Supplemental Appendix rev. 01/01/2025). Where the materials
+allow, a figure is sourced twice: the Section I and Section II package limits come from
+columns I–L of the List of Dangerous Goods *and* from the per-section requirement tables, and
+they agree. The Section IB limits — 10 kg for lithium ion, 2.5 kg for lithium metal — come
+only from figure 5-29, because the List of Dangerous Goods defers to the packing instruction
+for UN3480 and UN3090.
+
+Nothing is interpolated. Where the materials state no limit, the module says so instead of
+inventing one, and the assessment reports it rather than passing it silently.
+
+Two boundaries are deliberate and should stay:
+
+- **Air only.** The ground "medium" band — ion cells >20 and ≤60 Wh, batteries >100 and
+  ≤300 Wh — has no air equivalent, and a battery this module calls large is large *by air*.
+- **No variations.** State and operator variations change what is acceptable more often than
+  the DGR does, and none of them ship with the app. The reviewer confirms; the app does not
+  pretend.
+
 ## Open questions
 
 - **Box 26 net vs gross.** All historical shipments enter net weight into a box captioned
@@ -89,6 +128,7 @@ changed and which of your parts that touches; every correction stays a human act
 
 | Date | Milestone | Details |
 | :--- | :--- | :--- |
+| 2026-08-06 | **Dangerous goods — air** | Lithium and sodium battery classification, consignment assessment, the Shipper's Declaration drawn to the IATA layout, the package checklist, and two-year retention — behind its own tab, leaving conventional shipping untouched. |
 | 2026-07-28 | **Pre-packaging pass** | Store seam narrowed to one assignment, Schedule B staleness warning, toolchain bumps (vite 8, vitest 4), monorepo leftovers removed. |
 | 2026-07-27 | **Item library** | Dependency-free .xlsx/.csv import, per-part weights, commodity-number screening. |
 | 2026-07-27 | **Second CIPL format** | `SHIPMENT#` parser behind a format registry; sales order vs customer PO separated. |
