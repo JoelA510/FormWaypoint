@@ -342,4 +342,16 @@ describe('which page the total comes from', () => {
     pages[2].rows.push(row(100, [[400, 'Total Net Value:'], [X.extended, '99999.00']]))
     expect(parse(pages).headers.FC.totalValue).toBeCloseTo(printedTotal(), 2)
   })
+
+  it('does not keep one read off a packing-list page when the invoice prints none', () => {
+    // The header is seeded from the first recognised page, whichever kind that is, and this
+    // layout prints the same label on the packing list. Leaving that figure standing would
+    // let the value check pass against a number the invoice never printed — underneath a
+    // warning saying the total could not be proved, which is the worst of both.
+    const packing = packingPage(1, LINES)
+    packing.rows.push(row(100, [[400, 'Total Net Value:'], [X.extended, '99999.00']]))
+    const parsed = parse([packing, invoicePage(2, LINES)])
+    expect(parsed.headers.FC.totalValue).toBe(0)
+    expect(parsed.warnings.some((w) => /Total Net Value/i.test(w))).toBe(true)
+  })
 })

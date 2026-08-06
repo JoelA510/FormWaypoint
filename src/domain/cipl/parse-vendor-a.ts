@@ -124,6 +124,19 @@ export function parseCiplPages(fileName: string, pages: TextPage[]): ParsedCipl 
             `reference ${fromLines.length}. Using the line items (added: ${missing.join(', ')}).`,
         )
       }
+      // The reverse direction is the one that matters. Truncation only ever loses order
+      // numbers from the header, so a header carrying one the lines do not is not truncation —
+      // it means lines were lost, and those are the lines the whole form is built from. The
+      // line items still win, because a number with no line behind it cannot be filed against
+      // anything; but it is not dropped in silence.
+      const unreferenced = header.orderNumbers.filter((o) => !fromLines.includes(o))
+      if (unreferenced.length) {
+        warnings.push(
+          `${set}: the header P/O field lists order number(s) no line item references ` +
+            `(${unreferenced.join(', ')}). Lines belonging to them were probably not read. ` +
+            'Check the line count against the document before filing.',
+        )
+      }
       header.orderNumbers = fromLines
     }
   }

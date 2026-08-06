@@ -331,9 +331,17 @@ export function flagEntries(entries: ItemLibraryEntry[], index: ScheduleBIndex |
 // Lookup
 // ---------------------------------------------------------------------------
 
-/** Case-insensitive lookup over the library. */
+/**
+ * Case-insensitive lookup over the library.
+ *
+ * Keyed through `partKey`, not on `entry.partNumber` directly. The import normalises that
+ * field itself, so the two agree today — but the lookup side is `itemsByPart.get(partKey(...))`
+ * and an index whose keys are merely *assumed* to match is the shape of defect `partKey`
+ * exists to close: every entry silently missing its library record, with nothing in the diff
+ * to read wrong.
+ */
 export function indexByPart(entries: ItemLibraryEntry[]): Map<string, ItemLibraryEntry> {
-  return new Map(entries.map((entry) => [entry.partNumber, entry]))
+  return new Map(entries.map((entry) => [partKey(entry.partNumber), entry]))
 }
 
 /** Per-part net weights in the shape the reconciliation engine expects. */
