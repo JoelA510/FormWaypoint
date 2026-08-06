@@ -368,7 +368,10 @@ function drawEntry(
 
   text(ctx, line.unNumber, COLUMNS.unNumber + 3, top, { size })
   line.properShippingName.forEach((part, i) => {
-    if (!rowFits(i)) return
+    if (!rowFits(i)) {
+      clipped++
+      return
+    }
     text(ctx, part, COLUMNS.properShippingName + 4, top - i * ROW_HEIGHT, { size })
   })
   text(ctx, line.classOrDivision, COLUMNS.classOrDivision + 18, top, { size })
