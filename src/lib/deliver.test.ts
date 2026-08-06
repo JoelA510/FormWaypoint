@@ -144,10 +144,13 @@ describe('safeFileName', () => {
     expect(safeFileName('console.pdf')).toBe('console.pdf')
   })
 
-  it('bounds the length without losing the fact that it was cut', () => {
+  it('bounds the length, keeping the extension and showing that it was cut', () => {
     const long = safeFileName(`${'x'.repeat(400)}.pdf`)
     expect(long.length).toBeLessThanOrEqual(120)
-    expect(long.endsWith('…')).toBe(true)
+    // The extension has to survive: a name cut to `xxxx…` is a file the operating system
+    // cannot open by type, and the desktop shell's duplicate handling splits on it.
+    expect(long.endsWith('….pdf')).toBe(true)
+    expect(safeFileName('y'.repeat(400))).toMatch(/^y+…$/)
   })
 
   it('is applied by deliver, so no call site has to remember', async () => {

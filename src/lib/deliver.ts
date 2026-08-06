@@ -53,8 +53,18 @@ export function safeFileName(name: string, fallback = 'document'): string {
   // called `-` is worse than one called `document`.
   if (!cleaned || !/[a-z0-9]/i.test(cleaned) || reserved.test(cleaned)) return fallback
   // Long enough for any reference, short of the 255-byte limit most filesystems impose.
-  return cleaned.length <= 120 ? cleaned : `${cleaned.slice(0, 119)}…`
+  if (cleaned.length <= MAX_FILE_NAME) return cleaned
+  // Truncate the stem, not the name: a `.pdf` cut off the end leaves a file the operating
+  // system cannot open by type, and leaves the desktop shell's duplicate handling — which
+  // splits on the extension — appending `(2)` to something that no longer has one.
+  const dot = cleaned.lastIndexOf('.')
+  const extension = dot > 0 && cleaned.length - dot <= 8 ? cleaned.slice(dot) : ''
+  const stem = extension ? cleaned.slice(0, dot) : cleaned
+  return `${stem.slice(0, MAX_FILE_NAME - extension.length - 1)}…${extension}`
 }
+
+/** Comfortably inside the 255 bytes most filesystems allow for a single name. */
+const MAX_FILE_NAME = 120
 
 export async function deliver(
   bridge: DesktopBridge | null,
