@@ -10,6 +10,7 @@
  * touching any calling code.
  */
 import { openDB, type IDBPDatabase } from 'idb'
+import { localDate } from '../lib/report'
 import type { CompanyProfile, ShipmentSettings } from '../domain/draft'
 import type { ItemLibraryEntry } from '../domain/item-library'
 import type { DgConsignment } from '../domain/dangerous-goods/types'
@@ -141,7 +142,11 @@ export interface DgConsignmentRecord {
   /** `${air waybill or reference or 'consignment'}@${preparedAt}`, keyed per run like shipments. */
   id: string
   preparedAt: string
-  /** Two years on from preparation, as `YYYY-MM-DD`. */
+  /**
+   * Two years on from preparation, as `YYYY-MM-DD` — the *earliest* the obligation can end.
+   * The rule runs from acceptance by the initial carrier, which is on or after preparation,
+   * so this date is a floor and the UI labels it "at least".
+   */
   retainUntil: string
   airWaybillNumber: string
   shippersReference: string
@@ -200,7 +205,15 @@ export interface LocalStore {
   listDgConsignments(limit?: number): Promise<DgConsignmentRecord[]>
   saveDgConsignment(record: DgConsignmentRecord): Promise<void>
 
-  /** Removes everything. Exposed in the UI so a shared machine can be wiped. */
+  /**
+   * Removes everything except the dangerous goods consignment records. Exposed in the UI so
+   * a shared machine can be wiped.
+   *
+   * The carve-out is the point, not an oversight. Every other store holds convenience data;
+   * `dgConsignments` holds the evidence behind a two-year retention obligation, and this
+   * used to delete it under a confirmation dialog that read as though it were kept. Records
+   * past their `retainUntil` date are owed nothing and are dropped.
+   */
   clearAll(): Promise<void>
 }
 
@@ -356,9 +369,15 @@ export const indexedDbStore: LocalStore = {
   async clearAll() {
     const database = await db()
     await Promise.all(
-      ['profile', 'consignees', 'overrides', 'shipments', 'partWeights', 'items', 'dgConsignments'].map((name) =>
+      ['profile', 'consignees', 'overrides', 'shipments', 'partWeights', 'items'].map((name) =>
         database.clear(name),
       ),
+    )
+    // Dangerous goods records inside their retention window stay — see the interface note.
+    const today = localDate()
+    const records = (await database.getAll('dgConsignments')) as DgConsignmentRecord[]
+    await Promise.all(
+      records.filter((r) => r.retainUntil < today).map((r) => database.delete('dgConsignments', r.id)),
     )
   },
 }

@@ -281,7 +281,7 @@ function drawPage(
 
   let rowY = headerBottom - 12
   for (const line of pageModel.lines) {
-    rowY = drawEntry(ctx, doc, line, rowY, pageModel.pageNumber)
+    rowY = drawEntry(ctx, doc, line, rowY, pageModel.pageNumber, tableBottom)
     rowY -= 4
   }
 
@@ -341,20 +341,48 @@ function drawPage(
   )
 }
 
-/** One dangerous goods entry across the seven columns. Returns the y the next entry starts at. */
-function drawEntry(ctx: Ctx, doc: PDFDocument, line: DgdLine, top: number, pageNumber: number): number {
+/**
+ * One dangerous goods entry across the seven columns. Returns the y the next entry starts at.
+ *
+ * Rows are clipped at the foot of the table rather than drawn past it. The paginator keeps
+ * *entries* inside its per-page budget but never bounds one entry's own height, and two
+ * free-text inputs feed that height — the packaging type wrapped into the quantity column,
+ * and the overpack marks list under it. An entry taller than the space left would otherwise
+ * draw straight across the handling-information and certification boxes, silently, on a
+ * regulated form.
+ */
+function drawEntry(
+  ctx: Ctx,
+  doc: PDFDocument,
+  line: DgdLine,
+  top: number,
+  pageNumber: number,
+  tableBottom: number,
+): number {
   const size = 7.5
   const rows = Math.max(line.properShippingName.length, line.quantityAndType.length)
+  // Rows at or below this y would leave the table box. `top` is the first row's baseline.
+  const rowFits = (i: number) => top - i * ROW_HEIGHT > tableBottom + 2
+  const totalRows = rows + line.annotations.length
+  let clipped = 0
 
   text(ctx, line.unNumber, COLUMNS.unNumber + 3, top, { size })
-  line.properShippingName.forEach((part, i) =>
-    text(ctx, part, COLUMNS.properShippingName + 4, top - i * ROW_HEIGHT, { size }),
-  )
+  line.properShippingName.forEach((part, i) => {
+    if (!rowFits(i)) {
+      clipped++
+      return
+    }
+    text(ctx, part, COLUMNS.properShippingName + 4, top - i * ROW_HEIGHT, { size })
+  })
   text(ctx, line.classOrDivision, COLUMNS.classOrDivision + 18, top, { size })
   text(ctx, line.packingGroup, COLUMNS.packingGroup + 16, top, { size })
-  line.quantityAndType.forEach((part, i) =>
-    text(ctx, part, COLUMNS.quantity + 4, top - i * ROW_HEIGHT, { size: QUANTITY_FONT_SIZE }),
-  )
+  line.quantityAndType.forEach((part, i) => {
+    if (!rowFits(i)) {
+      clipped++
+      return
+    }
+    text(ctx, part, COLUMNS.quantity + 4, top - i * ROW_HEIGHT, { size: QUANTITY_FONT_SIZE })
+  })
   text(ctx, line.packingInstruction, COLUMNS.packingInstruction + 5, top, { size })
 
   // Box 17 is the shipper's, for a special provision number where one has been granted. It
@@ -375,9 +403,21 @@ function drawEntry(ctx: Ctx, doc: PDFDocument, line: DgdLine, top: number, pageN
   }
 
   let y = top - rows * ROW_HEIGHT
-  for (const annotation of line.annotations) {
-    text(ctx, annotation, COLUMNS.quantity + 4, y, { size: QUANTITY_FONT_SIZE })
-    y -= ROW_HEIGHT
+  line.annotations.forEach((annotation, i) => {
+    if (!rowFits(rows + i)) {
+      clipped++
+      return
+    }
+    text(ctx, annotation, COLUMNS.quantity + 4, y - i * ROW_HEIGHT, { size: QUANTITY_FONT_SIZE })
+  })
+  y -= line.annotations.length * ROW_HEIGHT
+
+  if (clipped) {
+    ctx.warnings.push(
+      `The ${line.unNumber} entry runs to ${totalRows} rows but the table has room for fewer; ` +
+        `${clipped} row(s) were not printed. Shorten the packaging description or the overpack marks, ` +
+        'and check the printed sheet against the review screen before signing.',
+    )
   }
   return y
 }

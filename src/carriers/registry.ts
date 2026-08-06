@@ -49,7 +49,9 @@ export function detectCarrier(vesselAgent: string | null | undefined): ShipmentC
   if (text.includes('nippon')) return 'nippon-express'
   if (text.includes('ceva')) return 'ceva'
   if (text.includes('fedex') || text.includes('federal express')) return 'fedex'
-  if (text.includes('ups') || text.includes('united parcel')) return 'ups'
+  // Word-bounded: 'ups' is three letters that sit inside ordinary words — "Groups",
+  // "Supship" — and a match there silently preselects UPS and swaps its keying defaults in.
+  if (/\bups\b/.test(text) || text.includes('united parcel')) return 'ups'
   return null
 }
 

@@ -80,7 +80,7 @@ export function parseCiplPages(fileName: string, pages: TextPage[]): ParsedCipl 
     if (ctx.isHeaderPage) {
       // Keyed by set, not by kind: the invoice header supplies values and the packing-list
       // header supplies weights, and both describe the same shipment.
-      headers[ctx.set] = parseHeaderPage(page, headers[ctx.set])
+      headers[ctx.set] = parseHeaderPage(page, ctx.kind, headers[ctx.set])
     }
 
     // A block can only continue into the next page of the same set and kind. Anything else
@@ -204,7 +204,7 @@ function findSetMarker(page: TextPage): DocumentSet | null {
 // Header page
 // ---------------------------------------------------------------------------
 
-function parseHeaderPage(page: TextPage, existing?: ShipmentHeader): ShipmentHeader {
+function parseHeaderPage(page: TextPage, kind: DocumentKind, existing?: ShipmentHeader): ShipmentHeader {
   const rows = page.rows
 
   const invoiceNumber = labelValue(rows, 'INVOICE NUMBER:') ?? existing?.invoiceNumber ?? ''
@@ -224,7 +224,12 @@ function parseHeaderPage(page: TextPage, existing?: ShipmentHeader): ShipmentHea
 
   const tradeTerms = tradeTermsValue(rows)
   const { totalQuantity, cartons } = totalsBlock(rows)
-  const { totalValue, documentCurrency } = invoiceTotal(rows)
+  // Only an invoice page may supply the money total. `invoiceTotal` matches any two-item
+  // row shaped `<number> <AAA>`, and a packing-list header row like `1113.140 KGS` fits
+  // that shape — read from the wrong kind of page it would coalesce over the invoice's
+  // real figure and currency, since fresh values win.
+  const { totalValue, documentCurrency } =
+    kind === 'INVOICE' ? invoiceTotal(rows) : { totalValue: null, documentCurrency: null }
   const weights = packingTotals(rows)
 
   const orderNumbers = headerOrderNumbers(rows)

@@ -368,6 +368,16 @@ function stateOfChargeFor(spec: BatterySpec): StateOfChargeRule | null {
 }
 
 /**
+ * The wording every battery-mark line starts with.
+ *
+ * A constant because `assess.ts` filters the mark out of a package's hazard communication
+ * when the two-package exemption applies, and it does so by matching this prefix. Two
+ * copies of the string would let a rewording here silently break the exemption there —
+ * nothing types against prose.
+ */
+export const BATTERY_MARK_PREFIX = 'Lithium battery mark'
+
+/**
  * Marks and labels for a package prepared to this section.
  *
  * The per-consignment exemptions are *not* applied here — whether the battery mark may be
@@ -379,7 +389,7 @@ function hazardCommunicationFor(section: PackingSection, aircraft: AircraftLimit
 
   if (section === 'II') {
     // Excepted Class 9: the battery mark is the whole of the hazard communication.
-    return [...marks, `Lithium battery mark bearing ${id.unNumber}`]
+    return [...marks, `${BATTERY_MARK_PREFIX} bearing ${id.unNumber}`]
   }
 
   marks.push(`${id.unNumber} and proper shipping name mark ("${id.properShippingName}")`)
@@ -387,7 +397,7 @@ function hazardCommunicationFor(section: PackingSection, aircraft: AircraftLimit
   if (aircraft === 'cargo-aircraft-only') marks.push('Cargo Aircraft Only label, on the same surface as the Class 9 label')
   // Section IB alone carries both the Class 9 label and the lithium battery mark (fig. 5-28);
   // Sections I and IA carry the label without the mark (figs. 5-32, 5-33, 5-34).
-  if (section === 'IB') marks.push(`Lithium battery mark bearing ${id.unNumber}`)
+  if (section === 'IB') marks.push(`${BATTERY_MARK_PREFIX} bearing ${id.unNumber}`)
   marks.push('Net quantity mark, where multiple non-identical packages are offered in the consignment')
   return marks
 }

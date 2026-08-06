@@ -13,15 +13,21 @@ export function UploadPanel({
   busy: boolean
 }) {
   const [dragging, setDragging] = useState(false)
+  // The parse itself runs here, before App learns anything, so App's `busy` cannot cover
+  // it. Without this, a slow multi-page parse leaves the button live and accepting a second
+  // file with no sign anything is happening.
+  const [parsing, setParsing] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const working = busy || parsing
 
   const handleFile = useCallback(
     async (file: File | undefined) => {
-      if (!file) return
+      if (!file || parsing) return
       if (!file.name.toLowerCase().endsWith('.pdf')) {
         onError('That is not a PDF. Upload the combined commercial invoice and packing list.')
         return
       }
+      setParsing(true)
       try {
         const parsed = await parseCipl(file.name, await file.arrayBuffer())
         if (!parsed.lines.length) {
@@ -34,9 +40,11 @@ export function UploadPanel({
         onParsed(parsed)
       } catch (error) {
         onError(error instanceof Error ? error.message : 'That PDF could not be read.')
+      } finally {
+        setParsing(false)
       }
     },
-    [onParsed, onError],
+    [onParsed, onError, parsing],
   )
 
   return (
@@ -63,8 +71,8 @@ export function UploadPanel({
           ].join(' ')}
         >
           <p className="text-sm text-[var(--color-ink-soft)]">Drop the CIPL PDF here</p>
-          <Button variant="primary" onClick={() => inputRef.current?.click()} disabled={busy}>
-            {busy ? 'Reading…' : 'Choose a PDF'}
+          <Button variant="primary" onClick={() => inputRef.current?.click()} disabled={working}>
+            {working ? 'Reading…' : 'Choose a PDF'}
           </Button>
           <input
             ref={inputRef}

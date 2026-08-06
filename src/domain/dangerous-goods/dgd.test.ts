@@ -83,14 +83,18 @@ describe('packaging descriptions', () => {
     ])
   })
 
-  it('writes the plain wording for a single overpack', () => {
+  it('writes the plain wording and the identifier for a single overpack', () => {
+    // The identifier the assessment demands on the box has to appear on the paper too —
+    // an identifier stated on one and not the other is the mismatch that gets corrected.
     const shipment = consignment(
       [pkg('p1', [entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 10 })], { count: 3, overpackId: 'o1' })],
       { overpacks: [overpack('o1')] },
     )
     const declaration = buildDeclaration(shipment, assess(shipment))
     expect(declaration.lines[0].quantityAndType.join(' ')).toBe('3 Fibreboard box x 10 kg')
-    expect(declaration.lines[0].annotations).toEqual(['Overpack used'])
+    expect(declaration.lines[0].annotations).toEqual(['Overpack used', 'Overpack marks: #A001'])
+    // No per-overpack total for a single overpack: it would restate the quantity column.
+    expect(declaration.lines[0].annotations.join(' ')).not.toContain('Total quantity')
   })
 
   it('states the packaging once for a package holding two entries', () => {
@@ -129,7 +133,7 @@ describe('packaging descriptions', () => {
     )
     const declaration = buildDeclaration(shipment, assess(shipment))
     expect(declaration.lines[0].annotations).toEqual([])
-    expect(declaration.lines[1].annotations).toEqual(['Overpack used'])
+    expect(declaration.lines[1].annotations).toEqual(['Overpack used', 'Overpack marks: #A001'])
   })
 })
 
@@ -200,6 +204,26 @@ describe('rendering', () => {
     })
     const { warnings } = await renderDeclaration(buildDeclaration(wide, assess(wide)))
     expect(warnings.some((w) => w.startsWith('Consignee:'))).toBe(true)
+  })
+
+  it('clips an entry taller than the table and says so, rather than drawing over the boxes beneath', async () => {
+    // The paginator bounds entries per page but never one entry's own height, and two
+    // free-text inputs feed it: the packaging type wrapped into the quantity column, and the
+    // overpack marks list. Eighty identifiers wrap to more rows than the whole table holds.
+    const marks = Array.from({ length: 80 }, (_, i) => `#A${String(i + 1).padStart(3, '0')}`).join(', ')
+    const tall = consignment(
+      [
+        pkg('p1', [entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 10 })], {
+          packagingType:
+            'Fibreboard box with moulded pulp cradles, anti-static liner, corner blocks and double-wall sleeve ' +
+            'per the tested design type drawing, tape-sealed on all seams',
+          overpackId: 'o1',
+        }),
+      ],
+      { overpacks: [overpack('o1', { marks, count: 2 })] },
+    )
+    const { warnings } = await renderDeclaration(buildDeclaration(tall, assess(tall)))
+    expect(warnings.some((w) => w.includes('row(s) were not printed'))).toBe(true)
   })
 })
 

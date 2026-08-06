@@ -115,6 +115,18 @@ describe.skipIf(!hasFixtures())('carrier detection', () => {
   })
 })
 
+describe('carrier detection on names alone', () => {
+  it('matches UPS as a word, not a substring', () => {
+    // 'ups' sits inside ordinary words, and a match there silently preselects UPS and swaps
+    // its keying defaults in.
+    expect(detectCarrier('UPS')).toBe('ups')
+    expect(detectCarrier('UPS Supply Chain Solutions')).toBe('ups')
+    expect(detectCarrier('United Parcel Service')).toBe('ups')
+    expect(detectCarrier('XYZ Groups Logistics')).toBeNull()
+    expect(detectCarrier('Supship Marine Services')).toBeNull()
+  })
+})
+
 describe.skipIf(!hasFixtures())('template verification', () => {
   it('recognises both shipped blank templates', async () => {
     for (const id of ['nippon-express', 'ceva'] as const) {
