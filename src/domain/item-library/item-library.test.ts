@@ -195,6 +195,39 @@ describe('workbook reading', () => {
     await expect(readXlsx(encoder.encode('this is not a zip'))).rejects.toBeInstanceOf(WorkbookError)
   })
 
+  it('says a truncated workbook is damaged, rather than reporting a DataView bound', async () => {
+    // Every offset the directory walk follows comes out of the file. A half-downloaded
+    // workbook points past the end, and the raw RangeError goes straight to whoever picked
+    // the file — in place of the plain sentences the rest of this reader produces.
+    const whole = await zip({
+      'xl/workbook.xml': WORKBOOK_XML,
+      'xl/_rels/workbook.xml.rels': RELS_XML,
+      'xl/worksheets/sheet4.xml': sheetXml([['PART-1']]),
+    })
+    for (const keep of [0.55, 0.75, 0.9]) {
+      const truncated = whole.slice(0, Math.floor(whole.length * keep))
+      // The end-of-directory record lives at the tail, so most truncations lose it; the
+      // point is that whatever is left produces this reader's own error type.
+      await expect(readXlsx(truncated)).rejects.toBeInstanceOf(WorkbookError)
+    }
+  })
+
+  it('rejects a directory entry pointing outside the file', async () => {
+    const whole = await zip({
+      'xl/workbook.xml': WORKBOOK_XML,
+      'xl/_rels/workbook.xml.rels': RELS_XML,
+      'xl/worksheets/sheet4.xml': sheetXml([['PART-1']]),
+    })
+    // Point the first central-directory entry's local header far past the end.
+    const corrupt = whole.slice()
+    const view = new DataView(corrupt.buffer, corrupt.byteOffset, corrupt.byteLength)
+    let eocd = corrupt.length - 22
+    while (eocd >= 0 && view.getUint32(eocd, true) !== 0x06054b50) eocd--
+    const central = view.getUint32(eocd + 16, true)
+    view.setUint32(central + 42, 0x7fffffff, true)
+    await expect(readXlsx(corrupt)).rejects.toBeInstanceOf(WorkbookError)
+  })
+
   it('maps spreadsheet column letters past Z', () => {
     expect([columnToIndex('A'), columnToIndex('Z'), columnToIndex('AA'), columnToIndex('AB')]).toEqual([0, 25, 26, 27])
   })

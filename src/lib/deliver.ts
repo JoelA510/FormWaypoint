@@ -20,12 +20,49 @@ export interface Delivery {
   path: string | null
 }
 
+/**
+ * A name that is a file name and not a path.
+ *
+ * Every output this application writes is named after something a person typed or a document
+ * printed — an invoice number, an air waybill number, a shipper's reference. None of those is
+ * constrained to characters a filesystem likes, and `SO/13310965` is an entirely ordinary way
+ * to write a reference. Unsanitised, it becomes `SO/13310965_dg-checklist.md`: the desktop
+ * shell rejects it outright, correctly, with a message about plain file names that says
+ * nothing about the reference that caused it, and the browser silently renames it.
+ *
+ * So the separators go, along with the other characters Windows refuses and the control
+ * characters that can arrive pasted in from a spreadsheet. Replaced rather than dropped, so
+ * two references differing only in punctuation do not collapse onto one name.
+ */
+export function safeFileName(name: string, fallback = 'document'): string {
+  const cleaned = name
+    // eslint-disable-next-line no-control-regex -- the point is to strip them
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .replace(/[/\\:*?"<>|]/g, '-')
+    // A run of dots survives the separator pass and would still be refused by the desktop
+    // shell, which rejects any name containing `..` outright.
+    .replace(/\.{2,}/g, '-')
+    .replace(/\s+/g, ' ')
+    // Leading dots would hide the file; trailing dots and spaces are stripped by Windows
+    // itself, which turns `shipment .pdf` into something the app cannot then find.
+    .replace(/^\.+/, '')
+    .trim()
+  // Reserved device names are still reserved with an extension: `CON.pdf` is not a file.
+  const reserved = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i
+  // A name left with no letters or digits names nothing — `..` reduces to a dash, and a file
+  // called `-` is worse than one called `document`.
+  if (!cleaned || !/[a-z0-9]/i.test(cleaned) || reserved.test(cleaned)) return fallback
+  // Long enough for any reference, short of the 255-byte limit most filesystems impose.
+  return cleaned.length <= 120 ? cleaned : `${cleaned.slice(0, 119)}…`
+}
+
 export async function deliver(
   bridge: DesktopBridge | null,
-  fileName: string,
+  requestedName: string,
   bytes: Uint8Array,
   mimeType = 'application/pdf',
 ): Promise<Delivery> {
+  const fileName = safeFileName(requestedName)
   if (!bridge) {
     downloadBytes(bytes, fileName, mimeType)
     return { fileName, path: null }

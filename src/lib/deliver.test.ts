@@ -12,7 +12,7 @@
  * half the behaviour and it is an anchor element.
  */
 import { describe, expect, it, vi } from 'vitest'
-import { deliver, open } from './deliver'
+import { deliver, open, safeFileName } from './deliver'
 import type { DesktopBridge } from '../desktop'
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
@@ -90,5 +90,69 @@ describe('in a browser', () => {
 
   it('has nothing to open', async () => {
     await expect(open(null, { fileName: 'a.pdf', path: null })).resolves.toBeUndefined()
+  })
+})
+
+/**
+ * Output names are built from an invoice number, an air waybill number or a shipper's
+ * reference — none of which is constrained to characters a filesystem accepts.
+ */
+describe('safeFileName', () => {
+  it('leaves an ordinary name alone', () => {
+    expect(safeFileName('vendorA3_SLI_ceva.pdf')).toBe('vendorA3_SLI_ceva.pdf')
+    expect(safeFileName('125-1234 5678_shippers-declaration.pdf')).toBe('125-1234 5678_shippers-declaration.pdf')
+  })
+
+  it('replaces separators rather than dropping them, so two references stay distinct', () => {
+    // `SO/13310965` is an ordinary way to write a reference, and the desktop shell rejects
+    // any name that is not a plain file name — correctly, but with a message that says
+    // nothing about the reference that caused it.
+    expect(safeFileName('SO/13310965_dg-checklist.md')).toBe('SO-13310965_dg-checklist.md')
+    expect(safeFileName('SO\\13310965.md')).toBe('SO-13310965.md')
+    expect(safeFileName('AB/CD.pdf')).not.toBe(safeFileName('ABCD.pdf'))
+  })
+
+  it('produces a name the desktop shell will accept', () => {
+    // safe_join in the Tauri shell refuses a separator, a `..`, or anything with more than
+    // one path component, so a name that still contains one is a failed save.
+    for (const hostile of ['../../etc/passwd', 'a/b/c.pdf', '..\\..\\x.pdf', 'a..b.pdf']) {
+      const safe = safeFileName(hostile)
+      expect(safe).not.toContain('/')
+      expect(safe).not.toContain('\\')
+      expect(safe).not.toContain('..')
+    }
+  })
+
+  it('strips the other characters Windows refuses', () => {
+    expect(safeFileName('inv:oice*?"<>|.pdf')).toBe('inv-oice------.pdf')
+  })
+
+  it('strips control characters pasted in from a spreadsheet', () => {
+    expect(safeFileName(`inv${String.fromCharCode(9)}oice.pdf`)).toBe('invoice.pdf')
+    expect(safeFileName(`inv${String.fromCharCode(0)}oice.pdf`)).toBe('invoice.pdf')
+  })
+
+  it('falls back rather than producing a hidden, empty or reserved name', () => {
+    expect(safeFileName('')).toBe('document')
+    expect(safeFileName('   ')).toBe('document')
+    expect(safeFileName('...')).toBe('document')
+    expect(safeFileName('..')).toBe('document')
+    // CON.pdf is not a file on Windows, whatever the extension says.
+    expect(safeFileName('CON.pdf')).toBe('document')
+    expect(safeFileName('lpt1')).toBe('document')
+    // But a name that merely starts with those letters is fine.
+    expect(safeFileName('console.pdf')).toBe('console.pdf')
+  })
+
+  it('bounds the length without losing the fact that it was cut', () => {
+    const long = safeFileName(`${'x'.repeat(400)}.pdf`)
+    expect(long.length).toBeLessThanOrEqual(120)
+    expect(long.endsWith('…')).toBe(true)
+  })
+
+  it('is applied by deliver, so no call site has to remember', async () => {
+    const bridge = fakeBridge((name) => `/downloads/${name}`)
+    await deliver(bridge, 'SO/13310965_dg-checklist.md', bytes, 'text/markdown')
+    expect(bridge.saveOutput).toHaveBeenCalledWith('SO-13310965_dg-checklist.md', bytes)
   })
 })
