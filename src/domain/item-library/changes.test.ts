@@ -188,6 +188,17 @@ describe('rendering', () => {
     expect(csv).toContain('"CABLE, 5M"')
   })
 
+  it('quotes a description carrying a bare carriage return, so the row stays one row', () => {
+    // An item-master cell containing one arrives through the workbook reader as `&#13;`,
+    // decoded. Unquoted it terminates the row for any reader following RFC 4180, splitting
+    // one change across two misaligned lines.
+    const description = `CABLE${String.fromCharCode(13)}5M`
+    const csv = renderLibraryChangesCsv(
+      libraryChanges([entered({ exportCode: '8536.50.9065' })], [entry({ description })]),
+    )
+    expect(csv).toContain(`"${description}"`)
+  })
+
   it('says there is nothing to do when every entry matches', () => {
     const matching = libraryChanges([entered({ exportCode: '8544420000' })], [entry({})])
     expect(renderLibraryChangeLog(matching, { today: '2026-07-29', librarySource: 'x' })).toContain('Nothing to do')

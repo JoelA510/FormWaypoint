@@ -14,6 +14,7 @@ import {
   type ItemLibraryEntry,
 } from '.'
 import { createScheduleBIndex, screenCode, type ScheduleBIndex } from '../schedule-b'
+import { partKey } from '../part-key'
 
 // ---------------------------------------------------------------------------
 // A minimal .xlsx writer, so the reader is tested against real ZIP + XML bytes
@@ -449,6 +450,24 @@ describe('import', () => {
     expect(summary.entries[0].partNumber).toBe('ABC-100')
     expect(summary.entries[0].displayPartNumber).toBe('abc-100')
     expect(indexByPart(summary.entries).get('ABC-100')).toBeDefined()
+  })
+
+  it('indexes through partKey, so an entry that skipped the import still resolves', () => {
+    // Entries reach this map from the import, which normalises, and from the saved library,
+    // which stores what the import wrote. Keying on `entry.partNumber` relied on that holding
+    // everywhere; the lookup side is `get(partKey(part))`, and a key merely assumed to match
+    // fails by returning nothing — every part shown as having no library record at all.
+    const raw: ItemLibraryEntry = {
+      partNumber: ' abc-100 ',
+      displayPartNumber: ' abc-100 ',
+      description: '',
+      exportCode: '',
+      importCode: '',
+      netWeightKg: null,
+      source: 'hand.xlsx',
+      importedAt: '2026-07-01T00:00:00.000Z',
+    }
+    expect(indexByPart([raw]).get(partKey('ABC-100'))).toBe(raw)
   })
 
   it('exposes weights as a part -> kg map, omitting parts with none', () => {

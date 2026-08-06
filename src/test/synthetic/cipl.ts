@@ -57,6 +57,14 @@ export interface SyntheticCipl {
   linesPerPage?: number
   /** Emit the TP1 set as well, priced in another currency. */
   includeTp1?: boolean
+  /**
+   * Order numbers to print in the header's P/O field instead of the ones the lines carry.
+   *
+   * The field normally lists what the lines list, truncated. Setting it apart is how a
+   * header that names an order no line item accounts for — the shape of a lost line — gets
+   * put in front of the parser.
+   */
+  headerOrders?: string[]
 }
 
 const PAGE = { width: 612, height: 792 }
@@ -117,7 +125,7 @@ function drawHeaderPage(doc: PDFDocument, spec: SyntheticCipl, set: string, kind
 
   // The P/O field is a fixed-width display field; three per row is what the real form fits.
   text(page, 'P/O NUMBER:', 306, 577, font)
-  const orders = [...new Set(spec.lines.map((l) => l.order))]
+  const orders = spec.headerOrders ?? [...new Set(spec.lines.map((l) => l.order))]
   orders.slice(0, 6).forEach((order, i) => {
     text(page, order, 414 + (i % 3) * 72, 577 - Math.floor(i / 3) * 12, font)
   })

@@ -303,6 +303,20 @@ describe('address extraction', () => {
     expect(field(['Rua Example 100', 'Sao Paulo SP 01310-100'], 'City')).toBe('Sao Paulo')
   })
 
+  it('reads both fields off the same line when an earlier one also ends in a number', () => {
+    // A PO box, a suite or a building number ends an address line exactly the way a postcode
+    // does. The postcode was taken from the last matching line and the city from the first,
+    // so these two came apart: the right postcode, and `Postbus` typed into the field a
+    // courier sorts on.
+    const lines = ['Postbus 1234', "'s-Hertogenbosch NA 5234"]
+    expect(field(lines, 'Postal code')).toBe('5234')
+    expect(field(lines, 'City')).toBe("'s-Hertogenbosch")
+
+    const suite = ['Example Tower Suite 1200', 'Singapore EX 498781']
+    expect(field(suite, 'Postal code')).toBe('498781')
+    expect(field(suite, 'City')).toBe('Singapore')
+  })
+
   it('keeps a city that is itself written in capitals', () => {
     expect(field(['1 Example Road', 'SINGAPORE 498781'], 'City')).toBe('SINGAPORE')
   })

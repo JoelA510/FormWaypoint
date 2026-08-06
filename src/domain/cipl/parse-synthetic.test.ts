@@ -148,6 +148,26 @@ describe('commodity headings', () => {
   })
 })
 
+describe('the header’s P/O field against the line items', () => {
+  it('says so when the header names an order no line item accounts for', async () => {
+    // Truncation only ever loses order numbers *from* the header, so this direction is not
+    // truncation — it is the shape of lines that failed to parse. The line items still win,
+    // because an order with no line behind it cannot be filed against anything, but the
+    // shortfall is the one thing nobody should have to spot by reading the PDF alongside.
+    const base = simpleShipment()
+    const orders = [...new Set(base.lines.map((l) => l.order))]
+    const parsed = await parse(simpleShipment({ headerOrders: [...orders, '00000099OP0010'] }))
+
+    expect(parsed.headers.FC.orderNumbers).toEqual(orders)
+    expect(parsed.warnings.some((w) => w.includes('00000099OP0010'))).toBe(true)
+  })
+
+  it('stays quiet when the header and the line items agree', async () => {
+    const parsed = await parse()
+    expect(parsed.warnings.some((w) => /no line item references/.test(w))).toBe(false)
+  })
+})
+
 describe('many lines over many pages', () => {
   const many = () => {
     const base = simpleShipment()
