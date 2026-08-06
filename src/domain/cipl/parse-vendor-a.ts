@@ -1,5 +1,5 @@
 /**
- * Parser for the the vendor combined Commercial Invoice & Packing List layout.
+ * Parser for the Vendor A combined Commercial Invoice & Packing List layout.
  *
  * One PDF contains up to four documents, in this order:
  *

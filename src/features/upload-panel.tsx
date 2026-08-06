@@ -26,8 +26,8 @@ export function UploadPanel({
         const parsed = await parseCipl(file.name, await file.arrayBuffer())
         if (!parsed.lines.length) {
           onError(
-            `No merchandise lines were found in ${file.name}. This parser reads the the vendor combined ` +
-              'invoice and packing list layout; another format needs its own parser.',
+            `No merchandise lines were found in ${file.name}. The supported layouts are a combined ` +
+              'commercial invoice and packing list; another format needs its own parser.',
           )
           return
         }
