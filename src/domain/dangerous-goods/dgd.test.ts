@@ -1,51 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { PDFDocument } from 'pdf-lib'
+import { consignment, entry, overpack, pkg } from './test-support'
 import { assess } from './assess'
 import { buildDeclaration, wrap } from './dgd'
 import { renderDeclaration } from '../../carriers/dgd/render'
-import { emptyConsignment, emptyEntry, type BatteryEntry, type DgConsignment, type DgPackage } from './types'
-import type { BatterySpec } from './lithium'
 
-function entry(id: string, spec: Partial<BatterySpec>, overrides: Partial<BatteryEntry> = {}): BatteryEntry {
-  return {
-    ...emptyEntry(id),
-    spec: {
-      chemistry: 'lithium-ion',
-      form: 'battery',
-      configuration: 'standalone',
-      wattHours: null,
-      lithiumContentG: null,
-      ...spec,
-    },
-    netWeightKgPerPackage: 1,
-    testSummaryOnFile: true,
-    wattHourMarkedOnCase: true,
-    stateOfChargePercent: 25,
-    ...overrides,
-  }
-}
-
-function pkg(id: string, entries: BatteryEntry[], overrides: Partial<DgPackage> = {}): DgPackage {
-  return { id, packagingType: 'Fibreboard box', count: 1, unSpecificationMark: '', entries, overpackId: null, ...overrides }
-}
-
-function consignment(packages: DgPackage[], overrides: Partial<DgConsignment> = {}): DgConsignment {
-  return {
-    ...emptyConsignment(),
-    shipper: { name: 'Acme Exports', addressLines: ['1 Harbour Way', 'Long Beach, CA 90802', 'USA'] },
-    consignee: { name: 'Southern Distribution', addressLines: ['15 Rockwell Lane', 'Las Vegas, NV 78654', 'USA'] },
-    airportOfDeparture: 'Los Angeles',
-    airportOfDestination: 'Las Vegas',
-    emergencyContactName: 'CHEMTREC',
-    emergencyContactPhone: '1-800-424-9300 / +1-703-527-3887',
-    signerName: 'J. Alvarez',
-    signerDate: '2026-08-06',
-    stateVariationsChecked: true,
-    operatorVariationsChecked: true,
-    packages,
-    ...overrides,
-  }
-}
 
 /** The workbook's Section IB exercise, which prints the expected declaration alongside it. */
 const workbook = consignment([
@@ -113,7 +72,7 @@ describe('packaging descriptions', () => {
   it('multiplies the package count out across identical overpacks', () => {
     const shipment = consignment(
       [pkg('p1', [entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 10 })], { count: 50, overpackId: 'o1' })],
-      { overpacks: [{ id: 'o1', marks: '#A001, #A002', count: 2 }] },
+      { overpacks: [overpack('o1', { marks: '#A001, #A002', count: 2 })] },
     )
     const declaration = buildDeclaration(shipment, assess(shipment))
     expect(declaration.lines[0].quantityAndType.join(' ')).toBe('100 Fibreboard box x 10 kg')
@@ -127,7 +86,7 @@ describe('packaging descriptions', () => {
   it('writes the plain wording for a single overpack', () => {
     const shipment = consignment(
       [pkg('p1', [entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 10 })], { count: 3, overpackId: 'o1' })],
-      { overpacks: [{ id: 'o1', marks: '', count: 1 }] },
+      { overpacks: [overpack('o1')] },
     )
     const declaration = buildDeclaration(shipment, assess(shipment))
     expect(declaration.lines[0].quantityAndType.join(' ')).toBe('3 Fibreboard box x 10 kg')
@@ -166,7 +125,7 @@ describe('packaging descriptions', () => {
           { overpackId: 'o1' },
         ),
       ],
-      { overpacks: [{ id: 'o1', marks: '', count: 1 }] },
+      { overpacks: [overpack('o1')] },
     )
     const declaration = buildDeclaration(shipment, assess(shipment))
     expect(declaration.lines[0].annotations).toEqual([])

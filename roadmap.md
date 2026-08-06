@@ -35,10 +35,16 @@ B refresh, which cannot work in a browser.
 | **Local history** | ✅ Done | Exporter profile, per-consignee values, per-part weights, the item library, overrides and processed shipments in IndexedDB. |
 | **Lithium battery classification (air)** | ✅ Done | UN3480/3481/3090/3091/3551/3552, PI 965–970 and 976–978, Sections IA/IB/I/II from chemistry, cell-or-battery, configuration and energy content. Per-package limits, state of charge, marks and labels, air waybill statements. Every figure cited against the training material it came from. |
 | **Consignment assessment (air)** | ✅ Done | Package limits per regulatory entry and A181 totals, aircraft type, UN specification packaging, the battery-mark exemption and its two-package consignment ceiling, forbidden conditions (A154, A183), state and operator variation confirmation. |
+| **UN 38.3 coverage** | ✅ Done | Tested-article scope against the article in the box. A module summary held against an assembled pack blocks with both levels named. |
+| **State of charge as evidence** | ✅ Done | Value, basis, method, date, measurer. An indicated-capacity reading blocks wherever the 25% alternative does not apply — everywhere but contained-in-equipment. |
+| **Three weights** | ✅ Done | Gross, equipment net and battery net entered separately and never derived from one another. Contents heavier than the package block. |
+| **Operating carrier** | ✅ Done | Separate from the forwarder, with its source. Unresolved blocks, because operator variations attach to the airline. |
+| **Overpack integrity** | ✅ Done | An identifier on every overpack, the OVERPACK mark, and the reproduce-marks-unless-visible rule on the package requirements. |
+| **Vehicle question** | ✅ Done | Asked of any battery with equipment; undetermined blocks. Names UN3556/3557/3558 by air and the unadopted UN3171 position in 49 CFR. |
 | **Shipper's Declaration** | ✅ Done | Drawn to the IATA layout rather than filled, since no blank form exists to fetch. Red hatched margins, struck-out aircraft and shipment type, real page x of y, overpack wording in all three of its forms, forwarder boxes left fillable, signature block empty. |
 | **Package checklist** | ✅ Done | Markdown to print and work through — the only deliverable for a Section II consignment, where the battery mark and the air waybill statement carry the whole of the hazard communication. |
 | **DG retention** | ✅ Done | Prepared consignments recorded locally with the date the two-year retention obligation runs to. |
-| **Regression suite** | ✅ Done | 313 TypeScript tests: five real shipments across both CIPL formats, plus the lithium battery course's own worked scenarios, plus Rust unit tests for the shell's path handling. |
+| **Regression suite** | ✅ Done | 336 TypeScript tests: five real shipments across both CIPL formats, plus the lithium battery course's own worked scenarios, plus Rust unit tests for the shell's path handling. |
 | **Desktop packaging seam** | ✅ Done | `localStore` is the single named implementation; a Tauri build replaces one assignment. Windows-only target; WebView2 covers every platform API the app uses. |
 | **Desktop build (.exe)** | ✅ Done | Tauri v2 shell; the Windows installer is built by the `Desktop build` workflow. Four Rust commands and no decisions. TLS goes through the OS certificate store, so a corporate inspection CA is trusted, and an environment proxy is honoured. |
 | **Schedule B revision diff** | ✅ Done | `src/domain/schedule-b/revision.ts` — diffs two datasets, intersects the result with the item library by part, and renders the change log and CSV worklist. Pure logic, no filesystem or network. |
@@ -81,6 +87,30 @@ can still be consulted after a later refresh.
 library, never reclassifies a part, and never rewrites a code. It reports what Census
 changed and which of your parts that touches; every correction stays a human action.
 
+## What the dangerous goods workflow still does not do
+
+Two supplied documents — an ORT per-shipment checklist and a domain specification — describe a
+platform considerably larger than this workflow. `docs/dangerous-goods-fact-check.md` records
+which of their claims were confirmed, which could not be reached, and which was wrong. What is
+knowingly absent:
+
+- **A ruleset maintained as versioned data.** Thresholds and limits are in source with
+  citations, which means a January revision is a code change. The specification is right that
+  this should be data a compliance user publishes; it is a larger piece of work than the
+  workflow it would serve.
+- **A governed battery master.** Keyed on manufacturer, model and revision, with article level
+  and composition, so the engine resolves which revision is physically in the box rather than
+  which is on the drawing. Today each consignment is described from scratch.
+- **Scoped approval objects, annual production run evidence, and personnel qualification
+  gating.** All three are how the prototype, low-production-run and A99 paths would actually
+  clear rather than simply block.
+- **Forwarder DG approval and HAWB weight reconciliation as workflow states.** The checklist is
+  explicit that pickup is not scheduled before forwarder approval and that the house air waybill
+  weight must be checked against the packing record. Both appear on the generated checklist as
+  steps; neither is a state the application tracks.
+- **PI 910 and PI 974 on an approved declaration.** Claimed by the specification, unconfirmable
+  from anything available here, and therefore not implemented rather than guessed.
+
 ## Where the dangerous goods figures come from
 
 Every threshold, limit, packing instruction and statement in
@@ -92,6 +122,10 @@ columns I–L of the List of Dangerous Goods *and* from the per-section requirem
 they agree. The Section IB limits — 10 kg for lithium ion, 2.5 kg for lithium metal — come
 only from figure 5-29, because the List of Dangerous Goods defers to the packing instruction
 for UN3480 and UN3090.
+
+The PI 965 text reproduced in the appendix confirms the Student Guide figures directly:
+Table 965-IA gives passenger `Forbidden` and cargo 35 kg, Table 965-IB gives `Forbidden` and
+10 kg, and special provision A802 expressly excepts Section IB from UN specification packaging.
 
 Nothing is interpolated. Where the materials state no limit, the module says so instead of
 inventing one, and the assessment reports it rather than passing it silently.
@@ -128,6 +162,7 @@ Two boundaries are deliberate and should stay:
 
 | Date | Milestone | Details |
 | :--- | :--- | :--- |
+| 2026-08-06 | **DG fact check and hardening** | The supplied ORT checklist and domain specification worked through against the PI 965 text and eCFR. UN 38.3 article coverage, three weights, state-of-charge evidence, operating carrier, overpack identity, the corrected co-packing list, packaging authorization limits and the vehicle question all folded in. |
 | 2026-08-06 | **Dangerous goods — air** | Lithium and sodium battery classification, consignment assessment, the Shipper's Declaration drawn to the IATA layout, the package checklist, and two-year retention — behind its own tab, leaving conventional shipping untouched. |
 | 2026-07-28 | **Pre-packaging pass** | Store seam narrowed to one assignment, Schedule B staleness warning, toolchain bumps (vite 8, vitest 4), monorepo leftovers removed. |
 | 2026-07-27 | **Item library** | Dependency-free .xlsx/.csv import, per-part weights, commodity-number screening. |

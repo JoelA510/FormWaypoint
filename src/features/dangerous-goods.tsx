@@ -40,11 +40,16 @@ import {
 import {
   emptyConsignment,
   emptyEntry,
+  emptyOverpack,
   emptyPackage,
+  PROHIBITED_CO_PACKED_CLASSES,
+  type ArticleLevel,
   type BatteryCondition,
   type BatteryEntry,
   type DgConsignment,
   type DgPackage,
+  type StateOfChargeBasis,
+  type VehicleDetermination,
 } from '../domain/dangerous-goods/types'
 import { renderDeclaration } from '../carriers/dgd/render'
 import { deliver, open as openDelivery, type Delivery } from '../lib/deliver'
@@ -55,9 +60,22 @@ import type { DgConsignmentRecord } from '../store/local-store'
 
 const CONDITION_LABELS: Record<BatteryCondition, string> = {
   sound: 'Sound — undamaged, not for disposal',
-  'damaged-or-defective': 'Damaged or defective',
+  'damaged-or-defective': 'Damaged, defective, or not diagnosable',
   'for-recycling-or-disposal': 'Being sent for recycling or disposal',
   'prototype-or-preproduction': 'Prototype or low production run',
+}
+
+const ARTICLE_LEVEL_LABELS: Record<ArticleLevel, string> = {
+  cell: 'Cell',
+  module: 'Module',
+  'battery-pack': 'Assembled battery pack',
+  equipment: 'Equipment containing cells or batteries',
+}
+
+const SOC_BASIS_LABELS: Record<StateOfChargeBasis, string> = {
+  'rated-capacity': 'Rated capacity',
+  'rated-design-capacity': 'Rated design capacity',
+  'indicated-capacity': 'Indicated battery capacity',
 }
 
 let sequence = 0
@@ -277,13 +295,35 @@ export function DangerousGoodsPanel({
                   </Select>
                 )}
               </Field>
-              <Field label="Operating airline" hint="Named in the operator variation reminder.">
+              <Field label="Forwarder" hint="Books the space and coordinates DG review. Not the airline.">
                 {(id) => (
                   <Input
                     id={id}
-                    value={consignment.operator}
-                    onChange={(e) => patch({ operator: e.target.value })}
-                    placeholder="e.g. UPS"
+                    value={consignment.forwarder}
+                    onChange={(e) => patch({ forwarder: e.target.value })}
+                  />
+                )}
+              </Field>
+              <Field
+                label="Operating carrier"
+                hint="The airline whose aircraft this flies on. Operator variations attach here, not to the forwarder."
+              >
+                {(id) => (
+                  <Input
+                    id={id}
+                    value={consignment.operatingCarrier}
+                    onChange={(e) => patch({ operatingCarrier: e.target.value })}
+                    placeholder="e.g. UPS Airlines"
+                  />
+                )}
+              </Field>
+              <Field label="Carrier read from" hint="Booking confirmation, master air waybill.">
+                {(id) => (
+                  <Input
+                    id={id}
+                    value={consignment.operatingCarrierSource}
+                    onChange={(e) => patch({ operatingCarrierSource: e.target.value })}
+                    placeholder="booking confirmation"
                   />
                 )}
               </Field>
@@ -388,7 +428,7 @@ export function DangerousGoodsPanel({
             hint="For the countries of origin, transit and destination. This application holds no variation data."
           />
           <Toggle
-            label={`Operator variations checked (IATA 2.8.3)${consignment.operator ? ` — ${consignment.operator}` : ''}`}
+            label={`Operator variations checked (IATA 2.8.3)${consignment.operatingCarrier ? ` — ${consignment.operatingCarrier}` : ''}`}
             checked={consignment.operatorVariationsChecked}
             onChange={(next) => patch({ operatorVariationsChecked: next })}
             hint="An airline may forbid what the DGR allows, and lithium batteries attract more variations than anything else."
@@ -478,10 +518,7 @@ function PackagesEditor({
     })
 
   const addOverpack = () =>
-    onChange({
-      ...consignment,
-      overpacks: [...consignment.overpacks, { id: nextId('ovp-'), marks: '', count: 1 }],
-    })
+    onChange({ ...consignment, overpacks: [...consignment.overpacks, emptyOverpack(nextId('ovp-'))] })
 
   const updateOverpack = (id: string, changes: Partial<DgConsignment['overpacks'][number]>) =>
     onChange({
@@ -582,6 +619,77 @@ function PackagesEditor({
                 </Field>
               </div>
 
+              {/*
+                Three weights, entered as three numbers. None is computed from the others:
+                deriving battery net from gross minus equipment is how a declaration ends up
+                stating a quantity nobody weighed.
+              */}
+              <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <Field label="Package gross weight (kg)" hint="The whole package on a scale.">
+                  {(id) => (
+                    <Input
+                      id={id}
+                      type="number"
+                      step="0.001"
+                      min={0}
+                      value={pkg.grossWeightKg ?? ''}
+                      onChange={(e) =>
+                        onUpdatePackage(pkg.id, {
+                          grossWeightKg: e.target.value.trim() === '' ? null : Number(e.target.value),
+                        })
+                      }
+                    />
+                  )}
+                </Field>
+                <Field label="Equipment net weight (kg)" hint="Zero for a standalone shipment.">
+                  {(id) => (
+                    <Input
+                      id={id}
+                      type="number"
+                      step="0.001"
+                      min={0}
+                      value={pkg.equipmentNetWeightKg ?? ''}
+                      onChange={(e) =>
+                        onUpdatePackage(pkg.id, {
+                          equipmentNetWeightKg: e.target.value.trim() === '' ? null : Number(e.target.value),
+                        })
+                      }
+                    />
+                  )}
+                </Field>
+                <Field
+                  label="Packaging authorization limit (kg)"
+                  hint="Where the tested design holds less than the packing instruction allows."
+                >
+                  {(id) => (
+                    <Input
+                      id={id}
+                      type="number"
+                      step="0.001"
+                      min={0}
+                      value={pkg.packagingAuthorizationLimitKg ?? ''}
+                      onChange={(e) =>
+                        onUpdatePackage(pkg.id, {
+                          packagingAuthorizationLimitKg: e.target.value.trim() === '' ? null : Number(e.target.value),
+                        })
+                      }
+                    />
+                  )}
+                </Field>
+                <div className="self-end pb-1">
+                  <Toggle
+                    label="Also holds prohibited dangerous goods"
+                    checked={pkg.coPackedWithProhibitedClass}
+                    onChange={(next) => onUpdatePackage(pkg.id, { coPackedWithProhibitedClass: next })}
+                    hint={
+                      `Not permitted in the same outer packaging: ${PROHIBITED_CO_PACKED_CLASSES.join('; ')}. ` +
+                      'Division 1.4S is permitted, and Divisions 4.2, 4.3 and 5.2, Class 8 and Division 2.2 are ' +
+                      'not on the list.'
+                    }
+                  />
+                </div>
+              </div>
+
               <div className="mt-4 space-y-3">
                 {pkg.entries.map((entry, entryIndex) => {
                   const classification = assessed?.entries.find((e) => e.entry.id === entry.id)?.classification
@@ -647,27 +755,47 @@ function PackagesEditor({
             </Button>
           </div>
           {consignment.overpacks.map((overpack, i) => (
-            <div key={overpack.id} className="mt-2 grid gap-3 sm:grid-cols-3">
-              <Field label={`Overpack ${i + 1} — identical count`}>
-                {(id) => (
-                  <Input
-                    id={id}
-                    type="number"
-                    min={1}
-                    value={overpack.count}
-                    onChange={(e) => updateOverpack(overpack.id, { count: Number(e.target.value) || 1 })}
-                  />
-                )}
-              </Field>
-              <Field label="Identification marks" className="sm:col-span-2" hint="All of them, e.g. #A001, #A002.">
-                {(id) => (
-                  <Input
-                    id={id}
-                    value={overpack.marks}
-                    onChange={(e) => updateOverpack(overpack.id, { marks: e.target.value })}
-                  />
-                )}
-              </Field>
+            <div key={overpack.id} className="mt-3 space-y-3 rounded-md border p-3">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <Field label={`Overpack ${i + 1} — identical count`}>
+                  {(id) => (
+                    <Input
+                      id={id}
+                      type="number"
+                      min={1}
+                      value={overpack.count}
+                      onChange={(e) => updateOverpack(overpack.id, { count: Number(e.target.value) || 1 })}
+                    />
+                  )}
+                </Field>
+                <Field
+                  label="Identification marks"
+                  className="sm:col-span-2"
+                  hint="All of them, e.g. #A001, #A002. Must read identically on the box and on the declaration."
+                >
+                  {(id) => (
+                    <Input
+                      id={id}
+                      value={overpack.marks}
+                      onChange={(e) => updateOverpack(overpack.id, { marks: e.target.value })}
+                    />
+                  )}
+                </Field>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Toggle
+                  label="Inner marks and labels stay visible through it"
+                  checked={overpack.innerMarksVisible}
+                  onChange={(next) => updateOverpack(overpack.id, { innerMarksVisible: next })}
+                  hint="Otherwise every one of them is reproduced on the exterior."
+                />
+                <Toggle
+                  label="Also holds prohibited dangerous goods"
+                  checked={overpack.coPackedWithProhibitedClass}
+                  onChange={(next) => updateOverpack(overpack.id, { coPackedWithProhibitedClass: next })}
+                  hint="The same list applies to an overpack as to an outer packaging."
+                />
+              </div>
             </div>
           ))}
         </div>
@@ -788,23 +916,131 @@ function EntryEditor({
             />
           )}
         </Field>
+        <Field label="Article level" hint="What is physically in the box, at the level its type is tested.">
+          {(id) => (
+            <Select
+              id={id}
+              value={entry.articleLevel}
+              onChange={(e) => onChange({ articleLevel: e.target.value as ArticleLevel })}
+            >
+              {(Object.keys(ARTICLE_LEVEL_LABELS) as ArticleLevel[]).map((value) => (
+                <option key={value} value={value}>
+                  {ARTICLE_LEVEL_LABELS[value]}
+                </option>
+              ))}
+            </Select>
+          )}
+        </Field>
+      </div>
+
+      {/*
+        UN 38.3 coverage, asked as two questions rather than a tick. A module-level summary
+        held against an assembled pack reads as qualification and is not one, and it is the
+        failure that looks compliant right up until an airline asks.
+      */}
+      <div className="grid gap-3 sm:grid-cols-2">
         <Field
-          label="State of charge (%)"
-          hint={isMetal ? 'Not applicable — lithium metal is not rechargeable.' : 'Of rated capacity.'}
+          label="UN 38.3 test summary covers"
+          hint="A summary for the modules does not qualify the pack assembled from them."
         >
+          {(id) => (
+            <Select
+              id={id}
+              value={entry.testSummaryScope ?? ''}
+              onChange={(e) =>
+                onChange({ testSummaryScope: e.target.value ? (e.target.value as ArticleLevel) : null })
+              }
+            >
+              <option value="">No test summary on file</option>
+              {(Object.keys(ARTICLE_LEVEL_LABELS) as ArticleLevel[]).map((value) => (
+                <option key={value} value={value}>
+                  {ARTICLE_LEVEL_LABELS[value]}
+                </option>
+              ))}
+            </Select>
+          )}
+        </Field>
+        <Field label="Test summary reference" hint="Report number or document reference — something retrievable.">
           {(id) => (
             <Input
               id={id}
-              type="number"
-              min={0}
-              max={100}
-              disabled={isMetal}
-              value={entry.stateOfChargePercent ?? ''}
-              onChange={(e) => onChange({ stateOfChargePercent: number(e.target.value) })}
+              value={entry.testSummaryReference}
+              onChange={(e) => onChange({ testSummaryReference: e.target.value })}
             />
           )}
         </Field>
       </div>
+
+      {/*
+        State of charge as evidence. The basis matters as much as the number: 30% of rated
+        capacity and 25% of indicated capacity are different standards written for different
+        entries, and a gauge reading cannot satisfy a rated-capacity limit.
+      */}
+      {isMetal ? null : (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <Field label="State of charge (%)">
+            {(id) => (
+              <Input
+                id={id}
+                type="number"
+                min={0}
+                max={100}
+                value={entry.stateOfChargePercent ?? ''}
+                onChange={(e) => onChange({ stateOfChargePercent: number(e.target.value) })}
+              />
+            )}
+          </Field>
+          <Field label="Measured against">
+            {(id) => (
+              <Select
+                id={id}
+                value={entry.stateOfChargeBasis ?? ''}
+                onChange={(e) =>
+                  onChange({
+                    stateOfChargeBasis: e.target.value ? (e.target.value as StateOfChargeBasis) : null,
+                  })
+                }
+              >
+                <option value="">Not recorded</option>
+                {(Object.keys(SOC_BASIS_LABELS) as StateOfChargeBasis[]).map((value) => (
+                  <option key={value} value={value}>
+                    {SOC_BASIS_LABELS[value]}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+          <Field label="Device or method">
+            {(id) => (
+              <Input
+                id={id}
+                value={entry.stateOfChargeMethod}
+                onChange={(e) => onChange({ stateOfChargeMethod: e.target.value })}
+                placeholder="BMS readout"
+              />
+            )}
+          </Field>
+          <Field label="Measured on">
+            {(id) => (
+              <Input
+                id={id}
+                type="date"
+                value={entry.stateOfChargeMeasuredAt}
+                onChange={(e) => onChange({ stateOfChargeMeasuredAt: e.target.value })}
+              />
+            )}
+          </Field>
+          <Field label="Measured by">
+            {(id) => (
+              <Input
+                id={id}
+                value={entry.stateOfChargeMeasuredBy}
+                onChange={(e) => onChange({ stateOfChargeMeasuredBy: e.target.value })}
+              />
+            )}
+          </Field>
+        </div>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Condition">
@@ -834,12 +1070,30 @@ function EntryEditor({
         </Field>
       </div>
 
-      <div className="grid gap-2 sm:grid-cols-3">
-        <Toggle
-          label="UN 38.3 test summary on file"
-          checked={entry.testSummaryOnFile}
-          onChange={(next) => onChange({ testSummaryOnFile: next })}
-        />
+      {/*
+        Only asked where it can matter. A standalone battery is UN3480 or UN3090 whatever the
+        machine it will eventually power turns out to be.
+      */}
+      {entry.spec.configuration === 'standalone' ? null : (
+        <Field
+          label="Is the equipment a vehicle?"
+          hint="A vehicle is a self-propelled apparatus designed to carry persons or goods — a different UN entry entirely."
+        >
+          {(id) => (
+            <Select
+              id={id}
+              value={entry.vehicleDetermination}
+              onChange={(e) => onChange({ vehicleDetermination: e.target.value as VehicleDetermination })}
+            >
+              <option value="not-determined">Not determined</option>
+              <option value="not-a-vehicle">No — equipment</option>
+              <option value="is-a-vehicle">Yes — a vehicle</option>
+            </Select>
+          )}
+        </Field>
+      )}
+
+      <div className="grid gap-2 sm:grid-cols-2">
         <Toggle
           label="Watt-hour rating marked on the case"
           checked={entry.wattHourMarkedOnCase}

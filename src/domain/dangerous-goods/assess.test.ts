@@ -5,52 +5,8 @@
  * course expects a trained shipper to give.
  */
 import { describe, expect, it } from 'vitest'
+import { consignment, entry, overpack, pkg } from './test-support'
 import { assess, packageCountInConsignment } from './assess'
-import { emptyConsignment, emptyEntry, type BatteryEntry, type DgConsignment, type DgPackage } from './types'
-import type { BatterySpec } from './lithium'
-
-/** A battery entry with everything the shipper is responsible for already answered. */
-function entry(id: string, spec: Partial<BatterySpec>, overrides: Partial<BatteryEntry> = {}): BatteryEntry {
-  return {
-    ...emptyEntry(id),
-    spec: {
-      chemistry: 'lithium-ion',
-      form: 'battery',
-      configuration: 'standalone',
-      wattHours: null,
-      lithiumContentG: null,
-      ...spec,
-    },
-    netWeightKgPerPackage: 1,
-    testSummaryOnFile: true,
-    wattHourMarkedOnCase: true,
-    stateOfChargePercent: 25,
-    ...overrides,
-  }
-}
-
-function pkg(id: string, entries: BatteryEntry[], overrides: Partial<DgPackage> = {}): DgPackage {
-  return { id, packagingType: 'Fibreboard box', count: 1, unSpecificationMark: '', entries, overpackId: null, ...overrides }
-}
-
-/** A consignment whose non-battery boxes are all filled in, so only the goods are under test. */
-function consignment(packages: DgPackage[], overrides: Partial<DgConsignment> = {}): DgConsignment {
-  return {
-    ...emptyConsignment(),
-    shipper: { name: 'Acme Exports', addressLines: ['1 Harbour Way', 'Long Beach, CA 90802', 'USA'] },
-    consignee: { name: 'Southern Distribution', addressLines: ['15 Rockwell Lane', 'Las Vegas, NV 78654', 'USA'] },
-    airportOfDeparture: 'Los Angeles',
-    airportOfDestination: 'Las Vegas',
-    emergencyContactName: 'CHEMTREC',
-    emergencyContactPhone: '1-800-424-9300 / +1-703-527-3887',
-    signerName: 'J. Alvarez',
-    signerDate: '2026-08-06',
-    stateVariationsChecked: true,
-    operatorVariationsChecked: true,
-    packages,
-    ...overrides,
-  }
-}
 
 function check(result: ReturnType<typeof assess>, idPrefix: string) {
   return result.checks.find((c) => c.id.startsWith(idPrefix))
@@ -70,7 +26,7 @@ describe('the workbook Section IB consignment', () => {
     const result = assess(shipment)
     expect(result.declarationRequired).toBe(true)
     expect(result.requiredAircraft).toBe('cargo-aircraft-only')
-    expect(result.totals).toEqual({ packages: 2, netWeightKg: 8.5 })
+    expect(result.totals).toMatchObject({ packages: 2, netWeightKg: 8.5 })
   })
 
   it('passes every blocking check', () => {
@@ -182,7 +138,7 @@ describe('the battery mark exemption for equipment', () => {
           netWeightKgPerPackage: 0.2,
           countPerPackage: 400,
           buttonCellsInEquipment: true,
-          testSummaryOnFile: false,
+          testSummaryScope: null,
           stateOfChargePercent: 20,
         }),
       ]),
@@ -230,7 +186,34 @@ describe('what the shipper has to establish', () => {
   })
 
   it('blocks a missing UN 38.3 test summary', () => {
-    const result = assess(consignment([pkg('p1', [entry('e1', { wattHours: 90 }, { testSummaryOnFile: false })])]))
+    const result = assess(consignment([pkg('p1', [entry('e1', { wattHours: 90 }, { testSummaryScope: null })])]))
+    expect(check(result, 'dg.test-summary')).toMatchObject({ severity: 'blocking', passed: false })
+  })
+
+  // The quiet one. A module summary held against the pack assembled from those modules
+  // reads as qualification and is not one — a battery must be of a proved type irrespective
+  // of whether the cells it is composed of are of a tested type.
+  it('blocks a module test summary held against an assembled pack', () => {
+    const result = assess(
+      consignment([
+        pkg('p1', [
+          entry('e1', { wattHours: 2000 }, { articleLevel: 'battery-pack', testSummaryScope: 'module' }),
+        ]),
+      ]),
+    )
+    const summary = check(result, 'dg.test-summary')
+    expect(summary).toMatchObject({
+      severity: 'blocking',
+      passed: false,
+      expected: 'an assembled battery pack',
+      actual: 'a module',
+    })
+  })
+
+  it('blocks a summary that covers the right article but cannot be retrieved', () => {
+    const result = assess(
+      consignment([pkg('p1', [entry('e1', { wattHours: 90 }, { testSummaryReference: '  ' })])]),
+    )
     expect(check(result, 'dg.test-summary')).toMatchObject({ severity: 'blocking', passed: false })
   })
 
@@ -343,24 +326,275 @@ describe('overpacks', () => {
   it('counts packages across identical overpacks', () => {
     const shipment = consignment(
       [pkg('p1', [entry('e1', { wattHours: 90 }, { netWeightKgPerPackage: 2 })], { count: 4, overpackId: 'o1' })],
-      { overpacks: [{ id: 'o1', marks: '#A001, #A002', count: 2 }] },
+      { overpacks: [overpack('o1', { marks: '#A001, #A002', count: 2 })] },
     )
     expect(packageCountInConsignment(shipment.packages[0], shipment)).toBe(8)
-    expect(assess(shipment).totals).toEqual({ packages: 8, netWeightKg: 16 })
+    expect(assess(shipment).totals).toMatchObject({ packages: 8, netWeightKg: 16 })
   })
 
   it('blocks unmarked overpacks once there is more than one', () => {
     const shipment = consignment(
       [pkg('p1', [entry('e1', { wattHours: 90 })], { count: 1, overpackId: 'o1' })],
-      { overpacks: [{ id: 'o1', marks: '', count: 3 }] },
+      { overpacks: [overpack('o1', { marks: '', count: 3 })] },
     )
     expect(check(assess(shipment), 'dg.overpack')).toMatchObject({ severity: 'blocking', passed: false })
   })
 
   it('says nothing about an overpack no package is in', () => {
     const shipment = consignment([pkg('p1', [entry('e1', { wattHours: 90 })])], {
-      overpacks: [{ id: 'o1', marks: '', count: 4 }],
+      overpacks: [overpack('o1', { count: 4 })],
     })
     expect(check(assess(shipment), 'dg.overpack')).toBeUndefined()
+  })
+})
+
+describe('the operating carrier is not the forwarder', () => {
+  it('blocks until the airline is resolved', () => {
+    const result = assess(consignment([pkg('p1', [entry('e1', { wattHours: 90 })])], { operatingCarrier: '' }))
+    const carrier = check(result, 'dg.operating-carrier')
+    expect(carrier).toMatchObject({ severity: 'blocking', passed: false })
+    expect(carrier?.detail).toContain('not the forwarder')
+  })
+
+  it('is satisfied by the airline, not by naming the forwarder', () => {
+    const result = assess(
+      consignment([pkg('p1', [entry('e1', { wattHours: 90 })])], {
+        forwarder: 'Nippon Express USA',
+        operatingCarrier: '',
+      }),
+    )
+    expect(check(result, 'dg.operating-carrier')).toMatchObject({ passed: false })
+  })
+})
+
+describe('state of charge as evidence', () => {
+  it('rejects an indicated-capacity reading for a standalone battery', () => {
+    const result = assess(
+      consignment([
+        pkg('p1', [entry('e1', { wattHours: 90 }, { stateOfChargeBasis: 'indicated-capacity' })]),
+      ]),
+    )
+    const basis = check(result, 'dg.soc-basis')
+    expect(basis).toMatchObject({ severity: 'blocking', passed: false, expected: 'rated capacity' })
+  })
+
+  it('rejects it for a battery packed with equipment too — that branch has no 25% alternative', () => {
+    const result = assess(
+      consignment([
+        pkg('p1', [
+          entry('e1', { configuration: 'packed-with-equipment', wattHours: 90 }, {
+            stateOfChargeBasis: 'indicated-capacity',
+          }),
+        ]),
+      ]),
+    )
+    expect(check(result, 'dg.soc-basis')).toMatchObject({ severity: 'blocking', passed: false })
+  })
+
+  it('accepts it for a battery contained in equipment, where the alternative does apply', () => {
+    const result = assess(
+      consignment([
+        pkg('p1', [
+          entry('e1', { configuration: 'contained-in-equipment', wattHours: 90 }, {
+            countPerPackage: 1,
+            stateOfChargeBasis: 'indicated-capacity',
+            stateOfChargePercent: 22,
+          }),
+        ]),
+      ]),
+    )
+    expect(check(result, 'dg.soc-basis')).toBeUndefined()
+  })
+
+  it('blocks a mandatory figure that nobody can say how they measured', () => {
+    const result = assess(
+      consignment([
+        pkg('p1', [
+          entry('e1', { wattHours: 90 }, { stateOfChargeMethod: '', stateOfChargeMeasuredBy: '' }),
+        ]),
+      ]),
+    )
+    const evidence = check(result, 'dg.soc-evidence')
+    expect(evidence).toMatchObject({ severity: 'blocking', passed: false })
+    expect(evidence?.detail).toContain('the measuring device or method')
+  })
+})
+
+describe('the vehicle question', () => {
+  it('blocks equipment nobody has determined either way', () => {
+    const result = assess(
+      consignment([
+        pkg('p1', [
+          entry('e1', { configuration: 'contained-in-equipment', wattHours: 90 }, {
+            countPerPackage: 1,
+            vehicleDetermination: 'not-determined',
+          }),
+        ]),
+      ]),
+    )
+    expect(check(result, 'dg.vehicle')).toMatchObject({ severity: 'blocking', passed: false })
+  })
+
+  it('blocks a vehicle and points at the entries that do apply', () => {
+    const result = assess(
+      consignment([
+        pkg('p1', [
+          entry('e1', { configuration: 'contained-in-equipment', wattHours: 90 }, {
+            countPerPackage: 1,
+            vehicleDetermination: 'is-a-vehicle',
+          }),
+        ]),
+      ]),
+    )
+    const vehicle = check(result, 'dg.vehicle')
+    expect(vehicle).toMatchObject({ severity: 'blocking', passed: false })
+    expect(vehicle?.detail).toContain('UN3556')
+    // And the mode split: the US has not adopted the vehicle entries.
+    expect(vehicle?.detail).toContain('UN3171')
+  })
+
+  it('never asks it of a standalone battery', () => {
+    const result = assess(
+      consignment([pkg('p1', [entry('e1', { wattHours: 90 }, { vehicleDetermination: 'not-determined' })])]),
+    )
+    expect(check(result, 'dg.vehicle')).toBeUndefined()
+  })
+})
+
+describe('the three weights', () => {
+  it('blocks contents heavier than the package they are in', () => {
+    const result = assess(
+      consignment([
+        pkg('p1', [entry('e1', { wattHours: 90 }, { netWeightKgPerPackage: 20 })], {
+          grossWeightKg: 15,
+          equipmentNetWeightKg: 0,
+        }),
+      ]),
+    )
+    const weights = check(result, 'dg.weights')
+    expect(weights).toMatchObject({ severity: 'blocking', passed: false, expected: '≤ 15 kg', actual: '20 kg' })
+  })
+
+  it('warns rather than blocks when no gross weight was recorded', () => {
+    const result = assess(consignment([pkg('p1', [entry('e1', { wattHours: 90 })], { grossWeightKg: null })]))
+    expect(check(result, 'dg.weights')).toMatchObject({ severity: 'warning', passed: false })
+  })
+
+  it('never derives one weight from another', () => {
+    const result = assess(
+      consignment([
+        pkg('p1', [entry('e1', { configuration: 'packed-with-equipment', wattHours: 90 }, { netWeightKgPerPackage: 4 })], {
+          grossWeightKg: 30,
+          equipmentNetWeightKg: 18,
+        }),
+      ]),
+    )
+    // The declared quantity is the battery net weight alone — not gross, and not gross minus
+    // equipment, which would be 12 kg here.
+    expect(result.totals.netWeightKg).toBe(4)
+    expect(result.totals.grossWeightKg).toBe(30)
+  })
+})
+
+describe('the packaging authorization', () => {
+  it('binds below the packing instruction figure', () => {
+    const result = assess(
+      consignment([
+        pkg('p1', [entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 8 })], {
+          packagingAuthorizationLimitKg: 6,
+        }),
+      ]),
+    )
+    const limit = check(result, 'dg.limit.p1')
+    expect(limit).toMatchObject({ severity: 'blocking', passed: false, expected: '≤ 6 kg' })
+    expect(limit?.detail).toContain('authorization')
+  })
+
+  it('leaves the packing instruction figure in force when it is the lower of the two', () => {
+    const result = assess(
+      consignment([
+        pkg('p1', [entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 8 })], {
+          packagingAuthorizationLimitKg: 25,
+        }),
+      ]),
+    )
+    expect(check(result, 'dg.limit.p1')).toMatchObject({ passed: true, expected: '≤ 10 kg' })
+  })
+})
+
+describe('co-packing', () => {
+  it('blocks a package sharing an outer packaging with a prohibited class', () => {
+    const result = assess(
+      consignment([pkg('p1', [entry('e1', { wattHours: 90 })], { coPackedWithProhibitedClass: true })]),
+    )
+    expect(check(result, 'dg.co-pack')).toMatchObject({ severity: 'blocking', passed: false })
+  })
+
+  it('names the list exactly, and says 1.4S is permitted', () => {
+    const result = assess(consignment([pkg('p1', [entry('e1', { wattHours: 90 })])]))
+    const detail = check(result, 'dg.co-pack')?.detail ?? ''
+    expect(detail).toContain('Division 1.4S is permitted')
+    expect(detail).toContain('Division 5.1 oxidizers')
+    // Not on the list, however often they are added to it.
+    expect(detail).toContain('Divisions 4.2, 4.3 and 5.2, Class 8 and Division 2.2 do not appear in it')
+  })
+
+  it('applies the same prohibition to an overpack', () => {
+    const result = assess(
+      consignment([pkg('p1', [entry('e1', { wattHours: 90 })], { overpackId: 'o1' })], {
+        overpacks: [overpack('o1', { coPackedWithProhibitedClass: true })],
+      }),
+    )
+    expect(check(result, 'dg.overpack-co-pack')).toMatchObject({ severity: 'blocking', passed: false })
+  })
+})
+
+describe('overpack marking', () => {
+  it('requires an identifier on a single overpack, not only on multiples', () => {
+    const result = assess(
+      consignment([pkg('p1', [entry('e1', { wattHours: 90 })], { overpackId: 'o1' })], {
+        overpacks: [overpack('o1', { marks: '', count: 1 })],
+      }),
+    )
+    expect(check(result, 'dg.overpack-identifier')).toMatchObject({ severity: 'blocking', passed: false })
+  })
+
+  it('puts OVERPACK and the reproduce-marks rule on the package requirements', () => {
+    const result = assess(
+      consignment([pkg('p1', [entry('e1', { wattHours: 90 })], { overpackId: 'o1' })], {
+        overpacks: [overpack('o1', { innerMarksVisible: false })],
+      }),
+    )
+    const marks = result.packages[0].hazardCommunication
+    expect(marks).toContain('The word OVERPACK on the outside of the overpack, at least 12 mm high')
+    expect(marks).toContain('Overpack identification mark (#A001)')
+    expect(marks).toContain('Every mark and label above reproduced on the outside of the overpack')
+  })
+
+  it('drops the reproduce rule when the marks stay visible through it', () => {
+    const result = assess(
+      consignment([pkg('p1', [entry('e1', { wattHours: 90 })], { overpackId: 'o1' })], {
+        overpacks: [overpack('o1', { innerMarksVisible: true })],
+      }),
+    )
+    expect(
+      result.packages[0].hazardCommunication.some((m) => m.startsWith('Every mark and label above reproduced')),
+    ).toBe(false)
+  })
+})
+
+describe('over the limit', () => {
+  it('says what A99 actually costs rather than calling it an approval', () => {
+    const result = assess(
+      consignment([
+        pkg('p1', [entry('e1', { configuration: 'packed-with-equipment', wattHours: 500 }, {
+          netWeightKgPerPackage: 68,
+        })], { unSpecificationMark: '4G/Y75/S/26/USA/+D02390', grossWeightKg: 90 }),
+      ]),
+    )
+    const a99 = check(result, 'dg.a99')
+    expect(a99).toBeDefined()
+    expect(a99?.detail).toContain('State of the Operator')
+    expect(a99?.detail).toContain('refuse carriage')
   })
 })

@@ -1,51 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import { consignment, entry, pkg } from './test-support'
 import { assess } from './assess'
 import { buildChecklist } from './checklist'
 import { retainUntil } from './dgd'
-import { emptyConsignment, emptyEntry, type BatteryEntry, type DgConsignment, type DgPackage } from './types'
-import type { BatterySpec } from './lithium'
 
-function entry(id: string, spec: Partial<BatterySpec>, overrides: Partial<BatteryEntry> = {}): BatteryEntry {
-  return {
-    ...emptyEntry(id),
-    spec: {
-      chemistry: 'lithium-ion',
-      form: 'battery',
-      configuration: 'standalone',
-      wattHours: null,
-      lithiumContentG: null,
-      ...spec,
-    },
-    netWeightKgPerPackage: 1,
-    testSummaryOnFile: true,
-    wattHourMarkedOnCase: true,
-    stateOfChargePercent: 25,
-    ...overrides,
-  }
-}
-
-function pkg(id: string, entries: BatteryEntry[], overrides: Partial<DgPackage> = {}): DgPackage {
-  return { id, packagingType: 'Fibreboard box', count: 1, unSpecificationMark: '', entries, overpackId: null, ...overrides }
-}
-
-function consignment(packages: DgPackage[], overrides: Partial<DgConsignment> = {}): DgConsignment {
-  return {
-    ...emptyConsignment(),
-    shipper: { name: 'Acme Exports', addressLines: ['1 Harbour Way'] },
-    consignee: { name: 'Southern Distribution', addressLines: ['15 Rockwell Lane'] },
-    airportOfDeparture: 'Los Angeles',
-    airportOfDestination: 'Las Vegas',
-    emergencyContactName: 'CHEMTREC',
-    emergencyContactPhone: '1-800-424-9300',
-    signerName: 'J. Alvarez',
-    signerDate: '2026-08-06',
-    operator: 'UPS',
-    stateVariationsChecked: true,
-    operatorVariationsChecked: true,
-    packages,
-    ...overrides,
-  }
-}
 
 describe('the package checklist', () => {
   it('lists the marks a Section IB package carries, as things to tick off', () => {
@@ -93,9 +51,9 @@ describe('the package checklist', () => {
     expect(markdown).toContain('*Battery mark not required:*')
   })
 
-  it('names the operator in the variations reminder', () => {
+  it('names the operating carrier in the variations reminder', () => {
     const shipment = consignment([pkg('p1', [entry('e1', { wattHours: 95 })])])
-    expect(buildChecklist(shipment, assess(shipment), '2026-08-06')).toContain('Operator variations (IATA 2.8.3) read for UPS')
+    expect(buildChecklist(shipment, assess(shipment), '2026-08-06')).toContain('Operator variations (IATA 2.8.3) read for UPS Airlines')
   })
 
   it('calls out UN specification packaging with its marking', () => {

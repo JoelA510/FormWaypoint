@@ -224,6 +224,8 @@ export interface AirClassification {
   stackTestRequired: boolean
   /** The state of charge rule that applies, or null where none does. */
   stateOfCharge: StateOfChargeRule | null
+  /** Convenience mirror of `stateOfCharge.indicatedCapacityAlternative`, false where no rule applies. */
+  indicatedCapacityAlternative: boolean
   /** Marks and labels the package carries, before the per-consignment exemptions. */
   hazardCommunication: string[]
   /** The training the person preparing this shipment must hold. */
@@ -239,6 +241,15 @@ export interface StateOfChargeRule {
   /** `must` is a requirement; `should` is a recommendation the materials state as such. */
   strength: 'must' | 'should'
   detail: string
+  /**
+   * Whether an indicated battery capacity not exceeding 25% is an accepted alternative.
+   *
+   * True only for batteries contained in equipment. The two-prong standard — 30% of rated
+   * design capacity *or* 25% indicated capacity — otherwise belongs to the vehicle entries,
+   * which this module does not cover, and reading it onto a standalone or packed-with battery
+   * substitutes a fuel-gauge reading for a measurement against rated capacity.
+   */
+  indicatedCapacityAlternative: boolean
 }
 
 /**
@@ -316,10 +327,11 @@ function stateOfChargeFor(spec: BatterySpec): StateOfChargeRule | null {
     return {
       limitPercent: STATE_OF_CHARGE_LIMIT,
       strength: 'must',
+      indicatedCapacityAlternative: false,
       detail:
         'Standalone lithium ion cells and batteries must be offered at a state of charge not exceeding 30% of ' +
-        'rated capacity. Above 30% needs approval from the State of Origin and the State of the Operator ' +
-        '(special provision A331).',
+        'rated capacity. Above 30% may only be shipped with the approval of the State of Origin and the State ' +
+        'of the Operator, under the written conditions those authorities establish (special provision A331).',
     }
   }
   if (spec.chemistry === 'sodium-ion') return null
@@ -328,17 +340,22 @@ function stateOfChargeFor(spec: BatterySpec): StateOfChargeRule | null {
     return {
       limitPercent: STATE_OF_CHARGE_LIMIT,
       strength: advisory ? 'should' : 'must',
+      // Deliberately false. The 25% indicated-capacity alternative is written against
+      // batteries *contained in* equipment, and reading it across to packed-with is a
+      // documented misreading that merges two rules into one sentence.
+      indicatedCapacityAlternative: false,
       detail: advisory
         ? `Rated at ${spec.wattHours} Wh, at or below the 2.7 Wh threshold, so from 1 January 2026 a state of ` +
-          'charge not exceeding 30% is recommended rather than required.'
+          'charge not exceeding 30% of rated capacity is recommended rather than required.'
         : 'From 1 January 2026 lithium ion cells and batteries packed with equipment must be offered at a state ' +
-          'of charge not exceeding 30% of rated capacity. Above 30% needs approval from the State of Origin and ' +
-          'the State of the Operator.',
+          'of charge not exceeding 30% of rated capacity. There is no indicated-capacity alternative for this ' +
+          'branch. Above 30% needs approval from the State of Origin and the State of the Operator.',
     }
   }
   return {
     limitPercent: STATE_OF_CHARGE_LIMIT,
     strength: 'should',
+    indicatedCapacityAlternative: true,
     detail:
       'Lithium ion cells and batteries contained in equipment should be offered at a state of charge not ' +
       'exceeding 30% of rated capacity, or an indicated battery capacity not exceeding 25%.',
@@ -410,6 +427,7 @@ function specialProvisionsFor(spec: BatterySpec, section: PackingSection): strin
  */
 export function classifyForAir(spec: BatterySpec): AirClassification {
   const id = IDENTITIES[spec.chemistry][spec.configuration]
+  const stateOfCharge = stateOfChargeFor(spec)
   const band = energyBand(spec)
   const section = sectionFor(spec.configuration, band, spec.chemistry)
   const limits = limitsFor(id.packingInstruction, section)
@@ -454,7 +472,8 @@ export function classifyForAir(spec: BatterySpec): AirClassification {
     // and restating them there would read as two separate obligations on one box.
     dropTestRequired: !unSpecificationPackaging && spec.configuration !== 'contained-in-equipment',
     stackTestRequired: !unSpecificationPackaging && spec.chemistry !== 'sodium-ion',
-    stateOfCharge: stateOfChargeFor(spec),
+    stateOfCharge,
+    indicatedCapacityAlternative: stateOfCharge?.indicatedCapacityAlternative ?? false,
     hazardCommunication: hazardCommunicationFor(section, aircraft, id),
     training: isSectionII ? 'adequate-instruction' : 'dangerous-goods',
     specialProvisions: specialProvisionsFor(spec, section),
@@ -471,6 +490,14 @@ export function classifyForAir(spec: BatterySpec): AirClassification {
  * operator at the declaration that travels with it; a Section II consignment has no
  * declaration, so the statement *is* the notification, and it names the packing instruction
  * so the operator knows what it is accepting (Student Guide figs. 5-23 to 5-25, 5-38).
+ *
+ * The fully regulated wording has accepted variants, and the course materials use both:
+ * "Dangerous goods as per associated Shipper's Declaration" (figs. 5-29, 5-33, 5-34) and
+ * "Dangerous Goods as per associated DGD" (p. 71), each with "Cargo Aircraft Only" or "CAO"
+ * appended where that applies. Neither is more correct than the other, which is why
+ * `FULLY_REGULATED_STATEMENT_VARIANTS` exists rather than a second hard-coded string: an
+ * operator that requires a particular form of words is the only thing that narrows it, and no
+ * variation data ships with this application.
  */
 export function airWaybillStatement(classification: AirClassification): string {
   const { section, packingInstruction, spec, aircraft } = classification
@@ -496,6 +523,22 @@ export function airWaybillStatement(classification: AirClassification): string {
 export function combinedSectionIIStatement(classifications: AirClassification[]): string {
   const statements = [...new Set(classifications.filter((c) => c.section === 'II').map(airWaybillStatement))]
   return statements.join('. ')
+}
+
+/**
+ * Equally accepted wordings for the fully regulated air waybill statement.
+ *
+ * Offered rather than chosen between. A shipper matching an operator's preferred form of
+ * words needs to know that the alternatives exist; a shipper who has no such requirement can
+ * use the first.
+ */
+export function fullyRegulatedStatementVariants(aircraft: AircraftLimitation): string[] {
+  const cargoOnly = aircraft === 'cargo-aircraft-only'
+  return [
+    `Dangerous goods as per associated Shipper’s Declaration${cargoOnly ? ' — Cargo Aircraft Only' : ''}`,
+    `Dangerous Goods as per associated DGD${cargoOnly ? ' — Cargo Aircraft Only' : ''}`,
+    ...(cargoOnly ? ['Dangerous Goods as per associated DGD — CAO'] : []),
+  ]
 }
 
 /** Human labels, kept beside the codes so the UI and the reports cannot drift apart. */
