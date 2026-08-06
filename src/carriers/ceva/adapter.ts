@@ -144,8 +144,9 @@ export function createCevaAdapter(): CarrierAdapter {
       setText(ctx, draft.hazardous ? F.hasDangerousGoods : F.noDangerousGoods, draft.signerInitials)
       if (draft.hazardous) {
         ctx.warnings.push(
-          'Marked as containing dangerous goods. Box 33 requires an attached shipper’s declaration, ' +
-            'which this tool does not produce.',
+          'Marked as containing dangerous goods. Box 33 requires an attached shipper’s declaration — ' +
+            'for lithium and sodium batteries by air, prepare it in the Dangerous goods tab; it is a ' +
+            'separate assessment, not an attachment generated from this SLI.',
         )
       }
 

@@ -114,12 +114,15 @@ export interface ShippersDeclaration {
 }
 
 /**
- * The date a copy of this declaration may stop being kept, as `YYYY-MM-DD`.
+ * The earliest date a copy of this declaration may stop being kept, as `YYYY-MM-DD`.
  *
  * Two years, which the materials state twice — once as "a minimum period of 2 years" and once
- * as "kept on file for 24 months". Computed in local time for the same reason the report file
- * names are: a UTC date names the wrong day for most of the working afternoon in the United
- * States, and this one is read off a shelf label.
+ * as "kept on file for 24 months". A *floor*, not the date itself: the obligation runs from
+ * acceptance by the initial carrier (49 CFR 172.201(e)), which is always on or after the
+ * preparation date this is computed from, so the real keep-until can only be later. The UI
+ * says "at least" for the same reason. Computed in local time for the same reason the report
+ * file names are: a UTC date names the wrong day for most of the working afternoon in the
+ * United States, and this one is read off a shelf label.
  */
 export function retainUntil(preparedAt: Date): string {
   const due = new Date(preparedAt.getFullYear() + 2, preparedAt.getMonth(), preparedAt.getDate())
@@ -164,13 +167,20 @@ export function wrap(text: string, width: number): string[] {
  * identification mark, and the total quantity per overpack. Several with different contents
  * are listed separately, which in this model means separate overpack records, each producing
  * its own wording after its own entries.
+ *
+ * The identification mark is printed for a single overpack too. The assessment blocks until
+ * every used overpack has one — the identifier is what ties the physical overpack to its
+ * declaration entry — and an identifier the check demands on the box but the paper never
+ * states is exactly the box/paper mismatch these consignments get corrected for. The
+ * per-overpack total stays a multiples-only line, because with one overpack it is the
+ * quantity column's own figure restated.
  */
 function overpackAnnotations(overpack: Overpack, totalPerOverpackKg: number): string[] {
   const lines = overpack.count <= 1 ? ['Overpack used'] : [`Overpack used x ${overpack.count}`]
+  // The marks are what must be listed; "identification marks" as a label is mine, not the
+  // regulation's, and it costs a wrapped row every time.
+  if (overpack.marks.trim()) lines.push(`Overpack marks: ${overpack.marks.trim()}`)
   if (overpack.count > 1) {
-    // The marks are what must be listed; "identification marks" as a label is mine, not the
-    // regulation's, and it costs a wrapped row every time.
-    if (overpack.marks.trim()) lines.push(`Overpack marks: ${overpack.marks.trim()}`)
     lines.push(`Total quantity per Overpack ${formatKg(totalPerOverpackKg)} kg`)
   }
   // Wrapped to the same column the quantity is wrapped to, because that is the column they

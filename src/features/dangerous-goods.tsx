@@ -180,6 +180,10 @@ export function DangerousGoodsPanel({
   }
 
   async function downloadChecklist() {
+    // Guarded like the declaration: each run appends a retention record, and a double-click
+    // that writes two files is noise while one that writes two audit rows is misinformation.
+    if (busy) return
+    setBusy(true)
     setError(null)
     try {
       const markdown = buildChecklist(consignment, assessment, localDate())
@@ -196,6 +200,8 @@ export function DangerousGoodsPanel({
       onPrepared(record())
     } catch (e) {
       setError(e instanceof Error ? e.message : 'The checklist could not be saved.')
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -1276,7 +1282,7 @@ function DeclarationPanel({
               {busy ? 'Generating…' : 'Download the Shipper’s Declaration'}
             </Button>
           ) : null}
-          <Button onClick={onChecklist} disabled={!assessment.canGenerate}>
+          <Button onClick={onChecklist} disabled={!assessment.canGenerate || busy}>
             Download the package checklist
           </Button>
           <span className="text-xs text-[var(--color-ink-faint)]">
@@ -1356,7 +1362,11 @@ export function DgHistoryPanel({ records }: { records: DgConsignmentRecord[] }) 
                   <th className="py-2 pr-4 text-right font-semibold">Pkgs</th>
                   <th className="py-2 pr-4 text-right font-semibold">Net kg</th>
                   <th className="py-2 pr-4 font-semibold">Prepared</th>
-                  <th className="py-2 font-semibold">Keep until</th>
+                  {/*
+                    "At least": the two years run from acceptance by the initial carrier,
+                    which is on or after the preparation date this is computed from.
+                  */}
+                  <th className="py-2 font-semibold">Keep until at least</th>
                 </tr>
               </thead>
               <tbody>

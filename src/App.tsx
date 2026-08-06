@@ -144,28 +144,39 @@ export function App() {
       setParsed(next)
       setError(null)
 
-      const header = next.headers[next.availableSets[0]]
-      const detected = detectCarrier(header?.vesselAgent)
-      const nextCarrier = detected ?? carrierId
-      setCarrierId(nextCarrier)
+      try {
+        const header = next.headers[next.availableSets[0]]
+        const detected = detectCarrier(header?.vesselAgent)
+        const nextCarrier = detected ?? carrierId
+        setCarrierId(nextCarrier)
 
-      // Reuse what was learned about this consignee last time.
-      const base = defaultShipmentSettings(
-        getAdapter(isKeyedCarrier(nextCarrier) ? 'nippon-express' : (nextCarrier as CarrierId)),
-      )
-      const known = header ? await localStore.getConsignee(header.consignedTo.name) : null
-      setSettings(
-        known
-          ? {
-              ...base,
-              consigneeId: known.consigneeId,
-              consigneeType: known.consigneeType,
-              partiesRelated: known.partiesRelated,
-              destinationCountry: known.destinationCountry ?? '',
-            }
-          : base,
-      )
-      setBusy(false)
+        // Reuse what was learned about this consignee last time.
+        const base = defaultShipmentSettings(
+          getAdapter(isKeyedCarrier(nextCarrier) ? 'nippon-express' : (nextCarrier as CarrierId)),
+        )
+        const known = header ? await localStore.getConsignee(header.consignedTo.name) : null
+        setSettings(
+          known
+            ? {
+                ...base,
+                consigneeId: known.consigneeId,
+                consigneeType: known.consigneeType,
+                partiesRelated: known.partiesRelated,
+                destinationCountry: known.destinationCountry ?? '',
+              }
+            : base,
+        )
+      } catch (e) {
+        // The parse already succeeded; only the saved-consignee lookup can land here. The
+        // shipment is still workable, so say what was lost rather than wedging the screen.
+        setError(
+          e instanceof Error
+            ? `Saved consignee details could not be read (${e.message}); enter them by hand.`
+            : 'Saved consignee details could not be read; enter them by hand.',
+        )
+      } finally {
+        setBusy(false)
+      }
     },
     [carrierId],
   )
@@ -294,7 +305,7 @@ export function App() {
 
   const handleGenerated = useCallback(async () => {
     if (!reconciliation || !parsed) return
-    const { header, sliLines, checks } = reconciliation
+    const { header, sliLines } = reconciliation
     const processedAt = new Date().toISOString()
     const record: ShipmentRecord = {
       id: `${header.invoiceNumber}@${processedAt}`,
@@ -308,6 +319,9 @@ export function App() {
       totalValueUsd: header.totalValue,
       totalNetWeightKg: header.totalNetWeightKg ?? 0,
       lines: sliLines,
+      // The combined list, not `reconciliation.checks` alone: generation was gated on the
+      // draft checks too, and an audit record that cannot show the profile and destination
+      // were complete at the time is missing half of what it exists to answer.
       checks,
       settings,
     }
@@ -323,7 +337,7 @@ export function App() {
       })
     }
     setShipments(await localStore.listShipments())
-  }, [reconciliation, parsed, adapter, settings, draft])
+  }, [reconciliation, parsed, adapter, settings, draft, checks])
 
   const handleDgPrepared = useCallback(async (record: DgConsignmentRecord) => {
     await localStore.saveDgConsignment(record)
@@ -345,9 +359,9 @@ export function App() {
   const clearAll = useCallback(async () => {
     if (
       !window.confirm(
-        'Delete the saved profile, consignees, overrides, item library, shipment history and prepared dangerous ' +
-          'goods consignments from this machine? Dangerous goods records are kept to evidence the two-year ' +
-          'retention rule.',
+        'Delete the saved profile, consignees, overrides, item library and shipment history from this machine? ' +
+          'Prepared dangerous goods consignments still inside their two-year retention window are kept — they ' +
+          'evidence the retention rule and are only removed once that date has passed.',
       )
     )
       return
@@ -357,7 +371,7 @@ export function App() {
     setPartOverrides([])
     setItems([])
     setShipments([])
-    setDgConsignments([])
+    setDgConsignments(await localStore.listDgConsignments())
   }, [])
 
   return (

@@ -1,7 +1,7 @@
 # Full-repository review findings — 2026-08-06
 
-A fresh-eyes review pass over the whole repository, ordered most-severe first. **Nothing
-here has been fixed** — this file is the worklist. Each finding names the files and lines
+A fresh-eyes review pass over the whole repository, ordered most-severe first. **All
+twelve findings have since been addressed** — each carries a dated resolution note below. Each finding names the files and lines
 it rests on and says how it was verified. Line numbers are against `main` at `14dcb10`.
 
 Severity scale: **High** = wrong regulated output or destroyed compliance evidence;
@@ -35,6 +35,8 @@ total for `count === 1` as well). Resolve against the DGR/training materials, th
 check and the annotation agree. Verified by reading both functions and the UI path
 (`features/dangerous-goods.tsx` renders both).
 
+**Resolution (2026-08-06):** Resolved the other way from the file’s first suggestion: the blocking check was deliberate (it has its own test), so the declaration now prints `Overpack marks: …` for a single overpack too — box and paper state the same identifier. The per-overpack total stays multiples-only, since with one overpack it restates the quantity column.
+
 ## F2 · Medium — "Clear all local data" deletes the DG retention records while its confirmation reads as though they are kept
 
 `src/App.tsx:345-361` (`clearAll`) shows:
@@ -54,6 +56,8 @@ preserved. Either exclude `dgConsignments` from `clearAll` (with a separate, har
 confirmation for records past their `retainUntil` date), or reword the dialog to state
 plainly that retention records are being deleted and what that means. Verified by reading
 both files; the store has no carve-out.
+
+**Resolution (2026-08-06):** `clearAll` now keeps `dgConsignments` records whose `retainUntil` has not passed (expired ones are dropped), and the confirmation dialog says exactly that. The store interface documents the carve-out.
 
 ## F3 · Medium — A single tall DGD entry overflows the table into the boxes beneath it, silently
 
@@ -79,6 +83,8 @@ own). Fix by hard-splitting or warning in `paginate` when a single line exceeds
 `tableBottom`. Verified by arithmetic against the geometry constants; not reproduced with a
 rendered PDF.
 
+**Resolution (2026-08-06):** `drawEntry` now clips any row that would land below the table box and pushes a warning naming the entry and the number of rows not printed.
+
 ## F4 · Medium — `retainUntil` runs from the preparation date, but the obligation runs from acceptance by the initial carrier
 
 `src/domain/dangerous-goods/dgd.ts:124-128` computes `retainUntil` as two years from the
@@ -94,6 +100,8 @@ Cheapest correct fix: label the column "Keep until at least" and note the anchor
 record an acceptance date when known and compute from it. Verified by reading
 `retainUntil`, its caller, and the two places the correct rule is already stated.
 
+**Resolution (2026-08-06):** Labelled honestly: the history column reads “Keep until at least”, and `retainUntil`’s docs (model and store) state it is a floor because the obligation runs from carrier acceptance.
+
 ## F5 · Low — Vendor-A's `invoiceTotal` also runs on packing-list header pages and can overwrite the invoice's total
 
 `src/domain/cipl/parse-vendor-a.ts` — `parseHeaderPage` is document-kind-blind and is
@@ -108,6 +116,8 @@ the USD currency check) rather than silent. Hardening: only read `invoiceTotal` 
 `INVOICE`-kind pages, or reject unit strings (`KGS`, `PCS`, `M3`) that match the
 `/^[A-Z]{3}$/` currency pattern. Verified by reading the call path; not reproduced.
 
+**Resolution (2026-08-06):** `parseHeaderPage` now takes the page kind and only reads the money total off INVOICE pages. The regression test proved the bug real: a synthetic `<net weight> KGS` row on the packing-list header did overwrite the invoice’s USD total before the fix.
+
 ## F6 · Low — `detectCarrier` matches `'ups'` as a bare substring
 
 `src/carriers/registry.ts:47-55`: `text.includes('ups')` matches inside ordinary words —
@@ -116,6 +126,8 @@ swaps in UPS keying defaults via `applyCarrierDefaults`. It is only a preselecti
 can change, but a wrong silent default on a field most users trust is worth a word-boundary
 match (`/\bups\b/`) like the longer names effectively get. Verified by reading; trivially
 reproducible with `detectCarrier('XYZ Groups Logistics')`.
+
+**Resolution (2026-08-06):** `detectCarrier` matches `/\bups\b/`; “XYZ Groups Logistics” and “Supship” no longer preselect UPS.
 
 ## F7 · Low — Two download paths have no in-flight guard, so a double-click writes twice and records twice
 
@@ -129,6 +141,8 @@ the desktop the file side is harmless (`(2)` suffix), but the duplicate audit/re
 rows are noise in exactly the tables that exist to be read later. Verified by reading; the
 buttons are disabled only on `canGenerate`, not while the async work runs.
 
+**Resolution (2026-08-06):** Both paths now guard on `busy` (early-return plus `finally`), and their buttons disable while the work runs.
+
 ## F8 · Low — The CEVA adapter's dangerous-goods warning predates the DG workflow
 
 `src/carriers/ceva/adapter.ts:145-150`: marking a shipment hazardous warns "Box 33 requires
@@ -139,6 +153,8 @@ at the Dangerous goods tab (while keeping the caveat that the DG workflow is its
 assessment, not an attachment generated from this SLI). Verified against
 `features/dangerous-goods.tsx` / `carriers/dgd/render.ts`.
 
+**Resolution (2026-08-06):** The warning now points at the Dangerous goods tab and says the declaration is a separate assessment, not an attachment generated from the SLI.
+
 ## F9 · Low — `handleParsed` can leave the app stuck busy
 
 `src/App.tsx:141-171`: `setBusy(true)` … `await localStore.getConsignee(...)` …
@@ -148,6 +164,8 @@ button stays disabled with no error surfaced. Wrap in `try/finally` and report t
 Verified by reading; the sibling paths (`generate`, `generateDeclaration`) all use
 `finally`.
 
+**Resolution (2026-08-06):** `handleParsed` wraps the consignee lookup in `try/catch/finally`; a failure reports what was lost and the screen stays usable.
+
 ## F10 · Info — The shipment audit record stores only half the checks that gated it
 
 `src/App.tsx:295-326` (`handleGenerated`) saves `reconciliation.checks`, but generation was
@@ -155,6 +173,8 @@ gated on `[...reconciliation.checks, ...checkDraft(draft, adapter)]` (App.tsx:22
 saved record therefore cannot show that the profile/destination/date checks passed at
 generation time — which is part of what an audit record is for. Store the combined list (or
 the draft checks alongside).
+
+**Resolution (2026-08-06):** `handleGenerated` stores the combined check list (reconciliation + draft checks) on the shipment record.
 
 ## F11 · Info — The battery-mark exemption is keyed on an English string prefix
 
@@ -167,12 +187,16 @@ no failing type or test local to the change. Emit a structured
 `{ kind: 'battery-mark', text }` (or a constant both sides import) instead of matching
 prose.
 
+**Resolution (2026-08-06):** `BATTERY_MARK_PREFIX` is exported from `lithium.ts` and used by both the mark builder and the exemption filter.
+
 ## F12 · Info — No user feedback while a CIPL is parsing
 
 `src/features/upload-panel.tsx:18-40`: `handleFile` parses before calling `onParsed`, but
 App's `busy` only turns on inside `handleParsed` — i.e. *after* the parse finishes. During
 a slow multi-page parse the button reads "Choose a PDF", is not disabled, and accepts a
 second file. Cosmetic, but it invites the double-submission F7 guards against elsewhere.
+
+**Resolution (2026-08-06):** The upload panel holds its own `parsing` state: the button disables and reads “Reading…” during the parse, and a second file is refused while one is being read.
 
 ---
 

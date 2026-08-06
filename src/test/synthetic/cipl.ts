@@ -65,6 +65,14 @@ export interface SyntheticCipl {
    * put in front of the parser.
    */
   headerOrders?: string[]
+  /**
+   * Print a bare `<net weight> KGS` row on the packing-list header.
+   *
+   * Two items, number then a three-letter unit — indistinguishable in shape from the
+   * invoice's own `<total> USD` row. Exists to prove the parser only reads a money total
+   * off an invoice page.
+   */
+  packingHeaderWeightRow?: boolean
 }
 
 const PAGE = { width: 612, height: 792 }
@@ -146,6 +154,12 @@ function drawHeaderPage(doc: PDFDocument, spec: SyntheticCipl, set: string, kind
     text(page, 'KGS', 444, 451, font)
     text(page, 'KGS', 510, 451, font)
     text(page, 'M3', 582, 451, font)
+    // A two-item `<number> KGS` row — the exact shape `invoiceTotal` scans for. A layout
+    // revision could print one, and the parser must not read it as the money total.
+    if (spec.packingHeaderWeightRow) {
+      text(page, weight(spec.lines.reduce((s, l) => s + l.netWeightKg, 0)), 438, 415, font)
+      text(page, 'KGS', 504, 415, font)
+    }
   } else {
     const total = spec.lines.reduce((s, l) => s + l.quantity * l.unitPrice, 0)
     text(page, total.toFixed(3), 550, 463, font)

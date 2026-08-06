@@ -28,6 +28,7 @@
 import type { CheckResult } from '../types'
 import {
   airWaybillStatement,
+  BATTERY_MARK_PREFIX,
   classifyForAir,
   CHEMISTRY_LABELS,
   energyThreshold,
@@ -1137,7 +1138,7 @@ function packageHazardCommunication(
     for (const mark of classification.hazardCommunication) {
       // The classification lists the Cargo Aircraft Only label only where the goods force it.
       // A shipper who *chooses* cargo aircraft only still has to apply it.
-      if (mark.startsWith('Lithium battery mark') && exemption) continue
+      if (mark.startsWith(BATTERY_MARK_PREFIX) && exemption) continue
       marks.add(mark)
     }
   }
