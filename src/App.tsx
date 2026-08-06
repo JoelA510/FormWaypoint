@@ -48,6 +48,7 @@ import {
   type ShipmentRecord,
 } from './store/local-store'
 import { DangerousGoodsPanel } from './features/dangerous-goods'
+import { newConsignment, type DgConsignment } from './domain/dangerous-goods/types'
 import type { ParsedCipl } from './domain/types'
 
 /**
@@ -78,6 +79,10 @@ export function App() {
   const [items, setItems] = useState<ItemLibraryEntry[]>([])
   const [shipments, setShipments] = useState<ShipmentRecord[]>([])
   const [dgConsignments, setDgConsignments] = useState<DgConsignmentRecord[]>([])
+  // Held here rather than inside the tab, which unmounts when the other one is shown. A
+  // half-entered dangerous goods consignment is measured, weighed, looked-up work; losing it
+  // to a glance at the standard flow would be its own kind of data loss.
+  const [dgConsignment, setDgConsignment] = useState<DgConsignment>(newConsignment)
   const [scheduleB, setScheduleB] = useState<ScheduleBIndex | null>(null)
   const [scheduleBPayload, setScheduleBPayload] = useState<RawPayload | null>(null)
   const [scheduleBError, setScheduleBError] = useState<string | null>(null)
@@ -412,6 +417,8 @@ export function App() {
             profile={profile}
             bridge={bridge}
             records={dgConsignments}
+            consignment={dgConsignment}
+            onConsignmentChange={setDgConsignment}
             onPrepared={(record) => void handleDgPrepared(record)}
           />
         ) : (

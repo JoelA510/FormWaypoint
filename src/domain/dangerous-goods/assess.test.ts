@@ -598,3 +598,35 @@ describe('over the limit', () => {
     expect(a99?.detail).toContain('refuse carriage')
   })
 })
+
+describe('special provision A99 is about 35 kg, not about being over the limit', () => {
+  it('does not offer A99 for a 12 kg package over the 10 kg Section IB ceiling', () => {
+    const result = assess(
+      consignment([pkg('p1', [entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 12 })])]),
+    )
+    // The limit still fails...
+    expect(check(result, 'dg.limit.p1')).toMatchObject({ severity: 'blocking', passed: false })
+    // ...but the remedy is a second box, not a two-authority approval.
+    expect(check(result, 'dg.a99')).toBeUndefined()
+    expect(check(result, 'dg.limit.p1')?.detail).toContain('below the 35 kg mark')
+  })
+
+  it('offers it once the battery itself is over 35 kg', () => {
+    const result = assess(
+      consignment([
+        pkg('p1', [entry('e1', { configuration: 'packed-with-equipment', wattHours: 500 }, {
+          netWeightKgPerPackage: 68,
+        })], { unSpecificationMark: '4G/Y75/S/26/USA/+D02390', grossWeightKg: 90 }),
+      ]),
+    )
+    expect(check(result, 'dg.a99')).toBeDefined()
+  })
+})
+
+describe('a package description covering no packages', () => {
+  it('blocks, rather than putting "0 Fibreboard box" on the declaration', () => {
+    const result = assess(consignment([pkg('p1', [entry('e1', { wattHours: 95 })], { count: 0 })]))
+    expect(check(result, 'dg.package-count')).toMatchObject({ severity: 'blocking', passed: false })
+    expect(result.canGenerate).toBe(false)
+  })
+})

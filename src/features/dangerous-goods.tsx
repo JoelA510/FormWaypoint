@@ -11,7 +11,7 @@
  * Nothing here is uploaded, and nothing here is inferred. Every field the regulations turn on
  * is asked, and an unanswered one blocks rather than defaults.
  */
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
 import {
   Badge,
   Button,
@@ -38,10 +38,11 @@ import {
   type Configuration,
 } from '../domain/dangerous-goods/lithium'
 import {
-  emptyConsignment,
   emptyEntry,
   emptyOverpack,
   emptyPackage,
+  newConsignment,
+  nextDgId,
   PROHIBITED_CO_PACKED_CLASSES,
   type ArticleLevel,
   type BatteryCondition,
@@ -78,25 +79,23 @@ const SOC_BASIS_LABELS: Record<StateOfChargeBasis, string> = {
   'indicated-capacity': 'Indicated battery capacity',
 }
 
-let sequence = 0
-const nextId = (prefix: string) => `${prefix}${(sequence += 1)}`
-
 export function DangerousGoodsPanel({
   profile,
   bridge,
   records,
+  consignment,
+  onConsignmentChange: setConsignment,
   onPrepared,
 }: {
   /** The exporter profile the standard flow already holds; the shipper block is seeded from it. */
   profile: CompanyProfile
   bridge: DesktopBridge | null
   records: DgConsignmentRecord[]
+  /** Held above this component so switching tabs does not discard it. */
+  consignment: DgConsignment
+  onConsignmentChange: Dispatch<SetStateAction<DgConsignment>>
   onPrepared: (record: DgConsignmentRecord) => void
 }) {
-  const [consignment, setConsignment] = useState<DgConsignment>(() => ({
-    ...emptyConsignment(),
-    packages: [emptyPackage(nextId('pkg-'), nextId('ent-'))],
-  }))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [warnings, setWarnings] = useState<string[]>([])
@@ -107,7 +106,7 @@ export function DangerousGoodsPanel({
 
   const patch = useCallback(
     (changes: Partial<DgConsignment>) => setConsignment((prev) => ({ ...prev, ...changes })),
-    [],
+    [setConsignment],
   )
 
   const seedShipper = useCallback(() => {
@@ -119,7 +118,7 @@ export function DangerousGoodsPanel({
       ...prev,
       packages: prev.packages.map((p) => (p.id === id ? { ...p, ...changes } : p)),
     }))
-  }, [])
+  }, [setConsignment])
 
   const updateEntry = useCallback((packageId: string, entryId: string, changes: Partial<BatteryEntry>) => {
     setConsignment((prev) => ({
@@ -130,7 +129,7 @@ export function DangerousGoodsPanel({
           : p,
       ),
     }))
-  }, [])
+  }, [setConsignment])
 
   /** Records what was prepared, which is the two-year retention obligation in practice. */
   const record = useCallback((): DgConsignmentRecord => {
@@ -214,6 +213,23 @@ export function DangerousGoodsPanel({
               <Badge tone={assessment.requiredAircraft === 'cargo-aircraft-only' ? 'block' : 'neutral'}>
                 {assessment.requiredAircraft === 'cargo-aircraft-only' ? 'cargo aircraft only' : 'passenger permitted'}
               </Badge>
+              {/*
+                Explicit, because this consignment now survives a tab switch. Held state with
+                no way to clear it is how the next shipment inherits the last one's figures.
+              */}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  if (!window.confirm('Clear this consignment and start a new one?')) return
+                  setConsignment(newConsignment())
+                  setSaved(null)
+                  setWarnings([])
+                  setError(null)
+                }}
+              >
+                Start a new consignment
+              </Button>
             </div>
           }
         />
@@ -496,7 +512,7 @@ function PackagesEditor({
   onChange: (next: DgConsignment) => void
 }) {
   const addPackage = () =>
-    onChange({ ...consignment, packages: [...consignment.packages, emptyPackage(nextId('pkg-'), nextId('ent-'))] })
+    onChange({ ...consignment, packages: [...consignment.packages, emptyPackage(nextDgId('pkg-'), nextDgId('ent-'))] })
 
   const removePackage = (id: string) =>
     onChange({ ...consignment, packages: consignment.packages.filter((p) => p.id !== id) })
@@ -505,7 +521,7 @@ function PackagesEditor({
     onChange({
       ...consignment,
       packages: consignment.packages.map((p) =>
-        p.id === packageId ? { ...p, entries: [...p.entries, emptyEntry(nextId('ent-'))] } : p,
+        p.id === packageId ? { ...p, entries: [...p.entries, emptyEntry(nextDgId('ent-'))] } : p,
       ),
     })
 
@@ -518,12 +534,20 @@ function PackagesEditor({
     })
 
   const addOverpack = () =>
-    onChange({ ...consignment, overpacks: [...consignment.overpacks, emptyOverpack(nextId('ovp-'))] })
+    onChange({ ...consignment, overpacks: [...consignment.overpacks, emptyOverpack(nextDgId('ovp-'))] })
 
   const updateOverpack = (id: string, changes: Partial<DgConsignment['overpacks'][number]>) =>
     onChange({
       ...consignment,
       overpacks: consignment.overpacks.map((o) => (o.id === id ? { ...o, ...changes } : o)),
+    })
+
+  /** Removes the overpack and detaches anything in it, so no package points at a gap. */
+  const removeOverpack = (id: string) =>
+    onChange({
+      ...consignment,
+      overpacks: consignment.overpacks.filter((o) => o.id !== id),
+      packages: consignment.packages.map((p) => (p.overpackId === id ? { ...p, overpackId: null } : p)),
     })
 
   return (
@@ -796,6 +820,9 @@ function PackagesEditor({
                   hint="The same list applies to an overpack as to an outer packaging."
                 />
               </div>
+              <Button size="sm" variant="ghost" onClick={() => removeOverpack(overpack.id)}>
+                Remove overpack
+              </Button>
             </div>
           ))}
         </div>

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { PDFDocument } from 'pdf-lib'
+import { PDFDocument, StandardFonts } from 'pdf-lib'
 import { consignment, entry, overpack, pkg } from './test-support'
 import { assess } from './assess'
-import { buildDeclaration, wrap } from './dgd'
-import { renderDeclaration } from '../../carriers/dgd/render'
+import { buildDeclaration, QUANTITY_WIDTH, wrap } from './dgd'
+import { COLUMNS, fitHeadingSize, QUANTITY_FONT_SIZE, renderDeclaration } from '../../carriers/dgd/render'
 
 
 /** The workbook's Section IB exercise, which prints the expected declaration alongside it. */
@@ -78,7 +78,7 @@ describe('packaging descriptions', () => {
     expect(declaration.lines[0].quantityAndType.join(' ')).toBe('100 Fibreboard box x 10 kg')
     expect(declaration.lines[0].annotations).toEqual([
       'Overpack used x 2',
-      'Overpack identification marks: #A001, #A002',
+      'Overpack marks: #A001, #A002',
       'Total quantity per Overpack 500 kg',
     ])
   })
@@ -200,5 +200,140 @@ describe('rendering', () => {
     })
     const { warnings } = await renderDeclaration(buildDeclaration(wide, assess(wide)))
     expect(warnings.some((w) => w.startsWith('Consignee:'))).toBe(true)
+  })
+})
+
+describe('an overpack holding more than one package description', () => {
+  // Two descriptions in one pair of identical overpacks: 2 × 7 kg and 1 × 2 kg per overpack.
+  const shipment = consignment(
+    [
+      pkg('p1', [entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 7 })], {
+        count: 2,
+        overpackId: 'o1',
+      }),
+      pkg('p2', [entry('e2', { chemistry: 'lithium-metal', lithiumContentG: 1 }, {
+        netWeightKgPerPackage: 2,
+        wattHourMarkedOnCase: false,
+      })], { count: 1, overpackId: 'o1' }),
+    ],
+    { overpacks: [overpack('o1', { marks: '#A001, #A002', count: 2 })] },
+  )
+  const declaration = buildDeclaration(shipment, assess(shipment))
+
+  it('states the overpack wording once, not once per package', () => {
+    expect(declaration.lines[0].annotations).toEqual([])
+    expect(declaration.lines[1].annotations).toEqual([
+      'Overpack used x 2',
+      'Overpack marks: #A001, #A002',
+      'Total quantity per Overpack 16 kg',
+    ])
+  })
+
+  it('totals the overpack across every package in it', () => {
+    // 2 × 7 kg plus 1 × 2 kg. Not 14 and not 2, which is what a per-package total would give
+    // — and it would give both, on the same declaration, for the same overpack.
+    const totals = declaration.lines
+      .flatMap((l) => l.annotations)
+      .filter((a) => a.startsWith('Total quantity per Overpack'))
+    expect(totals).toEqual(['Total quantity per Overpack 16 kg'])
+  })
+
+  it('still multiplies each package description out across the overpacks', () => {
+    expect(declaration.lines[0].quantityAndType.join(' ')).toBe('4 Fibreboard box x 7 kg')
+    expect(declaration.lines[1].quantityAndType.join(' ')).toBe('2 Fibreboard box x 2 kg')
+  })
+})
+
+describe('annotations that are wider than their column', () => {
+  it('wraps the overpack identification marks rather than running them across the next column', () => {
+    const shipment = consignment(
+      [pkg('p1', [entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 5 })], { overpackId: 'o1' })],
+      { overpacks: [overpack('o1', { marks: '#A001, #A002, #A003, #A004', count: 4 })] },
+    )
+    const declaration = buildDeclaration(shipment, assess(shipment))
+    for (const annotation of declaration.lines[0].annotations) {
+      expect(annotation.length).toBeLessThanOrEqual(QUANTITY_WIDTH)
+    }
+    expect(declaration.lines[0].annotations.join(' ')).toContain('#A004')
+  })
+
+  it('counts the wrapped rows towards the page budget', () => {
+    const marks = Array.from({ length: 12 }, (_, i) => `#A${String(i).padStart(3, '0')}`).join(', ')
+    const shipment = consignment(
+      [
+        ...Array.from({ length: 10 }, (_, i) =>
+          pkg(`p${i}`, [entry(`e${i}`, { wattHours: 95 }, { netWeightKgPerPackage: 1 })]),
+        ),
+        pkg('pz', [entry('ez', { wattHours: 95 }, { netWeightKgPerPackage: 1 })], { overpackId: 'o1' }),
+      ],
+      { overpacks: [overpack('o1', { marks, count: 12 })] },
+    )
+    const declaration = buildDeclaration(shipment, assess(shipment))
+    for (const page of declaration.pages) {
+      const rows = page.lines.reduce(
+        (sum, l) => sum + Math.max(l.properShippingName.length, l.quantityAndType.length) + l.annotations.length,
+        0,
+      )
+      expect(rows).toBeLessThanOrEqual(14)
+    }
+  })
+})
+
+describe('the drawn table, measured in points rather than characters', () => {
+  it('keeps every quantity and overpack row inside the column it is drawn in', async () => {
+    const shipment = consignment(
+      [
+        pkg('p1', [entry('e1', { configuration: 'packed-with-equipment', wattHours: 95 }, {
+          netWeightKgPerPackage: 4.5,
+        })], { count: 120, overpackId: 'o1' }),
+      ],
+      { overpacks: [overpack('o1', { marks: '#A001, #A002, #A003', count: 3 })] },
+    )
+    const declaration = buildDeclaration(shipment, assess(shipment))
+
+    // The character-count wrap in the model is a proxy for what the renderer can fit. This
+    // measures the real thing: Helvetica at the size the renderer uses, against the real
+    // column. An unwrapped overpack line ran across the packing instruction beside it.
+    const probe = await PDFDocument.create()
+    const helvetica = await probe.embedFont(StandardFonts.Helvetica)
+    const columnWidth = COLUMNS.packingInstruction - COLUMNS.quantity - 8
+
+    for (const line of declaration.lines) {
+      for (const row of [...line.quantityAndType, ...line.annotations]) {
+        expect(helvetica.widthOfTextAtSize(row, QUANTITY_FONT_SIZE)).toBeLessThanOrEqual(columnWidth)
+      }
+    }
+    // And the prescribed phrases are not broken across rows.
+    expect(line0Annotations(declaration)).toContain('Total quantity per Overpack 540 kg')
+  })
+})
+
+function line0Annotations(declaration: ReturnType<typeof buildDeclaration>): string[] {
+  return declaration.lines.flatMap((l) => l.annotations)
+}
+
+describe('the table headings', () => {
+  it('fit the columns they name, including "(Subsidiary Risk)"', async () => {
+    const probe = await PDFDocument.create()
+    const bold = await probe.embedFont(StandardFonts.HelveticaBold)
+    const measure = (part: string, size: number) => bold.widthOfTextAtSize(part, size)
+
+    const headings: [string[], number, number][] = [
+      [['UN', 'or', 'ID No.'], COLUMNS.unNumber, COLUMNS.properShippingName],
+      [['Proper Shipping Name'], COLUMNS.properShippingName, COLUMNS.classOrDivision],
+      [['Class', 'or Division', '(Subsidiary Risk)'], COLUMNS.classOrDivision, COLUMNS.packingGroup],
+      [['Packing', 'Group'], COLUMNS.packingGroup, COLUMNS.quantity],
+      [['Quantity and', 'Type of packing'], COLUMNS.quantity, COLUMNS.packingInstruction],
+      [['Packing', 'Inst.'], COLUMNS.packingInstruction, COLUMNS.authorization],
+      [['Authorization'], COLUMNS.authorization, COLUMNS.end],
+    ]
+
+    for (const [label, left, right] of headings) {
+      const available = right - left - 4
+      const size = fitHeadingSize(label, available, measure)
+      for (const part of label) expect(measure(part, size)).toBeLessThanOrEqual(available)
+      // And it never shrinks so far that the heading stops being readable.
+      expect(size).toBeGreaterThanOrEqual(4.6)
+    }
   })
 })

@@ -94,3 +94,33 @@ describe('the retention date', () => {
     expect(retainUntil(new Date(2026, 7, 6, 21, 30))).toBe('2028-08-06')
   })
 })
+
+describe('combined Section II wording', () => {
+  it('offers the one statement that replaces two', () => {
+    const shipment = consignment([
+      pkg('p1', [
+        entry('e1', { configuration: 'packed-with-equipment', wattHours: 90 }, { netWeightKgPerPackage: 1 }),
+      ]),
+      pkg('p2', [
+        entry('e2', { configuration: 'contained-in-equipment', wattHours: 90 }, {
+          netWeightKgPerPackage: 1,
+          countPerPackage: 1,
+        }),
+      ]),
+    ])
+    const markdown = buildChecklist(shipment, assess(shipment), '2026-08-06')
+    expect(markdown).toContain(
+      'Lithium ion batteries in compliance with Section II of PI966. ' +
+        'Lithium ion batteries in compliance with Section II of PI967',
+    )
+  })
+
+  it('does not offer a "combined" statement when there is only one', () => {
+    const shipment = consignment([
+      pkg('p1', [
+        entry('e1', { configuration: 'packed-with-equipment', wattHours: 90 }, { netWeightKgPerPackage: 1 }),
+      ]),
+    ])
+    expect(buildChecklist(shipment, assess(shipment), '2026-08-06')).not.toContain('may be combined into one')
+  })
+})

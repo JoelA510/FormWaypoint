@@ -324,12 +324,17 @@ function limitsFor(pi: number, section: PackingSection): QuantityLimits {
 function stateOfChargeFor(spec: BatterySpec): StateOfChargeRule | null {
   if (spec.chemistry === 'lithium-metal') return null
   if (spec.configuration === 'standalone') {
+    // Named for the chemistry in hand rather than hard-coded to lithium ion. Special
+    // provision A331 appears in column M against UN3551 as well as UN3480, so a standalone
+    // sodium ion battery carries the same limit — and a rule that told a sodium shipper
+    // about "lithium ion cells" would read as though it had been applied to the wrong entry.
+    const chemistry = spec.chemistry === 'sodium-ion' ? 'Standalone sodium ion' : 'Standalone lithium ion'
     return {
       limitPercent: STATE_OF_CHARGE_LIMIT,
       strength: 'must',
       indicatedCapacityAlternative: false,
       detail:
-        'Standalone lithium ion cells and batteries must be offered at a state of charge not exceeding 30% of ' +
+        `${chemistry} cells and batteries must be offered at a state of charge not exceeding 30% of ` +
         'rated capacity. Above 30% may only be shipped with the approval of the State of Origin and the State ' +
         'of the Operator, under the written conditions those authorities establish (special provision A331).',
     }

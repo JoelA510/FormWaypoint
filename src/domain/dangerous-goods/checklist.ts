@@ -15,8 +15,13 @@
 import { cell } from '../../lib/report'
 import { packageCountInConsignment, type DgAssessment } from './assess'
 import { formatKg } from './dgd'
-import { CHEMISTRY_LABELS, FORM_LABELS, fullyRegulatedStatementVariants } from './lithium'
-import { PROHIBITED_CO_PACKED_CLASSES, type DgConsignment } from './types'
+import {
+  CHEMISTRY_LABELS,
+  FORM_LABELS,
+  combinedSectionIIStatement,
+  fullyRegulatedStatementVariants,
+} from './lithium'
+import { ARTICLE_LEVEL_PHRASES, PROHIBITED_CO_PACKED_CLASSES, type DgConsignment } from './types'
 
 export function buildChecklist(
   consignment: DgConsignment,
@@ -82,11 +87,16 @@ export function buildChecklist(
     out.push('')
     for (const statement of assessment.airWaybillStatements) out.push(`- “${cell(statement)}”`)
     if (assessment.declarationRequired) {
-      out.push('')
-      out.push('Equally accepted wordings for a fully regulated consignment:')
-      out.push('')
-      for (const variant of fullyRegulatedStatementVariants(consignment.aircraft)) {
-        out.push(`- “${cell(variant)}”`)
+      // Only the wordings not already listed above, so the reader is looking at alternatives
+      // rather than at the same sentence twice.
+      const alternatives = fullyRegulatedStatementVariants(consignment.aircraft).filter(
+        (variant) => !assessment.airWaybillStatements.includes(variant),
+      )
+      if (alternatives.length) {
+        out.push('')
+        out.push('Equally accepted in place of the fully regulated wording above:')
+        out.push('')
+        for (const variant of alternatives) out.push(`- “${cell(variant)}”`)
       }
       out.push('')
       out.push(
@@ -94,12 +104,15 @@ export function buildChecklist(
           'over any of these.',
       )
     }
-    if (assessment.airWaybillStatements.length > 1) {
+    const combined = combinedSectionIIStatement(assessment.classifications)
+    if (combined && combined !== assessment.airWaybillStatements.find((s) => s === combined)) {
       out.push('')
       out.push(
-        'Section II statements may be combined into one, provided the combined wording still identifies the ' +
-          'battery types and packing instructions involved, and says CAO where that applies.',
+        'The Section II statements may be combined into one, provided the combined wording still identifies the ' +
+          'battery types and packing instructions involved:',
       )
+      out.push('')
+      out.push(`- “${cell(combined)}”`)
     }
   } else {
     out.push('Nothing to declare on the air waybill — this consignment holds no battery entries yet.')
@@ -129,9 +142,9 @@ export function buildChecklist(
           `Class ${classification.hazardClass}, PI ${classification.packingInstructionLabel}.`,
       )
       out.push(
-        `  - UN 38.3: ${entry.testSummaryScope ? `${entry.testSummaryScope} summary` : 'none recorded'}` +
-          `${entry.testSummaryReference.trim() ? ` — ${cell(entry.testSummaryReference)}` : ''}, against ` +
-          `${entry.articleLevel} in the box.`,
+        `  - UN 38.3: ${entry.testSummaryScope ? `covers ${ARTICLE_LEVEL_PHRASES[entry.testSummaryScope]}` : 'none recorded'}` +
+          `${entry.testSummaryReference.trim() ? ` (${cell(entry.testSummaryReference)})` : ''}; ` +
+          `${ARTICLE_LEVEL_PHRASES[entry.articleLevel]} in the box.`,
       )
       if (classification.stateOfCharge) {
         out.push(

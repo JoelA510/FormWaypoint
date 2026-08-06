@@ -40,19 +40,30 @@ const FRAME = { left: 30, right: 582, top: 762, bottom: 30 }
 const HATCH_WIDTH = 16
 const CONTENT = { left: FRAME.left + HATCH_WIDTH + 6, right: FRAME.right - HATCH_WIDTH - 6 }
 
-/** Column boundaries of the dangerous goods table, as x positions. */
-const COLUMNS = {
+/**
+ * Column boundaries of the dangerous goods table, as x positions.
+ *
+ * The quantity column is the widest of the middle group on purpose. It carries not only
+ * "2 Fibreboard box x 7 kg" but the overpack wording underneath, and two of those phrases are
+ * prescribed — "Total quantity per Overpack 16 kg" is thirty-three characters and is not
+ * mine to shorten. A column that cannot hold it either wraps it mid-phrase or lets it run
+ * across the packing instruction beside it, and neither belongs on a regulated form.
+ */
+export const COLUMNS = {
   unNumber: CONTENT.left,
   properShippingName: CONTENT.left + 44,
-  classOrDivision: CONTENT.left + 210,
-  packingGroup: CONTENT.left + 256,
-  quantity: CONTENT.left + 296,
-  packingInstruction: CONTENT.left + 400,
-  authorization: CONTENT.left + 450,
+  classOrDivision: CONTENT.left + 180,
+  packingGroup: CONTENT.left + 230,
+  quantity: CONTENT.left + 264,
+  packingInstruction: CONTENT.left + 406,
+  authorization: CONTENT.left + 454,
   end: CONTENT.right,
 }
 
-const ROW_HEIGHT = 11
+export const ROW_HEIGHT = 11
+
+/** Font size the quantity column and the overpack wording under it are drawn at. */
+export const QUANTITY_FONT_SIZE = 7
 
 interface Ctx {
   page: PDFPage
@@ -341,7 +352,9 @@ function drawEntry(ctx: Ctx, doc: PDFDocument, line: DgdLine, top: number, pageN
   )
   text(ctx, line.classOrDivision, COLUMNS.classOrDivision + 18, top, { size })
   text(ctx, line.packingGroup, COLUMNS.packingGroup + 16, top, { size })
-  line.quantityAndType.forEach((part, i) => text(ctx, part, COLUMNS.quantity + 4, top - i * ROW_HEIGHT, { size: 7 }))
+  line.quantityAndType.forEach((part, i) =>
+    text(ctx, part, COLUMNS.quantity + 4, top - i * ROW_HEIGHT, { size: QUANTITY_FONT_SIZE }),
+  )
   text(ctx, line.packingInstruction, COLUMNS.packingInstruction + 5, top, { size })
 
   // Box 17 is the shipper's, for a special provision number where one has been granted. It
@@ -363,17 +376,45 @@ function drawEntry(ctx: Ctx, doc: PDFDocument, line: DgdLine, top: number, pageN
 
   let y = top - rows * ROW_HEIGHT
   for (const annotation of line.annotations) {
-    text(ctx, annotation, COLUMNS.quantity + 4, y, { size: 7 })
+    text(ctx, annotation, COLUMNS.quantity + 4, y, { size: QUANTITY_FONT_SIZE })
     y -= ROW_HEIGHT
   }
   return y
 }
 
+/**
+ * The largest size at or below the nominal one at which every part of a heading fits.
+ *
+ * Separated out and exported so the invariant — no heading wider than the column it names —
+ * can be asserted against the real column geometry rather than eyeballed on a render.
+ */
+export function fitHeadingSize(
+  label: string[],
+  available: number,
+  measure: (part: string, size: number) => number,
+): number {
+  let size = HEADING_SIZE
+  while (size > MIN_HEADING_SIZE && label.some((part) => measure(part, size) > available)) size -= 0.2
+  return size
+}
+
+const HEADING_SIZE = 6.2
+const MIN_HEADING_SIZE = 4.4
+
 function drawTableHeadings(ctx: Ctx, top: number, bottom: number): void {
+  /**
+   * A column heading, shrunk to fit its column.
+   *
+   * Measured rather than assumed. "(Subsidiary Risk)" is wider than the class column at the
+   * nominal size, and a heading that overhangs into the column beside it makes two headings
+   * unreadable rather than one. Shrinking is the right trade here — these are fixed captions
+   * a reader already knows, not data.
+   */
   const heading = (label: string[], left: number, right: number) => {
+    const size = fitHeadingSize(label, right - left - 4, (part, at) => ctx.bold.widthOfTextAtSize(part, at))
     label.forEach((part, i) =>
       text(ctx, part, (left + right) / 2, bottom + 6 + (label.length - 1 - i) * 7, {
-        size: 6.2,
+        size,
         align: 'center',
         font: ctx.bold,
       }),

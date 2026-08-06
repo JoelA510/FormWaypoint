@@ -33,8 +33,8 @@ import type { DgConsignment, Overpack } from './types'
  * always need one row more than the model allowed for, and the row it lost would be the
  * bottom one.
  */
-const PROPER_SHIPPING_NAME_WIDTH = 34
-const QUANTITY_WIDTH = 26
+const PROPER_SHIPPING_NAME_WIDTH = 30
+export const QUANTITY_WIDTH = 34
 
 /** Rows of the dangerous goods table one page holds, counting wrapped and annotation rows. */
 const ROWS_PER_PAGE = 14
@@ -59,7 +59,8 @@ export interface DgdLine {
   authorization: string
   /**
    * Wording printed under the entry: `Overpack used`, `Overpack used x 2`, the overpack
-   * identification marks, `Total quantity per Overpack 20 kg`.
+   * identification marks, `Total quantity per Overpack 20 kg`. Pre-wrapped to the quantity
+   * column, one array element per printed row.
    */
   annotations: string[]
   /**
@@ -165,11 +166,17 @@ export function wrap(text: string, width: number): string[] {
  * its own wording after its own entries.
  */
 function overpackAnnotations(overpack: Overpack, totalPerOverpackKg: number): string[] {
-  if (overpack.count <= 1) return ['Overpack used']
-  const lines = [`Overpack used x ${overpack.count}`]
-  if (overpack.marks.trim()) lines.push(`Overpack identification marks: ${overpack.marks.trim()}`)
-  lines.push(`Total quantity per Overpack ${formatKg(totalPerOverpackKg)} kg`)
-  return lines
+  const lines = overpack.count <= 1 ? ['Overpack used'] : [`Overpack used x ${overpack.count}`]
+  if (overpack.count > 1) {
+    // The marks are what must be listed; "identification marks" as a label is mine, not the
+    // regulation's, and it costs a wrapped row every time.
+    if (overpack.marks.trim()) lines.push(`Overpack marks: ${overpack.marks.trim()}`)
+    lines.push(`Total quantity per Overpack ${formatKg(totalPerOverpackKg)} kg`)
+  }
+  // Wrapped to the same column the quantity is wrapped to, because that is the column they
+  // are drawn in. A list of overpack identifiers is easily longer than the column is wide,
+  // and an unwrapped one runs across the packing instruction beside it.
+  return lines.flatMap((line) => wrap(line, QUANTITY_WIDTH))
 }
 
 /**
@@ -182,6 +189,19 @@ function overpackAnnotations(overpack: Overpack, totalPerOverpackKg: number): st
  */
 export function buildDeclaration(consignment: DgConsignment, assessment: DgAssessment): ShippersDeclaration {
   const lines: DgdLine[] = []
+
+  /**
+   * Where each overpack's wording goes, and what it says.
+   *
+   * An overpack is not a property of a package — several package descriptions can sit inside
+   * one — so its wording is accumulated across every package that references it and written
+   * once, after the last entry belonging to it. Writing it per package instead repeats
+   * "Overpack used x 2" for each and states a *different* total quantity per overpack each
+   * time, none of them the real one. Overpack entries that disagree with each other, or with
+   * the mark on the box, is the single most frequent cause of a resubmission on these
+   * consignments.
+   */
+  const overpackTotals = new Map<string, { lastLineIndex: number; totalPerOverpackKg: number }>()
 
   // Entries are emitted package by package so that the overpack wording lands immediately
   // after the entries it belongs to, which is where the regulation puts it.
@@ -208,17 +228,6 @@ export function buildDeclaration(consignment: DgConsignment, assessment: DgAsses
         ? `${formatKg(weightKg)} kg`
         : `${totalPackages} ${pkg.packagingType || 'package'} x ${formatKg(weightKg)} kg`
 
-      const isLastOfPackage = index === groupList.length - 1
-      const annotations =
-        isLastOfPackage && overpack
-          ? overpackAnnotations(
-              overpack,
-              // Per overpack, so the package's own count — which is per overpack — not the
-              // consignment total.
-              packageAssessment.netWeightKg * Math.max(0, pkg.count),
-            )
-          : []
-
       lines.push({
         unNumber: classification.unNumber,
         properShippingName: wrap(classification.properShippingName, PROPER_SHIPPING_NAME_WIDTH),
@@ -228,10 +237,26 @@ export function buildDeclaration(consignment: DgConsignment, assessment: DgAsses
         quantityAndType: wrap(quantity, QUANTITY_WIDTH),
         packingInstruction: classification.packingInstructionLabel,
         authorization: '',
-        annotations,
+        annotations: [],
         sharesPackagingWithPreviousLine: shares,
       })
+
+      if (overpack && index === groupList.length - 1) {
+        const held = overpackTotals.get(overpack.id)
+        // Per overpack, so the package's own count — which is per overpack — not the
+        // consignment total across every overpack.
+        const contribution = packageAssessment.netWeightKg * Math.max(0, pkg.count)
+        overpackTotals.set(overpack.id, {
+          lastLineIndex: lines.length - 1,
+          totalPerOverpackKg: (held?.totalPerOverpackKg ?? 0) + contribution,
+        })
+      }
     })
+  }
+
+  for (const [overpackId, { lastLineIndex, totalPerOverpackKg }] of overpackTotals) {
+    const overpack = consignment.overpacks.find((o) => o.id === overpackId)
+    if (overpack) lines[lastLineIndex].annotations = overpackAnnotations(overpack, totalPerOverpackKg)
   }
 
   return {

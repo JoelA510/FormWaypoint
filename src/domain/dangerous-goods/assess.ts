@@ -35,8 +35,8 @@ import {
   type AirClassification,
 } from './lithium'
 import {
+  ARTICLE_LEVEL_PHRASES,
   PROHIBITED_CO_PACKED_CLASSES,
-  type ArticleLevel,
   type BatteryEntry,
   type DgConsignment,
   type DgPackage,
@@ -90,6 +90,17 @@ function kg(value: number): number {
   return Math.round(value * 1000) / 1000
 }
 
+/**
+ * The mass above which special provision A99 is the only route by air.
+ *
+ * A99 permits a lithium or sodium ion battery or battery assembly to exceed **35 kg** on a
+ * cargo aircraft when approved. It has nothing to say about a package that merely exceeds a
+ * lower sectional limit — a 12 kg package of small standalone cells is over the 10 kg Section
+ * IB ceiling and is not an A99 case, and pointing a shipper at a two-authority approval when
+ * the answer is a second box costs months for nothing.
+ */
+const A99_THRESHOLD_KG = 35
+
 /** A stable identity for "the same regulatory entry", for grouping DGD lines and limits. */
 export function classificationKey(classification: AirClassification): string {
   return `${classification.unNumber}|${classification.properShippingName}|${classification.packingInstructionLabel}`
@@ -106,13 +117,6 @@ export function classificationKey(classification: AirClassification): string {
 export function packageCountInConsignment(pkg: DgPackage, consignment: DgConsignment): number {
   const overpack = pkg.overpackId ? consignment.overpacks.find((o) => o.id === pkg.overpackId) : null
   return Math.max(0, pkg.count) * Math.max(1, overpack?.count ?? 1)
-}
-
-const ARTICLE_LEVEL_LABELS: Record<ArticleLevel, string> = {
-  cell: 'a cell',
-  module: 'a module',
-  'battery-pack': 'an assembled battery pack',
-  equipment: 'equipment containing cells or batteries',
 }
 
 export function assess(consignment: DgConsignment): DgAssessment {
@@ -214,6 +218,7 @@ function effectiveLimit(instructionLimitKg: number, authorizationLimitKg: number
 /** The consignment has to describe something before any of it can be checked. */
 function structureChecks(consignment: DgConsignment): CheckResult[] {
   const entryCount = consignment.packages.reduce((sum, p) => sum + p.entries.length, 0)
+  const empty = consignment.packages.filter((p) => p.count < 1)
   return [
     {
       id: 'dg.structure',
@@ -224,6 +229,17 @@ function structureChecks(consignment: DgConsignment): CheckResult[] {
           `${entryCount} battery type${entryCount === 1 ? '' : 's'}.`
         : 'Add a package and describe the cells or batteries in it.',
       passed: entryCount > 0,
+    },
+    {
+      id: 'dg.package-count',
+      severity: 'blocking',
+      title: 'Every package description covers at least one package',
+      detail: empty.length
+        ? `${empty.map((p) => p.packagingType || 'a package').join(', ')} — a count of zero would put “0 ` +
+          'Fibreboard box x 7 kg” on the declaration and leave the batteries it describes out of the ' +
+          'consignment total. Remove the description, or say how many there are.'
+        : 'Each package description states how many identical packages it covers.',
+      passed: empty.length === 0,
     },
   ]
 }
@@ -360,7 +376,7 @@ function testSummaryCheck(entry: BatteryEntry, ref: string, name: string): Check
     }
   }
 
-  const offered = ARTICLE_LEVEL_LABELS[entry.articleLevel]
+  const offered = ARTICLE_LEVEL_PHRASES[entry.articleLevel]
   if (entry.testSummaryScope == null) {
     return {
       id: `dg.test-summary.${ref}`,
@@ -381,14 +397,14 @@ function testSummaryCheck(entry: BatteryEntry, ref: string, name: string): Check
       severity: 'blocking',
       title: `${name}: UN 38.3 test summary covers this article`,
       detail:
-        `The summary on file covers ${ARTICLE_LEVEL_LABELS[entry.testSummaryScope]}; what is going in the box is ` +
+        `The summary on file covers ${ARTICLE_LEVEL_PHRASES[entry.testSummaryScope]}; what is going in the box is ` +
         `${offered}. Coverage of the parts is not coverage of the whole — a battery must be of a type proved to ` +
         `meet the tests of the Manual of Tests and Criteria irrespective of whether the cells it is composed of ` +
         `are of a tested type. Obtain a summary for the assembled article, or the article is unqualified and air ` +
         `is closed to it under the ordinary entries.`,
       passed: false,
       expected: offered,
-      actual: ARTICLE_LEVEL_LABELS[entry.testSummaryScope],
+      actual: ARTICLE_LEVEL_PHRASES[entry.testSummaryScope],
       refs: [ref],
     }
   }
@@ -531,10 +547,12 @@ function stateOfChargeChecks(
   }
 
   const provenance = [
-    entry.stateOfChargeMethod.trim() ? null : 'the measuring device or method',
-    entry.stateOfChargeMeasuredAt.trim() ? null : 'the date measured',
-    entry.stateOfChargeMeasuredBy.trim() ? null : 'who measured it',
-  ].filter(Boolean) as string[]
+    [entry.stateOfChargeMethod, 'the measuring device or method'],
+    [entry.stateOfChargeMeasuredAt, 'the date measured'],
+    [entry.stateOfChargeMeasuredBy, 'who measured it'],
+  ]
+    .filter(([value]) => !value.trim())
+    .map(([, label]) => label)
 
   checks.push({
     id: `dg.soc-evidence.${ref}`,
@@ -595,7 +613,9 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
     // A forbidden aircraft type is reported by the check above; repeating it as a quantity
     // failure would say the same thing twice in different words.
     if (instructionLimit == null) continue
-    const limit = effectiveLimit(instructionLimit, pkg.packagingAuthorizationLimitKg) as number
+    // Computed rather than asserted: `instructionLimit` is known finite by the guard above,
+    // so the minimum of the two is a number without anything having to claim it is one.
+    const limit = Math.min(instructionLimit, pkg.packagingAuthorizationLimitKg ?? Infinity)
     const authorizationBinds = limit < instructionLimit
     checks.push({
       id: `dg.limit.${pkg.id}.${key}`,
@@ -617,8 +637,11 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
               : ` for PI ${classification.packingInstructionLabel}. ` +
                 (classification.limits.cargoKg > limit
                   ? 'Split the batteries across more packages, or offer the consignment as cargo aircraft only.'
-                  : 'Split the batteries across more packages. The alternative is special provision A99, which ' +
-                    'is not a paperwork step — see the A99 note below.')),
+                  : kg(weight) > A99_THRESHOLD_KG
+                    ? 'Split the batteries across more packages. The alternative is special provision A99, ' +
+                      'which is not a paperwork step — see the A99 note below.'
+                    : 'Split the batteries across more packages. This is below the 35 kg mark, so special ' +
+                      'provision A99 is not an alternative here.')),
       passed: kg(weight) <= limit,
       expected: `≤ ${limit} kg`,
       actual: `${kg(weight)} kg`,
@@ -627,8 +650,9 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
 
     // A99 is reachable by any sufficiently heavy battery, qualified or not, and it is the
     // step people underestimate: two approvals, only one of which the shipper can obtain,
-    // and carriers that refuse approved shipments outright.
-    if (kg(weight) > limit && !authorizationBinds && classification.limits.cargoKg <= limit) {
+    // and carriers that refuse approved shipments outright. It is gated on the 35 kg the
+    // provision actually names, not on merely being over the section's own ceiling.
+    if (kg(weight) > A99_THRESHOLD_KG && !authorizationBinds && classification.limits.cargoKg <= limit) {
       checks.push({
         id: `dg.a99.${pkg.id}.${key}`,
         severity: 'warning',

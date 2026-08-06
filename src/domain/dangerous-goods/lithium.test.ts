@@ -244,3 +244,20 @@ describe('an unstated rating', () => {
     expect(c.fullyRegulated).toBe(true)
   })
 })
+
+describe('standalone sodium ion', () => {
+  it('carries the 30% limit under A331, named for its own chemistry', () => {
+    const rule = classifyForAir(spec({ chemistry: 'sodium-ion', wattHours: 60 })).stateOfCharge
+    expect(rule).toMatchObject({ limitPercent: 30, strength: 'must', indicatedCapacityAlternative: false })
+    expect(rule?.detail).toContain('sodium ion')
+    expect(rule?.detail).not.toContain('lithium ion')
+    expect(rule?.detail).toContain('A331')
+  })
+
+  it('has no state of charge rule once it travels with equipment', () => {
+    expect(
+      classifyForAir(spec({ chemistry: 'sodium-ion', configuration: 'packed-with-equipment', wattHours: 60 }))
+        .stateOfCharge,
+    ).toBeNull()
+  })
+})

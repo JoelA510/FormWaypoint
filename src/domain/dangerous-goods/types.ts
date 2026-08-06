@@ -398,6 +398,27 @@ export function emptyOverpack(id: string): Overpack {
 }
 
 /**
+ * Ids for the things a person adds on screen.
+ *
+ * A counter rather than anything derived from content: two identical packages are two
+ * packages, and they have to stay distinguishable while one of them is being edited.
+ */
+let sequence = 0
+export const nextDgId = (prefix: string): string => `${prefix}${(sequence += 1)}`
+
+/**
+ * A consignment with one empty package, ready to be filled in.
+ *
+ * Lives here rather than beside the screen that uses it because it is held *above* that
+ * screen: the dangerous goods tab unmounts whenever the standard flow is shown, and a
+ * half-entered consignment represents measured, weighed, looked-up work that should not
+ * evaporate because someone glanced at the other tab.
+ */
+export function newConsignment(): DgConsignment {
+  return { ...emptyConsignment(), packages: [emptyPackage(nextDgId('pkg-'), nextDgId('ent-'))] }
+}
+
+/**
  * The dangerous goods a lithium battery package may not share an outer packaging — or an
  * overpack — with, as PI 965 Sections IA and IB name them.
  *
@@ -405,6 +426,20 @@ export function emptyOverpack(id: string): Overpack {
  * directions: Division 1.4S is *permitted*, and Divisions 4.2, 4.3, 5.2, Class 8 and Division
  * 2.2 do not appear in it.
  */
+/**
+ * Article levels as sentence fragments, for check details and the printed checklist.
+ *
+ * Distinct from the dropdown labels on screen, which are titles rather than phrases: "the
+ * summary covers a module; an assembled battery pack is in the box" only reads if the words
+ * carry their articles.
+ */
+export const ARTICLE_LEVEL_PHRASES: Record<ArticleLevel, string> = {
+  cell: 'a cell',
+  module: 'a module',
+  'battery-pack': 'an assembled battery pack',
+  equipment: 'equipment containing cells or batteries',
+}
+
 export const PROHIBITED_CO_PACKED_CLASSES = [
   'Class 1 explosives, other than Division 1.4S',
   'Division 2.1 flammable gases',
