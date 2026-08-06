@@ -1,7 +1,13 @@
 # FormWaypoint
 
-Turns a combined **Commercial Invoice & Packing List (CIPL)** into a completed carrier
-**Shipper's Letter of Instruction (SLI)**.
+Two shipping workflows, kept apart on purpose:
+
+- **Standard shipping** — turns a combined **Commercial Invoice & Packing List (CIPL)** into
+  a completed carrier **Shipper's Letter of Instruction (SLI)**.
+- **Dangerous goods — air** — classifies lithium, lithium metal and sodium ion batteries
+  under the IATA DGR, checks the consignment against the limits that classification carries,
+  and produces the **Shipper's Declaration for Dangerous Goods** and the package checklist
+  that goes with it.
 
 Everything runs in the browser. The CIPL is parsed locally, the carrier's blank PDF form is
 filled locally, and nothing is uploaded — there is no backend, no account, and no network
@@ -70,6 +76,104 @@ fails silently or transposes values.
 Adding a carrier means writing one adapter under `src/carriers/`. The parser and the
 reconciliation engine contain no carrier-specific logic.
 
+## Dangerous goods — lithium batteries by air
+
+A separate tab, sharing nothing with the CIPL flow but the design language and the checks
+panel. The two jobs have almost nothing in common: one reads a document and proves its
+arithmetic, the other asks what is in a box and tells you what the regulations make of it.
+Folding dangerous goods into the standard flow would put a hazard question in front of every
+ordinary shipment, which is how hazard questions come to be answered without being read.
+
+**What it classifies.** Lithium ion, lithium metal and sodium ion, as cells or batteries,
+standalone or packed with or contained in the equipment they power. From those four facts and
+the energy content it derives the UN number, proper shipping name, packing instruction and
+section, and everything each section carries:
+
+| | Standalone | Packed with equipment | Contained in equipment |
+| --- | --- | --- | --- |
+| Small (≤20 Wh cell / ≤100 Wh battery, ≤1 g / ≤2 g LC) | **Section IB** — PI 965 / 968, fully regulated, CAO only, 10 kg (ion) or 2.5 kg (metal) per package | **Section II** — PI 966 / 969, excepted, 5 kg | **Section II** — PI 967 / 970, excepted, 5 kg |
+| Large | **Section IA** — PI 965 / 968, UN specification packaging, CAO only, 35 kg | **Section I** — PI 966 / 969, UN specification packaging, 5 kg PAX / 35 kg CAO | **Section I** — PI 967 / 970, 5 kg PAX / 35 kg CAO |
+
+Standalone batteries have no Section II at all, which is the most-missed rule in the set: a
+"small" standalone battery is still fully regulated, still cargo aircraft only, and still
+needs a declaration. Every standalone sodium ion battery is fully regulated under PI 976,
+which has no sections. The U.S. ground "medium" band does not exist by air and is not applied.
+
+**What it refuses.** Damaged or defective batteries (A154) and waste batteries for recycling
+(A183) are forbidden by air, and block. So does a lithium ion state of charge over 30%, an
+unmarked battery case, a net battery weight over the package limit, a standalone entry offered
+on a passenger aircraft, Section I or IA without a UN specification marking, and — most
+importantly — a battery whose watt-hour rating or lithium content has not been stated. That
+last one is the point: a missing rating is not evidence of a small battery, and treating it as
+one would move a fully regulated shipment onto an air waybill statement and no declaration.
+
+Four more blocks exist because they are what has actually gone wrong on real consignments:
+
+- **A test summary that covers the wrong article.** UN 38.3 coverage is asked as two questions
+  — what the summary covers, and what is in the box — because a module-level summary held
+  against the pack assembled from those modules reads as qualification and is not one. A
+  battery must be of a proved type *irrespective of whether the cells it is composed of are of
+  a tested type*, so coverage of the parts is not coverage of the whole. This is the failure
+  that looks compliant right up until an airline asks.
+- **A state of charge that is asserted rather than measured.** Value, basis, device or method,
+  date, and who measured. The basis matters as much as the number: 30% of rated capacity and
+  25% of indicated capacity are different standards written for different entries, and a
+  gauge reading cannot demonstrate a rated-capacity limit. An indicated-capacity figure blocks
+  wherever the 25% alternative does not apply, which is everywhere except batteries contained
+  in equipment.
+- **The forwarder treated as the airline.** Operator variations attach to the operating
+  carrier, which comes off the booking confirmation or the master air waybill and is routinely
+  not known when the paperwork is prepared. Both are recorded; an unresolved carrier blocks.
+- **Equipment nobody has determined is not a vehicle.** A vehicle — a self-propelled apparatus
+  designed to carry persons or goods — is a different entry entirely: UN3556, UN3557 or UN3558
+  by air. An autonomous machine that carries goods sits on that boundary, so the answer is a
+  recorded determination, not something inferred from a product name. Worth knowing: the
+  United States has not adopted those entries, where a battery-powered vehicle is still
+  UN3171, so the same machine has one identity by air and another by US ground.
+
+**What it will not pretend to know.** State (IATA 2.8.1) and operator (2.8.3) variations. No
+published dataset of those travels with the app, and lithium batteries attract more of them
+than any other entry — UPS 5X-08 wants the packing instruction marked on Section II packages,
+Saudi Arabia SAG-06 wants the consignee's telephone number on every package. The app says
+which ones to read, names the operator, and refuses to generate until someone confirms they
+have.
+
+**What it produces.**
+
+- **The Shipper's Declaration**, drawn to the IATA layout — red hatched margins, the boxes in
+  their published order, the warning and the certification verbatim. There is no blank IATA
+  form to fill, and the regulations expressly allow a computer-generated declaration that
+  conforms in format. Aircraft limitation and shipment type are struck out rather than left
+  ambiguous, page x of y is real, and the boxes the forwarder completes — air waybill number,
+  airports, the authorization column — are left as fillable fields with a rule to write on
+  rather than as printed blanks. The signature block is empty: a typewritten signature is not
+  acceptable.
+- **The package checklist**, as markdown to print and work through: the marks and labels each
+  package must carry, the packaging the section demands, the air waybill statement, and what
+  is still outstanding. For a Section II consignment there is no declaration, so this *is* the
+  deliverable — the battery mark and the air waybill statement carry the whole of the hazard
+  communication between them.
+
+**Retention.** A copy of the declaration must be kept for two years and be producible at the
+shipment location on request, so preparing a consignment records it on this machine with the
+date its retention obligation runs to. The record is not the declaration — the declaration is
+the signed paper — it is what was declared and what the checks said.
+
+**Three weights, never derived from one another.** Package gross, equipment net and battery
+net are three measurements of the same parcel and they will not match — the declaration files
+the battery net quantity, the air waybill carries something closer to the gross. Deriving any
+of them from the others is how a declaration ends up stating a quantity nobody weighed, so
+they are entered separately and only sanity-checked against each other.
+
+The regulatory figures come from the Labelmaster *Shipping Lithium Batteries — Excepted &
+Fully Regulated* multimodal course (Student Guide rev. 02/01/2026, Supplemental Appendix rev.
+01/01/2025 for the reproduced PI 965 text), and each is cited in
+`src/domain/dangerous-goods/lithium.ts` against the figure it was taken from, so it can be
+re-checked when the DGR is revised. `docs/dangerous-goods-fact-check.md` records what was
+checked against what, including the claims in the supplied ORT documents that could be
+confirmed, the two that could not, and the one — the co-packing prohibition list — that turned
+out to be wrong in both directions.
+
 ## Item library
 
 An item master exported from your ERP can be imported (`.xlsx`, `.csv`, `.tsv`) to supply
@@ -114,9 +218,16 @@ manufacture the parts a document cannot support:
 
 ## Verification
 
-A clean checkout runs **200 tests**. They cover the parsers, the reconciliation engine, the
+A clean checkout runs **336 tests**. They cover the parsers, the reconciliation engine, the
 Schedule B validator, the carrier adapters and the guards, using synthetic documents built
 to reproduce each supported layout without reproducing anyone's data.
+
+The dangerous goods suites are written against the course materials' own worked scenarios, so
+a failure means this tool and the training disagree: the workbook's two-box Section IB
+consignment produces the declaration the exercise asks for, its three 76 Wh power drills
+classify as PI 967 Section II and need the battery mark, its 300 Wh data-backup batteries are
+fully regulated by air, and the two-laptops-in-two-packages marking exemption withdraws itself
+the moment a third package joins the consignment.
 
 A further **122 tests are skipped unless real shipment documents are present**. Those are
 the regression suites: they run five real, manually-processed shipments across both layouts
@@ -193,12 +304,14 @@ src/
     reconcile/   document-set selection, line joining, grouping, checks
     schedule-b/  Census dataset lookup and validation
     item-library/  item-master import and commodity-number screening
+    dangerous-goods/  IATA classification, consignment assessment, the declaration
     draft.ts     assembles reviewed values for a carrier form
   carriers/
     nippon-express/   field map + adapter
     ceva/             field map + adapter
     keying-sheet/     FedEx Ship Manager / UPS WorldShip
-  features/      upload, review, manual fields, output
+    dgd/              the Shipper's Declaration, drawn rather than filled
+  features/      upload, review, manual fields, output, dangerous goods
   store/         local persistence
 public/
   templates/     blank carrier forms

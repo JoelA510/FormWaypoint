@@ -41,12 +41,25 @@ import {
   overrideDescriptions,
   overrideWeights,
   overridesToMap,
+  type DgConsignmentRecord,
   type OverrideRecord,
   type PartOverrideRecord,
   type PartOverridePatch,
   type ShipmentRecord,
 } from './store/local-store'
+import { DangerousGoodsPanel } from './features/dangerous-goods'
+import { newConsignment, type DgConsignment } from './domain/dangerous-goods/types'
 import type { ParsedCipl } from './domain/types'
+
+/**
+ * The two workflows this application holds, kept apart on purpose.
+ *
+ * Conventional export paperwork and dangerous goods paperwork answer different questions and
+ * fail in different ways. Putting the lithium battery questions in front of every ordinary
+ * shipment would make them noise, and noise is how a hazard question comes to be answered
+ * without being read.
+ */
+type Workflow = 'standard' | 'dangerous-goods'
 
 const CARRIER_LABELS: Record<ShipmentCarrierId, string> = {
   'nippon-express': 'Nippon Express USA',
@@ -56,6 +69,7 @@ const CARRIER_LABELS: Record<ShipmentCarrierId, string> = {
 }
 
 export function App() {
+  const [workflow, setWorkflow] = useState<Workflow>('standard')
   const [parsed, setParsed] = useState<ParsedCipl | null>(null)
   const [carrierId, setCarrierId] = useState<ShipmentCarrierId>('nippon-express')
   const [profile, setProfile] = useState<CompanyProfile>(EMPTY_PROFILE)
@@ -64,6 +78,11 @@ export function App() {
   const [partOverrides, setPartOverrides] = useState<PartOverrideRecord[]>([])
   const [items, setItems] = useState<ItemLibraryEntry[]>([])
   const [shipments, setShipments] = useState<ShipmentRecord[]>([])
+  const [dgConsignments, setDgConsignments] = useState<DgConsignmentRecord[]>([])
+  // Held here rather than inside the tab, which unmounts when the other one is shown. A
+  // half-entered dangerous goods consignment is measured, weighed, looked-up work; losing it
+  // to a glance at the standard flow would be its own kind of data loss.
+  const [dgConsignment, setDgConsignment] = useState<DgConsignment>(newConsignment)
   const [scheduleB, setScheduleB] = useState<ScheduleBIndex | null>(null)
   const [scheduleBPayload, setScheduleBPayload] = useState<RawPayload | null>(null)
   const [scheduleBError, setScheduleBError] = useState<string | null>(null)
@@ -95,18 +114,20 @@ export function App() {
     })()
 
     void (async () => {
-      const [saved, savedOverrides, savedPartOverrides, savedItems, history] = await Promise.all([
+      const [saved, savedOverrides, savedPartOverrides, savedItems, history, dgHistory] = await Promise.all([
         localStore.getProfile(),
         localStore.listOverrides(),
         localStore.listPartOverrides(),
         localStore.listItems(),
         localStore.listShipments(),
+        localStore.listDgConsignments(),
       ])
       if (saved) setProfile(saved)
       setOverrides(savedOverrides)
       setPartOverrides(savedPartOverrides)
       setItems(savedItems)
       setShipments(history)
+      setDgConsignments(dgHistory)
     })()
   }, [bridge])
 
@@ -304,6 +325,11 @@ export function App() {
     setShipments(await localStore.listShipments())
   }, [reconciliation, parsed, adapter, settings, draft])
 
+  const handleDgPrepared = useCallback(async (record: DgConsignmentRecord) => {
+    await localStore.saveDgConsignment(record)
+    setDgConsignments(await localStore.listDgConsignments())
+  }, [])
+
   const importItemLibrary = useCallback(async (entries: ItemLibraryEntry[], mode: ImportMode) => {
     if (mode === 'merge') await localStore.mergeItems(entries)
     else await localStore.replaceItems(entries)
@@ -319,7 +345,9 @@ export function App() {
   const clearAll = useCallback(async () => {
     if (
       !window.confirm(
-        'Delete the saved profile, consignees, overrides, item library and shipment history from this machine?',
+        'Delete the saved profile, consignees, overrides, item library, shipment history and prepared dangerous ' +
+          'goods consignments from this machine? Dangerous goods records are kept to evidence the two-year ' +
+          'retention rule.',
       )
     )
       return
@@ -329,6 +357,7 @@ export function App() {
     setPartOverrides([])
     setItems([])
     setShipments([])
+    setDgConsignments([])
   }, [])
 
   return (
@@ -338,177 +367,228 @@ export function App() {
           <div>
             <h1 className="text-lg font-semibold">FormWaypoint</h1>
             <p className="text-sm text-[var(--color-ink-soft)]">
-              Commercial invoice &amp; packing list → Shipper&rsquo;s Letter of Instruction
+              {workflow === 'standard'
+                ? 'Commercial invoice & packing list → Shipper’s Letter of Instruction'
+                : 'Lithium and sodium batteries by air → Shipper’s Declaration for Dangerous Goods'}
             </p>
           </div>
           <div className="flex items-center gap-2">
             <Badge tone="pass">runs entirely on this machine</Badge>
-            {scheduleB ? (
-              <Badge tone={scheduleBIsStale(scheduleB.generatedAt) ? 'warn' : 'neutral'}>
-                Schedule B {scheduleB.generatedAt}
-              </Badge>
+            {workflow === 'standard' ? (
+              scheduleB ? (
+                <Badge tone={scheduleBIsStale(scheduleB.generatedAt) ? 'warn' : 'neutral'}>
+                  Schedule B {scheduleB.generatedAt}
+                </Badge>
+              ) : (
+                <Badge tone="warn">loading Schedule B…</Badge>
+              )
             ) : (
-              <Badge tone="warn">loading Schedule B…</Badge>
+              <Badge tone="neutral">IATA DGR · air</Badge>
             )}
           </div>
         </div>
+        <nav className="mx-auto flex max-w-6xl gap-1 px-5" aria-label="Workflow">
+          {(
+            [
+              ['standard', 'Standard shipping'],
+              ['dangerous-goods', 'Dangerous goods — air'],
+            ] as [Workflow, string][]
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              aria-current={workflow === id ? 'page' : undefined}
+              onClick={() => setWorkflow(id)}
+              className={
+                workflow === id
+                  ? 'border-b-2 border-[var(--color-accent)] px-3 py-2 text-sm font-semibold text-[var(--color-ink)]'
+                  : 'border-b-2 border-transparent px-3 py-2 text-sm text-[var(--color-ink-soft)] hover:text-[var(--color-ink)]'
+              }
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
       </header>
 
       <main className="mx-auto max-w-6xl space-y-4 px-5 py-6">
-        {scheduleBError ? (
-          <p className="rounded-md border border-[var(--color-warn)] bg-[var(--color-warn-soft)] px-3 py-2 text-sm">
-            {scheduleBError} Codes will not be checked for validity until it loads. Run{' '}
-            <code className="font-mono text-xs">npm run data:schedule-b</code> to rebuild it.
-          </p>
-        ) : null}
-
-        {scheduleB && scheduleBIsStale(scheduleB.generatedAt) ? (
-          <p className="rounded-md border border-[var(--color-warn)] bg-[var(--color-warn-soft)] px-3 py-2 text-sm">
-            The Schedule B dataset was generated {scheduleB.generatedAt}, before the most recent
-            January/July revision. Codes retired since then will still pass as active. Rebuild it with{' '}
-            <code className="font-mono text-xs">npm run data:schedule-b -- --fetch</code> and redeploy.
-          </p>
-        ) : null}
-
-        {error ? (
-          <p className="rounded-md border border-[var(--color-block)] bg-[var(--color-block-soft)] px-3 py-2 text-sm">
-            {error}
-          </p>
-        ) : null}
-
-        {!parsed ? (
+        {workflow === 'dangerous-goods' ? (
+          <DangerousGoodsPanel
+            profile={profile}
+            bridge={bridge}
+            records={dgConsignments}
+            consignment={dgConsignment}
+            onConsignmentChange={setDgConsignment}
+            onPrepared={(record) => void handleDgPrepared(record)}
+          />
+        ) : (
           <>
-            <UploadPanel onParsed={(p) => void handleParsed(p)} onError={setError} busy={busy} />
-            {bridge ? (
-              <ScheduleBRefreshPanel
-                bridge={bridge}
-                installed={scheduleBPayload}
-                items={items}
-                libraryLoaded={items.length > 0}
-                onRefreshed={(payload) => {
-                  setScheduleBPayload(payload)
-                  setScheduleB(createScheduleBIndex(payload))
-                }}
+          {scheduleBError ? (
+            <p className="rounded-md border border-[var(--color-warn)] bg-[var(--color-warn-soft)] px-3 py-2 text-sm">
+              {scheduleBError} Codes will not be checked for validity until it loads. Run{' '}
+              <code className="font-mono text-xs">npm run data:schedule-b</code> to rebuild it.
+            </p>
+          ) : null}
+
+          {scheduleB && scheduleBIsStale(scheduleB.generatedAt) ? (
+            <p className="rounded-md border border-[var(--color-warn)] bg-[var(--color-warn-soft)] px-3 py-2 text-sm">
+              The Schedule B dataset was generated {scheduleB.generatedAt}, before the most recent
+              January/July revision. Codes retired since then will still pass as active. Rebuild it with{' '}
+              <code className="font-mono text-xs">npm run data:schedule-b -- --fetch</code> and redeploy.
+            </p>
+          ) : null}
+
+          {error ? (
+            <p className="rounded-md border border-[var(--color-block)] bg-[var(--color-block-soft)] px-3 py-2 text-sm">
+              {error}
+            </p>
+          ) : null}
+
+          {!parsed ? (
+            <>
+              <UploadPanel onParsed={(p) => void handleParsed(p)} onError={setError} busy={busy} />
+              {bridge ? (
+                <ScheduleBRefreshPanel
+                  bridge={bridge}
+                  installed={scheduleBPayload}
+                  items={items}
+                  libraryLoaded={items.length > 0}
+                  onRefreshed={(payload) => {
+                    setScheduleBPayload(payload)
+                    setScheduleB(createScheduleBIndex(payload))
+                  }}
+                />
+              ) : null}
+              <ItemLibraryPanel
+                entries={items}
+                scheduleB={scheduleB}
+                onImport={(entries, mode) => void importItemLibrary(entries, mode)}
+                onClear={() => void clearItemLibrary()}
               />
-            ) : null}
-            <ItemLibraryPanel
-              entries={items}
-              scheduleB={scheduleB}
-              onImport={(entries, mode) => void importItemLibrary(entries, mode)}
-              onClear={() => void clearItemLibrary()}
-            />
-            <ItemMasterUpdatesPanel
-              changes={pendingLibraryChanges}
-              librarySource={librarySource}
-              today={localDate()}
-              bridge={bridge}
-            />
-            <HistoryPanel shipments={shipments} onClear={() => void clearAll()} />
-          </>
-        ) : reconciliation && draft ? (
-          <>
-            <Card>
-              <CardHeader
-                title="Carrier"
-                description={
-                  keyedCarrier
-                    ? `The CIPL names ${parsed.headers[reconciliation.selectedSet]?.vesselAgent ?? KEYED_CARRIERS[keyedCarrier].label}. ` +
-                      `This shipment is keyed into ${KEYED_CARRIERS[keyedCarrier].application}; no SLI is generated.`
-                    : parsed.headers[reconciliation.selectedSet]?.vesselAgent
-                      ? `The CIPL names ${parsed.headers[reconciliation.selectedSet].vesselAgent}.`
-                      : 'Choose the forwarder this shipment is going to.'
-                }
-                actions={
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setParsed(null)
-                      setError(null)
+              <ItemMasterUpdatesPanel
+                changes={pendingLibraryChanges}
+                librarySource={librarySource}
+                today={localDate()}
+                bridge={bridge}
+              />
+              <HistoryPanel shipments={shipments} onClear={() => void clearAll()} />
+            </>
+          ) : reconciliation && draft ? (
+            <>
+              <Card>
+                <CardHeader
+                  title="Carrier"
+                  description={
+                    keyedCarrier
+                      ? `The CIPL names ${parsed.headers[reconciliation.selectedSet]?.vesselAgent ?? KEYED_CARRIERS[keyedCarrier].label}. ` +
+                        `This shipment is keyed into ${KEYED_CARRIERS[keyedCarrier].application}; no SLI is generated.`
+                      : parsed.headers[reconciliation.selectedSet]?.vesselAgent
+                        ? `The CIPL names ${parsed.headers[reconciliation.selectedSet].vesselAgent}.`
+                        : 'Choose the forwarder this shipment is going to.'
+                  }
+                  actions={
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setParsed(null)
+                        setError(null)
+                      }}
+                    >
+                      Start over
+                    </Button>
+                  }
+                />
+                <CardBody>
+                  <Select
+                    value={carrierId}
+                    aria-label="Carrier"
+                    className="w-auto"
+                    onChange={(e) => {
+                      const next = e.target.value as ShipmentCarrierId
+                      setCarrierId(next)
+                      setSettings((prev) =>
+                        applyCarrierDefaults(
+                          prev,
+                          getAdapter(isKeyedCarrier(next) ? 'nippon-express' : (next as CarrierId)),
+                        ),
+                      )
                     }}
                   >
-                    Start over
-                  </Button>
-                }
-              />
-              <CardBody>
-                <Select
-                  value={carrierId}
-                  aria-label="Carrier"
-                  className="w-auto"
-                  onChange={(e) => {
-                    const next = e.target.value as ShipmentCarrierId
-                    setCarrierId(next)
-                    setSettings((prev) =>
-                      applyCarrierDefaults(
-                        prev,
-                        getAdapter(isKeyedCarrier(next) ? 'nippon-express' : (next as CarrierId)),
-                      ),
-                    )
-                  }}
-                >
-                  {(Object.keys(CARRIER_LABELS) as ShipmentCarrierId[]).map((id) => (
-                    <option key={id} value={id}>
-                      {CARRIER_LABELS[id]}
-                    </option>
-                  ))}
-                </Select>
-              </CardBody>
-            </Card>
+                    {(Object.keys(CARRIER_LABELS) as ShipmentCarrierId[]).map((id) => (
+                      <option key={id} value={id}>
+                        {CARRIER_LABELS[id]}
+                      </option>
+                    ))}
+                  </Select>
+                </CardBody>
+              </Card>
 
-            <ShipmentSummary parsed={parsed} reconciliation={reconciliation} />
-            {/*
-              Always shown, unlike the weights-only panel it replaces. A code can need
-              correcting on any document, and the format that prints weights is the one whose
-              codes there is no library figure to check against.
-            */}
-            <PartOverridesPanel
-              reconciliation={reconciliation}
-              weights={unitWeightsByPart}
-              codes={codesByPart}
-              descriptions={descriptionsByPart}
-              weightsNeeded={!parsed.providesWeights}
-              enteredBy={profile.signerName}
-              onSaveWeight={(part, description, weight) => void savePartWeight(part, description, weight)}
-              onSaveCode={(part, description, code, reason) => void savePartCode(part, description, code, reason)}
-              onSaveDescription={(part, description, text) => void savePartDescription(part, description, text)}
-              onClearCode={(part) => void clearPartCode(part)}
-            />
-            <CommodityTable reconciliation={reconciliation} />
-            <ChecksPanel checks={checks} canGenerate={canGenerate} />
-            <OverridesPanel
-              reconciliation={reconciliation}
-              overrides={overrides}
-              onSave={(record) => void saveOverride(record)}
-              onDelete={(sourceCode) => void removeOverride(sourceCode)}
-            />
-            <ManualFieldsPanel
-              profile={profile}
-              settings={settings}
-              adapter={adapter}
-              onProfileChange={setProfile}
-              onSettingsChange={setSettings}
-            />
-            <OutputPanel
-              adapter={adapter}
-              reconciliation={reconciliation}
-              draft={draft}
-              canGenerate={canGenerate}
-              onGenerated={() => void handleGenerated()}
-              keyedCarrier={keyedCarrier}
-              bridge={bridge}
-              descriptionsByPart={descriptionsByPart}
-              sourceFile={parsed.fileName}
-              excludedSets={parsed.availableSets.filter((set) => set !== reconciliation.selectedSet)}
-            />
-            <HistoryPanel shipments={shipments} onClear={() => void clearAll()} />
+              <ShipmentSummary parsed={parsed} reconciliation={reconciliation} />
+              {/*
+                Always shown, unlike the weights-only panel it replaces. A code can need
+                correcting on any document, and the format that prints weights is the one whose
+                codes there is no library figure to check against.
+              */}
+              <PartOverridesPanel
+                reconciliation={reconciliation}
+                weights={unitWeightsByPart}
+                codes={codesByPart}
+                descriptions={descriptionsByPart}
+                weightsNeeded={!parsed.providesWeights}
+                enteredBy={profile.signerName}
+                onSaveWeight={(part, description, weight) => void savePartWeight(part, description, weight)}
+                onSaveCode={(part, description, code, reason) => void savePartCode(part, description, code, reason)}
+                onSaveDescription={(part, description, text) => void savePartDescription(part, description, text)}
+                onClearCode={(part) => void clearPartCode(part)}
+              />
+              <CommodityTable reconciliation={reconciliation} />
+              <ChecksPanel checks={checks} canGenerate={canGenerate} />
+              <OverridesPanel
+                reconciliation={reconciliation}
+                overrides={overrides}
+                onSave={(record) => void saveOverride(record)}
+                onDelete={(sourceCode) => void removeOverride(sourceCode)}
+              />
+              <ManualFieldsPanel
+                profile={profile}
+                settings={settings}
+                adapter={adapter}
+                onProfileChange={setProfile}
+                onSettingsChange={setSettings}
+              />
+              <OutputPanel
+                adapter={adapter}
+                reconciliation={reconciliation}
+                draft={draft}
+                canGenerate={canGenerate}
+                onGenerated={() => void handleGenerated()}
+                keyedCarrier={keyedCarrier}
+                bridge={bridge}
+                descriptionsByPart={descriptionsByPart}
+                sourceFile={parsed.fileName}
+                excludedSets={parsed.availableSets.filter((set) => set !== reconciliation.selectedSet)}
+              />
+              <HistoryPanel shipments={shipments} onClear={() => void clearAll()} />
+            </>
+          ) : null}
           </>
-        ) : null}
+        )}
       </main>
 
       <footer className="mx-auto max-w-6xl px-5 pb-10 text-xs text-[var(--color-ink-faint)]">
-        Documents are parsed and forms are filled in this browser. Nothing is uploaded. Schedule B data comes from
-        the U.S. Census Bureau AES commodity file.
+        {workflow === 'standard' ? (
+          <>
+            Documents are parsed and forms are filled in this browser. Nothing is uploaded. Schedule B data comes from
+            the U.S. Census Bureau AES commodity file.
+          </>
+        ) : (
+          <>
+            Classification, limits and hazard communication follow the IATA Dangerous Goods Regulations as taught in
+            the Labelmaster <em>Shipping Lithium Batteries — Excepted &amp; Fully Regulated</em> multimodal course.
+            State and operator variations are not held here and must be read separately for every shipment.
+          </>
+        )}
       </footer>
     </div>
   )
