@@ -191,6 +191,18 @@ describe('workbook reading', () => {
     expect(await readXlsx(bytes)).toEqual([['BRACKET, L & R', 'X < Y', 'A']])
   })
 
+  it('leaves an undecodable numeric entity as text rather than throwing', async () => {
+    // `&#abc;` reaches the decimal branch because `abc` is valid hex, and `&#x110000;` names
+    // a code point that does not exist. String.fromCodePoint throws on both, which would
+    // take down the whole import over one bad cell.
+    const bytes = await zip({
+      'xl/workbook.xml': WORKBOOK_XML,
+      'xl/_rels/workbook.xml.rels': RELS_XML,
+      'xl/worksheets/sheet4.xml': sheetXml([['A&#x110000;B', 'C&#abc;D', 'E&#x41;F']]),
+    })
+    expect(await readXlsx(bytes)).toEqual([['A&#x110000;B', 'C&#abc;D', 'EAF']])
+  })
+
   it('rejects a file that is not a workbook', async () => {
     await expect(readXlsx(encoder.encode('this is not a zip'))).rejects.toBeInstanceOf(WorkbookError)
   })

@@ -106,10 +106,25 @@ async function unzip(data: Uint8Array, wanted: (name: string) => boolean): Promi
 
 const ENTITIES: Record<string, string> = { lt: '<', gt: '>', quot: '"', apos: "'", amp: '&' }
 
+/**
+ * A numeric entity whose value is outside Unicode, or not a number at all.
+ *
+ * `String.fromCodePoint` throws on both, and the pattern this runs against is loose enough
+ * to reach them: `&#abc;` matches the decimal branch because `abc` is valid hex, and
+ * `&#x110000;` is a perfectly well-formed entity for a code point that does not exist. Either
+ * would take down the whole import with a `RangeError` about code points, so an entity that
+ * cannot be decoded is left standing as text instead — the same thing an unknown named
+ * entity already does.
+ */
+function codePoint(value: number): string | null {
+  if (!Number.isInteger(value) || value < 0 || value > 0x10ffff) return null
+  return String.fromCodePoint(value)
+}
+
 function decodeXml(text: string): string {
   return text.replace(/&(#x?[0-9a-fA-F]+|[a-z]+);/g, (match, body: string) => {
-    if (body.startsWith('#x') || body.startsWith('#X')) return String.fromCodePoint(parseInt(body.slice(2), 16))
-    if (body.startsWith('#')) return String.fromCodePoint(Number(body.slice(1)))
+    if (body.startsWith('#x') || body.startsWith('#X')) return codePoint(parseInt(body.slice(2), 16)) ?? match
+    if (body.startsWith('#')) return codePoint(Number(body.slice(1))) ?? match
     return ENTITIES[body] ?? match
   })
 }
