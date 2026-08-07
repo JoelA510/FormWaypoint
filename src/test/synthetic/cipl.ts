@@ -282,14 +282,19 @@ function drawSet(doc: PDFDocument, spec: SyntheticCipl, set: string, kind: strin
   let group = ''
 
   for (const [i, line] of spec.lines.entries()) {
-    if (onPage >= perPage) {
-      cursor = startDetailPage(doc, spec, kind, font)
-      onPage = 0
-    }
+    // The heading is drawn *before* the page break is considered, which is what the real
+    // document does: a heading whose block will not fit stays behind on the page it was
+    // reached on, and the block it governs opens the next one. Breaking first instead kept
+    // every heading glued to its block and quietly made the stranded-heading fixture
+    // impossible to produce.
     if (line.commodityGroup && line.commodityGroup !== group) {
       group = line.commodityGroup
       text(cursor.page, group, 72, cursor.y, font)
       cursor.y -= BLOCK_GAP
+    }
+    if (onPage >= perPage) {
+      cursor = startDetailPage(doc, spec, kind, font)
+      onPage = 0
     }
     const draw = kind === 'INVOICE' ? drawInvoiceBlock : drawPackingBlock
     draw(cursor, line, font)

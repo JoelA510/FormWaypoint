@@ -467,10 +467,13 @@ function parseDetailLines(
   }
 
   let carry: CarriedBlock | null = null
+  // Where the last block's own rows stopped, so a heading printed below it can be found.
+  let lastCut = 0
   for (let s = 0; s < starts.length; s++) {
     const from = starts[s]
     const to = s + 1 < starts.length ? starts[s + 1] : rows.length
-    const cut = truncateAtPageTotals(rows, from, to)
+    const cut = truncateAtHeading(rows, from, truncateAtPageTotals(rows, from, to))
+    lastCut = cut
     const block = rows.slice(from, cut)
     group = commodityGroupBefore(rows, from) || group
     const commodityGroup = group
@@ -485,7 +488,12 @@ function parseDetailLines(
     }
     if (line) lines.push(line)
   }
-  return { lines, carry, group }
+
+  // A heading printed below the last block on a page belongs to the first block of the next
+  // one, and nothing on this page will ever look back at it. Shipment vendorA6 ends an invoice
+  // page with `Electrical Conductors` and opens the next with the plugs it heads; without
+  // this they reach the form under the heading of the gaskets three blocks earlier.
+  return { lines, carry, group: commodityGroupAfter(rows, lastCut) || group }
 }
 
 /**
@@ -511,6 +519,25 @@ function truncateAtPageTotals(rows: TextRow[], from: number, to: number): number
 }
 
 /**
+ * A block ends where the next commodity's heading begins, not at the next block's first row.
+ *
+ * The document separates blocks with a horizontal rule, but the text extractor strips those,
+ * so the heading is the only thing left standing between one block and the next — and slicing
+ * to the next line start swept it into the block above. `descriptionFrom` takes the longest
+ * free text it can find, so any heading longer than the part's own description won.
+ *
+ * Shipment vendorA6 filed `Glass Cartridge Fuses <=1000V` against a flash drive, `Elect.
+ * Apparatus, Other` against a processing module, and `Robot, not elsewhere spec` against a
+ * packet of oil — each one the *next* commodity's heading, attached to goods it had nothing
+ * to do with. Nothing inside a block can be mistaken for a heading: every row of one carries
+ * at least two items, and a heading stands alone.
+ */
+function truncateAtHeading(rows: TextRow[], from: number, to: number): number {
+  for (let i = from + 1; i < to; i++) if (isCommodityGroup(rows[i])) return i
+  return to
+}
+
+/**
  * The commodity heading (`Electrical Conductors`) printed just above a line block.
  *
  * Constrained to the detail column. The first block on a page has the consignee's address
@@ -523,14 +550,45 @@ function truncateAtPageTotals(rows: TextRow[], from: number, to: number): number
 const GROUP_COLUMN_MIN = 60
 const GROUP_COLUMN_MAX = 200
 
+/**
+ * A heading is free text in the detail column, starting with a letter.
+ *
+ * The character class used to be letters and a little punctuation, which quietly rejected two
+ * of the headings on a real shipment: `Glass Cartridge Fuses <=1000V` for its digits and
+ * comparison, `Elect. Apparatus, Other` for its full stop. A rejected heading is not a blank
+ * one — the previous heading stays in force — so a fuse was filed as `Flash drive` and a
+ * printed circuit board as `RFID system`, each carrying the commodity above it.
+ *
+ * So the class is wide, and the *guards* do the discriminating: one item, indented into the
+ * detail column, not a label, not a classification, and at least one letter after the first.
+ * Those are properties of where the text sits, which is what actually distinguishes a heading
+ * from an address or a code.
+ */
+const GROUP_TEXT = /^[A-Za-z][A-Za-z0-9 ,.&/'()<>=+%-]*[A-Za-z][A-Za-z0-9 ,.&/'()<>=+%-]*$/
+
+function isCommodityGroup(row: TextRow): string {
+  const items = row.items
+  if (items.length !== 1) return ''
+  const { str: text, x } = items[0]
+  if (x < GROUP_COLUMN_MIN || x > GROUP_COLUMN_MAX) return ''
+  if (!text || text.length < 3 || text.endsWith(':') || CLASSIFICATION.test(text)) return ''
+  if (isTotalsRow(text)) return ''
+  return GROUP_TEXT.test(text) ? text : ''
+}
+
 function commodityGroupBefore(rows: TextRow[], startIdx: number): string {
   for (let i = startIdx - 1; i >= 0 && i >= startIdx - 4; i--) {
-    const items = rows[i].items
-    if (items.length !== 1) continue
-    const { str: text, x } = items[0]
-    if (x < GROUP_COLUMN_MIN || x > GROUP_COLUMN_MAX) continue
-    if (!text || text.endsWith(':') || CLASSIFICATION.test(text)) continue
-    if (/^[A-Za-z][A-Za-z ,&/-]{2,}$/.test(text)) return text
+    const heading = isCommodityGroup(rows[i])
+    if (heading) return heading
+  }
+  return ''
+}
+
+/** The heading left stranded at the foot of a page, whose block begins on the next one. */
+function commodityGroupAfter(rows: TextRow[], endIdx: number): string {
+  for (let i = rows.length - 1; i >= endIdx; i--) {
+    const heading = isCommodityGroup(rows[i])
+    if (heading) return heading
   }
   return ''
 }
@@ -657,14 +715,28 @@ function parseInvoiceBlock(
 }
 
 /**
- * The per-line description is the longest free-text cell in the block that is not the part
- * number or a code. On the invoice it is printed twice on the last row.
+ * The description column, which is where a description is and nothing else is.
+ *
+ * Taking the longest free text anywhere in the block was the original rule, and it is how a
+ * commodity heading at the left margin, or the trade terms at the right, could end up
+ * describing the goods — both are text, and either can be longer than a terse part
+ * description. Bounding the search to the column makes those two impossible rather than
+ * merely unlikely, which matters because neither one failed a check: a shipment described as
+ * `FOB Origin - Collect` generates and files exactly as cleanly as a correct one.
+ */
+const DESCRIPTION_COLUMN_MIN = 150
+const DESCRIPTION_COLUMN_MAX = 400
+
+/**
+ * The per-line description is the longest free-text cell in the description column that is
+ * not the part number or a code. On the invoice it is printed twice on the last row.
  */
 function descriptionFrom(block: TextRow[], valueRowIdx: number, partNumber: string): string {
   let best = ''
   for (let i = Math.max(valueRowIdx, 1); i < block.length; i++) {
     for (const item of block[i].items) {
       const s = item.str
+      if (item.x < DESCRIPTION_COLUMN_MIN || item.x >= DESCRIPTION_COLUMN_MAX) continue
       if (s === partNumber || CLASSIFICATION.test(s) || parseNumber(s) !== null) continue
       if (s.length > best.length && /[a-z]/i.test(s)) best = s
     }
