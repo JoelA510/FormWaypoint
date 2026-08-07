@@ -1088,3 +1088,17 @@ describe('one part printed two ways', () => {
     expect(rows[0]).toMatchObject({ description: 'Braided copper cable', describedByOperator: true })
   })
 })
+
+describe('one wording printed two ways', () => {
+  it('is not offered as an alternative to itself', () => {
+    // The part number is stripped off the front of a description because it is already its
+    // own column. Counting the two spellings apart put `document also said: CABLE ASSY`
+    // beside a description reading exactly that.
+    const both = [
+      line({ id: 'a', partNumber: 'P-1', description: 'CABLE ASSY', quantity: 3 }),
+      line({ id: 'b', partNumber: 'P-1', description: 'P-1 CABLE ASSY', quantity: 1 }),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(both, []), draft()).commodities
+    expect(rows[0]).toMatchObject({ description: 'CABLE ASSY', otherDescriptions: [] })
+  })
+})

@@ -478,7 +478,7 @@ function parseDetailLines(
     // Everything up to and including the previous block's last structural row belongs to it.
     // On the first block that is the *carried* block, whose tail finishes on this page above
     // it — without this it lends its own description row forward as this block's heading.
-    const previousStart = s === 0 ? (carryIn ? 0 : -1) : starts[s - 1]
+    const previousStart = s === 0 ? (carryIn ? detailRowsBegin(rows, from) : -1) : starts[s - 1]
     const floor = previousStart === -1 ? -1 : blockEndsAt(rows, previousStart, from, ctx.kind)
     group = commodityGroupBefore(rows, from, floor) || group
     const commodityGroup = group
@@ -654,9 +654,21 @@ function blockEndsAt(rows: TextRow[], from: number, to: number, kind: DocumentKi
   return kind === 'INVOICE' ? figures + 1 : figures
 }
 
+/**
+ * Where a page's detail rows begin — below the column headers.
+ *
+ * `continuationRows` uses the same marker to decide what a carried block's tail is. Anchoring
+ * a carried block at row 0 instead let page furniture stand in for its figures: `PAGE 2 OF 3`
+ * is two numbers on the right of the page, which is all `figureRowIn` looks for.
+ */
+function detailRowsBegin(rows: TextRow[], upTo: number): number {
+  for (let i = 0; i < upTo; i++) if (/MARKS & NOS\./i.test(rowText(rows[i]))) return i + 1
+  return 0
+}
+
 /** The row carrying a block's quantity, price and value. */
 function figureRowIn(rows: TextRow[], from: number, to: number): number {
-  for (let i = from + 1; i < to; i++) {
+  for (let i = from; i < to; i++) {
     const numeric = rows[i].items.filter((it) => it.x > FIGURE_COLUMN_MIN && parseNumber(it.str) !== null)
     if (numeric.length >= 2) return i
   }
@@ -836,10 +848,14 @@ function descriptionFrom(block: TextRow[], valueRowIdx: number, partNumber: stri
   }
 
   // Its own column first, which is where this layout prints it — twice, in fact, and the
-  // longer of the two cells is the fuller wording. Failing that, anywhere left of the
-  // figures: a block that prints its description alone at the left margin still has one, and
-  // a blank commodity description passes every check there is.
-  return longestIn(DESCRIPTION_COLUMN_MIN, DESCRIPTION_COLUMN_MAX) || longestIn(0, FIGURE_COLUMN_MIN)
+  // longer of the two cells is the fuller wording. Failing that, the detail column: a block
+  // that prints its description alone at the left margin still has one, and a blank commodity
+  // description passes every check there is.
+  //
+  // The fallback stops at the same left edge headings do. Reaching further took in MARKS &
+  // NOS. at x=24, so a block with no description in its own column was declared as its
+  // shipping marks — `C/NO. ONE OF TWO` on an export declaration.
+  return longestIn(DESCRIPTION_COLUMN_MIN, DESCRIPTION_COLUMN_MAX) || longestIn(GROUP_COLUMN_MIN, FIGURE_COLUMN_MIN)
 }
 
 function parsePackingBlock(

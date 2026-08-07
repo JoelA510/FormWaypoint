@@ -170,6 +170,49 @@ describe('the block above', () => {
   })
 })
 
+describe('what the description fallback must not reach', () => {
+  it('never takes the shipping marks', () => {
+    // MARKS & NOS. is at x=24 and a description at the left margin is at x=72. A fallback
+    // wide enough for the second took the first, declaring the goods as `C/NO. ONE OF TWO`.
+    const pages = [
+      headerPage(),
+      detailPage(2, [
+        row(['00000001OP0010', 72], ['00000001OP0010', 198], ['1', 246]),
+        row(['0001', 72], ['00000001X', 96], ['Japan', 198]),
+        row(['8544.42.0000', 72], ['PCS', 408], ['USD', 486], ['USD', 564]),
+        row(['C/NO. ONE OF TWO', 24], ['MODEL-A', 72], ['10000-0001', 192], ['2', 421], ['10.000', 472], ['20.000', 550]),
+        row(['C/NO. ONE OF TWO', 24]),
+      ]),
+    ]
+    expect(invoiceLines(pages)[0].description).not.toContain('C/NO')
+  })
+})
+
+describe('page furniture above a carried block', () => {
+  it('does not stand in for the block’s own figures', () => {
+    // `PAGE 2 OF 3` is two numbers on the right of the page, which is all the figure-row scan
+    // looks for. Anchoring the carried block at row 0 let it satisfy that scan first, putting
+    // the floor above the carried block's description — which then became the next heading.
+    const first = detailPage(2, [
+      row(['00000001OP0010', 72], ['00000001OP0010', 198], ['1', 246]),
+      row(['0001', 72], ['00000001X', 96], ['Japan', 198]),
+    ])
+    const second: TextPage = (() => {
+      y = 700
+      return page(3, [
+        row(['INVOICE NO', 36], ['S0000009', 90], ['PAGE', 500], ['2', 545], ['3', 570]),
+        row(['INVOICE', 276]),
+        row(['MARKS & NOS.', 24], ['DESCRIPTION OF GOODS', 144], ['ORIGIN', 276], ['QUANTITY', 390]),
+        row(['8544.42.0000', 72], ['PCS', 408], ['USD', 486], ['USD', 564]),
+        row(['5610', 24], ['MODEL-A', 72], ['10000-0001', 192], ['2', 421], ['10.000', 472], ['20.000', 550]),
+        row(['CBL, OS32C-CBL-30M', 72]),
+        ...block('00000002OP0010', '10000-0002', '4016.93.0000', 'MODEL-B', 'O-RING'),
+      ])
+    })()
+    expect(invoiceLines([headerPage(), first, second]).map((l) => l.commodityGroup)).toEqual(['', ''])
+  })
+})
+
 describe('a model code printed where a heading goes', () => {
   it('is not read as one, whether it carries a space or not', () => {
     // `R6A 7833D` has a space and `SA34-F1` does not; both are models. What separates them

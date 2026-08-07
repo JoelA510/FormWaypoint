@@ -412,7 +412,16 @@ function fromDocument(group: MergedLine[], source: 'document' | 'heading'): { ra
       ? text.slice(part.length).replace(/^[\s:,-]+/, '').trim() || text
       : text
 
-  return { ranked: [...byText.entries()].sort((a, b) => b[1] - a[1]).map(([text]) => strip(text)) }
+  // Stripped before the tally, not after. `40649-0300 CABLE ASSY` and `CABLE ASSY` are the
+  // same wording printed two ways, and counting them apart put `document also said: CABLE
+  // ASSY` beside a description reading exactly that.
+  const stripped = new Map<string, number>()
+  for (const [text, quantity] of byText) {
+    const key = strip(text)
+    stripped.set(key, (stripped.get(key) ?? 0) + quantity)
+  }
+
+  return { ranked: [...stripped.entries()].sort((a, b) => b[1] - a[1]).map(([text]) => text) }
 }
 
 export interface KeyingInputs {
