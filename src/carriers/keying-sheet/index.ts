@@ -124,6 +124,21 @@ export interface KeyingSheet {
     documentCurrency: string
     excludedSets: string
   }
+  /**
+   * The shipment's own figures, from the invoice lines and unrounded.
+   *
+   * Separate from `totals`, which adds up the rows as printed. Both are true and they are not
+   * always equal: rounding each row to two decimals and summing is not the same as summing
+   * and rounding once, and which one is wanted depends on whether you are checking the
+   * application's running total or the shipment. Printing only the layout-dependent one would
+   * let a figure that moves with a dropdown be read as the filed value.
+   */
+  filed: {
+    quantity: number
+    customsValue: string
+    netWeightKg: string
+    grossWeightKg: string | null
+  }
   /** Values the operator must supply; the CIPL does not contain them. */
   manualFields: string[]
 }
@@ -220,6 +235,26 @@ function groupKeyFor(line: MergedLine, mode: GroupingMode, index: number, correc
 }
 
 /**
+ * The unit to key, which is a single value wherever the document means a single thing.
+ *
+ * `PCS` and `EA` canonicalise alike, and `df-code` groups on the canonical unit — so a row
+ * could print `PCS, EA` into a field that holds one value, disagreeing with the SLI row it
+ * exists to be checked against. Where every line agrees canonically the first printed form is
+ * used, matching what `aggregateLines` puts in `sourceUom`. Where they genuinely differ the
+ * row says so rather than picking one.
+ */
+function unitFor(group: MergedLine[]): string {
+  const canonical = new Set(group.map((l) => canonicalUnit(l.uom) ?? l.uom.trim().toUpperCase()))
+  return canonical.size === 1 ? group[0].uom : joinDistinct(group.map((l) => l.uom))
+}
+
+/** `MY - Malaysia`, or the name and a prompt where no code could be found for it. */
+function originLabel(origin: string): string {
+  const { known } = toIsoAlpha2(origin)
+  return known ? toCountryPickerLabel(origin) : `${origin} — no code found, enter it`
+}
+
+/**
  * Distinct values in first-seen order, joined.
  *
  * A row that spans several parts or origins says so rather than showing the first and
@@ -255,7 +290,6 @@ function groupForKeying(
     // no origin and whose second says Japan is a Japanese row, and taking `first` would
     // give it an empty country cell with nothing prompting anybody to fill it in.
     const origins = [...new Set(group.map((l) => l.countryOfOrigin.trim()).filter(Boolean))]
-    const country = toIsoAlpha2(origins[0] ?? '')
     const code = codeFor(first, corrections)
     // A saved wording is keyed to a part, so it only applies where the row is one part.
     const parts = [...new Set(group.map((l) => l.partNumber.trim()).filter(Boolean))]
@@ -272,15 +306,18 @@ function groupForKeying(
       // sheet must agree — an operator keying `8544491000` into a field expecting
       // `8544.49.1000` is the transposition this whole sheet exists to prevent.
       harmonizedCode: formatScheduleB(code),
-      countryOfManufacture: origins.length > 1 ? joinDistinct(origins.map((o) => toIsoAlpha2(o).code)) : country.code,
-      countryLabel: origins.length > 1 ? joinDistinct(origins.map(toCountryPickerLabel)) : toCountryPickerLabel(origins[0] ?? ''),
+      countryOfManufacture: joinDistinct(origins.map((o) => toIsoAlpha2(o).code)),
+      // One label per origin, each carrying its own verdict. A row of `MY, Ruritania` under a
+      // single "no code found" note loses which of the two resolved, and the operator has to
+      // work out for themselves that Malaysia was fine.
+      countryLabel: joinDistinct(origins.map(originLabel)),
       // Read off every origin in the row, not the first one. `part-code` merges origins by
       // design, so a part shipped 2 from the US and 3 from Japan is one row — and stating D
       // for it would declare three foreign pieces domestic.
       domesticForeign: joinDistinct(group.map((l) => domesticForeign(l.countryOfOrigin))),
       needsCountryCode: origins.some((o) => !toIsoAlpha2(o).known),
       quantity: String(roundTo(quantity, 3)),
-      unitOfMeasure: joinDistinct(group.map((l) => l.uom)),
+      unitOfMeasure: unitFor(group),
       // Derived from the group's own total rather than copied off one line, so the unit
       // price and the total beside it can never disagree.
       unitValue: quantity ? (total / quantity).toFixed(6) : '',
@@ -600,6 +637,12 @@ export function buildKeyingSheet(
       shipmentWeightLb: commodities.reduce((sum, c) => sum + Number(c.weightLb || 0), 0).toFixed(2),
       shipmentWeightKg: roundTo(printedKg, 3).toFixed(3),
     },
+    filed: {
+      quantity: roundTo(mergedLines.reduce((sum, l) => sum + l.quantity, 0), 3),
+      customsValue: mergedLines.reduce((sum, l) => sum + (l.extendedValue ?? 0), 0).toFixed(2),
+      netWeightKg: roundTo(netKg, 3).toFixed(3),
+      grossWeightKg: header.totalGrossWeightKg == null ? null : roundTo(header.totalGrossWeightKg, 3).toFixed(3),
+    },
     provenance: {
       sourceFile: sourceFile ?? '',
       documentSet: reconciliation.selectedSet,
@@ -678,8 +721,10 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
         return row.partNumber
       // The code the commodity record stores, and the name the picker lists, together: an
       // operator given only one of the two has to translate before they can type anything.
+      // `countryLabel` already carries a per-origin verdict, so a mixed row keeps the picker
+      // name for the origins that did resolve.
       case 'countryOfManufacture':
-        return row.needsCountryCode ? `${row.countryOfManufacture} — no code found, enter it` : row.countryLabel
+        return row.countryLabel
       case 'domesticForeign':
         return row.domesticForeign
       case 'harmonizedCode':
@@ -722,10 +767,15 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
    * summing unit prices down a column is a figure that means nothing.
    */
   const TOTALLED = new Set<CommodityColumnId>(['quantity', 'totalValue', 'weightLb', 'weightKg'])
-  // The word goes in the leftmost column that is not itself a total, so it never displaces
-  // a figure — and is simply absent if every chosen column carries one.
-  const labelColumn = columns.find((id) => !TOTALLED.has(id))
+  // The word goes in the leftmost column that is not itself a total, so it never displaces a
+  // figure. Where every chosen column carries one it takes the first anyway: an unlabelled
+  // row of figures at the foot of a grid is indistinguishable from another commodity, and
+  // somebody keys it. The figure it displaces is not lost — every total is written out again
+  // on the Notes tab.
+  const labelColumn = columns.find((id) => !TOTALLED.has(id)) ?? columns[0]
+  const labelDisplacesAFigure = !columns.some((id) => !TOTALLED.has(id))
   const totalFor = (id: CommodityColumnId): CellValue => {
+    if (labelDisplacesAFigure && id === labelColumn) return 'TOTAL'
     switch (id) {
       case 'quantity':
         return sheet.totals.quantity
@@ -788,7 +838,19 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
           : '') +
         'Rows noted "your wording" carry a description saved against that part. Nothing here is composed by the application.',
     ],
-    ['Check', `${sheet.totals.commodities} commodities · ${sheet.totals.quantity} pcs · ${sheet.totals.customsValue} USD · ${sheet.totals.shipmentWeightLb} lb · ${sheet.totals.shipmentWeightKg} kg`],
+    [
+      'Check',
+      `This sheet: ${sheet.totals.commodities} commodities · ${sheet.totals.quantity} pcs · ` +
+        `${sheet.totals.customsValue} USD · ${sheet.totals.shipmentWeightLb} lb · ${sheet.totals.shipmentWeightKg} kg. ` +
+        'Those are the printed rows added up, so the last row of the grid always equals the column above it.',
+    ],
+    [
+      'Shipment as filed',
+      `${sheet.filed.quantity} pcs · ${sheet.filed.customsValue} USD · ${sheet.filed.netWeightKg} kg net` +
+        `${sheet.filed.grossWeightKg ? ` · ${sheet.filed.grossWeightKg} kg gross` : ''}. ` +
+        'Taken from the invoice lines rather than the printed rows, so it does not move when the grouping ' +
+        'does. Where it differs from the line above, the difference is rounding a row at a time.',
+    ],
   ]
 
   if (sheet.manualFields.length) {

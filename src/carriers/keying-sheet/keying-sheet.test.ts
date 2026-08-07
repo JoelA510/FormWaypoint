@@ -925,3 +925,111 @@ describe('figures that must not move when the layout does', () => {
     expect(rows).toHaveLength(2)
   })
 })
+
+describe('a grid that says what its last row is', () => {
+  it('labels the TOTAL row even when every chosen column is a figure', () => {
+    // An unlabelled row of numbers at the foot of a grid is indistinguishable from another
+    // commodity, and somebody keys it.
+    const rows = keyingSheetToWorkbook(
+      buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+        options: { columns: ['quantity', 'totalValue'] },
+      }),
+    )[0].rows
+    expect(rows.at(-1)![0]).toBe('TOTAL')
+  })
+
+  it('writes every total out again on the Notes tab, so the displaced figure is not lost', () => {
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+      options: { columns: ['quantity', 'totalValue'] },
+    })
+    const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
+    expect(notes.Check).toContain('2 pcs')
+    expect(notes.Check).toContain('284.00 USD')
+  })
+})
+
+describe('figures that move with the layout, and figures that must not', () => {
+  // Three lines whose per-row rounding does not survive being summed: 0.005 each rounds to
+  // 0.01, so the printed column adds to 0.03 against a shipment value of 0.015.
+  const pennies = [
+    line({ id: 'a', partNumber: 'P-1', quantity: 1, extendedValue: 0.005, netWeightKg: 0 }),
+    line({ id: 'b', partNumber: 'P-2', quantity: 1, extendedValue: 0.005, netWeightKg: 0 }),
+    line({ id: 'c', partNumber: 'P-3', quantity: 1, extendedValue: 0.005, netWeightKg: 0 }),
+  ]
+
+  it('states the shipment as filed, unmoved by the grouping', () => {
+    const filedFor = (grouping: GroupingMode) =>
+      buildKeyingSheet('fedex-ship-manager', fixture(pennies, []), draft(), { options: { grouping } }).filed
+    expect(filedFor('line').customsValue).toBe(filedFor('df-code').customsValue)
+    expect(filedFor('line').customsValue).toBe(filedFor('part-origin-code').customsValue)
+  })
+
+  it('still makes the TOTAL row the sum of the rows above it', () => {
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(pennies, []), draft(), {
+      options: { grouping: 'line', columns: ['partNumber', 'totalValue'] },
+    })
+    const rows = keyingSheetToWorkbook(sheet)[0].rows
+    const printed = rows.slice(1, -1).reduce((sum, r) => sum + Number(r[1]), 0)
+    expect(rows.at(-1)![1]).toBeCloseTo(printed, 10)
+  })
+
+  it('says both figures on the Notes tab rather than only the one that moves', () => {
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(pennies, []), draft(), {
+      options: { grouping: 'line' },
+    })
+    const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
+    // The two differ precisely because one rounds a row at a time; both are stated.
+    expect(notes.Check).toContain('0.03 USD')
+    expect(notes['Shipment as filed']).not.toContain('0.03 USD')
+  })
+})
+
+describe('the country column on a row that merged origins', () => {
+  const mixed = [
+    line({ id: 'a', partNumber: 'P-1', countryOfOrigin: 'Malaysia' }),
+    line({ id: 'b', partNumber: 'P-1', countryOfOrigin: 'Ruritania' }),
+  ]
+
+  it('keeps the picker name for the origin that resolved', () => {
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(mixed, []), draft(), {
+      options: { grouping: 'part-code' },
+    })
+    const cell = String(keyingSheetToWorkbook(sheet)[0].rows[1][1])
+    expect(cell).toContain('MY - Malaysia')
+    expect(cell).toContain('Ruritania — no code found, enter it')
+  })
+
+  it('still flags the row as needing a code', () => {
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(mixed, []), draft(), {
+      options: { grouping: 'part-code' },
+    }).commodities
+    expect(rows[0].needsCountryCode).toBe(true)
+  })
+})
+
+describe('the unit column', () => {
+  it('prints one unit where the document meant one thing by two spellings', () => {
+    // PCS and EA canonicalise alike, and df-code groups on the canonical unit — so the row
+    // would otherwise put `PCS, EA` in a field that holds a single value.
+    const spellings = [
+      line({ id: 'a', countryOfOrigin: 'Japan', uom: 'PCS' }),
+      line({ id: 'b', countryOfOrigin: 'Japan', uom: 'EA' }),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(spellings, []), draft(), {
+      options: { grouping: 'df-code' },
+    }).commodities
+    expect(rows).toHaveLength(1)
+    expect(rows[0].unitOfMeasure).toBe('PCS')
+  })
+})
+
+describe('a stored layout that is hostile rather than merely stale', () => {
+  it('does not accept an inherited property as a grouping mode', () => {
+    expect(withDefaults({ grouping: 'constructor' as GroupingMode }).grouping).toBe(
+      DEFAULT_KEYING_OPTIONS.grouping,
+    )
+    expect(withDefaults({ descriptionSource: 'toString' as DescriptionSource }).descriptionSource).toBe(
+      DEFAULT_KEYING_OPTIONS.descriptionSource,
+    )
+  })
+})

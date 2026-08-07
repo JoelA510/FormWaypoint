@@ -157,9 +157,11 @@ export function withDefaults(options?: Partial<KeyingOptions>): KeyingOptions {
   const grouping = options?.grouping
   const descriptionSource = options?.descriptionSource
   return {
-    grouping: grouping && grouping in GROUPING_LABELS ? grouping : DEFAULT_KEYING_OPTIONS.grouping,
+    // `Object.hasOwn`, not `in`: a stored `"constructor"` satisfies `in` against any object
+    // literal and would reach the label tables as a function.
+    grouping: grouping && Object.hasOwn(GROUPING_LABELS, grouping) ? grouping : DEFAULT_KEYING_OPTIONS.grouping,
     descriptionSource:
-      descriptionSource && descriptionSource in DESCRIPTION_LABELS
+      descriptionSource && Object.hasOwn(DESCRIPTION_LABELS, descriptionSource)
         ? descriptionSource
         : DEFAULT_KEYING_OPTIONS.descriptionSource,
     columns: columns.length ? columns : DEFAULT_KEYING_OPTIONS.columns,

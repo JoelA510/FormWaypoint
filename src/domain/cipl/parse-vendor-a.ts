@@ -534,14 +534,20 @@ function truncateAtPageTotals(rows: TextRow[], from: number, to: number): number
 /**
  * Headings and descriptions live in disjoint columns, and that is the whole guarantee.
  *
- * These windows must not overlap `DESCRIPTION_COLUMN_MIN`..`MAX`. That is what makes "a
- * heading can never be read as a description" a property of the layout rather than a hope
- * about relative string lengths — the original bug was `descriptionFrom` taking the longest
- * text anywhere in the block, and bounding both searches to their own column is the fix.
- * Real headings sit at x≈72 and real descriptions at x≈192, so there is room either side.
+ * Both windows are measured off the document, not derived from each other: the `MARKS & NOS.`
+ * column header sits at x=24 and headings indent to x≈72, while `DESCRIPTION OF GOODS` is at
+ * x=144 and the descriptions under it at x≈192. The boundary goes in the gap between them.
+ *
+ * Deriving one bound from the other was worse than arbitrary — it looked principled while
+ * putting the description floor above the description column's own left edge, so anything
+ * printed flush to that edge would have been dropped and the line would have reached the form
+ * with no description at all.
+ *
+ * They must stay disjoint. That is what makes "a heading is never read as a description" a
+ * property of the layout rather than a hope about relative string lengths.
  */
 const GROUP_COLUMN_MIN = 60
-const GROUP_COLUMN_MAX = 140
+const GROUP_COLUMN_MAX = 130
 
 /**
  * A heading is free text in the detail column, starting with a letter.
@@ -722,7 +728,8 @@ function parseInvoiceBlock(
  * merely unlikely, which matters because neither one failed a check: a shipment described as
  * `FOB Origin - Collect` generates and files exactly as cleanly as a correct one.
  */
-const DESCRIPTION_COLUMN_MIN = GROUP_COLUMN_MAX + 10
+/** From the `DESCRIPTION OF GOODS` column header at x=144, with room to its left. */
+const DESCRIPTION_COLUMN_MIN = 140
 const DESCRIPTION_COLUMN_MAX = 400
 
 /**

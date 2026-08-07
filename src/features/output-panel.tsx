@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Select } from '../components/ui'
 import { deliver, open as openDelivery, type Delivery } from '../lib/deliver'
 import {
@@ -77,10 +77,15 @@ export function OutputPanel({
 
   // Restored once, then written back on every change. A layout is a way of working, and
   // making somebody re-pick it on each shipment is the friction this panel exists to remove.
+  //
+  // The restore is abandoned if the operator got there first. An IndexedDB read is fast but
+  // not instant, and applying a stored layout over a choice already made would undo it
+  // silently — and, because only `changeOptions` writes, would not even be saved.
+  const chosen = useRef(false)
   useEffect(() => {
     void (async () => {
       const saved = await localStore.getKeyingOptions()
-      if (saved) setOptions(withDefaults(saved))
+      if (saved && !chosen.current) setOptions(withDefaults(saved))
     })()
   }, [])
 
@@ -90,6 +95,7 @@ export function OutputPanel({
   const changeOptions = (update: (current: KeyingOptions) => KeyingOptions) => {
     const next = update(options)
     if (next === options) return
+    chosen.current = true
     setOptions(next)
     void localStore.saveKeyingOptions(next)
   }
