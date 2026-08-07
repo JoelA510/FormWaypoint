@@ -1061,9 +1061,11 @@ describe('a commodity record holds one unit', () => {
 })
 
 describe('one part printed two ways', () => {
+  // Letters on purpose: a part number of digits and hyphens is the same string in either
+  // case, so it cannot tell a case-insensitive key from a case-sensitive one.
   const cases = [
-    line({ id: 'a', partNumber: '40649-0300', quantity: 2, extendedValue: 100 }),
-    line({ id: 'b', partNumber: '40649-0300'.toLowerCase(), quantity: 3, extendedValue: 150 }),
+    line({ id: 'a', partNumber: 'CBL-100a', quantity: 2, extendedValue: 100 }),
+    line({ id: 'b', partNumber: 'CBL-100A', quantity: 3, extendedValue: 150 }),
   ]
 
   it('is one part, because that is how the grouping keys it', () => {
@@ -1071,13 +1073,17 @@ describe('one part printed two ways', () => {
     // spellings in a cell that holds one part number.
     const rows = buildKeyingSheet('fedex-ship-manager', fixture(cases, []), draft()).commodities
     expect(rows).toHaveLength(1)
-    expect(rows[0].partNumber).toBe('40649-0300')
     expect(rows[0].quantity).toBe('5')
+  })
+
+  it('shows the spelling the document used first', () => {
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(cases, []), draft()).commodities
+    expect(rows[0].partNumber).toBe('CBL-100a')
   })
 
   it('still finds the wording saved against it', () => {
     const rows = buildKeyingSheet('fedex-ship-manager', fixture(cases, []), draft(), {
-      descriptionsByPart: { '40649-0300': 'Braided copper cable' },
+      descriptionsByPart: { 'CBL-100A': 'Braided copper cable' },
     }).commodities
     expect(rows[0]).toMatchObject({ description: 'Braided copper cable', describedByOperator: true })
   })

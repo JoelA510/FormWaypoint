@@ -476,7 +476,10 @@ function parseDetailLines(
     const cut = truncateAtPageTotals(rows, from, to)
     const block = rows.slice(from, cut)
     // Everything up to and including the previous block's last structural row belongs to it.
-    const floor = s === 0 ? -1 : blockEndsAt(rows, starts[s - 1], from, ctx.kind)
+    // On the first block that is the *carried* block, whose tail finishes on this page above
+    // it — without this it lends its own description row forward as this block's heading.
+    const previousStart = s === 0 ? (carryIn ? 0 : -1) : starts[s - 1]
+    const floor = previousStart === -1 ? -1 : blockEndsAt(rows, previousStart, from, ctx.kind)
     group = commodityGroupBefore(rows, from, floor) || group
     const commodityGroup = group
     const line = parseBlock(block, commodityGroup, page.pageNumber)
@@ -808,16 +811,35 @@ const DESCRIPTION_COLUMN_MAX = 400
  * not the part number or a code. On the invoice it is printed twice on the last row.
  */
 function descriptionFrom(block: TextRow[], valueRowIdx: number, partNumber: string): string {
-  let best = ''
-  for (let i = Math.max(valueRowIdx, 1); i < block.length; i++) {
-    for (const item of block[i].items) {
-      const s = item.str
-      if (item.x < DESCRIPTION_COLUMN_MIN || item.x >= DESCRIPTION_COLUMN_MAX) continue
-      if (s === partNumber || CLASSIFICATION.test(s) || parseNumber(s) !== null) continue
-      if (s.length > best.length && /[a-z]/i.test(s)) best = s
+  // The block's own rows and no further: figures, then the description row under them. The
+  // slice runs on to the next block's first row, so everything past this point belongs to
+  // the next commodity — including its heading, which is what used to win on length.
+  const from = Math.max(valueRowIdx, 1)
+  const to = Math.min(from + 2, block.length)
+
+  const usable = (item: { str: string; x: number }, min: number, max: number) =>
+    item.x >= min &&
+    item.x < max &&
+    item.str !== partNumber &&
+    !CLASSIFICATION.test(item.str) &&
+    parseNumber(item.str) === null &&
+    /[a-z]/i.test(item.str)
+
+  const longestIn = (min: number, max: number) => {
+    let best = ''
+    for (let i = from; i < to; i++) {
+      for (const item of block[i].items) {
+        if (usable(item, min, max) && item.str.length > best.length) best = item.str
+      }
     }
+    return best
   }
-  return best
+
+  // Its own column first, which is where this layout prints it — twice, in fact, and the
+  // longer of the two cells is the fuller wording. Failing that, anywhere left of the
+  // figures: a block that prints its description alone at the left margin still has one, and
+  // a blank commodity description passes every check there is.
+  return longestIn(DESCRIPTION_COLUMN_MIN, DESCRIPTION_COLUMN_MAX) || longestIn(0, FIGURE_COLUMN_MIN)
 }
 
 function parsePackingBlock(

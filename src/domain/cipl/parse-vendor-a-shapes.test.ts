@@ -119,6 +119,44 @@ describe('the block above', () => {
     expect(invoiceLines(pages).map((l) => l.commodityGroup)).toEqual(['', ''])
   })
 
+  it('keeps that description on the line it belongs to', () => {
+    // Bounding the search to the description column dropped it: the row is at the left
+    // margin, so it was neither a description nor a heading and the line went out blank.
+    // Nothing blocks a blank commodity description.
+    const pages = [
+      headerPage(),
+      detailPage(2, [
+        row(['00000001OP0010', 72], ['00000001OP0010', 198], ['1', 246]),
+        row(['0001', 72], ['00000001X', 96], ['Japan', 198]),
+        row(['8544.42.0000', 72], ['PCS', 408], ['USD', 486], ['USD', 564]),
+        row(['5610', 24], ['MODEL-A', 72], ['10000-0001', 192], ['2', 421], ['10.000', 472], ['20.000', 550]),
+        row(['CBL, OS32C-CBL-30M', 72]),
+        row(['Gaskets', 72]),
+        ...block('00000002OP0010', '10000-0002', '4016.93.0000', 'MODEL-B', 'O-RING'),
+      ]),
+    ]
+    const lines = invoiceLines(pages)
+    expect(lines[0].description).toBe('CBL, OS32C-CBL-30M')
+    // And the heading below it still reaches the block it heads, not the one above.
+    expect(lines.map((l) => l.commodityGroup)).toEqual(['', 'Gaskets'])
+  })
+
+  it('does not lend it forward across a page break either', () => {
+    // The floor was applied from the second block on, so the first block of a page finishing
+    // a carried-over one was searched with no floor at all.
+    const first = detailPage(2, [
+      row(['00000001OP0010', 72], ['00000001OP0010', 198], ['1', 246]),
+      row(['0001', 72], ['00000001X', 96], ['Japan', 198]),
+    ])
+    const second = detailPage(3, [
+      row(['8544.42.0000', 72], ['PCS', 408], ['USD', 486], ['USD', 564]),
+      row(['5610', 24], ['MODEL-A', 72], ['10000-0001', 192], ['2', 421], ['10.000', 472], ['20.000', 550]),
+      row(['CBL, OS32C-CBL-30M', 72]),
+      ...block('00000002OP0010', '10000-0002', '4016.93.0000', 'MODEL-B', 'O-RING'),
+    ])
+    expect(invoiceLines([headerPage(), first, second]).map((l) => l.commodityGroup)).toEqual(['', ''])
+  })
+
   it('still lets a real heading through from the same position', () => {
     const pages = [
       headerPage(),
