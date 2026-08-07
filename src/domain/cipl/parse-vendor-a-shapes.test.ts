@@ -233,6 +233,41 @@ describe('a block whose figures could not be read', () => {
     // And the heading below it is still not swept in, which is what the window was bounding.
     expect(first.description).not.toBe('Gaskets')
   })
+
+  it('is not declared as its country of origin when the origin is the longest text', () => {
+    // `United States` sits in the description column on the line-number row and is longer
+    // than a terse description. The block has already been read for it.
+    const pages = [
+      headerPage(),
+      detailPage(2, [
+        row(['00000001OP0010', 72], ['00000001OP0010', 198], ['1', 246]),
+        row(['0001', 72], ['00000001X', 96], ['United States', 198]),
+        row(['8544.42.0000', 72], ['PCS', 408], ['USD', 486], ['USD', 564]),
+        row(['10000-0001', 72], ['FUSE', 192]),
+        ...block('00000002OP0010', '10000-0002', '4016.93.0000', 'MODEL-B', 'O-RING'),
+      ]),
+    ]
+    expect(invoiceLines(pages)[0]).toMatchObject({ description: 'FUSE', countryOfOrigin: 'United States' })
+  })
+})
+
+describe('a description shorter than the fields printed beside it', () => {
+  it('is not replaced by the model code', () => {
+    // The model sits at the left margin on the figures row, the same column a left-margin
+    // description uses, and `RT6 5450A` is longer than `FUSE`.
+    const pages = [
+      headerPage(),
+      detailPage(2, [
+        row(['00000001OP0010', 72], ['00000001OP0010', 198], ['1', 246]),
+        row(['0001', 72], ['00000001X', 96], ['Japan', 198]),
+        row(['8536.10.0020', 72], ['PCS', 408], ['USD', 486], ['USD', 564]),
+        row(['5610', 24], ['RT6 5450A', 72], ['10000-0001', 192], ['2', 421], ['1.000', 472], ['2.000', 550]),
+        row(['FUSE', 72]),
+        ...block('00000002OP0010', '10000-0002', '4016.93.0000', 'MODEL-B', 'O-RING'),
+      ]),
+    ]
+    expect(invoiceLines(pages)[0]).toMatchObject({ description: 'FUSE', model: 'RT6 5450A' })
+  })
 })
 
 describe('a model code printed where a heading goes', () => {

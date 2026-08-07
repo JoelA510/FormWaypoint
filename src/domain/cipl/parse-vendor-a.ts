@@ -780,7 +780,7 @@ function parseInvoiceBlock(
     }
   }
 
-  const description = descriptionFrom(block, valueRowIdx, partNumber)
+  const description = descriptionFrom(block, valueRowIdx, [partNumber, model, countryOfOrigin])
 
   return {
     id: sourceLineId(ctx.set, 'INV', core),
@@ -831,23 +831,28 @@ const DESCRIPTION_COLUMN_MAX = 400
  * The per-line description is the longest free-text cell in the description column that is
  * not the part number or a code. On the invoice it is printed twice on the last row.
  */
-function descriptionFrom(block: TextRow[], valueRowIdx: number, partNumber: string): string {
+function descriptionFrom(block: TextRow[], valueRowIdx: number, notDescriptions: string[]): string {
   // The block's own rows and no further: figures, then the description row under them. The
   // slice runs on to the next block's first row, so everything past this point belongs to
   // the next commodity — including its heading, which is what used to win on length.
   //
-  // With no figure row there is nothing to anchor on, and a two-row window from row 1 landed
-  // on the line-number row — whose ORIGIN cell sits inside the description column, so an
-  // unreadable block was declared as `Japan`. Then the whole block is read instead, with
-  // heading rows skipped, which is what keeps the next commodity's heading out of it.
+  // With no figure row there is nothing to anchor on, so the whole block is read — with
+  // heading rows skipped, which is what keeps the next commodity's heading out of it, and
+  // with the fields already read excluded, which keeps the origin out.
   const anchored = valueRowIdx > 0
   const from = anchored ? valueRowIdx : 1
   const to = anchored ? Math.min(from + 2, block.length) : block.length
 
+  // Every field the block has already been read for. The part number is not the only one
+  // that shares a column with the description: the model sits at the left margin on the
+  // figures row, and the country of origin sits inside the description column on the
+  // line-number row. Either can be longer than a terse description and win on length —
+  // `RT6 5450A` beat `FUSE`, and `United States` beat it too.
+  const excluded = new Set(notDescriptions.map((t) => t.trim()).filter(Boolean))
   const usable = (item: { str: string; x: number }, min: number, max: number) =>
     item.x >= min &&
     item.x < max &&
-    item.str !== partNumber &&
+    !excluded.has(item.str.trim()) &&
     !CLASSIFICATION.test(item.str) &&
     parseNumber(item.str) === null &&
     /[a-z]/i.test(item.str)
