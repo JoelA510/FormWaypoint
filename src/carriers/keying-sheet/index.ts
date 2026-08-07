@@ -321,7 +321,9 @@ function groupForKeying(
       // Read off every origin in the row, not the first one. `part-code` merges origins by
       // design, so a part shipped 2 from the US and 3 from Japan is one row — and stating D
       // for it would declare three foreign pieces domestic.
-      domesticForeign: joinDistinct(group.map((l) => domesticForeign(l.countryOfOrigin))),
+      // Sorted, so a mixed row reads `D, F` in document order rather than whichever origin
+      // the invoice happened to print first.
+      domesticForeign: joinDistinct(group.map((l) => domesticForeign(l.countryOfOrigin)).sort()),
       needsCountryCode: origins.some((o) => !toIsoAlpha2(o).known),
       quantity: String(roundTo(quantity, 3)),
       unitOfMeasure: unitFor(group),
@@ -845,8 +847,9 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
       'Descriptions',
       `${DESCRIPTION_LABELS[sheet.options.descriptionSource]}. ${DESCRIPTION_NOTES[sheet.options.descriptionSource]} ` +
         (noIndex
-          ? 'The Schedule B dataset is not loaded on this machine, so every row carries the document’s wording ' +
-            'instead. That is a problem with this installation, not with these commodity numbers. '
+          ? `The Schedule B dataset is not loaded on this machine, so ${noIndex} of ` +
+            `${sheet.commodities.length} rows carry the document’s wording instead — every row this app ` +
+            'described. That is a problem with this installation, not with these commodity numbers. '
           : '') +
         (noCode
           ? `${noCode} of ${sheet.commodities.length} rows carry the document's wording instead, because their ` +

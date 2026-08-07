@@ -153,7 +153,10 @@ export const DEFAULT_KEYING_OPTIONS: KeyingOptions = {
  */
 export function withDefaults(options?: Partial<KeyingOptions>): KeyingOptions {
   const known = new Set(COMMODITY_COLUMNS.map((c) => c.id))
-  const columns = options?.columns?.filter((id) => known.has(id)) ?? []
+  // `Array.isArray`, because what comes back from storage can be any shape at all — and a
+  // `TypeError` here surfaces as an unhandled rejection inside the restore, losing the saved
+  // layout without a word.
+  const columns = Array.isArray(options?.columns) ? options.columns.filter((id) => known.has(id)) : []
   const grouping = options?.grouping
   const descriptionSource = options?.descriptionSource
   return {

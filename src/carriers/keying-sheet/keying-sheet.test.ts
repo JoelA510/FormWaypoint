@@ -792,6 +792,8 @@ describe('what the sheet says versus what will be filed', () => {
     const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
     expect(notes.Descriptions).toContain('not loaded on this machine')
     expect(notes.Descriptions).not.toContain('not in the concordance')
+    // Counted, not "every row": a row carrying the operator's own wording is not one of them.
+    expect(notes.Descriptions).toContain('1 of 1 rows')
   })
 
   it('blames the code when the dataset loaded and the code is not in it', () => {
@@ -1100,5 +1102,30 @@ describe('one wording printed two ways', () => {
     ]
     const rows = buildKeyingSheet('fedex-ship-manager', fixture(both, []), draft()).commodities
     expect(rows[0]).toMatchObject({ description: 'CABLE ASSY', otherDescriptions: [] })
+  })
+})
+
+describe('what a stored layout may be, not just what it may say', () => {
+  it('survives a columns value that is not an array', () => {
+    // What comes back from storage can be any shape. A TypeError here surfaces as an
+    // unhandled rejection inside the restore and loses the saved layout without a word.
+    expect(withDefaults({ columns: 'partNumber' as unknown as CommodityColumnId[] }).columns).toEqual(
+      DEFAULT_KEYING_OPTIONS.columns,
+    )
+    expect(withDefaults({ columns: null as unknown as CommodityColumnId[] }).columns).toEqual(
+      DEFAULT_KEYING_OPTIONS.columns,
+    )
+  })
+
+  it('counts a mixed row’s origins in document order', () => {
+    // `D, F`, as the field's own documentation says — not whichever origin printed first.
+    const foreignFirst = [
+      line({ id: 'a', partNumber: 'P-1', countryOfOrigin: 'Japan' }),
+      line({ id: 'b', partNumber: 'P-1', countryOfOrigin: 'United States' }),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(foreignFirst, []), draft(), {
+      options: { grouping: 'part-code' },
+    }).commodities
+    expect(rows[0].domesticForeign).toBe('D, F')
   })
 })

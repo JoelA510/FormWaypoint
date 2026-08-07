@@ -213,6 +213,28 @@ describe('page furniture above a carried block', () => {
   })
 })
 
+describe('a block whose figures could not be read', () => {
+  it('is not declared as its country of origin', () => {
+    // With no figure row to anchor on, a two-row window from the top of the block landed on
+    // the line-number row — whose ORIGIN cell sits inside the description column.
+    const pages = [
+      headerPage(),
+      detailPage(2, [
+        row(['00000001OP0010', 72], ['00000001OP0010', 198], ['1', 246]),
+        row(['0001', 72], ['00000001X', 96], ['Japan', 198]),
+        row(['8544.42.0000', 72], ['PCS', 408], ['USD', 486], ['USD', 564]),
+        row(['10000-0001', 72], ['CABLE ASSY, 30M', 192]),
+        row(['Gaskets', 72]),
+        ...block('00000002OP0010', '10000-0002', '4016.93.0000', 'MODEL-B', 'O-RING'),
+      ]),
+    ]
+    const first = invoiceLines(pages)[0]
+    expect(first.description).toBe('CABLE ASSY, 30M')
+    // And the heading below it is still not swept in, which is what the window was bounding.
+    expect(first.description).not.toBe('Gaskets')
+  })
+})
+
 describe('a model code printed where a heading goes', () => {
   it('is not read as one, whether it carries a space or not', () => {
     // `R6A 7833D` has a space and `SA34-F1` does not; both are models. What separates them

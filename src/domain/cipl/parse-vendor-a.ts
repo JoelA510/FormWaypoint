@@ -651,7 +651,16 @@ function commodityGroupAfter(rows: TextRow[], lastBlockStart: number, carried: b
 function blockEndsAt(rows: TextRow[], from: number, to: number, kind: DocumentKind): number {
   const figures = figureRowIn(rows, from, to)
   if (figures === -1) return from
-  return kind === 'INVOICE' ? figures + 1 : figures
+  if (kind !== 'INVOICE') return figures
+  // The description row. This layout always prints one, and the alternative reading is not
+  // available anyway: a block with no description row is followed directly by the next
+  // block's heading, and one lone prose row after the figures looks exactly like the other.
+  // Nothing in the document separates them.
+  //
+  // So the parser takes the reading that keeps this line's own words on this line. Guessing
+  // the other way costs a commodity its description *and* gives the next one somebody else's
+  // wording; guessing this way costs only a heading, and the heading in force carries on.
+  return figures + 1
 }
 
 /**
@@ -826,8 +835,14 @@ function descriptionFrom(block: TextRow[], valueRowIdx: number, partNumber: stri
   // The block's own rows and no further: figures, then the description row under them. The
   // slice runs on to the next block's first row, so everything past this point belongs to
   // the next commodity — including its heading, which is what used to win on length.
-  const from = Math.max(valueRowIdx, 1)
-  const to = Math.min(from + 2, block.length)
+  //
+  // With no figure row there is nothing to anchor on, and a two-row window from row 1 landed
+  // on the line-number row — whose ORIGIN cell sits inside the description column, so an
+  // unreadable block was declared as `Japan`. Then the whole block is read instead, with
+  // heading rows skipped, which is what keeps the next commodity's heading out of it.
+  const anchored = valueRowIdx > 0
+  const from = anchored ? valueRowIdx : 1
+  const to = anchored ? Math.min(from + 2, block.length) : block.length
 
   const usable = (item: { str: string; x: number }, min: number, max: number) =>
     item.x >= min &&
@@ -840,6 +855,7 @@ function descriptionFrom(block: TextRow[], valueRowIdx: number, partNumber: stri
   const longestIn = (min: number, max: number) => {
     let best = ''
     for (let i = from; i < to; i++) {
+      if (!anchored && isCommodityGroup(block[i])) continue
       for (const item of block[i].items) {
         if (usable(item, min, max) && item.str.length > best.length) best = item.str
       }
