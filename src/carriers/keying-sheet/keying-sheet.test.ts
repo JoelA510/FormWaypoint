@@ -15,6 +15,7 @@ import {
   toIsoAlpha2,
   COMMODITY_COLUMNS,
   DEFAULT_KEYING_OPTIONS,
+  withDefaults,
   type CommodityColumnId,
   type DescriptionSource,
   type GroupingMode,
@@ -861,5 +862,66 @@ describe('what the sheet claims about its own wording', () => {
     ]
     const sheet = buildKeyingSheet('fedex-ship-manager', fixture(two, []), draft())
     expect(String(keyingSheetToWorkbook(sheet)[0].rows[1].at(-1))).toContain('document also said')
+  })
+})
+
+describe('a stored layout that no longer means anything', () => {
+  it('discards a grouping mode it does not recognise', () => {
+    // Options outlive releases. An unknown mode reaches the label tables as a missing key,
+    // and a Notes tab reading "undefined. undefined" is the gentler of the two outcomes.
+    const options = withDefaults({ grouping: 'by-vibes' as GroupingMode })
+    expect(options.grouping).toBe(DEFAULT_KEYING_OPTIONS.grouping)
+  })
+
+  it('discards a description source it does not recognise', () => {
+    const options = withDefaults({ descriptionSource: 'invented' as DescriptionSource })
+    expect(options.descriptionSource).toBe(DEFAULT_KEYING_OPTIONS.descriptionSource)
+  })
+
+  it('keeps the parts of a stored set that are still valid', () => {
+    const options = withDefaults({ grouping: 'df-code', descriptionSource: 'nope' as DescriptionSource })
+    expect(options).toMatchObject({ grouping: 'df-code', descriptionSource: 'document' })
+  })
+})
+
+describe('figures that must not move when the layout does', () => {
+  const shipment = [
+    line({ id: 'a', partNumber: 'P-1', countryOfOrigin: 'Japan', netWeightKg: 0.101, quantity: 1, extendedValue: 10 }),
+    line({ id: 'b', partNumber: 'P-2', countryOfOrigin: 'Japan', netWeightKg: 0.101, quantity: 1, extendedValue: 10 }),
+  ]
+
+  it('keys the same package weight whichever way the table is grouped', () => {
+    // The gross weight goes in the shipment's own weight field. A figure that moves by a
+    // gramme when somebody switches from part rows to D/F rows cannot be checked against a
+    // scale, and it is not a property of the layout.
+    const weightFor = (grouping: GroupingMode) => {
+      const sheet = buildKeyingSheet('fedex-ship-manager', fixture(shipment, []), draft(), { options: { grouping } })
+      return sheet.sections
+        .flatMap((s) => s.fields)
+        .find((f) => f.label.startsWith('Weight'))!.note
+    }
+    expect(weightFor('df-code')).toBe(weightFor('part-origin-code'))
+  })
+
+  it('merges a printed ECCN with the controlled one under df-code, as the SLI does', () => {
+    // aggregateLines resolves `line.eccn || options.eccn`. Bucketing a blank separately
+    // splits a row the filed form merges the moment one line prints the controlled value.
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(shipment.map((l, i) =>
+      i === 0 ? ({ ...l, eccn: 'EAR99' } as MergedLine) : l,
+    ), []), draft(), {
+      options: { grouping: 'df-code' },
+      eccn: 'EAR99',
+    }).commodities
+    expect(rows).toHaveLength(1)
+  })
+
+  it('still splits a line whose printed ECCN differs from the controlled one', () => {
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(shipment.map((l, i) =>
+      i === 0 ? ({ ...l, eccn: '5A992.C' } as MergedLine) : l,
+    ), []), draft(), {
+      options: { grouping: 'df-code' },
+      eccn: 'EAR99',
+    }).commodities
+    expect(rows).toHaveLength(2)
   })
 })

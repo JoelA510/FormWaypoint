@@ -467,13 +467,10 @@ function parseDetailLines(
   }
 
   let carry: CarriedBlock | null = null
-  // Where the last block's own rows stopped, so a heading printed below it can be found.
-  let lastCut = 0
   for (let s = 0; s < starts.length; s++) {
     const from = starts[s]
     const to = s + 1 < starts.length ? starts[s + 1] : rows.length
-    const cut = truncateAtHeading(rows, from, truncateAtPageTotals(rows, from, to))
-    lastCut = cut
+    const cut = truncateAtPageTotals(rows, from, to)
     const block = rows.slice(from, cut)
     group = commodityGroupBefore(rows, from) || group
     const commodityGroup = group
@@ -482,13 +479,7 @@ function parseDetailLines(
     // A block that reaches the foot of the page without its figures has not ended — it is
     // continued overleaf. Emitting it here would file a line with no weight, and drop the
     // rest of it on the floor.
-    //
-    // The test is incompleteness alone, not where the block was cut. `cut` used to be the
-    // page end whenever a block ran off it; it can now stop at a heading, so requiring
-    // `cut === rows.length` would drop the tail of any block a heading-shaped row landed
-    // inside. A last block that is genuinely unfinished and does not continue is still
-    // reported — by the warning that already exists for exactly that.
-    if (line && s === starts.length - 1 && !isComplete(line, ctx.kind)) {
+    if (line && s === starts.length - 1 && cut === rows.length && !isComplete(line, ctx.kind)) {
       carry = { rows: block, commodityGroup, page: page.pageNumber, set: ctx.set, kind: ctx.kind }
       continue
     }
@@ -504,9 +495,7 @@ function parseDetailLines(
   // new place: a page with no blocks at all is a header page, whose address block sits in the
   // detail column and reads exactly like a heading, and the text below the totals row is the
   // page footer. Only the gap between the last block and the totals can hold a heading.
-  const nextGroup = starts.length
-    ? commodityGroupAfter(rows, lastCut, truncateAtPageTotals(rows, lastCut - 1, rows.length))
-    : ''
+  const nextGroup = starts.length ? commodityGroupAfter(rows, starts[starts.length - 1]) : ''
   return { lines, carry, group: nextGroup || group }
 }
 
@@ -533,25 +522,6 @@ function truncateAtPageTotals(rows: TextRow[], from: number, to: number): number
 }
 
 /**
- * A block ends where the next commodity's heading begins, not at the next block's first row.
- *
- * The document separates blocks with a horizontal rule, but the text extractor strips those,
- * so the heading is the only thing left standing between one block and the next — and slicing
- * to the next line start swept it into the block above. `descriptionFrom` takes the longest
- * free text it can find, so any heading longer than the part's own description won.
- *
- * Shipment vendorA6 filed `Glass Cartridge Fuses <=1000V` against a flash drive, `Elect.
- * Apparatus, Other` against a processing module, and `Robot, not elsewhere spec` against a
- * packet of oil — each one the *next* commodity's heading, attached to goods it had nothing
- * to do with. Nothing inside a block can be mistaken for a heading: every row of one carries
- * at least two items, and a heading stands alone.
- */
-function truncateAtHeading(rows: TextRow[], from: number, to: number): number {
-  for (let i = from + 1; i < to; i++) if (isCommodityGroup(rows[i])) return i
-  return to
-}
-
-/**
  * The commodity heading (`Electrical Conductors`) printed just above a line block.
  *
  * Constrained to the detail column. The first block on a page has the consignee's address
@@ -561,8 +531,17 @@ function truncateAtHeading(rows: TextRow[], from: number, to: number): number {
  * the description column at x≈72; the address sits out at the x≈24 margin, and the page
  * title further right again.
  */
+/**
+ * Headings and descriptions live in disjoint columns, and that is the whole guarantee.
+ *
+ * These windows must not overlap `DESCRIPTION_COLUMN_MIN`..`MAX`. That is what makes "a
+ * heading can never be read as a description" a property of the layout rather than a hope
+ * about relative string lengths — the original bug was `descriptionFrom` taking the longest
+ * text anywhere in the block, and bounding both searches to their own column is the fix.
+ * Real headings sit at x≈72 and real descriptions at x≈192, so there is room either side.
+ */
 const GROUP_COLUMN_MIN = 60
-const GROUP_COLUMN_MAX = 200
+const GROUP_COLUMN_MAX = 140
 
 /**
  * A heading is free text in the detail column, starting with a letter.
@@ -599,19 +578,17 @@ function commodityGroupBefore(rows: TextRow[], startIdx: number): string {
 }
 
 /**
- * The heading left stranded at the foot of a page, whose block begins on the next one.
+ * The heading left stranded at the very foot of a page, whose block begins on the next one.
  *
- * Scanned downwards and stopping at the first match, because the document prints the heading
- * directly under the block it follows. Searching upwards from the page foot returned the
- * *lowest* heading-shaped row instead — and an intermediate detail page carries no totals row
- * to bound the search, so anything in the page footer would win over the real heading.
+ * Only the last row is considered, and only on a page that had blocks. A page that ends in a
+ * heading ends in *nothing else* — that is what being stranded means. Searching further up
+ * finds the page footer instead, and an intermediate detail page has no totals row to bound
+ * the search with; the heading is what `aggregateLines` writes as the SLI row description, so
+ * a footer reaching it puts the trade terms on an export declaration.
  */
-function commodityGroupAfter(rows: TextRow[], from: number, to: number): string {
-  for (let i = from; i < Math.min(to, rows.length); i++) {
-    const heading = isCommodityGroup(rows[i])
-    if (heading) return heading
-  }
-  return ''
+function commodityGroupAfter(rows: TextRow[], after: number): string {
+  const last = rows.length - 1
+  return last > after ? isCommodityGroup(rows[last]) : ''
 }
 
 interface BlockCore {
@@ -745,7 +722,7 @@ function parseInvoiceBlock(
  * merely unlikely, which matters because neither one failed a check: a shipment described as
  * `FOB Origin - Collect` generates and files exactly as cleanly as a correct one.
  */
-const DESCRIPTION_COLUMN_MIN = 150
+const DESCRIPTION_COLUMN_MIN = GROUP_COLUMN_MAX + 10
 const DESCRIPTION_COLUMN_MAX = 400
 
 /**

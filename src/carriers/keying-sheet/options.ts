@@ -144,18 +144,24 @@ export const DEFAULT_KEYING_OPTIONS: KeyingOptions = {
 }
 
 /**
- * Fills in anything a caller left out, and drops any column id it does not recognise.
+ * Fills in anything a caller left out, and discards anything it does not recognise.
  *
- * Options are held in IndexedDB between sessions, so a stored set can outlive the column it
- * names. A column that no longer exists must not put an empty heading on a sheet somebody is
- * keying from.
+ * Options are held in IndexedDB between sessions, so a stored set can outlive any name in it
+ * — a column, a grouping mode, a description source. Every field is checked against what
+ * exists now, not just the columns: an unknown grouping reaches the label tables as a missing
+ * key, and a Notes tab reading "undefined. undefined" is the better of the two outcomes.
  */
 export function withDefaults(options?: Partial<KeyingOptions>): KeyingOptions {
   const known = new Set(COMMODITY_COLUMNS.map((c) => c.id))
   const columns = options?.columns?.filter((id) => known.has(id)) ?? []
+  const grouping = options?.grouping
+  const descriptionSource = options?.descriptionSource
   return {
-    grouping: options?.grouping ?? DEFAULT_KEYING_OPTIONS.grouping,
-    descriptionSource: options?.descriptionSource ?? DEFAULT_KEYING_OPTIONS.descriptionSource,
+    grouping: grouping && grouping in GROUPING_LABELS ? grouping : DEFAULT_KEYING_OPTIONS.grouping,
+    descriptionSource:
+      descriptionSource && descriptionSource in DESCRIPTION_LABELS
+        ? descriptionSource
+        : DEFAULT_KEYING_OPTIONS.descriptionSource,
     columns: columns.length ? columns : DEFAULT_KEYING_OPTIONS.columns,
   }
 }

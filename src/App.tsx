@@ -503,6 +503,7 @@ export function App() {
               scheduleB={scheduleB}
               codesByPart={codesByPart}
               classificationOverrides={overridesToMap(overrides)}
+              eccn={settings.eccn || null}
             />
             <HistoryPanel shipments={shipments} onClear={() => void clearAll()} />
           </>

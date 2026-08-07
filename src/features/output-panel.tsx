@@ -35,6 +35,7 @@ export function OutputPanel({
   scheduleB = null,
   codesByPart = {},
   classificationOverrides = {},
+  eccn = null,
 }: {
   adapter: CarrierAdapter
   reconciliation: Reconciliation
@@ -52,6 +53,8 @@ export function OutputPanel({
   /** The same code corrections `reconcile` was given, so the sheet prints what will be filed. */
   codesByPart?: Record<string, string>
   classificationOverrides?: Record<string, string>
+  /** The controlled ECCN, so the `df-code` grouping partitions as the SLI's rows do. */
+  eccn?: string | null
   /** Gated on the document checks *and* the draft checks — see App. */
   canGenerate: boolean
   onGenerated: () => void
@@ -81,12 +84,15 @@ export function OutputPanel({
     })()
   }, [])
 
-  const changeOptions = (update: (current: KeyingOptions) => KeyingOptions) =>
-    setOptions((current) => {
-      const next = update(current)
-      if (next !== current) void localStore.saveKeyingOptions(next)
-      return next
-    })
+  // Computed here rather than inside the `setOptions` updater: React invokes an updater more
+  // than once under StrictMode, and a write in there persists layouts from renders that were
+  // thrown away. `options` is the committed value, so deriving from it is also the honest one.
+  const changeOptions = (update: (current: KeyingOptions) => KeyingOptions) => {
+    const next = update(options)
+    if (next === options) return
+    setOptions(next)
+    void localStore.saveKeyingOptions(next)
+  }
 
   /**
    * Column order follows the canonical list rather than the order they were ticked.
@@ -159,6 +165,7 @@ export function OutputPanel({
         scheduleB,
         codesByPart,
         classificationOverrides,
+        eccn,
       })
       const delivery = await deliver(
         bridge,

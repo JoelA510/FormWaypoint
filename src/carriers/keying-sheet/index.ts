@@ -167,6 +167,8 @@ export interface CodeCorrections {
   codesByPart?: Record<string, string>
   /** Classification redirects, keyed by normalised source code. */
   overrides?: Record<string, string>
+  /** The shipment-wide ECCN, for lines that print none. Only `df-code` reads it. */
+  eccn?: string | null
 }
 
 /**
@@ -198,12 +200,19 @@ function groupKeyFor(line: MergedLine, mode: GroupingMode, index: number, correc
       return [partKey(line.partNumber), code].join('|')
     // Unit and ECCN join the key because the SLI's own rows carry them: `aggregateLines`
     // keys on classification, D/F, ECCN, licence, SME *and* canonical unit. Licence and SME
-    // are shipment-wide controlled values, so D/F, code, unit and a line's own printed ECCN
-    // are everything that actually varies here. Without the unit, two foreign lines at one
-    // code in PCS and KG collapse into a row of `PCS, KG` that lines up with nothing on the
-    // form this mode exists to be checked against.
+    // are shipment-wide, so those two are everything that varies per line here.
+    //
+    // The ECCN is resolved the way `aggregateLines` resolves it — a line's printed value, or
+    // the controlled one where it prints none. Treating a blank as its own bucket splits a
+    // row the filed SLI merges as soon as one line happens to print the controlled value
+    // outright, which is the opposite of what this mode is for.
     case 'df-code':
-      return [domesticForeign(line.countryOfOrigin), code, canonicalUnit(line.uom) ?? line.uom, line.eccn ?? ''].join('|')
+      return [
+        domesticForeign(line.countryOfOrigin),
+        code,
+        canonicalUnit(line.uom) ?? line.uom,
+        line.eccn || corrections.eccn || '',
+      ].join('|')
     case 'part-origin-code':
     default:
       return [partKey(line.partNumber), partKey(line.countryOfOrigin), code].join('|')
@@ -380,6 +389,8 @@ export interface KeyingInputs {
    */
   codesByPart?: Record<string, string>
   classificationOverrides?: Record<string, string>
+  /** The controlled ECCN the SLI rows were built with, so `df-code` partitions as they do. */
+  eccn?: string | null
 }
 
 export function buildKeyingSheet(
@@ -395,16 +406,23 @@ export function buildKeyingSheet(
   const commodities = groupForKeying(mergedLines, descriptionsByPart, options, scheduleB, {
     codesByPart: inputs.codesByPart,
     overrides: inputs.classificationOverrides,
+    eccn: inputs.eccn,
   })
 
-  // Totalled from the rows the sheet actually prints, not from the SLI's own rows. Both are
-  // built from the same merged lines and agree in practice, but the TOTAL row sits under a
-  // column somebody adds up — a figure there that is not the sum of what is above it reads
-  // as an arithmetic error in the shipment, and there is no way to tell from the sheet that
-  // it came from somewhere else.
-  const customsValue = commodities.reduce((sum, c) => sum + Number(c.totalValue || 0), 0)
-  const netKg = commodities.reduce((sum, c) => sum + Number(c.weightKg || 0), 0)
+  // Two different weights, because they answer two different questions.
+  //
+  // The shipment's own net weight comes from the lines, unrounded, so the package weight
+  // keyed into Ship Manager is the same figure whichever way the operator groups the table —
+  // a gross weight that moves by a gramme when somebody switches from part rows to D/F rows
+  // is a number nobody can reconcile against a scale.
+  //
+  // The TOTAL row instead sums the rows the sheet prints. It sits under a column somebody
+  // adds up, and a figure there that is not the sum of what is above it reads as an
+  // arithmetic error in the shipment with nothing on the sheet to say otherwise.
+  const netKg = mergedLines.reduce((sum, l) => sum + (l.netWeightKg ?? 0), 0)
   const grossKg = header.totalGrossWeightKg ?? netKg
+  const customsValue = commodities.reduce((sum, c) => sum + Number(c.totalValue || 0), 0)
+  const printedKg = commodities.reduce((sum, c) => sum + Number(c.weightKg || 0), 0)
 
   const consignee = draft.ultimateConsignee
   const [address1 = '', address2 = '', address3 = ''] = consignee.addressLines
@@ -580,7 +598,7 @@ export function buildKeyingSheet(
       // of those rounded values — converting once is the more accurate number and the wrong
       // one to check against. Two rows of 0.101 kg print 0.22 lb each and totalled 0.45.
       shipmentWeightLb: commodities.reduce((sum, c) => sum + Number(c.weightLb || 0), 0).toFixed(2),
-      shipmentWeightKg: roundTo(netKg, 3).toFixed(3),
+      shipmentWeightKg: roundTo(printedKg, 3).toFixed(3),
     },
     provenance: {
       sourceFile: sourceFile ?? '',
