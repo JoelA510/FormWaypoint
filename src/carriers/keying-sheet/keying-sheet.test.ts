@@ -1033,3 +1033,29 @@ describe('a stored layout that is hostile rather than merely stale', () => {
     )
   })
 })
+
+describe('a commodity record holds one unit', () => {
+  const twoUnits = [
+    line({ id: 'a', partNumber: 'P-1', countryOfOrigin: 'Japan', uom: 'PCS', quantity: 2, extendedValue: 100 }),
+    line({ id: 'b', partNumber: 'P-1', countryOfOrigin: 'Japan', uom: 'KG', quantity: 5, extendedValue: 50 }),
+  ]
+
+  it('never merges two units, in any grouping mode', () => {
+    // 2 PCS and 5 KG merged into a row of 7 at a unit value averaged across two different
+    // things — an impossible record for a field that holds one unit. `aggregateLines` keys
+    // on the unit for exactly this reason.
+    for (const grouping of ['part-origin-code', 'part-code', 'df-code', 'line'] as GroupingMode[]) {
+      const rows = buildKeyingSheet('fedex-ship-manager', fixture(twoUnits, []), draft(), {
+        options: { grouping },
+      }).commodities
+      expect(rows, grouping).toHaveLength(2)
+      expect(rows.map((r) => r.unitOfMeasure).sort(), grouping).toEqual(['KG', 'PCS'])
+    }
+  })
+
+  it('still merges lines the document spelled one unit two ways', () => {
+    const spellings = twoUnits.map((l) => ({ ...l, uom: l.uom === 'KG' ? 'EA' : 'PCS' }) as MergedLine)
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(spellings, []), draft()).commodities
+    expect(rows).toHaveLength(1)
+  })
+})

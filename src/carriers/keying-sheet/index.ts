@@ -208,11 +208,15 @@ export interface CodeCorrections {
  */
 function groupKeyFor(line: MergedLine, mode: GroupingMode, index: number, corrections: CodeCorrections): string {
   const code = normalizeScheduleB(codeFor(line, corrections))
+  // In every mode, because a commodity record holds one unit and `aggregateLines` keys on it
+  // for the same reason. Without it, 2 PCS and 5 KG of one part merged into a row of 7 at a
+  // unit value averaged across two different things.
+  const unit = canonicalUnit(line.uom) ?? line.uom.trim().toUpperCase()
   switch (mode) {
     case 'line':
       return `${index}|${line.id}`
     case 'part-code':
-      return [partKey(line.partNumber), code].join('|')
+      return [partKey(line.partNumber), code, unit].join('|')
     // Unit and ECCN join the key because the SLI's own rows carry them: `aggregateLines`
     // keys on classification, D/F, ECCN, licence, SME *and* canonical unit. Licence and SME
     // are shipment-wide, so those two are everything that varies per line here.
@@ -222,15 +226,10 @@ function groupKeyFor(line: MergedLine, mode: GroupingMode, index: number, correc
     // row the filed SLI merges as soon as one line happens to print the controlled value
     // outright, which is the opposite of what this mode is for.
     case 'df-code':
-      return [
-        domesticForeign(line.countryOfOrigin),
-        code,
-        canonicalUnit(line.uom) ?? line.uom,
-        line.eccn || corrections.eccn || '',
-      ].join('|')
+      return [domesticForeign(line.countryOfOrigin), code, unit, line.eccn || corrections.eccn || ''].join('|')
     case 'part-origin-code':
     default:
-      return [partKey(line.partNumber), partKey(line.countryOfOrigin), code].join('|')
+      return [partKey(line.partNumber), partKey(line.countryOfOrigin), code, unit].join('|')
   }
 }
 

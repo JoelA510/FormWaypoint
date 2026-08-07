@@ -495,7 +495,9 @@ function parseDetailLines(
   // new place: a page with no blocks at all is a header page, whose address block sits in the
   // detail column and reads exactly like a heading, and the text below the totals row is the
   // page footer. Only the gap between the last block and the totals can hold a heading.
-  const nextGroup = starts.length ? commodityGroupAfter(rows, starts[starts.length - 1]) : ''
+  const nextGroup = starts.length
+    ? commodityGroupAfter(rows, starts[starts.length - 1], Boolean(carry))
+    : ''
   return { lines, carry, group: nextGroup || group }
 }
 
@@ -561,9 +563,19 @@ const GROUP_COLUMN_MAX = 130
  * So the class is wide, and the *guards* do the discriminating: one item, indented into the
  * detail column, not a label, not a classification, and at least one letter after the first.
  * Those are properties of where the text sits, which is what actually distinguishes a heading
- * from an address or a code.
+ * from an address.
+ *
+ * A model code is the one thing position cannot separate, because vendor A prints those in
+ * this same column and `SA34-F1` passes any class permissive enough to admit `<=1000V`.
+ * Shape separates them: every heading on these documents is prose — `Gaskets`, `Flash drive`,
+ * `Robot, not elsewhere spec` — and every model code is a single token carrying digits. So a
+ * heading must either contain a space or contain no digits at all, which admits all ten
+ * headings on the shipment that exposed this and rejects the model codes printed beside them.
  */
 const GROUP_TEXT = /^[A-Za-z][A-Za-z0-9 ,.&/'()<>=+%-]*[A-Za-z][A-Za-z0-9 ,.&/'()<>=+%-]*$/
+
+/** Prose, not a part or model code. See `GROUP_TEXT`. */
+const readsAsProse = (text: string): boolean => text.includes(' ') || !/\d/.test(text)
 
 function isCommodityGroup(row: TextRow): string {
   const items = row.items
@@ -572,7 +584,7 @@ function isCommodityGroup(row: TextRow): string {
   if (x < GROUP_COLUMN_MIN || x > GROUP_COLUMN_MAX) return ''
   if (!text || text.length < 3 || text.endsWith(':') || CLASSIFICATION.test(text)) return ''
   if (isTotalsRow(text)) return ''
-  return GROUP_TEXT.test(text) ? text : ''
+  return GROUP_TEXT.test(text) && readsAsProse(text) ? text : ''
 }
 
 function commodityGroupBefore(rows: TextRow[], startIdx: number): string {
@@ -586,15 +598,19 @@ function commodityGroupBefore(rows: TextRow[], startIdx: number): string {
 /**
  * The heading left stranded at the very foot of a page, whose block begins on the next one.
  *
- * Only the last row is considered, and only on a page that had blocks. A page that ends in a
- * heading ends in *nothing else* — that is what being stranded means. Searching further up
- * finds the page footer instead, and an intermediate detail page has no totals row to bound
- * the search with; the heading is what `aggregateLines` writes as the SLI row description, so
- * a footer reaching it puts the trade terms on an export declaration.
+ * Only the last row is considered. A page that ends in a heading ends in *nothing else* —
+ * that is what being stranded means — and searching further up finds the page footer instead,
+ * which an intermediate detail page has no totals row to bound. The heading is what
+ * `aggregateLines` writes as the SLI row description, so a footer reaching it puts the trade
+ * terms on an export declaration.
+ *
+ * Not consulted at all when the page's last block runs overleaf. Those closing rows belong to
+ * that unfinished block, and reading one as a heading hands the *next* page's goods a
+ * description taken from the middle of a line that has not been read yet.
  */
-function commodityGroupAfter(rows: TextRow[], after: number): string {
+function commodityGroupAfter(rows: TextRow[], lastBlockStart: number, carried: boolean): string {
   const last = rows.length - 1
-  return last > after ? isCommodityGroup(rows[last]) : ''
+  return !carried && last > lastBlockStart ? isCommodityGroup(rows[last]) : ''
 }
 
 interface BlockCore {
