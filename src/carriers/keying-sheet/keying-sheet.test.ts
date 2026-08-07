@@ -1151,3 +1151,47 @@ describe('a row whose lines do not all state an origin', () => {
     expect(rows[0]).toMatchObject({ countryOfManufacture: '', domesticForeign: '', needsCountryCode: true })
   })
 })
+
+describe('rows that must not go out unremarked', () => {
+  it('prompts for a country the document never stated', () => {
+    // A blank cell beside a blank D/F prompts nobody — while the SLI files F for the same
+    // lines. The flag was being computed and not read.
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({ countryOfOrigin: '' })], []), draft())
+    const cell = String(keyingSheetToWorkbook(sheet)[0].rows[1][1])
+    expect(cell).toContain('enter it')
+  })
+
+  it('does not leave another part’s number inside a merged row’s wording', () => {
+    // part-code and df-code merge several parts into one row. Stripping only the first
+    // part's number left the others inside the description keyed against these goods.
+    const merged = [
+      line({ id: 'a', partNumber: 'P-1', countryOfOrigin: 'Japan', description: 'P-1 CABLE ASSY', quantity: 1 }),
+      line({ id: 'b', partNumber: 'P-2', countryOfOrigin: 'Japan', description: 'P-2 O-RING', quantity: 3 }),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(merged, []), draft(), {
+      options: { grouping: 'df-code' },
+    }).commodities
+    expect(rows[0].description).toBe('O-RING')
+    expect(rows[0].otherDescriptions).toEqual(['CABLE ASSY'])
+  })
+
+  it('states one country per origin, however the document spelled it', () => {
+    const spellings = [
+      line({ id: 'a', partNumber: 'P-1', countryOfOrigin: 'Ruritania' }),
+      line({ id: 'b', partNumber: 'P-1', countryOfOrigin: 'RURITANIA' }),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(spellings, []), draft(), {
+      options: { grouping: 'part-code' },
+    }).commodities
+    expect(rows[0].countryLabel).toBe('Ruritania — no code found, enter it')
+  })
+
+  it('never prints a column twice, however the stored layout repeats it', () => {
+    const rows = keyingSheetToWorkbook(
+      buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+        options: { columns: ['partNumber', 'quantity', 'partNumber'] },
+      }),
+    )[0].rows
+    expect(rows[0]).toEqual(['Part Number', 'Qty'])
+  })
+})

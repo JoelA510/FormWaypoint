@@ -288,7 +288,13 @@ function groupForKeying(
     // Read from the distinct origins, not the first line's: a group whose first line prints
     // no origin and whose second says Japan is a Japanese row, and taking `first` would
     // give it an empty country cell with nothing prompting anybody to fill it in.
-    const origins = [...new Set(group.map((l) => l.countryOfOrigin.trim()).filter(Boolean))]
+    // Deduped case-insensitively, as `groupKeyFor` keys them: one unresolvable origin
+    // printed two ways gave `Ruritania, RURITANIA` in a cell that holds one country.
+    const origins = [...group.reduce((seen, l) => {
+      const name = l.countryOfOrigin.trim()
+      if (name && !seen.has(name.toUpperCase())) seen.set(name.toUpperCase(), name)
+      return seen
+    }, new Map<string, string>()).values()]
     const code = codeFor(first, corrections)
     // Deduped the way the grouping keys them, which is case-insensitively. Trimming alone
     // made one part printed in two cases look like two, which both dropped the operator's
@@ -411,11 +417,18 @@ function fromDocument(group: MergedLine[], source: 'document' | 'heading'): { ra
   }
   if (!byText.size) return { ranked: [] }
 
-  const part = group[0].partNumber.trim()
-  const strip = (text: string) =>
-    part && text.toUpperCase().startsWith(part.toUpperCase())
-      ? text.slice(part.length).replace(/^[\s:,-]+/, '').trim() || text
-      : text
+  // Any of the row's parts, not just the first: `part-code` and `df-code` merge several into
+  // one row, and another part's number left inside the wording travels into the description
+  // keyed against these goods.
+  const parts = [...new Set(group.map((l) => l.partNumber.trim()).filter(Boolean))]
+  const strip = (text: string) => {
+    for (const part of parts) {
+      if (text.toUpperCase().startsWith(part.toUpperCase())) {
+        return text.slice(part.length).replace(/^[\s:,-]+/, '').trim() || text
+      }
+    }
+    return text
+  }
 
   // Stripped before the tally, not after. `40649-0300 CABLE ASSY` and `CABLE ASSY` are the
   // same wording printed two ways, and counting them apart put `document also said: CABLE
@@ -743,9 +756,11 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
       // The code the commodity record stores, and the name the picker lists, together: an
       // operator given only one of the two has to translate before they can type anything.
       // `countryLabel` already carries a per-origin verdict, so a mixed row keeps the picker
-      // name for the origins that did resolve.
+      // name for the origins that did resolve. A row whose lines state no origin at all has
+      // no label to carry one, and a blank cell beside a blank D/F prompts nobody — while
+      // the SLI files `F` for those same lines.
       case 'countryOfManufacture':
-        return row.countryLabel
+        return row.countryLabel || (row.needsCountryCode ? 'not on the document — enter it' : '')
       case 'domesticForeign':
         return row.domesticForeign
       case 'harmonizedCode':

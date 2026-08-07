@@ -156,7 +156,10 @@ export function withDefaults(options?: Partial<KeyingOptions>): KeyingOptions {
   // `Array.isArray`, because what comes back from storage can be any shape at all — and a
   // `TypeError` here surfaces as an unhandled rejection inside the restore, losing the saved
   // layout without a word.
-  const columns = Array.isArray(options?.columns) ? options.columns.filter((id) => known.has(id)) : []
+  // Deduped as well as filtered: a repeated id renders the same column, and its total, twice.
+  const columns = Array.isArray(options?.columns)
+    ? [...new Set(options.columns.filter((id) => known.has(id)))]
+    : []
   const grouping = options?.grouping
   const descriptionSource = options?.descriptionSource
   return {
