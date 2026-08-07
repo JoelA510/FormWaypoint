@@ -22,7 +22,7 @@ import type { MergedLine, Reconciliation } from '../../domain/types'
 import { KG_PER_LB, kgToLb as kilogramsToPounds } from '../../domain/units'
 import { buildXlsx, type CellValue, type Sheet } from '../../lib/xlsx'
 import type { SliDraft } from '../types'
-import { normalizeScheduleB, type ScheduleBIndex } from '../../domain/schedule-b'
+import { canonicalUnit, normalizeScheduleB, type ScheduleBIndex } from '../../domain/schedule-b'
 import { partKey } from '../../domain/part-key'
 import { domesticForeign, roundTo } from '../../domain/reconcile'
 import { toCountryPickerLabel, toIsoAlpha2 } from './countries'
@@ -64,6 +64,13 @@ export interface KeyingCommodityRow {
   /** True when the wording came from a saved per-part override rather than the document. */
   describedByOperator?: boolean
   /**
+   * True when `schedule-b` wording was asked for and this code is not in the concordance, so
+   * the row carries the document's wording instead. Surfaced on the row and counted on the
+   * Notes tab, because a sheet that says its descriptions are official must not quietly hold
+   * rows that are not.
+   */
+  scheduleBUnavailable?: boolean
+  /**
    * Other wordings the document used for this part. Printed beside the row so the choice is
    * visible: the CIPL describes one part more than one way and does not say which is meant.
    */
@@ -81,8 +88,14 @@ export interface KeyingCommodityRow {
   weightLb: string
   weightKg: string
   partNumber: string
-  /** D (US origin) or F. Read off the row's origin, never off the seller or ship-from. */
-  domesticForeign: 'D' | 'F'
+  /**
+   * `D` (US origin), `F`, or `D, F` for a row that merged both.
+   *
+   * Read off every origin in the row, never off the seller or the ship-from location. A
+   * mixed row says so: the grouping modes that combine origins can produce one, and naming
+   * only the first origin's letter would misdeclare the rest.
+   */
+  domesticForeign: string
   /** Set when the country name could not be resolved to a code. */
   needsCountryCode?: boolean
 }
@@ -156,8 +169,14 @@ function groupKeyFor(line: MergedLine, mode: GroupingMode, index: number): strin
       return `${index}|${line.id}`
     case 'part-code':
       return [partKey(line.partNumber), code].join('|')
+    // Unit and ECCN join the key because the SLI's own rows carry them: `aggregateLines`
+    // keys on classification, D/F, ECCN, licence, SME *and* canonical unit. Licence and SME
+    // are shipment-wide controlled values, so D/F, code, unit and a line's own printed ECCN
+    // are everything that actually varies here. Without the unit, two foreign lines at one
+    // code in PCS and KG collapse into a row of `PCS, KG` that lines up with nothing on the
+    // form this mode exists to be checked against.
     case 'df-code':
-      return [domesticForeign(line.countryOfOrigin), code].join('|')
+      return [domesticForeign(line.countryOfOrigin), code, canonicalUnit(line.uom) ?? line.uom, line.eccn ?? ''].join('|')
     case 'part-origin-code':
     default:
       return [partKey(line.partNumber), partKey(line.countryOfOrigin), code].join('|')
@@ -204,14 +223,17 @@ function groupForKeying(
     return {
       description: saved || chosen.description,
       describedByOperator: Boolean(saved),
+      /** The official wording was asked for and the code was not in the concordance. */
+      scheduleBUnavailable: !saved && chosen.fellBack,
       // Only meaningful when the app chose; the operator's own wording replaces all of them.
       otherDescriptions: saved ? [] : chosen.alternatives,
       harmonizedCode: first.classification,
       countryOfManufacture: origins.length > 1 ? joinDistinct(origins.map((o) => toIsoAlpha2(o).code)) : country.code,
       countryLabel: origins.length > 1 ? joinDistinct(origins.map(toCountryPickerLabel)) : toCountryPickerLabel(first.countryOfOrigin),
-      // D/F is a property of origin, and every origin in a `df-code` row shares one by
-      // construction. Anywhere else it is read off the row's own first line.
-      domesticForeign: domesticForeign(first.countryOfOrigin),
+      // Read off every origin in the row, not the first one. `part-code` merges origins by
+      // design, so a part shipped 2 from the US and 3 from Japan is one row — and stating D
+      // for it would declare three foreign pieces domestic.
+      domesticForeign: joinDistinct(group.map((l) => domesticForeign(l.countryOfOrigin))),
       needsCountryCode: origins.some((o) => !toIsoAlpha2(o).known),
       quantity: String(roundTo(quantity, 3)),
       unitOfMeasure: joinDistinct(group.map((l) => l.uom)),
@@ -259,15 +281,20 @@ function describeGroup(
   group: MergedLine[],
   source: DescriptionSource,
   scheduleB: ScheduleBIndex | null,
-): { description: string; alternatives: string[] } {
+): { description: string; alternatives: string[]; fellBack: boolean } {
   if (source === 'schedule-b') {
     const official = scheduleB?.lookup(group[0].classification)?.description?.trim()
     // The document's own wordings still travel with the row: the official text describes the
     // code, and whether the code describes these goods is the reviewer's call, not the app's.
-    if (official) return { description: official, alternatives: fromDocument(group, 'document').ranked }
+    if (official) {
+      return { description: official, alternatives: fromDocument(group, 'document').ranked, fellBack: false }
+    }
   }
   const { ranked } = fromDocument(group, source === 'heading' ? 'heading' : 'document')
-  return { description: ranked[0] ?? '', alternatives: ranked.slice(1) }
+  // A row that asked for the official wording and did not get it has to say so. The Notes tab
+  // states where descriptions came from, and a silent fallback makes that statement false for
+  // rows nobody can pick out.
+  return { description: ranked[0] ?? '', alternatives: ranked.slice(1), fellBack: source === 'schedule-b' }
 }
 
 /** The document's own wordings for a group, most-invoiced first. */
@@ -497,7 +524,11 @@ export function buildKeyingSheet(
         3,
       ),
       customsValue: customsValue.toFixed(2),
-      shipmentWeightLb: kgToLb(netKg).toFixed(2),
+      // Summed from the printed pounds rather than converted from the summed kilograms.
+      // Each row is keyed at the figure shown, so the application's running total is the sum
+      // of those rounded values — converting once is the more accurate number and the wrong
+      // one to check against. Two rows of 0.101 kg print 0.22 lb each and totalled 0.45.
+      shipmentWeightLb: commodities.reduce((sum, c) => sum + Number(c.weightLb || 0), 0).toFixed(2),
       shipmentWeightKg: roundTo(netKg, 3).toFixed(3),
     },
     provenance: {
@@ -598,12 +629,12 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
         return numberOr(row.weightKg)
       case 'description':
         return row.description
-      case 'note':
-        return row.describedByOperator
-          ? 'your wording'
-          : row.otherDescriptions.length
-            ? `document also said: ${row.otherDescriptions.join('; ')}`
-            : ''
+      case 'note': {
+        if (row.describedByOperator) return 'your wording'
+        const said = row.otherDescriptions.length ? `document said: ${row.otherDescriptions.join('; ')}` : ''
+        if (!row.scheduleBUnavailable) return said.replace('document said', 'document also said')
+        return ['no Schedule B wording for this code — the document’s is used', said].filter(Boolean).join('; ')
+      }
     }
   }
 
@@ -647,6 +678,8 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
     }
   }
 
+  const fellBack = sheet.commodities.filter((c) => c.scheduleBUnavailable).length
+
   const notes: CellValue[][] = [
     ['Note', 'Detail'],
     ['Application', sheet.applicationName],
@@ -659,10 +692,18 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
         : `Used the ${sheet.provenance.documentSet} set, priced in ${sheet.provenance.documentCurrency}.`,
     ],
     ['Grouping', `${GROUPING_LABELS[sheet.options.grouping]}. ${GROUPING_NOTES[sheet.options.grouping]}`],
-    ['Weight basis', `Net weights summed in kilograms and converted once at 1 kg = ${KG_PER_LB_LABEL} lb.`],
+    [
+      'Weight basis',
+      `Each row's net weight is summed in kilograms and converted once at 1 kg = ${KG_PER_LB_LABEL} lb. ` +
+        'The TOTAL row adds the pounds as printed, because that is what the application will have added.',
+    ],
     [
       'Descriptions',
       `${DESCRIPTION_LABELS[sheet.options.descriptionSource]}. ${DESCRIPTION_NOTES[sheet.options.descriptionSource]} ` +
+        (fellBack
+          ? `${fellBack} of ${sheet.commodities.length} rows carry the document's wording instead, because their ` +
+            'commodity number is not in the concordance; each one says so in the Note column. '
+          : '') +
         'Rows noted "your wording" carry a description saved against that part. Nothing here is composed by the application.',
     ],
     ['Check', `${sheet.totals.commodities} commodities · ${sheet.totals.quantity} pcs · ${sheet.totals.customsValue} USD · ${sheet.totals.shipmentWeightLb} lb · ${sheet.totals.shipmentWeightKg} kg`],

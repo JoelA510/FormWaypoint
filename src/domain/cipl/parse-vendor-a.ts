@@ -493,7 +493,15 @@ function parseDetailLines(
   // one, and nothing on this page will ever look back at it. Shipment vendorA6 ends an invoice
   // page with `Electrical Conductors` and opens the next with the plugs it heads; without
   // this they reach the form under the heading of the gaskets three blocks earlier.
-  return { lines, carry, group: commodityGroupAfter(rows, lastCut) || group }
+  //
+  // Bounded on both sides, because an unbounded look-ahead is the consignee-address bug in a
+  // new place: a page with no blocks at all is a header page, whose address block sits in the
+  // detail column and reads exactly like a heading, and the text below the totals row is the
+  // page footer. Only the gap between the last block and the totals can hold a heading.
+  const nextGroup = starts.length
+    ? commodityGroupAfter(rows, lastCut, truncateAtPageTotals(rows, lastCut - 1, rows.length))
+    : ''
+  return { lines, carry, group: nextGroup || group }
 }
 
 /**
@@ -585,8 +593,8 @@ function commodityGroupBefore(rows: TextRow[], startIdx: number): string {
 }
 
 /** The heading left stranded at the foot of a page, whose block begins on the next one. */
-function commodityGroupAfter(rows: TextRow[], endIdx: number): string {
-  for (let i = rows.length - 1; i >= endIdx; i--) {
+function commodityGroupAfter(rows: TextRow[], from: number, to: number): string {
+  for (let i = Math.min(to, rows.length) - 1; i >= from; i--) {
     const heading = isCommodityGroup(rows[i])
     if (heading) return heading
   }

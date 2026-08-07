@@ -661,3 +661,75 @@ describe('column selection', () => {
     expect(rows[0]).toEqual(DEFAULT_KEYING_OPTIONS.columns.map((id) => COMMODITY_COLUMNS.find((c) => c.id === id)!.label))
   })
 })
+
+describe('what a row can honestly assert', () => {
+  const mixed = [
+    line({ id: 'a', partNumber: 'P-1', countryOfOrigin: 'United States', quantity: 2, extendedValue: 100 }),
+    line({ id: 'b', partNumber: 'P-1', countryOfOrigin: 'Japan', quantity: 3, extendedValue: 150 }),
+  ]
+
+  it('says D, F on a row that merged both rather than naming the first origin’s letter', () => {
+    // `part-code` merges origins by design. Stating D for this row would declare three
+    // foreign pieces domestic.
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(mixed, []), draft(), {
+      options: { grouping: 'part-code' },
+    }).commodities
+    expect(rows[0]).toMatchObject({ countryOfManufacture: 'US, JP', domesticForeign: 'D, F' })
+  })
+
+  it('keeps two units apart under df-code, because the SLI’s own rows do', () => {
+    // aggregateLines keys on the canonical unit as well as D/F and code. Without it these
+    // collapse into one row of `PCS, KG` that lines up with nothing on the filed form.
+    const units = [
+      line({ id: 'a', countryOfOrigin: 'Japan', uom: 'PCS', quantity: 2 }),
+      line({ id: 'b', countryOfOrigin: 'Japan', uom: 'KG', quantity: 5 }),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(units, []), draft(), {
+      options: { grouping: 'df-code' },
+    }).commodities
+    expect(rows).toHaveLength(2)
+    expect(rows.map((r) => r.unitOfMeasure).sort()).toEqual(['KG', 'PCS'])
+  })
+
+  it('keeps a line’s own ECCN on its own row under df-code', () => {
+    const controlled = [
+      line({ id: 'a', countryOfOrigin: 'Japan' }),
+      line({ id: 'b', countryOfOrigin: 'Japan', eccn: '5A992.C' } as Partial<MergedLine>),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(controlled, []), draft(), {
+      options: { grouping: 'df-code' },
+    }).commodities
+    expect(rows).toHaveLength(2)
+  })
+
+  it('totals the pounds as printed, so the column adds up to the TOTAL under it', () => {
+    // 0.101 kg is 0.2227 lb, printed 0.22. Converting the summed kilograms gives 0.45 over
+    // a column that reads 0.22 + 0.22, which looks like an arithmetic error in the shipment.
+    const light = [
+      line({ id: 'a', partNumber: 'P-1', netWeightKg: 0.101 }),
+      line({ id: 'b', partNumber: 'P-2', netWeightKg: 0.101 }),
+    ]
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(light, []), draft())
+    expect(sheet.commodities.map((c) => c.weightLb)).toEqual(['0.22', '0.22'])
+    expect(sheet.totals.shipmentWeightLb).toBe('0.44')
+  })
+
+  it('says on the row when the official wording was asked for and did not exist', () => {
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+      options: { descriptionSource: 'schedule-b' },
+      scheduleB: null,
+    })
+    expect(sheet.commodities[0].scheduleBUnavailable).toBe(true)
+    const [, row] = keyingSheetToWorkbook(sheet)[0].rows
+    expect(String(row.at(-1))).toContain('no Schedule B wording for this code')
+    const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
+    expect(notes.Descriptions).toContain('1 of 1 rows carry the document')
+  })
+
+  it('claims nothing about a fallback that did not happen', () => {
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft())
+    expect(sheet.commodities[0].scheduleBUnavailable).toBe(false)
+    const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
+    expect(notes.Descriptions).not.toContain('carry the document')
+  })
+})

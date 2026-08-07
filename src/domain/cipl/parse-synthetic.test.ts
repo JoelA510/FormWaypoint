@@ -241,3 +241,23 @@ describe('many lines over many pages', () => {
 })
 
 const round3 = (n: number) => Math.round(n * 1000) / 1000
+
+describe('what a heading lookahead must not reach', () => {
+  it('never takes the consignee city, even where no heading is printed at all', async () => {
+    // The stranded-heading lookahead scans below the last block on a page. Unbounded, it
+    // reaches the header page — whose address block sits in the detail column and whose last
+    // line is a single word — and a shipment of cable is declared as a country.
+    const spec = simpleShipment()
+    const anonymous = { ...spec, lines: spec.lines.map((l) => ({ ...l, commodityGroup: undefined })) }
+    const parsed = await parse(anonymous)
+    const groups = fc(parsed, 'INVOICE').map((l) => l.commodityGroup)
+    expect(groups).not.toContain('Singapore')
+    expect(groups.every((g) => !g)).toBe(true)
+  })
+
+  it('never takes the trade terms printed below the totals row', async () => {
+    const parsed = await parse(simpleShipment({ linesPerPage: 2 }))
+    const groups = fc(parsed, 'INVOICE').map((l) => l.commodityGroup)
+    expect(groups.some((g) => /FOB|Collect/i.test(g))).toBe(false)
+  })
+})
