@@ -500,6 +500,7 @@ export function App() {
               descriptionsByPart={descriptionsByPart}
               sourceFile={parsed.fileName}
               excludedSets={parsed.availableSets.filter((set) => set !== reconciliation.selectedSet)}
+              scheduleB={scheduleB}
             />
             <HistoryPanel shipments={shipments} onClear={() => void clearAll()} />
           </>

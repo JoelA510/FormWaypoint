@@ -1,9 +1,22 @@
 import { useState } from 'react'
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Select } from '../components/ui'
 import { deliver, open as openDelivery, type Delivery } from '../lib/deliver'
-import { buildKeyingSheet, keyingSheetToXlsx, type KeyingTarget } from '../carriers/keying-sheet'
+import {
+  buildKeyingSheet,
+  keyingSheetToXlsx,
+  COMMODITY_COLUMNS,
+  DEFAULT_KEYING_OPTIONS,
+  DESCRIPTION_LABELS,
+  GROUPING_LABELS,
+  type CommodityColumnId,
+  type DescriptionSource,
+  type GroupingMode,
+  type KeyingOptions,
+  type KeyingTarget,
+} from '../carriers/keying-sheet'
 import type { DesktopBridge } from '../desktop'
 import type { CarrierAdapter, SliDraft } from '../carriers/types'
+import type { ScheduleBIndex } from '../domain/schedule-b'
 import type { Reconciliation } from '../domain/types'
 import type { ShipmentRecord } from '../store/local-store'
 
@@ -18,6 +31,7 @@ export function OutputPanel({
   descriptionsByPart = {},
   sourceFile,
   excludedSets = [],
+  scheduleB = null,
 }: {
   adapter: CarrierAdapter
   reconciliation: Reconciliation
@@ -30,6 +44,8 @@ export function OutputPanel({
   sourceFile?: string
   /** Document sets present but not used, for the same. */
   excludedSets?: string[]
+  /** Supplies the official wording for the `schedule-b` description source. */
+  scheduleB?: ScheduleBIndex | null
   /** Gated on the document checks *and* the draft checks — see App. */
   canGenerate: boolean
   onGenerated: () => void
@@ -48,6 +64,24 @@ export function OutputPanel({
   const [target, setTarget] = useState<KeyingTarget>(
     keyedCarrier === 'ups' ? 'ups-worldship' : 'fedex-ship-manager',
   )
+  const [options, setOptions] = useState<KeyingOptions>(DEFAULT_KEYING_OPTIONS)
+
+  /**
+   * Column order follows the canonical list rather than the order they were ticked.
+   *
+   * A sheet whose columns move about between shipments is a sheet somebody keys wrongly
+   * once. Toggling one column should not reorder the others.
+   */
+  const toggleColumn = (id: CommodityColumnId) =>
+    setOptions((current) => {
+      const next = new Set(current.columns)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      const columns = COMMODITY_COLUMNS.map((c) => c.id).filter((c) => next.has(c))
+      // The table has to carry something. Refusing the last removal is less surprising than
+      // silently keeping a column the operator just switched off.
+      return columns.length ? { ...current, columns } : current
+    })
 
   const { header } = reconciliation
 
@@ -95,7 +129,13 @@ export function OutputPanel({
   async function downloadKeyingSheet() {
     setError(null)
     try {
-      const sheet = buildKeyingSheet(target, reconciliation, draft, descriptionsByPart, sourceFile, excludedSets)
+      const sheet = buildKeyingSheet(target, reconciliation, draft, {
+        descriptionsByPart,
+        sourceFile,
+        excludedSets,
+        options,
+        scheduleB,
+      })
       const delivery = await deliver(
         bridge,
         `${header.invoiceNumber || 'shipment'}_${target}.xlsx`,
@@ -205,9 +245,89 @@ export function OutputPanel({
               Download keying sheet
             </Button>
           </div>
+          <KeyingSheetOptions options={options} setOptions={setOptions} toggleColumn={toggleColumn} />
         </div>
       </CardBody>
     </Card>
+  )
+}
+
+/**
+ * How the commodity table is laid out, folded away until it is wanted.
+ *
+ * The defaults are what a Ship Manager commodity screen asks for, and most shipments never
+ * need anything else — so this opens closed. It is not a preference screen: the choices
+ * change what the next download contains, and the sheet's own Notes tab records which ones
+ * were in force, so a workbook found months later still says how its rows were made.
+ */
+function KeyingSheetOptions({
+  options,
+  setOptions,
+  toggleColumn,
+}: {
+  options: KeyingOptions
+  setOptions: (update: (current: KeyingOptions) => KeyingOptions) => void
+  toggleColumn: (id: CommodityColumnId) => void
+}) {
+  return (
+    <details className="mt-3 rounded-md border border-[var(--color-line)]">
+      <summary className="cursor-pointer px-3 py-2 text-sm text-[var(--color-ink-soft)] select-none">
+        Layout — {options.columns.length} columns, {GROUPING_LABELS[options.grouping].toLowerCase()}
+      </summary>
+      <div className="space-y-3 border-t border-[var(--color-line)] px-3 py-3">
+        <div className="flex flex-wrap gap-3">
+          <label className="text-sm">
+            <span className="mb-1 block font-medium text-[var(--color-ink)]">Group rows by</span>
+            <Select
+              value={options.grouping}
+              onChange={(e) => setOptions((c) => ({ ...c, grouping: e.target.value as GroupingMode }))}
+              className="w-auto"
+            >
+              {Object.entries(GROUPING_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </Select>
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block font-medium text-[var(--color-ink)]">Descriptions</span>
+            <Select
+              value={options.descriptionSource}
+              onChange={(e) =>
+                setOptions((c) => ({ ...c, descriptionSource: e.target.value as DescriptionSource }))
+              }
+              className="w-auto"
+            >
+              {Object.entries(DESCRIPTION_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </Select>
+          </label>
+        </div>
+        <p className="text-xs text-[var(--color-ink-soft)]">
+          Every wording comes from the document or from the Census Schedule B file. The application never
+          writes a commodity description — that is part of what is being declared.
+        </p>
+        <fieldset>
+          <legend className="mb-1 text-sm font-medium text-[var(--color-ink)]">Columns</legend>
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {COMMODITY_COLUMNS.map((column) => (
+              <label key={column.id} className="flex items-center gap-1.5 text-sm">
+                <input
+                  type="checkbox"
+                  checked={options.columns.includes(column.id)}
+                  onChange={() => toggleColumn(column.id)}
+                />
+                {column.label}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      </div>
+    </details>
   )
 }
 

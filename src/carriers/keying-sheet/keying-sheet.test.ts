@@ -7,7 +7,19 @@
  * them is a value the operator would otherwise convert by hand.
  */
 import { describe, expect, it } from 'vitest'
-import { buildKeyingSheet, keyingSheetToWorkbook, kgToLb, toCountryPickerLabel, toIsoAlpha2 } from '.'
+import {
+  buildKeyingSheet,
+  keyingSheetToWorkbook,
+  kgToLb,
+  toCountryPickerLabel,
+  toIsoAlpha2,
+  COMMODITY_COLUMNS,
+  DEFAULT_KEYING_OPTIONS,
+  type CommodityColumnId,
+  type DescriptionSource,
+  type GroupingMode,
+} from '.'
+import { createScheduleBIndex, type ScheduleBIndex } from '../../domain/schedule-b'
 import type { MergedLine, Reconciliation, SLILine } from '../../domain/types'
 import type { SliDraft } from '../types'
 
@@ -321,12 +333,16 @@ describe('the workbook', () => {
     expect(workbook().map((s) => s.name)).toEqual(['Commodities', 'Shipment details', 'Notes'])
   })
 
-  it('ends the grid with a TOTAL row to check the application against', () => {
+  it('ends the grid with a TOTAL row that sums the column above it', () => {
     const rows = workbook()[0].rows
+    const [, row] = rows
     const total = rows[rows.length - 1]
     expect(total[0]).toBe('TOTAL')
-    expect(total[6]).toBe(749.4)
-    expect(total[7]).toBe(17.9)
+    // The point of the row is that it can be checked against the application's own running
+    // total, so it has to be the sum of what is printed — not a figure from somewhere else
+    // that happens to describe the same shipment.
+    expect(total[6]).toBe(row[6])
+    expect(total[7]).toBe(row[7])
     // No country, code or unit value on a total — those columns stay empty rather than
     // carrying a number that means nothing.
     expect([total[1], total[2], total[5]]).toEqual([null, null, null])
@@ -343,8 +359,8 @@ describe('the workbook', () => {
     const notes = Object.fromEntries(workbook()[2].rows.map((r) => [String(r[0]), String(r[1])]))
     expect(notes.Application).toBe('FedEx Ship Manager')
     expect(notes['Weight basis']).toContain('summed in kilograms and converted once')
-    expect(notes.Grouping).toContain('One row per part number, country of manufacture and commodity number')
-    expect(notes.Check).toContain('749.40 USD')
+    expect(notes.Grouping).toContain('Part + country + code')
+    expect(notes.Check).toContain('284.00 USD')
   })
 })
 
@@ -416,7 +432,7 @@ describe('one part is one commodity record', () => {
   ]
 
   const build = (lines: MergedLine[], descriptions: Record<string, string> = {}) =>
-    buildKeyingSheet('fedex-ship-manager', fixture(lines, []), draft(), descriptions).commodities
+    buildKeyingSheet('fedex-ship-manager', fixture(lines, []), draft(), { descriptionsByPart: descriptions }).commodities
 
   it('merges the lines the document split by wording', () => {
     const rows = build(vendorA5)
@@ -481,5 +497,167 @@ describe('one part is one commodity record', () => {
     const rows = build(vendorA5)
     expect(rows[0]).toMatchObject({ weightKg: '0.520', weightLb: '1.15' })
     expect(rows[1]).toMatchObject({ weightKg: '5.274', weightLb: '11.63' })
+  })
+})
+
+/**
+ * The same shipment laid out four ways.
+ *
+ * One row per commodity record is right for keying into Ship Manager and wrong for checking
+ * against a filed SLI, and neither is what somebody reading the invoice line by line wants.
+ * Each mode groups on something the row can assert jointly; none merges two commodity
+ * numbers, because a row states one.
+ */
+describe('grouping modes', () => {
+  const shipment = [
+    line({ id: 'a', partNumber: 'P-1', countryOfOrigin: 'United States', quantity: 2, extendedValue: 100, netWeightKg: 1 }),
+    line({ id: 'b', partNumber: 'P-1', countryOfOrigin: 'Japan', quantity: 3, extendedValue: 150, netWeightKg: 2 }),
+    line({ id: 'c', partNumber: 'P-2', countryOfOrigin: 'Japan', quantity: 1, extendedValue: 50, netWeightKg: 4 }),
+  ]
+
+  const rowsFor = (grouping: GroupingMode) =>
+    buildKeyingSheet('fedex-ship-manager', fixture(shipment, []), draft(), { options: { grouping } }).commodities
+
+  it('keeps two origins of one part apart, because origin is a field on the record', () => {
+    const rows = rowsFor('part-origin-code')
+    expect(rows).toHaveLength(3)
+    expect(rows.map((r) => `${r.partNumber}/${r.countryOfManufacture}`)).toEqual(['P-1/US', 'P-1/JP', 'P-2/JP'])
+  })
+
+  it('combines a part shipped from two countries, and names both', () => {
+    const rows = rowsFor('part-code')
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toMatchObject({ partNumber: 'P-1', countryOfManufacture: 'US, JP', quantity: '5' })
+    expect(rows[0].countryLabel).toBe('US - United States, JP - Japan')
+  })
+
+  it('files by D/F and code, the way the SLI does, listing the parts it rolled up', () => {
+    const rows = rowsFor('df-code')
+    expect(rows).toHaveLength(2)
+    const domestic = rows.find((r) => r.domesticForeign === 'D')!
+    const foreign = rows.find((r) => r.domesticForeign === 'F')!
+    expect(domestic).toMatchObject({ partNumber: 'P-1', quantity: '2', totalValue: '100.00' })
+    expect(foreign).toMatchObject({ partNumber: 'P-1, P-2', quantity: '4', totalValue: '200.00' })
+  })
+
+  it('never groups when asked not to, including two lines that are otherwise identical', () => {
+    const twins = [line({ id: 'x', quantity: 1, extendedValue: 10 }), line({ id: 'y', quantity: 1, extendedValue: 10 })]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(twins, []), draft(), {
+      options: { grouping: 'line' },
+    }).commodities
+    expect(rows).toHaveLength(2)
+    expect(rows.every((r) => r.quantity === '1')).toBe(true)
+  })
+
+  it('totals the same in every mode, because grouping moves figures rather than changing them', () => {
+    for (const grouping of ['part-origin-code', 'part-code', 'df-code', 'line'] as GroupingMode[]) {
+      const rows = rowsFor(grouping)
+      expect(rows.reduce((sum, r) => sum + Number(r.quantity), 0), grouping).toBe(6)
+      expect(rows.reduce((sum, r) => sum + Number(r.totalValue), 0), grouping).toBe(300)
+    }
+  })
+
+  it('applies a saved wording only where the row is one part', () => {
+    // A description is saved against a part. A row spanning two parts cannot claim it.
+    const saved = { 'P-1': 'Braided copper cable' }
+    const one = buildKeyingSheet('fedex-ship-manager', fixture(shipment, []), draft(), {
+      options: { grouping: 'part-code' },
+      descriptionsByPart: saved,
+    }).commodities
+    expect(one[0]).toMatchObject({ description: 'Braided copper cable', describedByOperator: true })
+
+    const rolled = buildKeyingSheet('fedex-ship-manager', fixture(shipment, []), draft(), {
+      options: { grouping: 'df-code' },
+      descriptionsByPart: saved,
+    }).commodities
+    expect(rolled.find((r) => r.domesticForeign === 'F')!.describedByOperator).toBe(false)
+  })
+})
+
+describe('description sources', () => {
+  const lines = [
+    line({ id: 'a', description: 'CBL, OS32C-CBL-30M', commodityGroup: 'Electrical Conductors', quantity: 3 }),
+    line({ id: 'b', description: 'CBL, OS32C-CBL-30M', commodityGroup: 'Electrical Conductors', quantity: 1 }),
+  ]
+  const CONCORDANCE = {
+    source: 'test',
+    generatedAt: '2026-01-01',
+    count: 1,
+    codes: { '8544420000': { d: 'Insulated electric conductors, fitted with connectors', u: ['NO'] } },
+  }
+
+  const describedBy = (
+    descriptionSource: DescriptionSource,
+    scheduleB: ScheduleBIndex | null = createScheduleBIndex(CONCORDANCE),
+  ) =>
+    buildKeyingSheet('fedex-ship-manager', fixture(lines, []), draft(), {
+      options: { descriptionSource },
+      scheduleB,
+    }).commodities[0]
+
+  it('takes the part’s own wording', () => {
+    expect(describedBy('document').description).toBe('CBL, OS32C-CBL-30M')
+  })
+
+  it('takes the document’s commodity heading', () => {
+    expect(describedBy('heading').description).toBe('Electrical Conductors')
+  })
+
+  it('takes the Census wording for the code, and keeps the document’s beside it', () => {
+    const row = describedBy('schedule-b')
+    expect(row.description).toBe('Insulated electric conductors, fitted with connectors')
+    // Whether the code describes these goods is a human judgement, so what the document
+    // called them travels with the row rather than being replaced by the official text.
+    expect(row.otherDescriptions).toContain('CBL, OS32C-CBL-30M')
+  })
+
+  it('falls back to the document rather than leaving a row with no words on it', () => {
+    // A code absent from the concordance has its own blocking check to answer for it; a
+    // blank commodity description would be a silent one.
+    expect(describedBy('schedule-b', null).description).toBe('CBL, OS32C-CBL-30M')
+    expect(describedBy('schedule-b', createScheduleBIndex({ ...CONCORDANCE, codes: {} })).description).toBe(
+      'CBL, OS32C-CBL-30M',
+    )
+  })
+
+  it('never composes one', () => {
+    // Every wording on the sheet is traceable to the document or to the Census file.
+    const fromDocument = new Set(lines.flatMap((l) => [l.description, l.commodityGroup]))
+    for (const source of ['document', 'heading'] as DescriptionSource[]) {
+      expect(fromDocument).toContain(describedBy(source).description)
+    }
+  })
+})
+
+describe('column selection', () => {
+  const workbookFor = (columns: CommodityColumnId[]) =>
+    keyingSheetToWorkbook(
+      buildKeyingSheet('fedex-ship-manager', fixture([line({})], [sli({})]), draft(), { options: { columns } }),
+    )[0].rows
+
+  it('prints only the columns asked for, in the order they were given', () => {
+    const rows = workbookFor(['description', 'partNumber', 'quantity'])
+    expect(rows[0]).toEqual(['Commodity Description', 'Part Number', 'Qty'])
+  })
+
+  it('carries the totals of whichever columns can be totalled', () => {
+    const rows = workbookFor(['partNumber', 'quantity', 'weightKg'])
+    expect(rows.at(-1)).toEqual(['TOTAL', 2, 7.438])
+  })
+
+  it('puts TOTAL in the leftmost column that is not itself a figure', () => {
+    // Writing it over the quantity would replace a number somebody checks against a
+    // running total with a word.
+    expect(workbookFor(['quantity', 'description'])!.at(-1)).toEqual([2, 'TOTAL'])
+  })
+
+  it('ignores a stored column that no longer exists rather than printing a blank one', () => {
+    const rows = workbookFor(['partNumber', 'notAColumn' as CommodityColumnId])
+    expect(rows[0]).toEqual(['Part Number'])
+  })
+
+  it('falls back to the defaults when every column is unrecognised', () => {
+    const rows = workbookFor(['gone' as CommodityColumnId])
+    expect(rows[0]).toEqual(DEFAULT_KEYING_OPTIONS.columns.map((id) => COMMODITY_COLUMNS.find((c) => c.id === id)!.label))
   })
 })
