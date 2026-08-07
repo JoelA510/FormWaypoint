@@ -320,11 +320,14 @@ function groupForKeying(
       countryLabel: joinDistinct(origins.map(originLabel)),
       // Read off every origin in the row, not the first one. `part-code` merges origins by
       // design, so a part shipped 2 from the US and 3 from Japan is one row — and stating D
-      // for it would declare three foreign pieces domestic.
-      // Sorted, so a mixed row reads `D, F` in document order rather than whichever origin
-      // the invoice happened to print first.
-      domesticForeign: joinDistinct(group.map((l) => domesticForeign(l.countryOfOrigin)).sort()),
-      needsCountryCode: origins.some((o) => !toIsoAlpha2(o).known),
+      // for it would declare three foreign pieces domestic. Read off the origins the row
+      // actually has, not off every line: a line with no origin supplies no letter either,
+      // and `domesticForeign('')` answers F — asserting a foreign portion nothing on the row
+      // supports. Sorted, so a mixed row reads `D, F` rather than whichever origin the
+      // invoice happened to print first.
+      domesticForeign: joinDistinct(origins.map(domesticForeign).sort()),
+      // A row with no origin at all needs one as much as a row with an unrecognised one.
+      needsCountryCode: !origins.length || origins.some((o) => !toIsoAlpha2(o).known),
       quantity: String(roundTo(quantity, 3)),
       unitOfMeasure: unitFor(group),
       // Derived from the group's own total rather than copied off one line, so the unit

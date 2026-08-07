@@ -1129,3 +1129,25 @@ describe('what a stored layout may be, not just what it may say', () => {
     expect(rows[0].domesticForeign).toBe('D, F')
   })
 })
+
+describe('a row whose lines do not all state an origin', () => {
+  it('does not read a foreign portion out of a blank', () => {
+    // `domesticForeign('')` answers F. Reading D/F off every line rather than off the
+    // origins the row has asserted a foreign portion nothing on the row supported — beside a
+    // country cell reading `US - United States`, with nothing prompting anybody to look.
+    const partial = [
+      line({ id: 'a', partNumber: 'P-1', countryOfOrigin: 'United States' }),
+      line({ id: 'b', partNumber: 'P-1', countryOfOrigin: '' }),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(partial, []), draft(), {
+      options: { grouping: 'part-code' },
+    }).commodities
+    expect(rows[0]).toMatchObject({ countryLabel: 'US - United States', domesticForeign: 'D' })
+  })
+
+  it('asks for a country when the row states none at all', () => {
+    const none = [line({ id: 'a', partNumber: 'P-1', countryOfOrigin: '' })]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(none, []), draft()).commodities
+    expect(rows[0]).toMatchObject({ countryOfManufacture: '', domesticForeign: '', needsCountryCode: true })
+  })
+})

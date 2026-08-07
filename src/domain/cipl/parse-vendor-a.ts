@@ -743,12 +743,24 @@ function parseInvoiceBlock(
   const core = readBlockCore(block)
   if (!core) return null
 
+  /**
+   * The cells this block has already been read for, by position.
+   *
+   * Excluding them from the description search by *text* was the obvious way and the wrong
+   * one: a description cell that happens to repeat the model — which is how some parts are
+   * described — matched the blacklist and the line went out with no description at all.
+   * Position is what "already used" actually means.
+   */
+  const consumed = new Set<string>()
+  const consume = (row: number, item: number) => consumed.add(`${row}:${item}`)
+
   // Country of origin sits to the right of the item id on the line-number row.
   let countryOfOrigin = ''
   if (core.lineNumberRowIdx !== -1) {
     const items = block[core.lineNumberRowIdx].items
-    const tail = items.slice(items.findIndex((it) => it.str === core.itemId) + 1)
-    countryOfOrigin = tail.map((t) => t.str).join(' ').trim()
+    const from = items.findIndex((it) => it.str === core.itemId) + 1
+    for (let k = from; k < items.length; k++) consume(core.lineNumberRowIdx, k)
+    countryOfOrigin = items.slice(from).map((t) => t.str).join(' ').trim()
   }
 
   const currency =
@@ -772,15 +784,17 @@ function parseInvoiceBlock(
       unitValue = parseNumber(numeric[1].str) ?? undefined
       extendedValue = parseNumber(numeric[2].str) ?? undefined
       valueRowIdx = i
-      const left = block[i].items.filter((it) => it.x < 380)
+      const left = block[i].items.map((it, k) => ({ it, k })).filter(({ it }) => it.x < 380)
       // `[marks] model  partNumber` — marks (when present) is furthest left.
-      model = left.length >= 2 ? left[left.length - 2].str : (left[0]?.str ?? '')
-      partNumber = left.length >= 1 ? left[left.length - 1].str : ''
+      model = left.length >= 2 ? left[left.length - 2].it.str : (left[0]?.it.str ?? '')
+      partNumber = left.length >= 1 ? left[left.length - 1].it.str : ''
+      if (left.length >= 2) consume(i, left[left.length - 2].k)
+      if (left.length >= 1) consume(i, left[left.length - 1].k)
       break
     }
   }
 
-  const description = descriptionFrom(block, valueRowIdx, [partNumber, model, countryOfOrigin])
+  const description = descriptionFrom(block, valueRowIdx, partNumber, consumed)
 
   return {
     id: sourceLineId(ctx.set, 'INV', core),
@@ -831,7 +845,12 @@ const DESCRIPTION_COLUMN_MAX = 400
  * The per-line description is the longest free-text cell in the description column that is
  * not the part number or a code. On the invoice it is printed twice on the last row.
  */
-function descriptionFrom(block: TextRow[], valueRowIdx: number, notDescriptions: string[]): string {
+function descriptionFrom(
+  block: TextRow[],
+  valueRowIdx: number,
+  partNumber: string,
+  consumed: ReadonlySet<string>,
+): string {
   // The block's own rows and no further: figures, then the description row under them. The
   // slice runs on to the next block's first row, so everything past this point belongs to
   // the next commodity — including its heading, which is what used to win on length.
@@ -843,16 +862,19 @@ function descriptionFrom(block: TextRow[], valueRowIdx: number, notDescriptions:
   const from = anchored ? valueRowIdx : 1
   const to = anchored ? Math.min(from + 2, block.length) : block.length
 
-  // Every field the block has already been read for. The part number is not the only one
-  // that shares a column with the description: the model sits at the left margin on the
-  // figures row, and the country of origin sits inside the description column on the
-  // line-number row. Either can be longer than a terse description and win on length —
-  // `RT6 5450A` beat `FUSE`, and `United States` beat it too.
-  const excluded = new Set(notDescriptions.map((t) => t.trim()).filter(Boolean))
-  const usable = (item: { str: string; x: number }, min: number, max: number) =>
+  // The model and the country of origin share a column with the description — the model at
+  // the left margin on the figures row, the origin inside the description column on the
+  // line-number row — and either can be longer than a terse one and win on length. Both are
+  // skipped by position, so a description that reads the same as one of them still counts.
+  //
+  // The part number stays a text match: it is printed twice, once as the block's own label
+  // beside the description, and a description reading exactly the part number says nothing
+  // the part-number column is not already saying.
+  const usable = (item: { str: string; x: number }, k: number, i: number, min: number, max: number) =>
     item.x >= min &&
     item.x < max &&
-    !excluded.has(item.str.trim()) &&
+    !consumed.has(`${i}:${k}`) &&
+    item.str !== partNumber &&
     !CLASSIFICATION.test(item.str) &&
     parseNumber(item.str) === null &&
     /[a-z]/i.test(item.str)
@@ -861,9 +883,9 @@ function descriptionFrom(block: TextRow[], valueRowIdx: number, notDescriptions:
     let best = ''
     for (let i = from; i < to; i++) {
       if (!anchored && isCommodityGroup(block[i])) continue
-      for (const item of block[i].items) {
-        if (usable(item, min, max) && item.str.length > best.length) best = item.str
-      }
+      block[i].items.forEach((item, k) => {
+        if (usable(item, k, i, min, max) && item.str.length > best.length) best = item.str
+      })
     }
     return best
   }
