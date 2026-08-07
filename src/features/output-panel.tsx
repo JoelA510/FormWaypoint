@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Select } from '../components/ui'
 import { deliver, open as openDelivery, type Delivery } from '../lib/deliver'
 import {
@@ -8,6 +8,7 @@ import {
   DEFAULT_KEYING_OPTIONS,
   DESCRIPTION_LABELS,
   GROUPING_LABELS,
+  withDefaults,
   type CommodityColumnId,
   type DescriptionSource,
   type GroupingMode,
@@ -18,7 +19,7 @@ import type { DesktopBridge } from '../desktop'
 import type { CarrierAdapter, SliDraft } from '../carriers/types'
 import type { ScheduleBIndex } from '../domain/schedule-b'
 import type { Reconciliation } from '../domain/types'
-import type { ShipmentRecord } from '../store/local-store'
+import { localStore, type ShipmentRecord } from '../store/local-store'
 
 export function OutputPanel({
   adapter,
@@ -71,6 +72,22 @@ export function OutputPanel({
   )
   const [options, setOptions] = useState<KeyingOptions>(DEFAULT_KEYING_OPTIONS)
 
+  // Restored once, then written back on every change. A layout is a way of working, and
+  // making somebody re-pick it on each shipment is the friction this panel exists to remove.
+  useEffect(() => {
+    void (async () => {
+      const saved = await localStore.getKeyingOptions()
+      if (saved) setOptions(withDefaults(saved))
+    })()
+  }, [])
+
+  const changeOptions = (update: (current: KeyingOptions) => KeyingOptions) =>
+    setOptions((current) => {
+      const next = update(current)
+      if (next !== current) void localStore.saveKeyingOptions(next)
+      return next
+    })
+
   /**
    * Column order follows the canonical list rather than the order they were ticked.
    *
@@ -78,7 +95,7 @@ export function OutputPanel({
    * once. Toggling one column should not reorder the others.
    */
   const toggleColumn = (id: CommodityColumnId) =>
-    setOptions((current) => {
+    changeOptions((current) => {
       const next = new Set(current.columns)
       if (next.has(id)) next.delete(id)
       else next.add(id)
@@ -252,7 +269,7 @@ export function OutputPanel({
               Download keying sheet
             </Button>
           </div>
-          <KeyingSheetOptions options={options} setOptions={setOptions} toggleColumn={toggleColumn} />
+          <KeyingSheetOptions options={options} setOptions={changeOptions} toggleColumn={toggleColumn} />
         </div>
       </CardBody>
     </Card>

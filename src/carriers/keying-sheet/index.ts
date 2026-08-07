@@ -22,7 +22,7 @@ import type { MergedLine, Reconciliation } from '../../domain/types'
 import { KG_PER_LB, kgToLb as kilogramsToPounds } from '../../domain/units'
 import { buildXlsx, type CellValue, type Sheet } from '../../lib/xlsx'
 import type { SliDraft } from '../types'
-import { canonicalUnit, normalizeScheduleB, type ScheduleBIndex } from '../../domain/schedule-b'
+import { canonicalUnit, formatScheduleB, normalizeScheduleB, type ScheduleBIndex } from '../../domain/schedule-b'
 import { partKey } from '../../domain/part-key'
 import { domesticForeign, roundTo } from '../../domain/reconcile'
 import { toCountryPickerLabel, toIsoAlpha2 } from './countries'
@@ -258,7 +258,11 @@ function groupForKeying(
       scheduleBUnavailable: saved ? null : chosen.fellBack,
       // Only meaningful when the app chose; the operator's own wording replaces all of them.
       otherDescriptions: saved ? [] : chosen.alternatives,
-      harmonizedCode: code,
+      // Formatted, because a per-part correction is stored normalised: `PartCodeInput` commits
+      // `normalizeScheduleB`, so the raw value is ten bare digits. The SLI formats it and the
+      // sheet must agree — an operator keying `8544491000` into a field expecting
+      // `8544.49.1000` is the transposition this whole sheet exists to prevent.
+      harmonizedCode: formatScheduleB(code),
       countryOfManufacture: origins.length > 1 ? joinDistinct(origins.map((o) => toIsoAlpha2(o).code)) : country.code,
       countryLabel: origins.length > 1 ? joinDistinct(origins.map(toCountryPickerLabel)) : toCountryPickerLabel(origins[0] ?? ''),
       // Read off every origin in the row, not the first one. `part-code` merges origins by
@@ -678,8 +682,12 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
         return row.description
       case 'note': {
         if (row.describedByOperator) return 'your wording'
-        const said = row.otherDescriptions.length ? `document said: ${row.otherDescriptions.join('; ')}` : ''
-        if (!row.scheduleBUnavailable) return said.replace('document said', 'document also said')
+        // "also" only where the description itself came from the document. Beside Census
+        // wording it would assert the CIPL had used the official text, which it did not.
+        const fromDocument = sheet.options.descriptionSource !== 'schedule-b' || Boolean(row.scheduleBUnavailable)
+        const lead = fromDocument ? 'document also said' : 'document said'
+        const said = row.otherDescriptions.length ? `${lead}: ${row.otherDescriptions.join('; ')}` : ''
+        if (!row.scheduleBUnavailable) return said
         const why =
           row.scheduleBUnavailable === 'no-index'
             ? 'Schedule B dataset not loaded — the document’s wording is used'

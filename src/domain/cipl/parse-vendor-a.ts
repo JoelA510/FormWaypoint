@@ -482,7 +482,13 @@ function parseDetailLines(
     // A block that reaches the foot of the page without its figures has not ended — it is
     // continued overleaf. Emitting it here would file a line with no weight, and drop the
     // rest of it on the floor.
-    if (line && s === starts.length - 1 && cut === rows.length && !isComplete(line, ctx.kind)) {
+    //
+    // The test is incompleteness alone, not where the block was cut. `cut` used to be the
+    // page end whenever a block ran off it; it can now stop at a heading, so requiring
+    // `cut === rows.length` would drop the tail of any block a heading-shaped row landed
+    // inside. A last block that is genuinely unfinished and does not continue is still
+    // reported — by the warning that already exists for exactly that.
+    if (line && s === starts.length - 1 && !isComplete(line, ctx.kind)) {
       carry = { rows: block, commodityGroup, page: page.pageNumber, set: ctx.set, kind: ctx.kind }
       continue
     }
@@ -592,9 +598,16 @@ function commodityGroupBefore(rows: TextRow[], startIdx: number): string {
   return ''
 }
 
-/** The heading left stranded at the foot of a page, whose block begins on the next one. */
+/**
+ * The heading left stranded at the foot of a page, whose block begins on the next one.
+ *
+ * Scanned downwards and stopping at the first match, because the document prints the heading
+ * directly under the block it follows. Searching upwards from the page foot returned the
+ * *lowest* heading-shaped row instead — and an intermediate detail page carries no totals row
+ * to bound the search, so anything in the page footer would win over the real heading.
+ */
 function commodityGroupAfter(rows: TextRow[], from: number, to: number): string {
-  for (let i = Math.min(to, rows.length) - 1; i >= from; i--) {
+  for (let i = from; i < Math.min(to, rows.length); i++) {
     const heading = isCommodityGroup(rows[i])
     if (heading) return heading
   }

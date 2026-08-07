@@ -819,3 +819,47 @@ describe('what the sheet says versus what will be filed', () => {
     expect(sheet.commodities[0].scheduleBUnavailable).toBeNull()
   })
 })
+
+describe('what the sheet claims about its own wording', () => {
+  it('formats a corrected code the way the field expects it', () => {
+    // PartCodeInput commits `normalizeScheduleB`, so a saved correction is ten bare digits.
+    // Keying 8544491000 into a field expecting 8544.49.1000 is the transposition this
+    // whole sheet exists to prevent.
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+      codesByPart: { '40649-0300': '8544491000' },
+    })
+    expect(sheet.commodities[0].harmonizedCode).toBe('8544.49.1000')
+  })
+
+  it('leaves a code it cannot format alone rather than mangling it', () => {
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+      codesByPart: { '40649-0300': 'PENDING' },
+    })
+    expect(sheet.commodities[0].harmonizedCode).toBe('PENDING')
+  })
+
+  it('does not say the document "also said" the Census wording', () => {
+    // Beside official text, "also" asserts the CIPL used it. It did not.
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+      options: { descriptionSource: 'schedule-b' },
+      scheduleB: createScheduleBIndex({
+        source: 't',
+        generatedAt: '2026-01-01',
+        count: 1,
+        codes: { '8544420000': { d: 'Insulated electric conductors', u: ['NO'] } },
+      }),
+    })
+    const note = String(keyingSheetToWorkbook(sheet)[0].rows[1].at(-1))
+    expect(note).toContain('document said')
+    expect(note).not.toContain('document also said')
+  })
+
+  it('still says "also" where the description did come from the document', () => {
+    const two = [
+      line({ id: 'a', description: 'CBL, OS32C-CBL-30M', quantity: 3 }),
+      line({ id: 'b', description: 'Cable assembly', quantity: 1 }),
+    ]
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(two, []), draft())
+    expect(String(keyingSheetToWorkbook(sheet)[0].rows[1].at(-1))).toContain('document also said')
+  })
+})
