@@ -290,8 +290,11 @@ function groupForKeying(
     // give it an empty country cell with nothing prompting anybody to fill it in.
     const origins = [...new Set(group.map((l) => l.countryOfOrigin.trim()).filter(Boolean))]
     const code = codeFor(first, corrections)
+    // Deduped the way the grouping keys them, which is case-insensitively. Trimming alone
+    // made one part printed in two cases look like two, which both dropped the operator's
+    // saved wording and put both spellings in a cell that holds one part number.
+    const parts = [...new Map(group.map((l) => [partKey(l.partNumber), l.partNumber.trim()])).values()].filter(Boolean)
     // A saved wording is keyed to a part, so it only applies where the row is one part.
-    const parts = [...new Set(group.map((l) => l.partNumber.trim()).filter(Boolean))]
     const saved = parts.length === 1 ? descriptions[partKey(parts[0])] : undefined
     const chosen = describeGroup(group, options.descriptionSource, scheduleB, code)
     return {

@@ -6,7 +6,7 @@
  * and a defect in it went out under a green suite. These feed `parseCiplPages` directly.
  *
  * Positions are the ones the real documents use: headings and models at x=72, descriptions at
- * x=192, figures right of x=380.
+ * x=192 and x=384, figures right of x=421.
  */
 import { describe, expect, it } from 'vitest'
 import { parseCiplPages } from './parse-vendor-a'
@@ -62,6 +62,20 @@ describe('a heading stranded at the foot of a page', () => {
     expect(invoiceLines([headerPage(), first, second]).map((l) => l.commodityGroup)).toEqual(['', 'Gaskets'])
   })
 
+  it('is not taken from a row that is still inside the last block', () => {
+    // A description printed without its part number is a lone row in the heading column.
+    // Guarding only on the block's start let it carry forward as the next page's heading.
+    const first = detailPage(2, [
+      row(['00000001OP0010', 72], ['00000001OP0010', 198], ['1', 246]),
+      row(['0001', 72], ['00000001X', 96], ['Japan', 198]),
+      row(['8544.42.0000', 72], ['PCS', 408], ['USD', 486], ['USD', 564]),
+      row(['5610', 24], ['MODEL-A', 72], ['10000-0001', 192], ['2', 421], ['10.000', 472], ['20.000', 550]),
+      row(['CABLE ASSY', 72]),
+    ])
+    const second = detailPage(3, block('00000002OP0010', '10000-0002', '4016.93.0000', 'MODEL-B', 'O-RING'))
+    expect(invoiceLines([headerPage(), first, second]).map((l) => l.commodityGroup)).toEqual(['', ''])
+  })
+
   it('is not looked for when the page’s last block runs overleaf', () => {
     // Those closing rows belong to the unfinished block. Reading one as a heading hands the
     // next page's goods a description taken from the middle of a line not yet read — and the
@@ -86,18 +100,20 @@ describe('a heading stranded at the foot of a page', () => {
 })
 
 describe('a model code printed where a heading goes', () => {
-  it('is not read as one', () => {
-    // Vendor A prints models at x=72, the same column as headings, and `SA34-F1` passes any
-    // character class permissive enough to admit `Glass Cartridge Fuses <=1000V`.
-    const pages = [
-      headerPage(),
-      detailPage(2, [
-        ...block('00000001OP0010', '10000-0001', '8544.42.0000', 'MODEL-A', 'CABLE ASSY'),
-        row(['SA34-F1', 72]),
-        ...block('00000002OP0010', '10000-0002', '4016.93.0000', 'MODEL-B', 'O-RING'),
-      ]),
-    ]
-    expect(invoiceLines(pages).map((l) => l.commodityGroup)).toEqual(['', ''])
+  it('is not read as one, whether it carries a space or not', () => {
+    // `R6A 7833D` has a space and `SA34-F1` does not; both are models. What separates them
+    // from every heading on these documents is that neither contains a word.
+    for (const model of ['SA34-F1', 'R6A 7833D', 'RT6 5450A']) {
+      const pages = [
+        headerPage(),
+        detailPage(2, [
+          ...block('00000001OP0010', '10000-0001', '8544.42.0000', 'MODEL-A', 'CABLE ASSY'),
+          row([model, 72]),
+          ...block('00000002OP0010', '10000-0002', '4016.93.0000', 'MODEL-B', 'O-RING'),
+        ]),
+      ]
+      expect(invoiceLines(pages).map((l) => l.commodityGroup), model).toEqual(['', ''])
+    }
   })
 
   it('still reads the awkward headings that broke the old pattern', () => {

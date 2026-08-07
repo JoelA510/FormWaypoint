@@ -31,6 +31,9 @@ import {
   type TextRow,
 } from './extract-text'
 
+/** Quantity, unit price and extended value all sit right of this. */
+const FIGURE_COLUMN_MIN = 380
+
 const CLASSIFICATION = /^\d{4}\.\d{2}\.\d{4}$/
 const LINE_NUMBER = /^\d{4}$/
 const ORDER_NUMBER = /^[0-9][0-9A-Z]{7,}$/
@@ -567,15 +570,17 @@ const GROUP_COLUMN_MAX = 130
  *
  * A model code is the one thing position cannot separate, because vendor A prints those in
  * this same column and `SA34-F1` passes any class permissive enough to admit `<=1000V`.
- * Shape separates them: every heading on these documents is prose — `Gaskets`, `Flash drive`,
- * `Robot, not elsewhere spec` — and every model code is a single token carrying digits. So a
- * heading must either contain a space or contain no digits at all, which admits all ten
- * headings on the shipment that exposed this and rejects the model codes printed beside them.
+ *
+ * Shape separates them, but not by counting spaces: `R6A 7833D` is a model and has one. What
+ * every heading on these documents has and no model code does is a *word* — three or more
+ * letters running together with no digit among them. `Gaskets`, `Glass Cartridge Fuses
+ * <=1000V`, `Elect. Apparatus, Other`, `Robot, not elsewhere spec` all clear it; `SA34-F1`,
+ * `R6A 7833D` and `RT6 5450A` do not, because these codes mix a digit into every token.
  */
 const GROUP_TEXT = /^[A-Za-z][A-Za-z0-9 ,.&/'()<>=+%-]*[A-Za-z][A-Za-z0-9 ,.&/'()<>=+%-]*$/
 
-/** Prose, not a part or model code. See `GROUP_TEXT`. */
-const readsAsProse = (text: string): boolean => text.includes(' ') || !/\d/.test(text)
+/** Contains a word — three or more letters with no digit in them. See `GROUP_TEXT`. */
+const readsAsProse = (text: string): boolean => /(?:^|[^A-Za-z0-9])[A-Za-z]{3,}(?:[^A-Za-z0-9]|$)/.test(text)
 
 function isCommodityGroup(row: TextRow): string {
   const items = row.items
@@ -607,10 +612,28 @@ function commodityGroupBefore(rows: TextRow[], startIdx: number): string {
  * Not consulted at all when the page's last block runs overleaf. Those closing rows belong to
  * that unfinished block, and reading one as a heading hands the *next* page's goods a
  * description taken from the middle of a line that has not been read yet.
+ *
+ * Nor when the row is still inside the last block. A block is figures then description, so
+ * anything at or before the row after the figures is the block's own; only what follows it
+ * can belong to the next one. Guarding on the block's *start* let a block whose description
+ * printed without its part number — a lone row in the same column — carry forward as the next
+ * page's heading.
  */
 function commodityGroupAfter(rows: TextRow[], lastBlockStart: number, carried: boolean): string {
   const last = rows.length - 1
-  return !carried && last > lastBlockStart ? isCommodityGroup(rows[last]) : ''
+  if (carried) return ''
+  const figures = figureRowIn(rows, lastBlockStart, rows.length)
+  const blockEnd = figures === -1 ? lastBlockStart : figures + 1
+  return last > blockEnd ? isCommodityGroup(rows[last]) : ''
+}
+
+/** The row carrying a block's quantity, price and value — the last of its structural rows. */
+function figureRowIn(rows: TextRow[], from: number, to: number): number {
+  for (let i = from + 1; i < to; i++) {
+    const numeric = rows[i].items.filter((it) => it.x > FIGURE_COLUMN_MIN && parseNumber(it.str) !== null)
+    if (numeric.length >= 2) return i
+  }
+  return -1
 }
 
 interface BlockCore {
@@ -695,7 +718,7 @@ function parseInvoiceBlock(
   let valueRowIdx = -1
 
   for (let i = 1; i < block.length; i++) {
-    const numeric = block[i].items.filter((it) => it.x > 380 && parseNumber(it.str) !== null)
+    const numeric = block[i].items.filter((it) => it.x > FIGURE_COLUMN_MIN && parseNumber(it.str) !== null)
     if (numeric.length >= 3) {
       quantity = parseNumber(numeric[0].str) ?? 0
       unitValue = parseNumber(numeric[1].str) ?? undefined
@@ -746,6 +769,14 @@ function parseInvoiceBlock(
  */
 /** From the `DESCRIPTION OF GOODS` column header at x=144, with room to its left. */
 const DESCRIPTION_COLUMN_MIN = 140
+/**
+ * Left of the figures, and wide enough for both description cells.
+ *
+ * This layout prints two on a line — a short one at x=192 and a longer one at x=384 (`CA,
+ * BELT TO M12 Y-ADAPTER, 3M` beside `Cable, Belt Encoder to M12 Fem`) — and quantity starts
+ * at x=421. Tying this to `FIGURE_COLUMN_MIN` looked tidier and cut the second cell off,
+ * which cost a real description on a real shipment. Measured, not derived.
+ */
 const DESCRIPTION_COLUMN_MAX = 400
 
 /**

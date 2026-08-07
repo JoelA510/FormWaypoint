@@ -1059,3 +1059,26 @@ describe('a commodity record holds one unit', () => {
     expect(rows).toHaveLength(1)
   })
 })
+
+describe('one part printed two ways', () => {
+  const cases = [
+    line({ id: 'a', partNumber: '40649-0300', quantity: 2, extendedValue: 100 }),
+    line({ id: 'b', partNumber: '40649-0300'.toLowerCase(), quantity: 3, extendedValue: 150 }),
+  ]
+
+  it('is one part, because that is how the grouping keys it', () => {
+    // Deduping on trim alone made a part printed in two cases look like two, which put both
+    // spellings in a cell that holds one part number.
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(cases, []), draft()).commodities
+    expect(rows).toHaveLength(1)
+    expect(rows[0].partNumber).toBe('40649-0300')
+    expect(rows[0].quantity).toBe('5')
+  })
+
+  it('still finds the wording saved against it', () => {
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(cases, []), draft(), {
+      descriptionsByPart: { '40649-0300': 'Braided copper cable' },
+    }).commodities
+    expect(rows[0]).toMatchObject({ description: 'Braided copper cable', describedByOperator: true })
+  })
+})
