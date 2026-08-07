@@ -719,17 +719,103 @@ describe('what a row can honestly assert', () => {
       options: { descriptionSource: 'schedule-b' },
       scheduleB: null,
     })
-    expect(sheet.commodities[0].scheduleBUnavailable).toBe(true)
+    expect(sheet.commodities[0].scheduleBUnavailable).toBe('no-index')
     const [, row] = keyingSheetToWorkbook(sheet)[0].rows
-    expect(String(row.at(-1))).toContain('no Schedule B wording for this code')
+    expect(String(row.at(-1))).toContain('Schedule B dataset not loaded')
     const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
-    expect(notes.Descriptions).toContain('1 of 1 rows carry the document')
+    expect(notes.Descriptions).toContain('not loaded on this machine')
   })
 
   it('claims nothing about a fallback that did not happen', () => {
     const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft())
-    expect(sheet.commodities[0].scheduleBUnavailable).toBe(false)
+    expect(sheet.commodities[0].scheduleBUnavailable).toBeNull()
     const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
     expect(notes.Descriptions).not.toContain('carry the document')
+  })
+})
+
+describe('what the sheet says versus what will be filed', () => {
+  it('prints the code a reviewer corrected to, not the one the document got wrong', () => {
+    // The sheet is typed into software that files the same shipment. Printing the document's
+    // number would have the operator key the very code somebody just corrected away.
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+      codesByPart: { '40649-0300': '8544.49.1000' },
+    })
+    expect(sheet.commodities[0].harmonizedCode).toBe('8544.49.1000')
+  })
+
+  it('lets a per-part correction beat a blanket redirect, as the SLI rows do', () => {
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+      codesByPart: { '40649-0300': '8544.49.1000' },
+      classificationOverrides: { '8544420000': '8544.30.0000' },
+    })
+    expect(sheet.commodities[0].harmonizedCode).toBe('8544.49.1000')
+  })
+
+  it('groups on the corrected code, so two parts corrected apart do not share a row', () => {
+    const two = [
+      line({ id: 'a', partNumber: 'P-1', quantity: 1, extendedValue: 10 }),
+      line({ id: 'b', partNumber: 'P-2', quantity: 1, extendedValue: 10 }),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(two, []), draft(), {
+      options: { grouping: 'df-code' },
+      codesByPart: { 'P-1': '8544.49.1000' },
+    }).commodities
+    expect(rows).toHaveLength(2)
+    expect(rows.map((r) => r.harmonizedCode).sort()).toEqual(['8544.42.0000', '8544.49.1000'])
+  })
+
+  it('takes the country from the origins present, not from a first line that has none', () => {
+    // A group whose first line prints no origin and whose second says Japan is a Japanese
+    // row. Reading `first` gave it an empty cell with nothing prompting anybody to fill it.
+    const partial = [
+      line({ id: 'a', partNumber: 'P-1', countryOfOrigin: '' }),
+      line({ id: 'b', partNumber: 'P-1', countryOfOrigin: 'Japan' }),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(partial, []), draft(), {
+      options: { grouping: 'part-code' },
+    }).commodities
+    expect(rows[0]).toMatchObject({
+      countryOfManufacture: 'JP',
+      countryLabel: 'JP - Japan',
+      needsCountryCode: false,
+    })
+  })
+
+  it('blames the installation, not the classification, when the dataset never loaded', () => {
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+      options: { descriptionSource: 'schedule-b' },
+      scheduleB: null,
+    })
+    expect(sheet.commodities[0].scheduleBUnavailable).toBe('no-index')
+    const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
+    expect(notes.Descriptions).toContain('not loaded on this machine')
+    expect(notes.Descriptions).not.toContain('not in the concordance')
+  })
+
+  it('blames the code when the dataset loaded and the code is not in it', () => {
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+      options: { descriptionSource: 'schedule-b' },
+      scheduleB: createScheduleBIndex({ source: 't', generatedAt: '2026-01-01', count: 0, codes: {} }),
+    })
+    expect(sheet.commodities[0].scheduleBUnavailable).toBe('no-code')
+    const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
+    expect(notes.Descriptions).toContain('not in the concordance')
+    expect(notes.Descriptions).not.toContain('not loaded on this machine')
+  })
+
+  it('looks the official wording up under the corrected code', () => {
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+      options: { descriptionSource: 'schedule-b' },
+      codesByPart: { '40649-0300': '8544.49.1000' },
+      scheduleB: createScheduleBIndex({
+        source: 't',
+        generatedAt: '2026-01-01',
+        count: 1,
+        codes: { '8544491000': { d: 'Other electric conductors, not fitted with connectors', u: ['NO'] } },
+      }),
+    })
+    expect(sheet.commodities[0].description).toBe('Other electric conductors, not fitted with connectors')
+    expect(sheet.commodities[0].scheduleBUnavailable).toBeNull()
   })
 })

@@ -501,6 +501,8 @@ export function App() {
               sourceFile={parsed.fileName}
               excludedSets={parsed.availableSets.filter((set) => set !== reconciliation.selectedSet)}
               scheduleB={scheduleB}
+              codesByPart={codesByPart}
+              classificationOverrides={overridesToMap(overrides)}
             />
             <HistoryPanel shipments={shipments} onClear={() => void clearAll()} />
           </>

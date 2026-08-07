@@ -32,6 +32,8 @@ export function OutputPanel({
   sourceFile,
   excludedSets = [],
   scheduleB = null,
+  codesByPart = {},
+  classificationOverrides = {},
 }: {
   adapter: CarrierAdapter
   reconciliation: Reconciliation
@@ -46,6 +48,9 @@ export function OutputPanel({
   excludedSets?: string[]
   /** Supplies the official wording for the `schedule-b` description source. */
   scheduleB?: ScheduleBIndex | null
+  /** The same code corrections `reconcile` was given, so the sheet prints what will be filed. */
+  codesByPart?: Record<string, string>
+  classificationOverrides?: Record<string, string>
   /** Gated on the document checks *and* the draft checks — see App. */
   canGenerate: boolean
   onGenerated: () => void
@@ -135,6 +140,8 @@ export function OutputPanel({
         excludedSets,
         options,
         scheduleB,
+        codesByPart,
+        classificationOverrides,
       })
       const delivery = await deliver(
         bridge,

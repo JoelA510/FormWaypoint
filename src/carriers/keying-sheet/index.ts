@@ -38,6 +38,7 @@ import {
   type DescriptionSource,
   type GroupingMode,
   type KeyingOptions,
+  type ScheduleBFallback,
 } from './options'
 
 export * from './countries'
@@ -64,12 +65,13 @@ export interface KeyingCommodityRow {
   /** True when the wording came from a saved per-part override rather than the document. */
   describedByOperator?: boolean
   /**
-   * True when `schedule-b` wording was asked for and this code is not in the concordance, so
-   * the row carries the document's wording instead. Surfaced on the row and counted on the
-   * Notes tab, because a sheet that says its descriptions are official must not quietly hold
-   * rows that are not.
+   * Why this row carries the document's wording when the official one was asked for, or null
+   * when it does not. Surfaced on the row and counted on the Notes tab, because a sheet that
+   * says its descriptions are official must not quietly hold rows that are not — and the two
+   * reasons want different action, one from the classifier and one from whoever can get the
+   * dataset to load.
    */
-  scheduleBUnavailable?: boolean
+  scheduleBUnavailable?: ScheduleBFallback
   /**
    * Other wordings the document used for this part. Printed beside the row so the choice is
    * visible: the CIPL describes one part more than one way and does not say which is meant.
@@ -143,6 +145,31 @@ const MANUAL = 'Not on the CIPL — enter manually'
 const CHOOSE = 'Not on the CIPL — choose in the application'
 
 /**
+ * The commodity number this line is actually filed under.
+ *
+ * A reviewer who corrects a part's code corrects it for the SLI, and the keying sheet is
+ * typed into software that files the same shipment — printing the number the document got
+ * wrong would have the operator key the very code somebody just corrected away. Precedence
+ * matches `aggregateLines` exactly: the per-part correction is the narrower statement and
+ * beats a blanket code redirect. Truthiness, not `??`, because an empty string means "no
+ * override" and taking it would file a blank.
+ */
+function codeFor(line: MergedLine, corrections: CodeCorrections): string {
+  return (
+    corrections.codesByPart?.[partKey(line.partNumber)] ||
+    corrections.overrides?.[normalizeScheduleB(line.classification)] ||
+    line.classification
+  )
+}
+
+export interface CodeCorrections {
+  /** Commodity numbers a reviewer entered against a part. */
+  codesByPart?: Record<string, string>
+  /** Classification redirects, keyed by normalised source code. */
+  overrides?: Record<string, string>
+}
+
+/**
  * What makes two invoice lines one row.
  *
  * The default is part, country of manufacture and commodity number, because that is what a
@@ -162,8 +189,8 @@ const CHOOSE = 'Not on the CIPL — choose in the application'
  * No mode merges two commodity numbers, because a row asserts one. `line` groups on the
  * line's own identity, which is how "never group" is spelled without a special case.
  */
-function groupKeyFor(line: MergedLine, mode: GroupingMode, index: number): string {
-  const code = normalizeScheduleB(line.classification)
+function groupKeyFor(line: MergedLine, mode: GroupingMode, index: number, corrections: CodeCorrections): string {
+  const code = normalizeScheduleB(codeFor(line, corrections))
   switch (mode) {
     case 'line':
       return `${index}|${line.id}`
@@ -198,10 +225,11 @@ function groupForKeying(
   descriptions: Record<string, string>,
   options: KeyingOptions,
   scheduleB: ScheduleBIndex | null,
+  corrections: CodeCorrections,
 ): KeyingCommodityRow[] {
   const groups = new Map<string, MergedLine[]>()
   lines.forEach((line, index) => {
-    const key = groupKeyFor(line, options.grouping, index)
+    const key = groupKeyFor(line, options.grouping, index, corrections)
     const bucket = groups.get(key)
     if (bucket) bucket.push(line)
     else groups.set(key, [line])
@@ -214,22 +242,25 @@ function groupForKeying(
     // Summed in kilograms and converted once. Converting each line and adding the rounded
     // pounds accumulates the rounding: the same shipment came out 0.005 lb heavy that way.
     const weightKg = group.reduce((sum, l) => sum + (l.netWeightKg ?? 0), 0)
+    // Read from the distinct origins, not the first line's: a group whose first line prints
+    // no origin and whose second says Japan is a Japanese row, and taking `first` would
+    // give it an empty country cell with nothing prompting anybody to fill it in.
     const origins = [...new Set(group.map((l) => l.countryOfOrigin.trim()).filter(Boolean))]
-    const country = toIsoAlpha2(first.countryOfOrigin)
+    const country = toIsoAlpha2(origins[0] ?? '')
+    const code = codeFor(first, corrections)
     // A saved wording is keyed to a part, so it only applies where the row is one part.
     const parts = [...new Set(group.map((l) => l.partNumber.trim()).filter(Boolean))]
     const saved = parts.length === 1 ? descriptions[partKey(parts[0])] : undefined
-    const chosen = describeGroup(group, options.descriptionSource, scheduleB)
+    const chosen = describeGroup(group, options.descriptionSource, scheduleB, code)
     return {
       description: saved || chosen.description,
       describedByOperator: Boolean(saved),
-      /** The official wording was asked for and the code was not in the concordance. */
-      scheduleBUnavailable: !saved && chosen.fellBack,
+      scheduleBUnavailable: saved ? null : chosen.fellBack,
       // Only meaningful when the app chose; the operator's own wording replaces all of them.
       otherDescriptions: saved ? [] : chosen.alternatives,
-      harmonizedCode: first.classification,
+      harmonizedCode: code,
       countryOfManufacture: origins.length > 1 ? joinDistinct(origins.map((o) => toIsoAlpha2(o).code)) : country.code,
-      countryLabel: origins.length > 1 ? joinDistinct(origins.map(toCountryPickerLabel)) : toCountryPickerLabel(first.countryOfOrigin),
+      countryLabel: origins.length > 1 ? joinDistinct(origins.map(toCountryPickerLabel)) : toCountryPickerLabel(origins[0] ?? ''),
       // Read off every origin in the row, not the first one. `part-code` merges origins by
       // design, so a part shipped 2 from the US and 3 from Japan is one row — and stating D
       // for it would declare three foreign pieces domestic.
@@ -281,20 +312,26 @@ function describeGroup(
   group: MergedLine[],
   source: DescriptionSource,
   scheduleB: ScheduleBIndex | null,
-): { description: string; alternatives: string[]; fellBack: boolean } {
+  code: string,
+): { description: string; alternatives: string[]; fellBack: ScheduleBFallback } {
   if (source === 'schedule-b') {
-    const official = scheduleB?.lookup(group[0].classification)?.description?.trim()
+    const official = scheduleB?.lookup(code)?.description?.trim()
     // The document's own wordings still travel with the row: the official text describes the
     // code, and whether the code describes these goods is the reviewer's call, not the app's.
     if (official) {
-      return { description: official, alternatives: fromDocument(group, 'document').ranked, fellBack: false }
+      return { description: official, alternatives: fromDocument(group, 'document').ranked, fellBack: null }
     }
   }
   const { ranked } = fromDocument(group, source === 'heading' ? 'heading' : 'document')
-  // A row that asked for the official wording and did not get it has to say so. The Notes tab
-  // states where descriptions came from, and a silent fallback makes that statement false for
-  // rows nobody can pick out.
-  return { description: ranked[0] ?? '', alternatives: ranked.slice(1), fellBack: source === 'schedule-b' }
+  // A row that asked for the official wording and did not get it has to say so, and say which
+  // of the two reasons it was. "This code is not in the concordance" is a statement about the
+  // code, and repeating it for every row of a shipment because the dataset failed to load
+  // would send somebody looking for a classification problem that is not there.
+  return {
+    description: ranked[0] ?? '',
+    alternatives: ranked.slice(1),
+    fellBack: source !== 'schedule-b' ? null : scheduleB ? 'no-code' : 'no-index',
+  }
 }
 
 /** The document's own wordings for a group, most-invoiced first. */
@@ -332,6 +369,13 @@ export interface KeyingInputs {
   options?: Partial<KeyingOptions>
   /** Needed only for the `schedule-b` description source. */
   scheduleB?: ScheduleBIndex | null
+  /**
+   * Commodity numbers a reviewer entered against a part, and classification redirects — the
+   * same corrections `reconcile` was given. Without them the sheet prints the number the
+   * document got wrong and the operator keys the code somebody just corrected away.
+   */
+  codesByPart?: Record<string, string>
+  classificationOverrides?: Record<string, string>
 }
 
 export function buildKeyingSheet(
@@ -344,7 +388,10 @@ export function buildKeyingSheet(
   const { descriptionsByPart = {}, sourceFile, excludedSets = [], scheduleB = null } = inputs
   const options = withDefaults(inputs.options)
   const isFedex = target === 'fedex-ship-manager'
-  const commodities = groupForKeying(mergedLines, descriptionsByPart, options, scheduleB)
+  const commodities = groupForKeying(mergedLines, descriptionsByPart, options, scheduleB, {
+    codesByPart: inputs.codesByPart,
+    overrides: inputs.classificationOverrides,
+  })
 
   // Totalled from the rows the sheet actually prints, not from the SLI's own rows. Both are
   // built from the same merged lines and agree in practice, but the TOTAL row sits under a
@@ -633,7 +680,11 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
         if (row.describedByOperator) return 'your wording'
         const said = row.otherDescriptions.length ? `document said: ${row.otherDescriptions.join('; ')}` : ''
         if (!row.scheduleBUnavailable) return said.replace('document said', 'document also said')
-        return ['no Schedule B wording for this code — the document’s is used', said].filter(Boolean).join('; ')
+        const why =
+          row.scheduleBUnavailable === 'no-index'
+            ? 'Schedule B dataset not loaded — the document’s wording is used'
+            : 'no Schedule B wording for this code — the document’s is used'
+        return [why, said].filter(Boolean).join('; ')
       }
     }
   }
@@ -678,7 +729,8 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
     }
   }
 
-  const fellBack = sheet.commodities.filter((c) => c.scheduleBUnavailable).length
+  const noIndex = sheet.commodities.filter((c) => c.scheduleBUnavailable === 'no-index').length
+  const noCode = sheet.commodities.filter((c) => c.scheduleBUnavailable === 'no-code').length
 
   const notes: CellValue[][] = [
     ['Note', 'Detail'],
@@ -700,8 +752,12 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
     [
       'Descriptions',
       `${DESCRIPTION_LABELS[sheet.options.descriptionSource]}. ${DESCRIPTION_NOTES[sheet.options.descriptionSource]} ` +
-        (fellBack
-          ? `${fellBack} of ${sheet.commodities.length} rows carry the document's wording instead, because their ` +
+        (noIndex
+          ? 'The Schedule B dataset is not loaded on this machine, so every row carries the document’s wording ' +
+            'instead. That is a problem with this installation, not with these commodity numbers. '
+          : '') +
+        (noCode
+          ? `${noCode} of ${sheet.commodities.length} rows carry the document's wording instead, because their ` +
             'commodity number is not in the concordance; each one says so in the Note column. '
           : '') +
         'Rows noted "your wording" carry a description saved against that part. Nothing here is composed by the application.',

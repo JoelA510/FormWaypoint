@@ -28,6 +28,16 @@ export type GroupingMode =
   /** No grouping. One row per invoice line, as the document prints them. */
   | 'line'
 
+/**
+ * Why a row asked for the official wording and did not get it.
+ *
+ * `no-code` is a statement about that commodity number and belongs to whoever classifies it.
+ * `no-index` is a statement about this machine — the concordance did not load — and applies
+ * to every row at once. Telling somebody their codes are missing from a file that was never
+ * opened sends them looking for a classification problem that is not there.
+ */
+export type ScheduleBFallback = 'no-code' | 'no-index' | null
+
 /** Where a row's commodity description comes from. Never composed by the application. */
 export type DescriptionSource =
   /** The part's own description, as the document prints it. */
