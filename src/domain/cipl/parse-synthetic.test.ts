@@ -168,6 +168,15 @@ describe('commodity headings', () => {
     expect([...fc(parsed, 'INVOICE')].every((l) => l.commodityGroup)).toBe(true)
   })
 
+  it('carries it on the packing list too, which ends its blocks differently', async () => {
+    // A packing block carries its description on the first row and ends at the figures; an
+    // invoice block ends one row later. Assuming the invoice's shape put the boundary past
+    // the end of every packing block, so nothing stranded below one was ever carried.
+    const parsed = await parse(simpleShipment({ linesPerPage: 2 }))
+    expect(byOrder(parsed, 'PACKING_LIST', '00000003OP0010').commodityGroup).toBe('Optical instruments')
+  })
+
+
   /**
    * Three shapes that all put the wrong words against the wrong goods.
    *

@@ -38,6 +38,8 @@ export interface SyntheticLine {
   carton: string
   /** Print this line's packing figures divided N ways, as `(@ / N)`. */
   weightDivisor?: number
+  /** The second description cell this layout prints at x=384, where the document has one. */
+  secondDescription?: string
 }
 
 export interface SyntheticCipl {
@@ -212,9 +214,13 @@ function drawInvoiceBlock(cursor: Cursor, line: SyntheticLine, font: PDFFont) {
   text(page, money(line.unitPrice), 478, y, font)
   text(page, money(line.quantity * line.unitPrice), 556, y, font)
   y -= ROW
-  text(page, line.description, 72, y, font)
+  // Measured off a real invoice: the part number repeats at x=72, the description sits under
+  // its own column header at x=192, and a second description cell follows at x=384. The
+  // fixture used to put the description at x=72 and the model at x=384 — the two columns
+  // swapped — which made it disagree with the document about which text is which.
+  text(page, line.partNumber, 72, y, font)
   text(page, line.description, 192, y, font)
-  text(page, line.model, 384, y, font)
+  if (line.secondDescription) text(page, line.secondDescription, 384, y, font)
   cursor.y = y
 }
 

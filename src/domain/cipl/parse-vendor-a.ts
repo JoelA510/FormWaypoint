@@ -475,7 +475,9 @@ function parseDetailLines(
     const to = s + 1 < starts.length ? starts[s + 1] : rows.length
     const cut = truncateAtPageTotals(rows, from, to)
     const block = rows.slice(from, cut)
-    group = commodityGroupBefore(rows, from) || group
+    // Everything up to and including the previous block's last structural row belongs to it.
+    const floor = s === 0 ? -1 : blockEndsAt(rows, starts[s - 1], from, ctx.kind)
+    group = commodityGroupBefore(rows, from, floor) || group
     const commodityGroup = group
     const line = parseBlock(block, commodityGroup, page.pageNumber)
 
@@ -499,7 +501,7 @@ function parseDetailLines(
   // detail column and reads exactly like a heading, and the text below the totals row is the
   // page footer. Only the gap between the last block and the totals can hold a heading.
   const nextGroup = starts.length
-    ? commodityGroupAfter(rows, starts[starts.length - 1], Boolean(carry))
+    ? commodityGroupAfter(rows, starts[starts.length - 1], Boolean(carry), ctx.kind)
     : ''
   return { lines, carry, group: nextGroup || group }
 }
@@ -592,8 +594,17 @@ function isCommodityGroup(row: TextRow): string {
   return GROUP_TEXT.test(text) && readsAsProse(text) ? text : ''
 }
 
-function commodityGroupBefore(rows: TextRow[], startIdx: number): string {
-  for (let i = startIdx - 1; i >= 0 && i >= startIdx - 4; i--) {
+/**
+ * The heading printed just above a block.
+ *
+ * Floored at the end of the block before it, for the same reason the look-ahead is: a
+ * description printed without its part number is a lone row in the heading column, and the
+ * widened pattern accepts ordinary descriptions like `CBL, OS32C-CBL-30M`. Unbounded, the
+ * previous line's own words became this line's commodity heading — and the heading is what
+ * `aggregateLines` files as the SLI row description.
+ */
+function commodityGroupBefore(rows: TextRow[], startIdx: number, floor: number): string {
+  for (let i = startIdx - 1; i > floor && i >= startIdx - 4; i--) {
     const heading = isCommodityGroup(rows[i])
     if (heading) return heading
   }
@@ -619,15 +630,28 @@ function commodityGroupBefore(rows: TextRow[], startIdx: number): string {
  * printed without its part number — a lone row in the same column — carry forward as the next
  * page's heading.
  */
-function commodityGroupAfter(rows: TextRow[], lastBlockStart: number, carried: boolean): string {
+function commodityGroupAfter(rows: TextRow[], lastBlockStart: number, carried: boolean, kind: DocumentKind): string {
   const last = rows.length - 1
   if (carried) return ''
-  const figures = figureRowIn(rows, lastBlockStart, rows.length)
-  const blockEnd = figures === -1 ? lastBlockStart : figures + 1
-  return last > blockEnd ? isCommodityGroup(rows[last]) : ''
+  return last > blockEndsAt(rows, lastBlockStart, rows.length, kind) ? isCommodityGroup(rows[last]) : ''
 }
 
-/** The row carrying a block's quantity, price and value — the last of its structural rows. */
+/**
+ * The index of a block's last row of its own.
+ *
+ * The two kinds put their description on opposite sides of the figures: an invoice block ends
+ * `figures` then `part description`, while a packing block carries its description on the
+ * first row and ends at the figures. Assuming the invoice's shape put the boundary one row
+ * past the end of every packing block, so a heading stranded below one was never carried
+ * forward at all.
+ */
+function blockEndsAt(rows: TextRow[], from: number, to: number, kind: DocumentKind): number {
+  const figures = figureRowIn(rows, from, to)
+  if (figures === -1) return from
+  return kind === 'INVOICE' ? figures + 1 : figures
+}
+
+/** The row carrying a block's quantity, price and value. */
 function figureRowIn(rows: TextRow[], from: number, to: number): number {
   for (let i = from + 1; i < to; i++) {
     const numeric = rows[i].items.filter((it) => it.x > FIGURE_COLUMN_MIN && parseNumber(it.str) !== null)
