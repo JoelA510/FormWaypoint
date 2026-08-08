@@ -344,10 +344,17 @@ function groupForKeying(
       // that a blank origin produces, which is also what the SLI files for those lines — so
       // reading the cell from the origins instead would blank the one column that mode
       // exists to be checked against. The missing origin is still flagged beside it.
+      //
+      // And blank, not a partial letter, where some lines state no origin at all: `D` over a
+      // row whose other three pieces have no stated origin asserts they are domestic, which
+      // is both unsupported and the opposite of the `F` the SLI files for them. A field that
+      // cannot be stated is left for the operator, who is told to state it.
       domesticForeign:
         options.grouping === 'df-code'
           ? domesticForeign(first.countryOfOrigin)
-          : joinDistinct(origins.map(domesticForeign).sort()),
+          : originMissing
+            ? ''
+            : joinDistinct(origins.map(domesticForeign).sort()),
       // A row with no origin at all, or only some of one, needs one as much as a row with an
       // unrecognised name.
       needsCountryCode: originMissing || !origins.length || origins.some((o) => !toIsoAlpha2(o).known),
@@ -868,6 +875,8 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
   // country column off — and a prompt that lives only in a cell nobody chose to print is a
   // prompt that does not exist. The Schedule B fallback is repeated here for the same reason.
   const needCountry = sheet.commodities.filter((c) => c.needsCountryCode).length
+  const printed = new Set(sheet.options.columns)
+  const alternatives = sheet.commodities.some((c) => c.otherDescriptions.length || c.describedByOperator)
 
   const notes: CellValue[][] = [
     ['Note', 'Detail'],
@@ -898,7 +907,13 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
           ? `${noCode} of ${sheet.commodities.length} rows carry the document's wording instead, because their ` +
             'commodity number is not in the concordance; each one says so in the Note column. '
           : '') +
-        'Rows noted "your wording" carry a description saved against that part. Nothing here is composed by the application.',
+        (printed.has('note')
+          ? 'Rows noted "your wording" carry a description saved against that part. '
+          : alternatives
+            ? 'The Note column is switched off for this sheet, so what else the document called these goods — ' +
+              'and which rows carry a wording saved against the part — is not printed on it. '
+            : '') +
+        'Nothing here is composed by the application.',
     ],
     [
       'Check',
@@ -920,7 +935,10 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
       'Country of manufacture',
       `${needCountry} of ${sheet.commodities.length} rows need one entered by hand — the document either ` +
         'states no origin for some of their lines, or names one this app could not resolve to a code. ' +
-        'The country column says which; a commodity record needs the code either way.',
+        (printed.has('countryOfManufacture')
+          ? 'The country column says which. '
+          : 'The country column is switched off for this sheet, so it does not say which. ') +
+        'A commodity record needs the code either way.',
     ])
   }
 

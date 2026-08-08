@@ -1142,9 +1142,10 @@ describe('a row whose lines do not all state an origin', () => {
     const rows = buildKeyingSheet('fedex-ship-manager', fixture(partial, []), draft(), {
       options: { grouping: 'part-code' },
     }).commodities
-    // D, not `D, F`: nothing on the row says any of it is foreign. But the row does not
-    // pretend the missing origin away either — the SLI files those pieces as F.
-    expect(rows[0].domesticForeign).toBe('D')
+    // Blank, not `D` and not `D, F`. `D` would assert the origin-less pieces are domestic —
+    // unsupported, and the opposite of the `F` the SLI files for them. `F` would assert the
+    // reverse. The field cannot be stated from this row, so it is left to be stated.
+    expect(rows[0].domesticForeign).toBe('')
     expect(rows[0].countryLabel).toContain('US - United States')
     expect(rows[0].countryLabel).toContain('some lines state no origin')
     expect(rows[0].needsCountryCode).toBe(true)
@@ -1312,5 +1313,39 @@ describe('a prompt the column picker cannot silence', () => {
     const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft())
     const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
     expect(notes['Country of manufacture']).toBeUndefined()
+  })
+})
+
+describe('the Notes tab does not point at columns that are switched off', () => {
+  const withColumns = (columns: CommodityColumnId[], over: Parameters<typeof buildKeyingSheet>[3] = {}) =>
+    Object.fromEntries(
+      keyingSheetToWorkbook(
+        buildKeyingSheet('fedex-ship-manager', fixture([line({ countryOfOrigin: 'Ruritania' })], []), draft(), {
+          ...over,
+          options: { ...over.options, columns },
+        }),
+      )[2].rows.map((r) => [String(r[0]), String(r[1])]),
+    )
+
+  it('says the country column is off when it is', () => {
+    expect(withColumns(['partNumber', 'quantity'])['Country of manufacture']).toContain('switched off')
+    expect(withColumns(['countryOfManufacture', 'quantity'])['Country of manufacture']).toContain(
+      'The country column says which',
+    )
+  })
+
+  it('says where the document’s own wording went when the Note column is off', () => {
+    const both = [
+      line({ id: 'a', countryOfOrigin: 'Japan', description: 'CBL 30M', quantity: 3 }),
+      line({ id: 'b', countryOfOrigin: 'Japan', description: 'Cable assembly', quantity: 1 }),
+    ]
+    const notes = (columns: CommodityColumnId[]) =>
+      Object.fromEntries(
+        keyingSheetToWorkbook(
+          buildKeyingSheet('fedex-ship-manager', fixture(both, []), draft(), { options: { columns } }),
+        )[2].rows.map((r) => [String(r[0]), String(r[1])]),
+      )
+    expect(notes(['partNumber', 'description']).Descriptions).toContain('Note column is switched off')
+    expect(notes(['partNumber', 'description', 'note']).Descriptions).not.toContain('switched off')
   })
 })

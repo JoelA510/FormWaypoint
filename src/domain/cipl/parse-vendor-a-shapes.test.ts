@@ -304,6 +304,26 @@ describe('a description that reads like another field', () => {
   })
 })
 
+describe('the second description cell', () => {
+  it('is read, and beats the shorter one beside it', () => {
+    // This layout prints two description cells on the row: a terse one at x=192 and a fuller
+    // one at x=384, with quantity starting at x=421. Tying the column's right edge to the
+    // figures cut the second cell off and lost a real description on a real shipment.
+    const pages = [
+      headerPage(),
+      detailPage(2, [
+        row(['00000001OP0010', 72], ['00000001OP0010', 198], ['1', 246]),
+        row(['0001', 72], ['00000001X', 96], ['Japan', 198]),
+        row(['8544.20.0000', 72], ['PCS', 408], ['USD', 486], ['USD', 564]),
+        row(['5610', 24], ['MODEL-A', 72], ['10000-0001', 192], ['2', 421], ['10.000', 472], ['20.000', 550]),
+        row(['10000-0001', 72], ['CA, BELT TO M12', 192], ['Cable, Belt Encoder to M12 Fem', 384]),
+        ...block('00000002OP0010', '10000-0002', '4016.93.0000', 'MODEL-B', 'O-RING'),
+      ]),
+    ]
+    expect(invoiceLines(pages)[0].description).toBe('Cable, Belt Encoder to M12 Fem')
+  })
+})
+
 describe('a model code printed where a heading goes', () => {
   it('is not read as one, whether it carries a space or not', () => {
     // `R6A 7833D` has a space and `SA34-F1` does not; both are models. What separates them
