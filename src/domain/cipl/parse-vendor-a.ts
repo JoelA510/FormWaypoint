@@ -657,17 +657,17 @@ function blockEndsAt(rows: TextRow[], from: number, to: number, kind: DocumentKi
   // block's heading, and one lone prose row after the figures looks exactly like the other.
   // Nothing in the document separates them.
   //
-  // So the parser takes the reading that keeps this line's own words on this line: the row
-  // is the block's description row, and the heading below a *headingless* block is floored
-  // out. Both readings cost something, and this one is not free — where the row really was a
-  // heading, that commodity keeps the heading already in force rather than its own, and the
-  // block above ends up with no description at all (`descriptionFrom` skips heading-shaped
-  // rows, so it declines to steal it rather than printing the wrong words).
+  // So the parser takes the reading that keeps this line's own words on this line: the row is
+  // the block's description row, and the heading below a *headingless* block is floored out.
+  // That is not free, and the cost is worth stating plainly. Where the row really was a
+  // heading, `descriptionFrom` reads it as this block's description — the wrong words — and
+  // the commodity it headed keeps whatever heading was already in force.
   //
-  // The alternative reading is worse: a description printed without its part number is the
-  // shape this layout actually produces, and reading those as headings would hand the *next*
-  // commodity the previous line's wording — wrong words on a declaration rather than absent
-  // ones.
+  // The alternative reading is worse, not better: a description printed without its part
+  // number is the shape this layout actually produces, so reading those as headings would
+  // hand the *next* commodity the previous line's wording *and* leave this one blank. That is
+  // the same wrong words one row further down, plus a missing description. Three guards in
+  // this file cover cases where it does exactly that.
   return figures + 1
 }
 

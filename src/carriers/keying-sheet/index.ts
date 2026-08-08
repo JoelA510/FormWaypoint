@@ -864,6 +864,10 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
 
   const noIndex = sheet.commodities.filter((c) => c.scheduleBUnavailable === 'no-index').length
   const noCode = sheet.commodities.filter((c) => c.scheduleBUnavailable === 'no-code').length
+  // Counted here as well as printed on the row, because the column picker can switch the
+  // country column off — and a prompt that lives only in a cell nobody chose to print is a
+  // prompt that does not exist. The Schedule B fallback is repeated here for the same reason.
+  const needCountry = sheet.commodities.filter((c) => c.needsCountryCode).length
 
   const notes: CellValue[][] = [
     ['Note', 'Detail'],
@@ -910,6 +914,15 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
         'does. Where it differs from the line above, the difference is rounding a row at a time.',
     ],
   ]
+
+  if (needCountry) {
+    notes.push([
+      'Country of manufacture',
+      `${needCountry} of ${sheet.commodities.length} rows need one entered by hand — the document either ` +
+        'states no origin for some of their lines, or names one this app could not resolve to a code. ' +
+        'The country column says which; a commodity record needs the code either way.',
+    ])
+  }
 
   if (sheet.manualFields.length) {
     notes.push(['Enter manually', sheet.manualFields.join(', ')])

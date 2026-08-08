@@ -1286,3 +1286,31 @@ describe('the D/F column’s insertion', () => {
     expect(rows[0]).toEqual(['Part Number', 'D/F'])
   })
 })
+
+describe('a prompt the column picker cannot silence', () => {
+  const noOrigin = [line({ countryOfOrigin: '' })]
+
+  it('reports rows needing a country even with the country column switched off', () => {
+    // The prompt used to live only in that cell. Turning the column off left a row whose
+    // origin the document never stated going out with nothing said about it anywhere.
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(noOrigin, []), draft(), {
+      options: { columns: ['partNumber', 'quantity', 'description'] },
+    })
+    const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
+    expect(notes['Country of manufacture']).toContain('1 of 1 rows need one entered by hand')
+  })
+
+  it('reports an unresolvable country name the same way', () => {
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({ countryOfOrigin: 'Ruritania' })], []), draft(), {
+      options: { columns: ['partNumber', 'quantity'] },
+    })
+    const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
+    expect(notes['Country of manufacture']).toContain('1 of 1 rows')
+  })
+
+  it('says nothing when every row resolved', () => {
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft())
+    const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
+    expect(notes['Country of manufacture']).toBeUndefined()
+  })
+})
