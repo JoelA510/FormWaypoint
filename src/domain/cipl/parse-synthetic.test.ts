@@ -130,6 +130,27 @@ describe('weights printed divided', () => {
   })
 })
 
+/**
+ * Three consecutive commodities whose headings are the awkward shapes: one longer than the
+ * description below it, one carrying digits and a comparison, one carrying a full stop.
+ */
+const headings = () => {
+  const base = simpleShipment()
+  const wording: [string, string][] = [
+    ['Flash drive', 'BUNDLE, PACKXPERT 4.0'],
+    ['Glass Cartridge Fuses <=1000V', 'FUSE, 1A 3AG'],
+    ['Elect. Apparatus, Other', 'PCBAY, MB ELC ACRBD'],
+  ]
+  return {
+    ...base,
+    lines: base.lines.map((line, i) => ({
+      ...line,
+      commodityGroup: wording[i][0],
+      description: wording[i][1],
+    })),
+  }
+}
+
 describe('commodity headings', () => {
   it('never reads the consignee city as a heading', async () => {
     // The address block sits directly above the first block on every detail page, and its
@@ -145,6 +166,50 @@ describe('commodity headings', () => {
     const parsed = await parse(simpleShipment({ linesPerPage: 2 }))
     expect(byOrder(parsed, 'INVOICE', '00000003OP0010').commodityGroup).toBe('Optical instruments')
     expect([...fc(parsed, 'INVOICE')].every((l) => l.commodityGroup)).toBe(true)
+  })
+
+  it('carries it on the packing list too, which ends its blocks differently', async () => {
+    // A packing block carries its description on the first row and ends at the figures; an
+    // invoice block ends one row later. Assuming the invoice's shape put the boundary past
+    // the end of every packing block, so nothing stranded below one was ever carried.
+    const parsed = await parse(simpleShipment({ linesPerPage: 2 }))
+    expect(byOrder(parsed, 'PACKING_LIST', '00000003OP0010').commodityGroup).toBe('Optical instruments')
+  })
+
+
+  /**
+   * Three shapes that all put the wrong words against the wrong goods.
+   *
+   * A heading sits between two blocks with the rule that separated them stripped out, so
+   * whichever side claims it decides what both commodities are called. Every one of these
+   * was seen on one real shipment, and none of them failed a check: the form generated
+   * cleanly, describing a fuse as a flash drive.
+   */
+  it('does not let a heading longer than the description become the description', async () => {
+    const parsed = await parse(headings())
+    // `Glass Cartridge Fuses <=1000V` is 29 characters against a 21-character description,
+    // and the description is chosen by length.
+    expect(byOrder(parsed, 'INVOICE', '00000001OP0010')).toMatchObject({
+      description: 'BUNDLE, PACKXPERT 4.0',
+      commodityGroup: 'Flash drive',
+    })
+  })
+
+  it('reads a heading carrying digits and punctuation rather than skipping it', async () => {
+    const parsed = await parse(headings())
+    // A skipped heading is not a blank one — the previous heading stays in force, so the
+    // fuse took `Flash drive` from the block above it.
+    expect(byOrder(parsed, 'INVOICE', '00000002OP0010').commodityGroup).toBe('Glass Cartridge Fuses <=1000V')
+    expect(byOrder(parsed, 'INVOICE', '00000003OP0010').commodityGroup).toBe('Elect. Apparatus, Other')
+  })
+
+  it('gives every line the heading printed above it and its own description', async () => {
+    const parsed = await parse(headings())
+    expect(fc(parsed, 'INVOICE').map((l) => [l.commodityGroup, l.description])).toEqual([
+      ['Flash drive', 'BUNDLE, PACKXPERT 4.0'],
+      ['Glass Cartridge Fuses <=1000V', 'FUSE, 1A 3AG'],
+      ['Elect. Apparatus, Other', 'PCBAY, MB ELC ACRBD'],
+    ])
   })
 })
 
@@ -219,3 +284,23 @@ describe('many lines over many pages', () => {
 })
 
 const round3 = (n: number) => Math.round(n * 1000) / 1000
+
+describe('what a heading lookahead must not reach', () => {
+  it('never takes the consignee city, even where no heading is printed at all', async () => {
+    // The stranded-heading lookahead scans below the last block on a page. Unbounded, it
+    // reaches the header page — whose address block sits in the detail column and whose last
+    // line is a single word — and a shipment of cable is declared as a country.
+    const spec = simpleShipment()
+    const anonymous = { ...spec, lines: spec.lines.map((l) => ({ ...l, commodityGroup: undefined })) }
+    const parsed = await parse(anonymous)
+    const groups = fc(parsed, 'INVOICE').map((l) => l.commodityGroup)
+    expect(groups).not.toContain('Singapore')
+    expect(groups.every((g) => !g)).toBe(true)
+  })
+
+  it('never takes the trade terms printed below the totals row', async () => {
+    const parsed = await parse(simpleShipment({ linesPerPage: 2 }))
+    const groups = fc(parsed, 'INVOICE').map((l) => l.commodityGroup)
+    expect(groups.some((g) => /FOB|Collect/i.test(g))).toBe(false)
+  })
+})

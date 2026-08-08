@@ -234,9 +234,14 @@ function drawInvoiceBlock(cursor: Cursor, line: SyntheticLine, font: PDFFont) {
   text(page, money(line.unitPrice), 478, y, font)
   text(page, money(line.quantity * line.unitPrice), 556, y, font)
   y -= ROW
-  text(page, line.description, 72, y, font)
+  // Measured off a real invoice: the part number repeats at x=72 and the description sits
+  // under its own column header at x=192. The fixture used to put the description at x=72
+  // and the model at x=384 — two columns swapped — which made it disagree with the document
+  // about which text is which, and produced two review findings that were really about the
+  // fixture. The second description cell the layout prints at x=384 is covered in
+  // `parse-vendor-a-shapes.test.ts`, where a row can be built with one directly.
+  text(page, line.partNumber, 72, y, font)
   text(page, line.description, 192, y, font)
-  text(page, line.model, 384, y, font)
   cursor.y = y
 }
 
@@ -304,14 +309,19 @@ function drawSet(doc: PDFDocument, spec: SyntheticCipl, set: string, kind: strin
   let group = ''
 
   for (const [i, line] of spec.lines.entries()) {
-    if (onPage >= perPage) {
-      cursor = startDetailPage(doc, spec, kind, font)
-      onPage = 0
-    }
+    // The heading is drawn *before* the page break is considered, which is what the real
+    // document does: a heading whose block will not fit stays behind on the page it was
+    // reached on, and the block it governs opens the next one. Breaking first instead kept
+    // every heading glued to its block and quietly made the stranded-heading fixture
+    // impossible to produce.
     if (line.commodityGroup && line.commodityGroup !== group) {
       group = line.commodityGroup
       text(cursor.page, group, 72, cursor.y, font)
       cursor.y -= BLOCK_GAP
+    }
+    if (onPage >= perPage) {
+      cursor = startDetailPage(doc, spec, kind, font)
+      onPage = 0
     }
     const draw = kind === 'INVOICE' ? drawInvoiceBlock : drawPackingBlock
     draw(cursor, line, font)

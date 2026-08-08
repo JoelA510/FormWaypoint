@@ -1,0 +1,197 @@
+/**
+ * What the keying sheet puts in its commodity table, and how many rows it takes to do it.
+ *
+ * The right answer is not the same on two consecutive shipments. A shipment keyed into Ship
+ * Manager wants one row per commodity *record*, which is part plus origin plus code, because
+ * that is what the record stores. The same shipment checked against a filed SLI wants the
+ * SLI's own rows, which are D/F plus code. And a shipment being read line by line against the
+ * invoice wants no grouping at all. Rather than pick one and make the other two manual, all
+ * of them are here and the operator says which.
+ *
+ * Columns are chosen the same way and for the same reason: the eight fields a Ship Manager
+ * commodity screen asks for are not the eight a customs broker wants to see.
+ */
+
+/**
+ * How invoice lines become rows.
+ *
+ * Every mode groups on something the row can truthfully assert jointly. None of them merges
+ * two different commodity numbers, because a row states one.
+ */
+export type GroupingMode =
+  /** Part, country of manufacture and commodity number — one row per commodity record. */
+  | 'part-origin-code'
+  /** Part and commodity number, origins combined. One row per part, when origin is not keyed. */
+  | 'part-code'
+  /** D/F and commodity number: the rows a filed SLI carries. */
+  | 'df-code'
+  /** No grouping. One row per invoice line, as the document prints them. */
+  | 'line'
+
+/**
+ * Why a row asked for the official wording and did not get it.
+ *
+ * `no-code` is a statement about that commodity number and belongs to whoever classifies it.
+ * `no-index` is a statement about this machine — the concordance did not load — and applies
+ * to every row at once. Telling somebody their codes are missing from a file that was never
+ * opened sends them looking for a classification problem that is not there.
+ */
+export type ScheduleBFallback = 'no-code' | 'no-index' | null
+
+/** Where a row's commodity description comes from. Never composed by the application. */
+export type DescriptionSource =
+  /** The part's own description, as the document prints it. */
+  | 'document'
+  /** The commodity heading the document prints above the block. */
+  | 'heading'
+  /** The official Census wording for the commodity number. */
+  | 'schedule-b'
+
+export const GROUPING_LABELS: Record<GroupingMode, string> = {
+  'part-origin-code': 'Part + country + code (one commodity record)',
+  'part-code': 'Part + code (origins combined)',
+  'df-code': 'D/F + code (as the SLI files it)',
+  line: 'No grouping (one row per invoice line)',
+}
+
+export const DESCRIPTION_LABELS: Record<DescriptionSource, string> = {
+  document: 'As printed against the part',
+  heading: 'The document’s commodity heading',
+  'schedule-b': 'Official Schedule B wording',
+}
+
+/** Printed on the sheet's Notes tab, so a choice made months ago still explains itself. */
+export const GROUPING_NOTES: Record<GroupingMode, string> = {
+  'part-origin-code':
+    'Lines the document split by wording were combined; a part shipped from two countries, or carrying two commodity numbers, stays on separate rows because those are fields on the commodity record.',
+  'part-code':
+    'A part shipped from more than one country is one row, and every country it came from is listed in the country column. Use this only where the commodity record does not key origin.',
+  'df-code':
+    'The rows a filed SLI carries: everything domestic under one code on one row, everything foreign under that code on another. Parts and origins are listed rather than merged away.',
+  line: 'No grouping at all — one row per invoice line, in document order, including lines the document itself repeats.',
+}
+
+export const DESCRIPTION_NOTES: Record<DescriptionSource, string> = {
+  document:
+    'Taken from the wordings already on the document — the one most of these goods were invoiced under, by quantity. Where a part was described more than one way the alternatives are printed in the Note column, because the document does not say which is meant.',
+  heading:
+    'The commodity heading the document prints above the block, falling back to the part’s own description where a block carries no heading. Alternatives are printed in the Note column.',
+  'schedule-b':
+    'The Census Bureau’s own wording for the commodity number being filed, from the Schedule B concordance this app carries. Whether that code describes these goods is a human judgement, so what the document called them is printed in the Note column beside it.',
+}
+
+export interface CommodityColumn {
+  id: CommodityColumnId
+  label: string
+}
+
+export type CommodityColumnId =
+  | 'partNumber'
+  | 'countryOfManufacture'
+  | 'domesticForeign'
+  | 'harmonizedCode'
+  | 'quantity'
+  | 'unitOfMeasure'
+  | 'unitValue'
+  | 'totalValue'
+  | 'weightLb'
+  | 'weightKg'
+  | 'description'
+  | 'note'
+
+/** Every column the table can carry, in the order it prints them when all are on. */
+export const COMMODITY_COLUMNS: CommodityColumn[] = [
+  { id: 'partNumber', label: 'Part Number' },
+  { id: 'countryOfManufacture', label: 'Country of Manufacture' },
+  { id: 'domesticForeign', label: 'D/F' },
+  { id: 'harmonizedCode', label: 'Harmonized Code' },
+  { id: 'quantity', label: 'Qty' },
+  { id: 'unitOfMeasure', label: 'UOM' },
+  { id: 'unitValue', label: 'Unit Value (USD)' },
+  { id: 'totalValue', label: 'Total Customs Value (USD)' },
+  { id: 'weightLb', label: 'Weight (lb)' },
+  { id: 'weightKg', label: 'Weight (kg)' },
+  { id: 'description', label: 'Commodity Description' },
+  { id: 'note', label: 'Note' },
+]
+
+export interface KeyingOptions {
+  grouping: GroupingMode
+  descriptionSource: DescriptionSource
+  /** Columns to print, in the order they are given. */
+  columns: CommodityColumnId[]
+}
+
+/** What a Ship Manager commodity screen asks for, which is what this sheet is mostly for. */
+export const DEFAULT_KEYING_OPTIONS: KeyingOptions = {
+  grouping: 'part-origin-code',
+  descriptionSource: 'document',
+  columns: [
+    'partNumber',
+    'countryOfManufacture',
+    'harmonizedCode',
+    'quantity',
+    'unitOfMeasure',
+    'unitValue',
+    'totalValue',
+    'weightLb',
+    'weightKg',
+    'description',
+    'note',
+  ],
+}
+
+/**
+ * Fills in anything a caller left out, and discards anything it does not recognise.
+ *
+ * Options are held in IndexedDB between sessions, so a stored set can outlive any name in it
+ * — a column, a grouping mode, a description source. Every field is checked against what
+ * exists now, not just the columns: an unknown grouping reaches the label tables as a missing
+ * key, and a Notes tab reading "undefined. undefined" is the better of the two outcomes.
+ */
+export function withDefaults(options?: Partial<KeyingOptions>): KeyingOptions {
+  const known = new Set(COMMODITY_COLUMNS.map((c) => c.id))
+  // `Array.isArray`, because what comes back from storage can be any shape at all — and a
+  // `TypeError` here surfaces as an unhandled rejection inside the restore, losing the saved
+  // layout without a word.
+  // Deduped as well as filtered: a repeated id renders the same column, and its total, twice.
+  const columns = Array.isArray(options?.columns)
+    ? [...new Set(options.columns.filter((id) => known.has(id)))]
+    : []
+  const grouping = options?.grouping
+  const descriptionSource = options?.descriptionSource
+  // `Object.hasOwn`, not `in`: a stored `"constructor"` satisfies `in` against any object
+  // literal and would reach the label tables as a function.
+  const resolved: KeyingOptions = {
+    grouping: grouping && Object.hasOwn(GROUPING_LABELS, grouping) ? grouping : DEFAULT_KEYING_OPTIONS.grouping,
+    descriptionSource:
+      descriptionSource && Object.hasOwn(DESCRIPTION_LABELS, descriptionSource)
+        ? descriptionSource
+        : DEFAULT_KEYING_OPTIONS.descriptionSource,
+    columns: columns.length ? columns : DEFAULT_KEYING_OPTIONS.columns,
+  }
+
+  // The mode whose rows *are* D/F has to show it. Grouping by it and then leaving the column
+  // off — which the defaults do — produces a table that cannot be checked against the filed
+  // form line for line, which is the only reason the mode exists.
+  if (resolved.grouping === 'df-code' && !resolved.columns.includes('domesticForeign')) {
+    // Inserted in place, not sorted in. `columns` is documented as printing in the order it
+    // was given, and every other grouping honours that — re-sorting the whole array would
+    // rearrange a caller's layout as a side effect of choosing a grouping.
+    //
+    // It goes after the last column that precedes it canonically, which puts it beside the
+    // part and country it belongs with in a canonical layout, and leaves everything else
+    // exactly where the caller put it.
+    const order = COMMODITY_COLUMNS.map((c) => c.id)
+    const rank = order.indexOf('domesticForeign')
+    let at = 0
+    resolved.columns.forEach((id, i) => {
+      if (order.indexOf(id) < rank) at = i + 1
+    })
+    const next = [...resolved.columns]
+    next.splice(at, 0, 'domesticForeign')
+    resolved.columns = next
+  }
+
+  return resolved
+}

@@ -31,6 +31,20 @@ import {
   type TextRow,
 } from './extract-text'
 
+/** Quantity, unit price and extended value all sit right of this. */
+const FIGURE_COLUMN_MIN = 380
+
+/**
+ * How many figures right of that column mark a block's value row.
+ *
+ * Shared, because two readers used to disagree: `parseInvoiceBlock` wanted three and
+ * `figureRowIn` accepted two, so on a line printing a blank unit price they would have picked
+ * different rows — moving the heading floor and ceiling by one, and the heading is what
+ * `aggregateLines` files as the SLI row description. The invoice's three are quantity, unit
+ * price and extended value; the packing list's are net, gross and measurement.
+ */
+const FIGURES_PER_ROW = 3
+
 const CLASSIFICATION = /^\d{4}\.\d{2}\.\d{4}$/
 const LINE_NUMBER = /^\d{4}$/
 const ORDER_NUMBER = /^[0-9][0-9A-Z]{7,}$/
@@ -100,6 +114,7 @@ export function parseCiplPages(fileName: string, pages: TextPage[]): ParsedCipl 
       groupKind = ctx.kind
     }
     const detail = parseDetailLines(page, ctx, carry, lastGroup)
+    warnings.push(...detail.warnings)
     lines.push(...detail.lines)
     carry = detail.carry
     lastGroup = detail.group
@@ -440,16 +455,56 @@ function isComplete(line: SourceLine, kind: DocumentKind): boolean {
  * remaining rows follow it. The consignee and `C/NO` lines that sit between are harmless —
  * the block parser locates fields by shape and position, and none of them match.
  */
+/**
+ * Labelled header fields a detail page repeats below its column headings.
+ *
+ * They sit between `MARKS & NOS.` and the first block, so passing the column headings is not
+ * enough to be past the furniture. `COUNTRY OF ORIGIN` prints its value at x≈102 — inside the
+ * detail column — and spliced into a carried block it became that line's description, so a
+ * shipment came out declared as its own country.
+ */
+const DETAIL_PAGE_FURNITURE = /^(C\/NO|COUNTRY OF ORIGIN)\b/i
+
+/**
+ * Whether a row is one of those fields rather than part of a block.
+ *
+ * Two guards, because the label is not unique to the furniture: a block's own figures row
+ * begins with its shipping marks at the left margin, and those read `C/NO. ONE OF TWO`. So
+ * the test is on the leftmost *item* — not the whole row joined, which would match a block
+ * row on its marks alone — and the row must carry no figures, which furniture never does and
+ * a figures row always does. Matching the joined text discarded a carried block's figures
+ * and emitted the line with quantity 0.
+ */
+function isDetailPageFurniture(row: TextRow): boolean {
+  const first = row.items[0]
+  if (!first || !DETAIL_PAGE_FURNITURE.test(first.str)) return false
+  return !row.items.some((it) => it.x > FIGURE_COLUMN_MIN && parseNumber(it.str) !== null)
+}
+
+/**
+ * A carried block's tail, from the top of the page to the next block.
+ *
+ * Known limit, stated rather than hidden: where the carry still cannot be completed and a
+ * heading for the *next* block sits in this range, that heading is swept into the incomplete
+ * block and can be read as its description, while the block it belongs to keeps whatever
+ * heading was already in force. It is the same ambiguity `blockEndsAt` documents — a lone
+ * prose row is a description on a block that has one and a heading on a block that does not,
+ * and nothing in the document separates them — and there is no reading that is right in both
+ * cases. What makes it survivable is that such a line has no quantity and no value, so it
+ * raises a warning naming the page and fails the reconciliation totals, which blocks the
+ * shipment. It is a visible failure, not a quiet one.
+ */
 function continuationRows(rows: TextRow[], upTo: number): TextRow[] {
   const out: TextRow[] = []
   let pastFurniture = false
   for (let i = 0; i < upTo; i++) {
     const text = rowText(rows[i])
-    if (isTotalsRow(text)) break
+    if (isTotalsRow(rows[i])) break
     if (!pastFurniture) {
       if (/MARKS & NOS\./i.test(text)) pastFurniture = true
       continue
     }
+    if (isDetailPageFurniture(rows[i])) continue
     out.push(rows[i])
   }
   return out
@@ -460,7 +515,8 @@ function parseDetailLines(
   ctx: PageContext,
   carryIn: CarriedBlock | null,
   groupIn: string,
-): { lines: SourceLine[]; carry: CarriedBlock | null; group: string } {
+): { lines: SourceLine[]; carry: CarriedBlock | null; group: string; warnings: string[] } {
+  const warnings: string[] = []
   const rows = page.rows
   const starts: number[] = []
   for (let i = 0; i < rows.length; i++) if (isLineStart(rows[i])) starts.push(i)
@@ -477,11 +533,30 @@ function parseDetailLines(
       : parsePackingBlock(block, on, ctx, group)
   }
 
+  // Set when this page's copy of the carried block is *still* unfinished — which makes its
+  // closing rows the block's, not a stranded heading's, exactly as for a block that carries
+  // forward from here.
+  let carriedIncomplete = false
+
   // Finish a block that began on the previous page before reading this page's own.
   if (carryIn) {
     const block = [...carryIn.rows, ...continuationRows(rows, starts.length ? starts[0] : rows.length)]
     const line = parseBlock(block, carryIn.commodityGroup, carryIn.page)
-    if (line) lines.push(line)
+    if (line) {
+      // A carry that comes back still unfinished has always been emitted quietly, with
+      // quantity 0 and no figures. The reconciliation totals then fail and block the
+      // shipment, which is the right outcome and an unhelpful one on its own: nothing said
+      // which line was wrong or why. It does now.
+      if (!isComplete(line, ctx.kind)) {
+        carriedIncomplete = true
+        warnings.push(
+          `${ctx.set} ${ctx.kind === 'INVOICE' ? 'invoice' : 'packing list'}: the line beginning on page ` +
+            `${carryIn.page} continues onto page ${page.pageNumber} but its figures could not be read there. ` +
+            'It is reported with no quantity or value.',
+        )
+      }
+      lines.push(line)
+    }
   }
 
   let carry: CarriedBlock | null = null
@@ -490,7 +565,24 @@ function parseDetailLines(
     const to = s + 1 < starts.length ? starts[s + 1] : rows.length
     const cut = truncateAtPageTotals(rows, from, to)
     const block = rows.slice(from, cut)
-    group = commodityGroupBefore(rows, from) || group
+    // Everything up to and including the previous block's last structural row belongs to it.
+    // On the first block that is the *carried* block, whose tail finishes on this page above
+    // it — without this it lends its own description row forward as this block's heading.
+    //
+    // Where that tail is *still* unfinished, every row above this block is the tail's and the
+    // floor sits directly beneath: a block with neither figures nor classification on this
+    // page gives `blockEndsAt` nothing to anchor on, so it would otherwise fall back to the
+    // top of the page and hand this block the broken line's description. No heading is read
+    // there at all, which is what the look-ahead does with the same rows in the same state —
+    // this block keeps the heading already in force, and the broken line is warned about.
+    const previousStart = s === 0 ? (carryIn ? detailRowsBegin(rows, from) : -1) : starts[s - 1]
+    const floor =
+      previousStart === -1
+        ? -1
+        : s === 0 && carriedIncomplete
+          ? from - 1
+          : blockEndsAt(rows, previousStart, from, ctx.kind)
+    group = commodityGroupBefore(rows, from, floor) || group
     const commodityGroup = group
     const line = parseBlock(block, commodityGroup, page.pageNumber)
 
@@ -503,7 +595,28 @@ function parseDetailLines(
     }
     if (line) lines.push(line)
   }
-  return { lines, carry, group }
+
+  // A heading printed below the last block on a page belongs to the first block of the next
+  // one, and nothing on this page will ever look back at it. Shipment vendorA6 ends an invoice
+  // page with `Electrical Conductors` and opens the next with the plugs it heads; without
+  // this they reach the form under the heading of the gaskets three blocks earlier.
+  //
+  // Bounded on both sides, because an unbounded look-ahead is the consignee-address bug in a
+  // new place: a page with no blocks at all is a header page, whose address block sits in the
+  // detail column and reads exactly like a heading, and the text below the totals row is the
+  // page footer. Only the gap between the last block and the totals can hold a heading.
+  // A page with no block starts at all still has a last block, when it holds the tail of a
+  // carried one — and a heading may be stranded below that tail exactly as below any other.
+  // Guarding on `starts.length` alone dropped it, and the next page's first block kept the
+  // heading from before the break.
+  // `carry` is only ever set by the block loop, so on a page with no starts it is null
+  // whatever happened to the carried tail — and reading `Boolean(carry)` there let the
+  // look-ahead run over an unfinished one, returning its own description row as the next
+  // page's heading. Which block is last decides which flag answers for it.
+  const lastStart = starts.length ? starts[starts.length - 1] : carryIn ? detailRowsBegin(rows, rows.length) : -1
+  const unfinished = starts.length ? Boolean(carry) : carriedIncomplete
+  const nextGroup = lastStart === -1 ? '' : commodityGroupAfter(rows, lastStart, unfinished, ctx.kind)
+  return { lines, carry, group: nextGroup || group, warnings }
 }
 
 /**
@@ -517,13 +630,42 @@ function scaleFigure(value: number, divisor: number): number {
   return divisor === 1 ? value : Math.round(value * divisor * 1000) / 1000
 }
 
-function isTotalsRow(text: string): boolean {
-  return /^\s*TOTALS?:?\b/i.test(text) || /CARTONS ONLY/i.test(text) || /\bTOTALS\b/.test(text)
+/**
+ * The row that closes a page's line items.
+ *
+ * The word alone is not enough, because a commodity heading may legitimately begin with it —
+ * `Total Station Instruments` is goods. Matching on the word cut that heading out of both
+ * search windows and out of the block slice, so the goods below it went out under the
+ * previous commodity's wording and a block described as `Total Station Instrument` came out
+ * with no description at all.
+ *
+ * What separates them is that a totals row *has figures on it* — anywhere on the row, since
+ * the label may run to several words before them. A heading is words alone.
+ *
+ * Two narrower rules came first and were both wrong. Counting the row's items missed a footer
+ * an extractor emitted as one string. Requiring a colon or a digit immediately after the word
+ * missed `TOTAL PACKAGES 3` and `TOTAL NET WEIGHT 500.000`.
+ *
+ * The residual is a heading that begins with the word *and* carries a figure — `Total Station
+ * Instruments 2000` would be read as a totals row, and a heading stranded below it would go
+ * unseen. That is the error this rule chooses, deliberately, because the opposite one is
+ * worse: a missed totals row lets the block slice run past it, so a carried block absorbs the
+ * footer and reports the page totals as its own quantity and value — complete enough that the
+ * reconciliation has nothing to object to. A missed heading leaves the previous one in force,
+ * which is wrong wording on a row; a missed totals row puts the whole shipment's figures on
+ * one line and passes every check.
+ */
+function isTotalsRow(row: TextRow): boolean {
+  const text = rowText(row)
+  if (/^\s*TOTALS?\b/i.test(text) && /\d/.test(text)) return true
+  if (/CARTONS ONLY/i.test(text)) return true
+  // Upper case and unanchored: the packing list prints it mid-row. No heading spells it so.
+  return /\bTOTALS\b/.test(text)
 }
 
 function truncateAtPageTotals(rows: TextRow[], from: number, to: number): number {
   for (let i = from + 1; i < to; i++) {
-    if (isTotalsRow(rowText(rows[i]))) return i
+    if (isTotalsRow(rows[i])) return i
   }
   return to
 }
@@ -538,19 +680,203 @@ function truncateAtPageTotals(rows: TextRow[], from: number, to: number): number
  * the description column at x≈72; the address sits out at the x≈24 margin, and the page
  * title further right again.
  */
+/**
+ * Headings and descriptions live in disjoint columns, and that is the whole guarantee.
+ *
+ * Both windows are measured off the document, not derived from each other: the `MARKS & NOS.`
+ * column header sits at x=24 and headings indent to x≈72, while `DESCRIPTION OF GOODS` is at
+ * x=144 and the descriptions under it at x≈192. The boundary goes in the gap between them.
+ *
+ * Deriving one bound from the other was worse than arbitrary — it looked principled while
+ * putting the description floor above the description column's own left edge, so anything
+ * printed flush to that edge would have been dropped and the line would have reached the form
+ * with no description at all.
+ *
+ * They must stay disjoint. That is what makes "a heading is never read as a description" a
+ * property of the layout rather than a hope about relative string lengths.
+ */
 const GROUP_COLUMN_MIN = 60
-const GROUP_COLUMN_MAX = 200
+const GROUP_COLUMN_MAX = 130
 
-function commodityGroupBefore(rows: TextRow[], startIdx: number): string {
-  for (let i = startIdx - 1; i >= 0 && i >= startIdx - 4; i--) {
-    const items = rows[i].items
-    if (items.length !== 1) continue
-    const { str: text, x } = items[0]
-    if (x < GROUP_COLUMN_MIN || x > GROUP_COLUMN_MAX) continue
-    if (!text || text.endsWith(':') || CLASSIFICATION.test(text)) continue
-    if (/^[A-Za-z][A-Za-z ,&/-]{2,}$/.test(text)) return text
+/**
+ * A heading is free text in the detail column, starting with a letter.
+ *
+ * The character class used to be letters and a little punctuation, which quietly rejected two
+ * of the headings on a real shipment: `Glass Cartridge Fuses <=1000V` for its digits and
+ * comparison, `Elect. Apparatus, Other` for its full stop. A rejected heading is not a blank
+ * one — the previous heading stays in force — so a fuse was filed as `Flash drive` and a
+ * printed circuit board as `RFID system`, each carrying the commodity above it.
+ *
+ * So the class is wide, and the *guards* do the discriminating: one item, indented into the
+ * detail column, not a label, not a classification, and at least one letter after the first.
+ * Those are properties of where the text sits, which is what actually distinguishes a heading
+ * from an address.
+ *
+ * A model code is the one thing position cannot separate, because vendor A prints those in
+ * this same column and `SA34-F1` passes any class permissive enough to admit `<=1000V`.
+ *
+ * Shape separates them, but not by counting spaces: `R6A 7833D` is a model and has one. What
+ * every heading on these documents has and no model code does is a *word* — three or more
+ * letters running together with no digit among them. `Gaskets`, `Glass Cartridge Fuses
+ * <=1000V`, `Elect. Apparatus, Other`, `Robot, not elsewhere spec` all clear it; `SA34-F1`,
+ * `R6A 7833D` and `RT6 5450A` do not, because these codes mix a digit into every token.
+ */
+const GROUP_TEXT = /^[A-Za-z][A-Za-z0-9 ,.&/'()<>=+%-]*[A-Za-z][A-Za-z0-9 ,.&/'()<>=+%-]*$/
+
+/** Contains a word — three or more letters with no digit in them. See `GROUP_TEXT`. */
+const readsAsProse = (text: string): boolean => /(?:^|[^A-Za-z0-9])[A-Za-z]{3,}(?:[^A-Za-z0-9]|$)/.test(text)
+
+function isCommodityGroup(row: TextRow): string {
+  const items = row.items
+  if (items.length !== 1) return ''
+  const { str: text, x } = items[0]
+  if (x < GROUP_COLUMN_MIN || x > GROUP_COLUMN_MAX) return ''
+  if (!text || text.length < 3 || text.endsWith(':') || CLASSIFICATION.test(text)) return ''
+  // The labelled header fields a detail page repeats below its column headings. Excluded in
+  // `continuationRows` too — this is the other reader of the same rows. A value printed on
+  // its own baseline, away from its label, would be indistinguishable from a heading by
+  // anything here; this layout keeps the two on one line, which is what makes the label test
+  // sufficient rather than merely convenient.
+  if (isDetailPageFurniture(row)) return ''
+  // Deliberately no totals-row test here. A real totals row carries several items and fails
+  // the single-item guard above, and `truncateAtPageTotals` already keeps both search windows
+  // off it — while the test itself matched any heading whose first word is "Total", so
+  // `Total Station Instruments` was rejected and those goods went out under the heading of
+  // the commodity before them.
+  return GROUP_TEXT.test(text) && readsAsProse(text) ? text : ''
+}
+
+/**
+ * The heading printed just above a block.
+ *
+ * Floored at the end of the block before it, for the same reason the look-ahead is: a
+ * description printed without its part number is a lone row in the heading column, and the
+ * widened pattern accepts ordinary descriptions like `CBL, OS32C-CBL-30M`. Unbounded, the
+ * previous line's own words became this line's commodity heading — and the heading is what
+ * `aggregateLines` files as the SLI row description.
+ */
+function commodityGroupBefore(rows: TextRow[], startIdx: number, floor: number): string {
+  for (let i = startIdx - 1; i > floor && i >= startIdx - 4; i--) {
+    const heading = isCommodityGroup(rows[i])
+    if (heading) return heading
   }
   return ''
+}
+
+/**
+ * The heading left stranded at the very foot of a page, whose block begins on the next one.
+ *
+ * Searched upwards from the totals row — or from the foot of the page where there is none —
+ * down to the last row the block itself owns. Above the block's own last row is the block.
+ *
+ * The totals row is a weaker bound than it looks: this layout prints the trade terms *above*
+ * `TOTAL: n PCS`, so the first footer row is inside the window. What actually keeps it out is
+ * the column test — the trade terms sit at x≈447, far right of the detail column — and the
+ * single-item test, since that row carries a figure and a currency beside it. Those are the
+ * guards; the bound only removes everything below.
+ *
+ * Between those two, every row is skipped until one looks like a heading, which is the same
+ * thing `commodityGroupBefore` does in the other direction. Reading exactly one row instead
+ * was too literal a reading of "stranded": this layout's footer is two rows, trade terms then
+ * `TOTAL: n PCS`, so the single row inspected was the trade terms and the heading above them
+ * was never seen at all.
+ *
+ * Not consulted at all when the page's last block runs overleaf. Those closing rows belong to
+ * that unfinished block, and reading one as a heading hands the *next* page's goods a
+ * description taken from the middle of a line that has not been read yet.
+ *
+ * A page holding only a carried block's tail still has a last block, and a heading can be
+ * stranded below it like any other.
+ *
+ * Nor when the row is still inside the last block. A block is figures then description, so
+ * anything at or before the row after the figures is the block's own; only what follows it
+ * can belong to the next one. Guarding on the block's *start* let a block whose description
+ * printed without its part number — a lone row in the same column — carry forward as the next
+ * page's heading.
+ */
+function commodityGroupAfter(rows: TextRow[], lastBlockStart: number, carried: boolean, kind: DocumentKind): string {
+  if (carried) return ''
+  const end = truncateAtPageTotals(rows, lastBlockStart, rows.length)
+  const floor = blockEndsAt(rows, lastBlockStart, end, kind)
+  for (let i = end - 1; i > floor; i--) {
+    const heading = isCommodityGroup(rows[i])
+    if (heading) return heading
+  }
+  return ''
+}
+
+/**
+ * The index of a block's last row of its own.
+ *
+ * The two kinds put their description on opposite sides of the figures: an invoice block ends
+ * `figures` then `part description`, while a packing block carries its description on the
+ * first row and ends at the figures. Assuming the invoice's shape put the boundary one row
+ * past the end of every packing block, so a heading stranded below one was never carried
+ * forward at all.
+ */
+function blockEndsAt(rows: TextRow[], from: number, to: number, kind: DocumentKind): number {
+  const figures = figureRowIn(rows, from, to)
+  // No figure row to end on — a block whose figures could not be read. Falling back to the
+  // block's own start collapsed the floor and let the look-behind read the previous line's
+  // description as the next line's heading, which is the leak the floor exists to stop.
+  //
+  // The classification row is the anchor instead: a block is order, line, classification,
+  // figures, description, so without the figures the description is the row after the
+  // classification. That is the same rule the figures branch applies one row further down —
+  // and it has to be a structural anchor rather than "the last row that does not look like a
+  // heading", because a description printed alone looks exactly like one. That ambiguity is
+  // decided the same way here as everywhere else in this file: the row belongs to the block.
+  if (figures === -1) {
+    const classification = classificationRowIn(rows, from, to)
+    return classification === -1 ? from : classification + 1
+  }
+  if (kind !== 'INVOICE') return figures
+  // The description row. This layout always prints one, and the alternative reading is not
+  // available anyway: a block with no description row is followed directly by the next
+  // block's heading, and one lone prose row after the figures looks exactly like the other.
+  // Nothing in the document separates them.
+  //
+  // So the parser takes the reading that keeps this line's own words on this line: the row is
+  // the block's description row, and the heading below a *headingless* block is floored out.
+  // That is not free, and the cost is worth stating plainly. Where the row really was a
+  // heading, `descriptionFrom` reads it as this block's description — the wrong words — and
+  // the commodity it headed keeps whatever heading was already in force.
+  //
+  // The alternative reading is worse, not better: a description printed without its part
+  // number is the shape this layout actually produces, so reading those as headings would
+  // hand the *next* commodity the previous line's wording *and* leave this one blank. That is
+  // the same wrong words one row further down, plus a missing description. Three guards in
+  // this file cover cases where it does exactly that.
+  return figures + 1
+}
+
+/**
+ * Where a page's detail rows begin — below the column headers.
+ *
+ * `continuationRows` uses the same marker to decide what a carried block's tail is. Anchoring
+ * a carried block at row 0 instead let page furniture stand in for its figures: `PAGE 2 OF 3`
+ * is two numbers on the right of the page, which is all `figureRowIn` looks for.
+ */
+function detailRowsBegin(rows: TextRow[], upTo: number): number {
+  for (let i = 0; i < upTo; i++) if (/MARKS & NOS\./i.test(rowText(rows[i]))) return i + 1
+  return 0
+}
+
+/** The row carrying a block's commodity number. */
+function classificationRowIn(rows: TextRow[], from: number, to: number): number {
+  for (let i = from; i < Math.min(to, rows.length); i++) {
+    if (rows[i].items.some((it) => CLASSIFICATION.test(it.str))) return i
+  }
+  return -1
+}
+
+/** The row carrying a block's quantity, price and value. */
+function figureRowIn(rows: TextRow[], from: number, to: number): number {
+  for (let i = from; i < to; i++) {
+    const numeric = rows[i].items.filter((it) => it.x > FIGURE_COLUMN_MIN && parseNumber(it.str) !== null)
+    if (numeric.length >= FIGURES_PER_ROW) return i
+  }
+  return -1
 }
 
 interface BlockCore {
@@ -562,6 +888,8 @@ interface BlockCore {
   uom: string
   classificationRowIdx: number
   lineNumberRowIdx: number
+  /** Index of the line-number cell within its row; the lot id sits immediately after it. */
+  lineNumberItemIdx: number
 }
 
 /** Fields common to both document kinds, located by content rather than column. */
@@ -574,6 +902,7 @@ function readBlockCore(block: TextRow[]): BlockCore | null {
   let lineNumber = ''
   let itemId = ''
   let lineNumberRowIdx = -1
+  let lineNumberItemIdx = -1
   for (let i = 1; i < block.length; i++) {
     const items = block[i].items
     const idx = items.findIndex((it) => LINE_NUMBER.test(it.str) && it.x < 130)
@@ -581,6 +910,7 @@ function readBlockCore(block: TextRow[]): BlockCore | null {
       lineNumber = items[idx].str
       itemId = items[idx + 1].str
       lineNumberRowIdx = i
+      lineNumberItemIdx = idx
       break
     }
   }
@@ -600,7 +930,17 @@ function readBlockCore(block: TextRow[]): BlockCore | null {
     }
   }
 
-  return { orderNumber, sequence, lineNumber, itemId, classification, uom, classificationRowIdx, lineNumberRowIdx }
+  return {
+    orderNumber,
+    sequence,
+    lineNumber,
+    itemId,
+    classification,
+    uom,
+    classificationRowIdx,
+    lineNumberRowIdx,
+    lineNumberItemIdx,
+  }
 }
 
 function parseInvoiceBlock(
@@ -612,12 +952,26 @@ function parseInvoiceBlock(
   const core = readBlockCore(block)
   if (!core) return null
 
+  /**
+   * The cells this block has already been read for, by position.
+   *
+   * Excluding them from the description search by *text* was the obvious way and the wrong
+   * one: a description cell that happens to repeat the model — which is how some parts are
+   * described — matched the blacklist and the line went out with no description at all.
+   * Position is what "already used" actually means.
+   */
+  const consumed = new Set<string>()
+  const consume = (row: number, item: number) => consumed.add(`${row}:${item}`)
+
   // Country of origin sits to the right of the item id on the line-number row.
   let countryOfOrigin = ''
   if (core.lineNumberRowIdx !== -1) {
     const items = block[core.lineNumberRowIdx].items
-    const tail = items.slice(items.findIndex((it) => it.str === core.itemId) + 1)
-    countryOfOrigin = tail.map((t) => t.str).join(' ').trim()
+    // From the line number itself: it and the lot id beside it are identifiers the block has
+    // already been read for, and an unreadable block was coming out described as its lot id.
+    for (let k = Math.max(core.lineNumberItemIdx, 0); k < items.length; k++) consume(core.lineNumberRowIdx, k)
+    const from = core.lineNumberItemIdx + 2
+    countryOfOrigin = items.slice(from).map((t) => t.str).join(' ').trim()
   }
 
   const currency =
@@ -635,21 +989,23 @@ function parseInvoiceBlock(
   let valueRowIdx = -1
 
   for (let i = 1; i < block.length; i++) {
-    const numeric = block[i].items.filter((it) => it.x > 380 && parseNumber(it.str) !== null)
-    if (numeric.length >= 3) {
+    const numeric = block[i].items.filter((it) => it.x > FIGURE_COLUMN_MIN && parseNumber(it.str) !== null)
+    if (numeric.length >= FIGURES_PER_ROW) {
       quantity = parseNumber(numeric[0].str) ?? 0
       unitValue = parseNumber(numeric[1].str) ?? undefined
       extendedValue = parseNumber(numeric[2].str) ?? undefined
       valueRowIdx = i
-      const left = block[i].items.filter((it) => it.x < 380)
+      const left = block[i].items.map((it, k) => ({ it, k })).filter(({ it }) => it.x < FIGURE_COLUMN_MIN)
       // `[marks] model  partNumber` — marks (when present) is furthest left.
-      model = left.length >= 2 ? left[left.length - 2].str : (left[0]?.str ?? '')
-      partNumber = left.length >= 1 ? left[left.length - 1].str : ''
+      model = left.length >= 2 ? left[left.length - 2].it.str : (left[0]?.it.str ?? '')
+      partNumber = left.length >= 1 ? left[left.length - 1].it.str : ''
+      if (left.length >= 2) consume(i, left[left.length - 2].k)
+      if (left.length >= 1) consume(i, left[left.length - 1].k)
       break
     }
   }
 
-  const description = descriptionFrom(block, valueRowIdx, partNumber)
+  const description = descriptionFrom(block, valueRowIdx, partNumber, consumed)
 
   return {
     id: sourceLineId(ctx.set, 'INV', core),
@@ -675,19 +1031,91 @@ function parseInvoiceBlock(
 }
 
 /**
- * The per-line description is the longest free-text cell in the block that is not the part
- * number or a code. On the invoice it is printed twice on the last row.
+ * The description column, which is where a description is and nothing else is.
+ *
+ * Taking the longest free text anywhere in the block was the original rule, and it is how a
+ * commodity heading at the left margin, or the trade terms at the right, could end up
+ * describing the goods — both are text, and either can be longer than a terse part
+ * description. Bounding the search to the column makes those two impossible rather than
+ * merely unlikely, which matters because neither one failed a check: a shipment described as
+ * `FOB Origin - Collect` generates and files exactly as cleanly as a correct one.
  */
-function descriptionFrom(block: TextRow[], valueRowIdx: number, partNumber: string): string {
-  let best = ''
-  for (let i = Math.max(valueRowIdx, 1); i < block.length; i++) {
-    for (const item of block[i].items) {
-      const s = item.str
-      if (s === partNumber || CLASSIFICATION.test(s) || parseNumber(s) !== null) continue
-      if (s.length > best.length && /[a-z]/i.test(s)) best = s
+/** From the `DESCRIPTION OF GOODS` column header at x=144, with room to its left. */
+const DESCRIPTION_COLUMN_MIN = 140
+/**
+ * Left of the figures, and wide enough for both description cells.
+ *
+ * This layout prints two on a line — a short one at x=192 and a longer one at x=384 (`CA,
+ * BELT TO M12 Y-ADAPTER, 3M` beside `Cable, Belt Encoder to M12 Fem`) — and quantity starts
+ * at x=421. Tying this to `FIGURE_COLUMN_MIN` looked tidier and cut the second cell off,
+ * which cost a real description on a real shipment. Measured, not derived.
+ */
+const DESCRIPTION_COLUMN_MAX = 400
+
+/**
+ * The per-line description is the longest free-text cell in the description column that is
+ * not the part number or a code. On the invoice it is printed twice on the last row.
+ */
+function descriptionFrom(
+  block: TextRow[],
+  valueRowIdx: number,
+  partNumber: string,
+  consumed: ReadonlySet<string>,
+): string {
+  // The block's own rows and no further: figures, then the description row under them. The
+  // slice runs on to the next block's first row, so everything past this point belongs to
+  // the next commodity — including its heading, which is what used to win on length.
+  //
+  // With no figure row there is nothing to anchor on, so the whole block is read — with
+  // heading rows skipped, which is what keeps the next commodity's heading out of it, and
+  // with the fields already read excluded, which keeps the origin out.
+  const anchored = valueRowIdx > 0
+  const from = anchored ? valueRowIdx : 1
+  const to = anchored ? Math.min(from + 2, block.length) : block.length
+
+  // The model and the country of origin share a column with the description — the model at
+  // the left margin on the figures row, the origin inside the description column on the
+  // line-number row — and either can be longer than a terse one and win on length. Both are
+  // skipped by position, so a description that reads the same as one of them still counts.
+  //
+  // The part number stays a text match: it is printed twice, once as the block's own label
+  // beside the description, and a description reading exactly the part number says nothing
+  // the part-number column is not already saying.
+  const usable = (item: { str: string; x: number }, k: number, i: number, min: number, max: number) =>
+    item.x >= min &&
+    item.x < max &&
+    !consumed.has(`${i}:${k}`) &&
+    item.str !== partNumber &&
+    !CLASSIFICATION.test(item.str) &&
+    parseNumber(item.str) === null &&
+    /[a-z]/i.test(item.str)
+
+  const longestIn = (min: number, max: number) => {
+    let best = ''
+    for (let i = from; i < to; i++) {
+      // No heading skip. It was here to keep the next block's heading out of an unanchored
+      // scan, and it took the block's own description with it wherever that was printed alone
+      // at the left margin — the shape this file documents as real, and the one the fallback
+      // below exists for. The unanchored path is only reached by a block whose figures could
+      // not be read, which has no quantity or value and fails a blocking reconciliation check
+      // either way; between a description that might be the next heading and no description
+      // at all, the first is what the operator can see and correct.
+      block[i].items.forEach((item, k) => {
+        if (usable(item, k, i, min, max) && item.str.length > best.length) best = item.str
+      })
     }
+    return best
   }
-  return best
+
+  // Its own column first, which is where this layout prints it — twice, in fact, and the
+  // longer of the two cells is the fuller wording. Failing that, the detail column: a block
+  // that prints its description alone at the left margin still has one, and a blank commodity
+  // description passes every check there is.
+  //
+  // The fallback stops at the same left edge headings do. Reaching further took in MARKS &
+  // NOS. at x=24, so a block with no description in its own column was declared as its
+  // shipping marks — `C/NO. ONE OF TWO` on an export declaration.
+  return longestIn(DESCRIPTION_COLUMN_MIN, DESCRIPTION_COLUMN_MAX) || longestIn(GROUP_COLUMN_MIN, FIGURE_COLUMN_MIN)
 }
 
 function parsePackingBlock(

@@ -582,6 +582,10 @@ export function App() {
                 descriptionsByPart={descriptionsByPart}
                 sourceFile={parsed.fileName}
                 excludedSets={parsed.availableSets.filter((set) => set !== reconciliation.selectedSet)}
+                scheduleB={scheduleB}
+                codesByPart={codesByPart}
+                classificationOverrides={overridesToMap(overrides)}
+                eccn={settings.eccn || null}
               />
               <HistoryPanel shipments={shipments} onClear={() => void clearAll()} />
             </>

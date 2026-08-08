@@ -13,6 +13,7 @@ import { openDB, type IDBPDatabase } from 'idb'
 import { localDate } from '../lib/report'
 import type { CompanyProfile, ShipmentSettings } from '../domain/draft'
 import type { ItemLibraryEntry } from '../domain/item-library'
+import type { KeyingOptions } from '../carriers/keying-sheet/options'
 import type { DgConsignment } from '../domain/dangerous-goods/types'
 import type { CheckResult, SLILine } from '../domain/types'
 import { partKey } from '../domain/part-key'
@@ -171,6 +172,17 @@ export interface LocalStore {
   getProfile(): Promise<CompanyProfile | null>
   saveProfile(profile: CompanyProfile): Promise<void>
 
+  /**
+   * How the keying sheet was last laid out.
+   *
+   * A preference, not shipment data — it belongs to this machine and this operator, and is
+   * kept only so somebody who works one way is not made to re-pick it every shipment. Stored
+   * loosely typed because `withDefaults` is what decides whether a saved value still means
+   * anything; a set held here can outlive the column names it mentions.
+   */
+  getKeyingOptions(): Promise<Partial<KeyingOptions> | null>
+  saveKeyingOptions(options: KeyingOptions): Promise<void>
+
   getConsignee(name: string): Promise<ConsigneeRecord | null>
   saveConsignee(record: ConsigneeRecord): Promise<void>
   listConsignees(): Promise<ConsigneeRecord[]>
@@ -270,6 +282,12 @@ function db(): Promise<Schema> {
 export const indexedDbStore: LocalStore = {
   async getProfile() {
     return (await (await db()).get('profile', 'current')) ?? null
+  },
+  async getKeyingOptions() {
+    return (await (await db()).get('profile', 'keyingOptions')) ?? null
+  },
+  async saveKeyingOptions(options) {
+    await (await db()).put('profile', options, 'keyingOptions')
   },
   async saveProfile(profile) {
     await (await db()).put('profile', profile, 'current')

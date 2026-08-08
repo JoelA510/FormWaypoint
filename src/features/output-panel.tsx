@@ -1,11 +1,25 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Select } from '../components/ui'
 import { deliver, open as openDelivery, type Delivery } from '../lib/deliver'
-import { buildKeyingSheet, keyingSheetToXlsx, type KeyingTarget } from '../carriers/keying-sheet'
+import {
+  buildKeyingSheet,
+  keyingSheetToXlsx,
+  COMMODITY_COLUMNS,
+  DEFAULT_KEYING_OPTIONS,
+  DESCRIPTION_LABELS,
+  GROUPING_LABELS,
+  withDefaults,
+  type CommodityColumnId,
+  type DescriptionSource,
+  type GroupingMode,
+  type KeyingOptions,
+  type KeyingTarget,
+} from '../carriers/keying-sheet'
 import type { DesktopBridge } from '../desktop'
 import type { CarrierAdapter, SliDraft } from '../carriers/types'
+import type { ScheduleBIndex } from '../domain/schedule-b'
 import type { Reconciliation } from '../domain/types'
-import type { ShipmentRecord } from '../store/local-store'
+import { localStore, type ShipmentRecord } from '../store/local-store'
 
 export function OutputPanel({
   adapter,
@@ -18,6 +32,10 @@ export function OutputPanel({
   descriptionsByPart = {},
   sourceFile,
   excludedSets = [],
+  scheduleB = null,
+  codesByPart = {},
+  classificationOverrides = {},
+  eccn = null,
 }: {
   adapter: CarrierAdapter
   reconciliation: Reconciliation
@@ -30,6 +48,13 @@ export function OutputPanel({
   sourceFile?: string
   /** Document sets present but not used, for the same. */
   excludedSets?: string[]
+  /** Supplies the official wording for the `schedule-b` description source. */
+  scheduleB?: ScheduleBIndex | null
+  /** The same code corrections `reconcile` was given, so the sheet prints what will be filed. */
+  codesByPart?: Record<string, string>
+  classificationOverrides?: Record<string, string>
+  /** The controlled ECCN, so the `df-code` grouping partitions as the SLI's rows do. */
+  eccn?: string | null
   /** Gated on the document checks *and* the draft checks — see App. */
   canGenerate: boolean
   onGenerated: () => void
@@ -48,6 +73,56 @@ export function OutputPanel({
   const [target, setTarget] = useState<KeyingTarget>(
     keyedCarrier === 'ups' ? 'ups-worldship' : 'fedex-ship-manager',
   )
+  const [options, setOptions] = useState<KeyingOptions>(DEFAULT_KEYING_OPTIONS)
+
+  // Restored once, then written back on every change. A layout is a way of working, and
+  // making somebody re-pick it on each shipment is the friction this panel exists to remove.
+  //
+  // The restore is abandoned if the operator got there first. An IndexedDB read is fast but
+  // not instant, and applying a stored layout over a choice already made would undo it
+  // silently — and, because only `changeOptions` writes, would not even be saved.
+  const chosen = useRef(false)
+  useEffect(() => {
+    void (async () => {
+      const saved = await localStore.getKeyingOptions()
+      if (saved && !chosen.current) setOptions(withDefaults(saved))
+    })()
+  }, [])
+
+  // Computed here rather than inside the `setOptions` updater: React invokes an updater more
+  // than once under StrictMode, and a write in there persists layouts from renders that were
+  // thrown away. `options` is the committed value, so deriving from it is also the honest one.
+  const changeOptions = (update: (current: KeyingOptions) => KeyingOptions) => {
+    // Through `withDefaults`, exactly as the restore path and `buildKeyingSheet` do. It adds
+    // the D/F column when the D/F grouping is chosen, and without it here the checkbox showed
+    // unchecked while the download carried the column — the panel describing a sheet the
+    // operator was not getting.
+    // Marked before the no-op check, not after. Re-picking the grouping already selected, or
+    // unticking a column `withDefaults` puts straight back, is still the operator saying they
+    // have chosen — and leaving the flag unset let a stored layout land on top of it.
+    chosen.current = true
+    const next = withDefaults(update(options))
+    if (JSON.stringify(next) === JSON.stringify(options)) return
+    setOptions(next)
+    void localStore.saveKeyingOptions(next)
+  }
+
+  /**
+   * Column order follows the canonical list rather than the order they were ticked.
+   *
+   * A sheet whose columns move about between shipments is a sheet somebody keys wrongly
+   * once. Toggling one column should not reorder the others.
+   */
+  const toggleColumn = (id: CommodityColumnId) =>
+    changeOptions((current) => {
+      const next = new Set(current.columns)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      const columns = COMMODITY_COLUMNS.map((c) => c.id).filter((c) => next.has(c))
+      // The table has to carry something. Refusing the last removal is less surprising than
+      // silently keeping a column the operator just switched off.
+      return columns.length ? { ...current, columns } : current
+    })
 
   const { header } = reconciliation
 
@@ -99,7 +174,16 @@ export function OutputPanel({
     setBusy(true)
     setError(null)
     try {
-      const sheet = buildKeyingSheet(target, reconciliation, draft, descriptionsByPart, sourceFile, excludedSets)
+      const sheet = buildKeyingSheet(target, reconciliation, draft, {
+        descriptionsByPart,
+        sourceFile,
+        excludedSets,
+        options,
+        scheduleB,
+        codesByPart,
+        classificationOverrides,
+        eccn,
+      })
       const delivery = await deliver(
         bridge,
         `${header.invoiceNumber || 'shipment'}_${target}.xlsx`,
@@ -211,9 +295,89 @@ export function OutputPanel({
               Download keying sheet
             </Button>
           </div>
+          <KeyingSheetOptions options={options} setOptions={changeOptions} toggleColumn={toggleColumn} />
         </div>
       </CardBody>
     </Card>
+  )
+}
+
+/**
+ * How the commodity table is laid out, folded away until it is wanted.
+ *
+ * The defaults are what a Ship Manager commodity screen asks for, and most shipments never
+ * need anything else — so this opens closed. It is not a preference screen: the choices
+ * change what the next download contains, and the sheet's own Notes tab records which ones
+ * were in force, so a workbook found months later still says how its rows were made.
+ */
+function KeyingSheetOptions({
+  options,
+  setOptions,
+  toggleColumn,
+}: {
+  options: KeyingOptions
+  setOptions: (update: (current: KeyingOptions) => KeyingOptions) => void
+  toggleColumn: (id: CommodityColumnId) => void
+}) {
+  return (
+    <details className="mt-3 rounded-md border border-[var(--color-line)]">
+      <summary className="cursor-pointer px-3 py-2 text-sm text-[var(--color-ink-soft)] select-none">
+        Layout — {options.columns.length} columns, {GROUPING_LABELS[options.grouping].toLowerCase()}
+      </summary>
+      <div className="space-y-3 border-t border-[var(--color-line)] px-3 py-3">
+        <div className="flex flex-wrap gap-3">
+          <label className="text-sm">
+            <span className="mb-1 block font-medium text-[var(--color-ink)]">Group rows by</span>
+            <Select
+              value={options.grouping}
+              onChange={(e) => setOptions((c) => ({ ...c, grouping: e.target.value as GroupingMode }))}
+              className="w-auto"
+            >
+              {Object.entries(GROUPING_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </Select>
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block font-medium text-[var(--color-ink)]">Descriptions</span>
+            <Select
+              value={options.descriptionSource}
+              onChange={(e) =>
+                setOptions((c) => ({ ...c, descriptionSource: e.target.value as DescriptionSource }))
+              }
+              className="w-auto"
+            >
+              {Object.entries(DESCRIPTION_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </Select>
+          </label>
+        </div>
+        <p className="text-xs text-[var(--color-ink-soft)]">
+          Every wording comes from the document or from the Census Schedule B file. The application never
+          writes a commodity description — that is part of what is being declared.
+        </p>
+        <fieldset>
+          <legend className="mb-1 text-sm font-medium text-[var(--color-ink)]">Columns</legend>
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {COMMODITY_COLUMNS.map((column) => (
+              <label key={column.id} className="flex items-center gap-1.5 text-sm">
+                <input
+                  type="checkbox"
+                  checked={options.columns.includes(column.id)}
+                  onChange={() => toggleColumn(column.id)}
+                />
+                {column.label}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      </div>
+    </details>
   )
 }
 

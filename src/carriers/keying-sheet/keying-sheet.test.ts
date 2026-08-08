@@ -7,7 +7,20 @@
  * them is a value the operator would otherwise convert by hand.
  */
 import { describe, expect, it } from 'vitest'
-import { buildKeyingSheet, keyingSheetToWorkbook, kgToLb, toCountryPickerLabel, toIsoAlpha2 } from '.'
+import {
+  buildKeyingSheet,
+  keyingSheetToWorkbook,
+  kgToLb,
+  toCountryPickerLabel,
+  toIsoAlpha2,
+  COMMODITY_COLUMNS,
+  DEFAULT_KEYING_OPTIONS,
+  withDefaults,
+  type CommodityColumnId,
+  type DescriptionSource,
+  type GroupingMode,
+} from '.'
+import { createScheduleBIndex, type ScheduleBIndex } from '../../domain/schedule-b'
 import type { MergedLine, Reconciliation, SLILine } from '../../domain/types'
 import type { SliDraft } from '../types'
 
@@ -198,7 +211,10 @@ describe('commodity grouping', () => {
       fixture([line({ countryOfOrigin: 'Ruritania' })], [sli({})]),
       draft(),
     )
-    expect(sheet.commodities[0]).toMatchObject({ countryOfManufacture: 'Ruritania', needsCountryCode: true })
+    // The code field holds codes. An unplaced name is not one — it travels in the label,
+    // with the prompt beside it, and the row is flagged.
+    expect(sheet.commodities[0]).toMatchObject({ countryOfManufacture: '', needsCountryCode: true })
+    expect(sheet.commodities[0].countryLabel).toBe('Ruritania — no code found, enter it')
     const [, row] = keyingSheetToWorkbook(sheet)[0].rows
     expect(String(row[1])).toContain('no code found, enter it')
   })
@@ -335,12 +351,16 @@ describe('the workbook', () => {
     expect(workbook().map((s) => s.name)).toEqual(['Commodities', 'Shipment details', 'Notes'])
   })
 
-  it('ends the grid with a TOTAL row to check the application against', () => {
+  it('ends the grid with a TOTAL row that sums the column above it', () => {
     const rows = workbook()[0].rows
+    const [, row] = rows
     const total = rows[rows.length - 1]
     expect(total[0]).toBe('TOTAL')
-    expect(total[6]).toBe(749.4)
-    expect(total[7]).toBe(17.9)
+    // The point of the row is that it can be checked against the application's own running
+    // total, so it has to be the sum of what is printed — not a figure from somewhere else
+    // that happens to describe the same shipment.
+    expect(total[6]).toBe(row[6])
+    expect(total[7]).toBe(row[7])
     // No country, code or unit value on a total — those columns stay empty rather than
     // carrying a number that means nothing.
     expect([total[1], total[2], total[5]]).toEqual([null, null, null])
@@ -357,8 +377,8 @@ describe('the workbook', () => {
     const notes = Object.fromEntries(workbook()[2].rows.map((r) => [String(r[0]), String(r[1])]))
     expect(notes.Application).toBe('FedEx Ship Manager')
     expect(notes['Weight basis']).toContain('summed in kilograms and converted once')
-    expect(notes.Grouping).toContain('One row per part number, country of manufacture and commodity number')
-    expect(notes.Check).toContain('749.40 USD')
+    expect(notes.Grouping).toContain('Part + country + code')
+    expect(notes.Check).toContain('284.00 USD')
   })
 })
 
@@ -430,7 +450,7 @@ describe('one part is one commodity record', () => {
   ]
 
   const build = (lines: MergedLine[], descriptions: Record<string, string> = {}) =>
-    buildKeyingSheet('fedex-ship-manager', fixture(lines, []), draft(), descriptions).commodities
+    buildKeyingSheet('fedex-ship-manager', fixture(lines, []), draft(), { descriptionsByPart: descriptions }).commodities
 
   it('merges the lines the document split by wording', () => {
     const rows = build(vendorA5)
@@ -495,5 +515,1040 @@ describe('one part is one commodity record', () => {
     const rows = build(vendorA5)
     expect(rows[0]).toMatchObject({ weightKg: '0.520', weightLb: '1.15' })
     expect(rows[1]).toMatchObject({ weightKg: '5.274', weightLb: '11.63' })
+  })
+})
+
+/**
+ * The same shipment laid out four ways.
+ *
+ * One row per commodity record is right for keying into Ship Manager and wrong for checking
+ * against a filed SLI, and neither is what somebody reading the invoice line by line wants.
+ * Each mode groups on something the row can assert jointly; none merges two commodity
+ * numbers, because a row states one.
+ */
+describe('grouping modes', () => {
+  const shipment = [
+    line({ id: 'a', partNumber: 'P-1', countryOfOrigin: 'United States', quantity: 2, extendedValue: 100, netWeightKg: 1 }),
+    line({ id: 'b', partNumber: 'P-1', countryOfOrigin: 'Japan', quantity: 3, extendedValue: 150, netWeightKg: 2 }),
+    line({ id: 'c', partNumber: 'P-2', countryOfOrigin: 'Japan', quantity: 1, extendedValue: 50, netWeightKg: 4 }),
+  ]
+
+  const rowsFor = (grouping: GroupingMode) =>
+    buildKeyingSheet('fedex-ship-manager', fixture(shipment, []), draft(), { options: { grouping } }).commodities
+
+  it('keeps two origins of one part apart, because origin is a field on the record', () => {
+    const rows = rowsFor('part-origin-code')
+    expect(rows).toHaveLength(3)
+    expect(rows.map((r) => `${r.partNumber}/${r.countryOfManufacture}`)).toEqual(['P-1/US', 'P-1/JP', 'P-2/JP'])
+  })
+
+  it('combines a part shipped from two countries, and names both', () => {
+    const rows = rowsFor('part-code')
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toMatchObject({ partNumber: 'P-1', countryOfManufacture: 'US, JP', quantity: '5' })
+    expect(rows[0].countryLabel).toBe('US - United States, JP - Japan')
+  })
+
+  it('files by D/F and code, the way the SLI does, listing the parts it rolled up', () => {
+    const rows = rowsFor('df-code')
+    expect(rows).toHaveLength(2)
+    const domestic = rows.find((r) => r.domesticForeign === 'D')!
+    const foreign = rows.find((r) => r.domesticForeign === 'F')!
+    expect(domestic).toMatchObject({ partNumber: 'P-1', quantity: '2', totalValue: '100.00' })
+    expect(foreign).toMatchObject({ partNumber: 'P-1, P-2', quantity: '4', totalValue: '200.00' })
+  })
+
+  it('never groups when asked not to, including two lines that are otherwise identical', () => {
+    const twins = [line({ id: 'x', quantity: 1, extendedValue: 10 }), line({ id: 'y', quantity: 1, extendedValue: 10 })]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(twins, []), draft(), {
+      options: { grouping: 'line' },
+    }).commodities
+    expect(rows).toHaveLength(2)
+    expect(rows.every((r) => r.quantity === '1')).toBe(true)
+  })
+
+  it('totals the same in every mode, because grouping moves figures rather than changing them', () => {
+    for (const grouping of ['part-origin-code', 'part-code', 'df-code', 'line'] as GroupingMode[]) {
+      const rows = rowsFor(grouping)
+      expect(rows.reduce((sum, r) => sum + Number(r.quantity), 0), grouping).toBe(6)
+      expect(rows.reduce((sum, r) => sum + Number(r.totalValue), 0), grouping).toBe(300)
+    }
+  })
+
+  it('applies a saved wording only where the row is one part', () => {
+    // A description is saved against a part. A row spanning two parts cannot claim it.
+    const saved = { 'P-1': 'Braided copper cable' }
+    const one = buildKeyingSheet('fedex-ship-manager', fixture(shipment, []), draft(), {
+      options: { grouping: 'part-code' },
+      descriptionsByPart: saved,
+    }).commodities
+    expect(one[0]).toMatchObject({ description: 'Braided copper cable', describedByOperator: true })
+
+    const rolled = buildKeyingSheet('fedex-ship-manager', fixture(shipment, []), draft(), {
+      options: { grouping: 'df-code' },
+      descriptionsByPart: saved,
+    }).commodities
+    expect(rolled.find((r) => r.domesticForeign === 'F')!.describedByOperator).toBe(false)
+  })
+})
+
+describe('description sources', () => {
+  const lines = [
+    line({ id: 'a', description: 'CBL, OS32C-CBL-30M', commodityGroup: 'Electrical Conductors', quantity: 3 }),
+    line({ id: 'b', description: 'CBL, OS32C-CBL-30M', commodityGroup: 'Electrical Conductors', quantity: 1 }),
+  ]
+  const CONCORDANCE = {
+    source: 'test',
+    generatedAt: '2026-01-01',
+    count: 1,
+    codes: { '8544420000': { d: 'Insulated electric conductors, fitted with connectors', u: ['NO'] } },
+  }
+
+  const describedBy = (
+    descriptionSource: DescriptionSource,
+    scheduleB: ScheduleBIndex | null = createScheduleBIndex(CONCORDANCE),
+  ) =>
+    buildKeyingSheet('fedex-ship-manager', fixture(lines, []), draft(), {
+      options: { descriptionSource },
+      scheduleB,
+    }).commodities[0]
+
+  it('takes the part’s own wording', () => {
+    expect(describedBy('document').description).toBe('CBL, OS32C-CBL-30M')
+  })
+
+  it('takes the document’s commodity heading', () => {
+    expect(describedBy('heading').description).toBe('Electrical Conductors')
+  })
+
+  it('takes the Census wording for the code, and keeps the document’s beside it', () => {
+    const row = describedBy('schedule-b')
+    expect(row.description).toBe('Insulated electric conductors, fitted with connectors')
+    // Whether the code describes these goods is a human judgement, so what the document
+    // called them travels with the row rather than being replaced by the official text.
+    expect(row.otherDescriptions).toContain('CBL, OS32C-CBL-30M')
+  })
+
+  it('falls back to the document rather than leaving a row with no words on it', () => {
+    // A code absent from the concordance has its own blocking check to answer for it; a
+    // blank commodity description would be a silent one.
+    expect(describedBy('schedule-b', null).description).toBe('CBL, OS32C-CBL-30M')
+    expect(describedBy('schedule-b', createScheduleBIndex({ ...CONCORDANCE, codes: {} })).description).toBe(
+      'CBL, OS32C-CBL-30M',
+    )
+  })
+
+  it('never composes one', () => {
+    // Every wording on the sheet is traceable to the document or to the Census file.
+    const fromDocument = new Set(lines.flatMap((l) => [l.description, l.commodityGroup]))
+    for (const source of ['document', 'heading'] as DescriptionSource[]) {
+      expect(fromDocument).toContain(describedBy(source).description)
+    }
+  })
+})
+
+describe('column selection', () => {
+  const workbookFor = (columns: CommodityColumnId[]) =>
+    keyingSheetToWorkbook(
+      buildKeyingSheet('fedex-ship-manager', fixture([line({})], [sli({})]), draft(), { options: { columns } }),
+    )[0].rows
+
+  it('prints only the columns asked for, in the order they were given', () => {
+    const rows = workbookFor(['description', 'partNumber', 'quantity'])
+    expect(rows[0]).toEqual(['Commodity Description', 'Part Number', 'Qty'])
+  })
+
+  it('carries the totals of whichever columns can be totalled', () => {
+    const rows = workbookFor(['partNumber', 'quantity', 'weightKg'])
+    expect(rows.at(-1)).toEqual(['TOTAL', 2, 7.438])
+  })
+
+  it('puts TOTAL in the leftmost column that is not itself a figure', () => {
+    // Writing it over the quantity would replace a number somebody checks against a
+    // running total with a word.
+    expect(workbookFor(['quantity', 'description'])!.at(-1)).toEqual([2, 'TOTAL'])
+  })
+
+  it('ignores a stored column that no longer exists rather than printing a blank one', () => {
+    const rows = workbookFor(['partNumber', 'notAColumn' as CommodityColumnId])
+    expect(rows[0]).toEqual(['Part Number'])
+  })
+
+  it('falls back to the defaults when every column is unrecognised', () => {
+    const rows = workbookFor(['gone' as CommodityColumnId])
+    expect(rows[0]).toEqual(DEFAULT_KEYING_OPTIONS.columns.map((id) => COMMODITY_COLUMNS.find((c) => c.id === id)!.label))
+  })
+})
+
+describe('what a row can honestly assert', () => {
+  const mixed = [
+    line({ id: 'a', partNumber: 'P-1', countryOfOrigin: 'United States', quantity: 2, extendedValue: 100 }),
+    line({ id: 'b', partNumber: 'P-1', countryOfOrigin: 'Japan', quantity: 3, extendedValue: 150 }),
+  ]
+
+  it('says D, F on a row that merged both rather than naming the first origin’s letter', () => {
+    // `part-code` merges origins by design. Stating D for this row would declare three
+    // foreign pieces domestic.
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(mixed, []), draft(), {
+      options: { grouping: 'part-code' },
+    }).commodities
+    expect(rows[0]).toMatchObject({ countryOfManufacture: 'US, JP', domesticForeign: 'D, F' })
+  })
+
+  it('keeps two units apart under df-code, because the SLI’s own rows do', () => {
+    // aggregateLines keys on the canonical unit as well as D/F and code. Without it these
+    // collapse into one row of `PCS, KG` that lines up with nothing on the filed form.
+    const units = [
+      line({ id: 'a', countryOfOrigin: 'Japan', uom: 'PCS', quantity: 2 }),
+      line({ id: 'b', countryOfOrigin: 'Japan', uom: 'KG', quantity: 5 }),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(units, []), draft(), {
+      options: { grouping: 'df-code' },
+    }).commodities
+    expect(rows).toHaveLength(2)
+    expect(rows.map((r) => r.unitOfMeasure).sort()).toEqual(['KG', 'PCS'])
+  })
+
+  it('keeps a line’s own ECCN on its own row under df-code', () => {
+    const controlled = [
+      line({ id: 'a', countryOfOrigin: 'Japan' }),
+      line({ id: 'b', countryOfOrigin: 'Japan', eccn: '5A992.C' } as Partial<MergedLine>),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(controlled, []), draft(), {
+      options: { grouping: 'df-code' },
+    }).commodities
+    expect(rows).toHaveLength(2)
+  })
+
+  it('totals the pounds as printed, so the column adds up to the TOTAL under it', () => {
+    // 0.101 kg is 0.2227 lb, printed 0.22. Converting the summed kilograms gives 0.45 over
+    // a column that reads 0.22 + 0.22, which looks like an arithmetic error in the shipment.
+    const light = [
+      line({ id: 'a', partNumber: 'P-1', netWeightKg: 0.101 }),
+      line({ id: 'b', partNumber: 'P-2', netWeightKg: 0.101 }),
+    ]
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(light, []), draft())
+    expect(sheet.commodities.map((c) => c.weightLb)).toEqual(['0.22', '0.22'])
+    expect(sheet.totals.shipmentWeightLb).toBe('0.44')
+  })
+
+  it('says on the row when the official wording was asked for and did not exist', () => {
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+      options: { descriptionSource: 'schedule-b' },
+      scheduleB: null,
+    })
+    expect(sheet.commodities[0].scheduleBUnavailable).toBe('no-index')
+    const [, row] = keyingSheetToWorkbook(sheet)[0].rows
+    expect(String(row.at(-1))).toContain('Schedule B dataset not loaded')
+    const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
+    expect(notes.Descriptions).toContain('not loaded on this machine')
+  })
+
+  it('claims nothing about a fallback that did not happen', () => {
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft())
+    expect(sheet.commodities[0].scheduleBUnavailable).toBeNull()
+    const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
+    expect(notes.Descriptions).not.toContain('carry the document')
+  })
+})
+
+describe('what the sheet says versus what will be filed', () => {
+  it('prints the code a reviewer corrected to, not the one the document got wrong', () => {
+    // The sheet is typed into software that files the same shipment. Printing the document's
+    // number would have the operator key the very code somebody just corrected away.
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+      codesByPart: { '40649-0300': '8544.49.1000' },
+    })
+    expect(sheet.commodities[0].harmonizedCode).toBe('8544.49.1000')
+  })
+
+  it('lets a per-part correction beat a blanket redirect, as the SLI rows do', () => {
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+      codesByPart: { '40649-0300': '8544.49.1000' },
+      classificationOverrides: { '8544420000': '8544.30.0000' },
+    })
+    expect(sheet.commodities[0].harmonizedCode).toBe('8544.49.1000')
+  })
+
+  it('groups on the corrected code, so two parts corrected apart do not share a row', () => {
+    const two = [
+      line({ id: 'a', partNumber: 'P-1', quantity: 1, extendedValue: 10 }),
+      line({ id: 'b', partNumber: 'P-2', quantity: 1, extendedValue: 10 }),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(two, []), draft(), {
+      options: { grouping: 'df-code' },
+      codesByPart: { 'P-1': '8544.49.1000' },
+    }).commodities
+    expect(rows).toHaveLength(2)
+    expect(rows.map((r) => r.harmonizedCode).sort()).toEqual(['8544.42.0000', '8544.49.1000'])
+  })
+
+  it('takes the country from the origins present, not from a first line that has none', () => {
+    // A group whose first line prints no origin and whose second says Japan is a Japanese
+    // row. Reading `first` gave it an empty cell with nothing prompting anybody to fill it.
+    const partial = [
+      line({ id: 'a', partNumber: 'P-1', countryOfOrigin: '' }),
+      line({ id: 'b', partNumber: 'P-1', countryOfOrigin: 'Japan' }),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(partial, []), draft(), {
+      options: { grouping: 'part-code' },
+    }).commodities
+    expect(rows[0].countryOfManufacture).toBe('JP')
+    expect(rows[0].countryLabel).toContain('JP - Japan')
+    // And the line that stated none is not silently absorbed into Japan's.
+    expect(rows[0].countryLabel).toContain('some lines state no origin')
+    expect(rows[0].needsCountryCode).toBe(true)
+  })
+
+  it('blames the installation, not the classification, when the dataset never loaded', () => {
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+      options: { descriptionSource: 'schedule-b' },
+      scheduleB: null,
+    })
+    expect(sheet.commodities[0].scheduleBUnavailable).toBe('no-index')
+    const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
+    expect(notes.Descriptions).toContain('not loaded on this machine')
+    expect(notes.Descriptions).not.toContain('not in the concordance')
+    // Counted, not "every row": a row carrying the operator's own wording is not one of them.
+    expect(notes.Descriptions).toContain('1 of 1 rows')
+  })
+
+  it('blames the code when the dataset loaded and the code is not in it', () => {
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+      options: { descriptionSource: 'schedule-b' },
+      scheduleB: createScheduleBIndex({ source: 't', generatedAt: '2026-01-01', count: 0, codes: {} }),
+    })
+    expect(sheet.commodities[0].scheduleBUnavailable).toBe('no-code')
+    const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
+    expect(notes.Descriptions).toContain('not in the concordance')
+    expect(notes.Descriptions).not.toContain('not loaded on this machine')
+  })
+
+  it('looks the official wording up under the corrected code', () => {
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+      options: { descriptionSource: 'schedule-b' },
+      codesByPart: { '40649-0300': '8544.49.1000' },
+      scheduleB: createScheduleBIndex({
+        source: 't',
+        generatedAt: '2026-01-01',
+        count: 1,
+        codes: { '8544491000': { d: 'Other electric conductors, not fitted with connectors', u: ['NO'] } },
+      }),
+    })
+    expect(sheet.commodities[0].description).toBe('Other electric conductors, not fitted with connectors')
+    expect(sheet.commodities[0].scheduleBUnavailable).toBeNull()
+  })
+})
+
+describe('what the sheet claims about its own wording', () => {
+  it('formats a corrected code the way the field expects it', () => {
+    // PartCodeInput commits `normalizeScheduleB`, so a saved correction is ten bare digits.
+    // Keying 8544491000 into a field expecting 8544.49.1000 is the transposition this
+    // whole sheet exists to prevent.
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+      codesByPart: { '40649-0300': '8544491000' },
+    })
+    expect(sheet.commodities[0].harmonizedCode).toBe('8544.49.1000')
+  })
+
+  it('leaves a code it cannot format alone rather than mangling it', () => {
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+      codesByPart: { '40649-0300': 'PENDING' },
+    })
+    expect(sheet.commodities[0].harmonizedCode).toBe('PENDING')
+  })
+
+  it('does not say the document "also said" the Census wording', () => {
+    // Beside official text, "also" asserts the CIPL used it. It did not.
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+      options: { descriptionSource: 'schedule-b' },
+      scheduleB: createScheduleBIndex({
+        source: 't',
+        generatedAt: '2026-01-01',
+        count: 1,
+        codes: { '8544420000': { d: 'Insulated electric conductors', u: ['NO'] } },
+      }),
+    })
+    const note = String(keyingSheetToWorkbook(sheet)[0].rows[1].at(-1))
+    expect(note).toContain('document said')
+    expect(note).not.toContain('document also said')
+  })
+
+  it('still says "also" where the description did come from the document', () => {
+    const two = [
+      line({ id: 'a', description: 'CBL, OS32C-CBL-30M', quantity: 3 }),
+      line({ id: 'b', description: 'Cable assembly', quantity: 1 }),
+    ]
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(two, []), draft())
+    expect(String(keyingSheetToWorkbook(sheet)[0].rows[1].at(-1))).toContain('document also said')
+  })
+})
+
+describe('a stored layout that no longer means anything', () => {
+  it('discards a grouping mode it does not recognise', () => {
+    // Options outlive releases. An unknown mode reaches the label tables as a missing key,
+    // and a Notes tab reading "undefined. undefined" is the gentler of the two outcomes.
+    const options = withDefaults({ grouping: 'by-vibes' as GroupingMode })
+    expect(options.grouping).toBe(DEFAULT_KEYING_OPTIONS.grouping)
+  })
+
+  it('discards a description source it does not recognise', () => {
+    const options = withDefaults({ descriptionSource: 'invented' as DescriptionSource })
+    expect(options.descriptionSource).toBe(DEFAULT_KEYING_OPTIONS.descriptionSource)
+  })
+
+  it('keeps the parts of a stored set that are still valid', () => {
+    const options = withDefaults({ grouping: 'df-code', descriptionSource: 'nope' as DescriptionSource })
+    expect(options).toMatchObject({ grouping: 'df-code', descriptionSource: 'document' })
+  })
+})
+
+describe('figures that must not move when the layout does', () => {
+  const shipment = [
+    line({ id: 'a', partNumber: 'P-1', countryOfOrigin: 'Japan', netWeightKg: 0.101, quantity: 1, extendedValue: 10 }),
+    line({ id: 'b', partNumber: 'P-2', countryOfOrigin: 'Japan', netWeightKg: 0.101, quantity: 1, extendedValue: 10 }),
+  ]
+
+  it('keys the same package weight whichever way the table is grouped', () => {
+    // The gross weight goes in the shipment's own weight field. A figure that moves by a
+    // gramme when somebody switches from part rows to D/F rows cannot be checked against a
+    // scale, and it is not a property of the layout.
+    const weightFor = (grouping: GroupingMode) => {
+      const sheet = buildKeyingSheet('fedex-ship-manager', fixture(shipment, []), draft(), { options: { grouping } })
+      return sheet.sections
+        .flatMap((s) => s.fields)
+        .find((f) => f.label.startsWith('Weight'))!.note
+    }
+    expect(weightFor('df-code')).toBe(weightFor('part-origin-code'))
+  })
+
+  it('merges a printed ECCN with the controlled one under df-code, as the SLI does', () => {
+    // aggregateLines resolves `line.eccn || options.eccn`. Bucketing a blank separately
+    // splits a row the filed form merges the moment one line prints the controlled value.
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(shipment.map((l, i) =>
+      i === 0 ? ({ ...l, eccn: 'EAR99' } as MergedLine) : l,
+    ), []), draft(), {
+      options: { grouping: 'df-code' },
+      eccn: 'EAR99',
+    }).commodities
+    expect(rows).toHaveLength(1)
+  })
+
+  it('still splits a line whose printed ECCN differs from the controlled one', () => {
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(shipment.map((l, i) =>
+      i === 0 ? ({ ...l, eccn: '5A992.C' } as MergedLine) : l,
+    ), []), draft(), {
+      options: { grouping: 'df-code' },
+      eccn: 'EAR99',
+    }).commodities
+    expect(rows).toHaveLength(2)
+  })
+})
+
+describe('a grid that says what its last row is', () => {
+  it('labels the TOTAL row even when every chosen column is a figure', () => {
+    // An unlabelled row of numbers at the foot of a grid is indistinguishable from another
+    // commodity, and somebody keys it.
+    const rows = keyingSheetToWorkbook(
+      buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+        options: { columns: ['quantity', 'totalValue'] },
+      }),
+    )[0].rows
+    expect(rows.at(-1)![0]).toBe('TOTAL')
+  })
+
+  it('writes every total out again on the Notes tab, so the displaced figure is not lost', () => {
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+      options: { columns: ['quantity', 'totalValue'] },
+    })
+    const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
+    expect(notes.Check).toContain('2 pcs')
+    expect(notes.Check).toContain('284.00 USD')
+  })
+})
+
+describe('figures that move with the layout, and figures that must not', () => {
+  // Three lines whose per-row rounding does not survive being summed: 0.005 each rounds to
+  // 0.01, so the printed column adds to 0.03 against a shipment value of 0.015.
+  const pennies = [
+    line({ id: 'a', partNumber: 'P-1', quantity: 1, extendedValue: 0.005, netWeightKg: 0 }),
+    line({ id: 'b', partNumber: 'P-2', quantity: 1, extendedValue: 0.005, netWeightKg: 0 }),
+    line({ id: 'c', partNumber: 'P-3', quantity: 1, extendedValue: 0.005, netWeightKg: 0 }),
+  ]
+
+  it('states the shipment as filed, unmoved by the grouping', () => {
+    const filedFor = (grouping: GroupingMode) =>
+      buildKeyingSheet('fedex-ship-manager', fixture(pennies, []), draft(), { options: { grouping } }).filed
+    expect(filedFor('line').customsValue).toBe(filedFor('df-code').customsValue)
+    expect(filedFor('line').customsValue).toBe(filedFor('part-origin-code').customsValue)
+  })
+
+  it('still makes the TOTAL row the sum of the rows above it', () => {
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(pennies, []), draft(), {
+      options: { grouping: 'line', columns: ['partNumber', 'totalValue'] },
+    })
+    const rows = keyingSheetToWorkbook(sheet)[0].rows
+    const printed = rows.slice(1, -1).reduce((sum, r) => sum + Number(r[1]), 0)
+    expect(rows.at(-1)![1]).toBeCloseTo(printed, 10)
+  })
+
+  it('says both figures on the Notes tab rather than only the one that moves', () => {
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(pennies, []), draft(), {
+      options: { grouping: 'line' },
+    })
+    const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
+    // The two differ precisely because one rounds a row at a time; both are stated.
+    expect(notes.Check).toContain('0.03 USD')
+    expect(notes['Shipment as filed']).not.toContain('0.03 USD')
+  })
+})
+
+describe('the country column on a row that merged origins', () => {
+  const mixed = [
+    line({ id: 'a', partNumber: 'P-1', countryOfOrigin: 'Malaysia' }),
+    line({ id: 'b', partNumber: 'P-1', countryOfOrigin: 'Ruritania' }),
+  ]
+
+  it('keeps the picker name for the origin that resolved', () => {
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(mixed, []), draft(), {
+      options: { grouping: 'part-code' },
+    })
+    const cell = String(keyingSheetToWorkbook(sheet)[0].rows[1][1])
+    expect(cell).toContain('MY - Malaysia')
+    expect(cell).toContain('Ruritania — no code found, enter it')
+  })
+
+  it('still flags the row as needing a code', () => {
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(mixed, []), draft(), {
+      options: { grouping: 'part-code' },
+    }).commodities
+    expect(rows[0].needsCountryCode).toBe(true)
+  })
+})
+
+describe('the unit column', () => {
+  it('prints one unit where the document meant one thing by two spellings', () => {
+    // PCS and EA canonicalise alike, and df-code groups on the canonical unit — so the row
+    // would otherwise put `PCS, EA` in a field that holds a single value.
+    const spellings = [
+      line({ id: 'a', countryOfOrigin: 'Japan', uom: 'PCS' }),
+      line({ id: 'b', countryOfOrigin: 'Japan', uom: 'EA' }),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(spellings, []), draft(), {
+      options: { grouping: 'df-code' },
+    }).commodities
+    expect(rows).toHaveLength(1)
+    expect(rows[0].unitOfMeasure).toBe('PCS')
+  })
+})
+
+describe('a stored layout that is hostile rather than merely stale', () => {
+  it('does not accept an inherited property as a grouping mode', () => {
+    expect(withDefaults({ grouping: 'constructor' as GroupingMode }).grouping).toBe(
+      DEFAULT_KEYING_OPTIONS.grouping,
+    )
+    expect(withDefaults({ descriptionSource: 'toString' as DescriptionSource }).descriptionSource).toBe(
+      DEFAULT_KEYING_OPTIONS.descriptionSource,
+    )
+  })
+})
+
+describe('a commodity record holds one unit', () => {
+  const twoUnits = [
+    line({ id: 'a', partNumber: 'P-1', countryOfOrigin: 'Japan', uom: 'PCS', quantity: 2, extendedValue: 100 }),
+    line({ id: 'b', partNumber: 'P-1', countryOfOrigin: 'Japan', uom: 'KG', quantity: 5, extendedValue: 50 }),
+  ]
+
+  it('never merges two units, in any grouping mode', () => {
+    // 2 PCS and 5 KG merged into a row of 7 at a unit value averaged across two different
+    // things — an impossible record for a field that holds one unit. `aggregateLines` keys
+    // on the unit for exactly this reason.
+    for (const grouping of ['part-origin-code', 'part-code', 'df-code', 'line'] as GroupingMode[]) {
+      const rows = buildKeyingSheet('fedex-ship-manager', fixture(twoUnits, []), draft(), {
+        options: { grouping },
+      }).commodities
+      expect(rows, grouping).toHaveLength(2)
+      expect(rows.map((r) => r.unitOfMeasure).sort(), grouping).toEqual(['KG', 'PCS'])
+    }
+  })
+
+  it('still merges lines the document spelled one unit two ways', () => {
+    const spellings = twoUnits.map((l) => ({ ...l, uom: l.uom === 'KG' ? 'EA' : 'PCS' }) as MergedLine)
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(spellings, []), draft()).commodities
+    expect(rows).toHaveLength(1)
+  })
+})
+
+describe('one part printed two ways', () => {
+  // Letters on purpose: a part number of digits and hyphens is the same string in either
+  // case, so it cannot tell a case-insensitive key from a case-sensitive one.
+  const cases = [
+    line({ id: 'a', partNumber: 'CBL-100a', quantity: 2, extendedValue: 100 }),
+    line({ id: 'b', partNumber: 'CBL-100A', quantity: 3, extendedValue: 150 }),
+  ]
+
+  it('is one part, because that is how the grouping keys it', () => {
+    // Deduping on trim alone made a part printed in two cases look like two, which put both
+    // spellings in a cell that holds one part number.
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(cases, []), draft()).commodities
+    expect(rows).toHaveLength(1)
+    expect(rows[0].quantity).toBe('5')
+  })
+
+  it('shows the spelling the document used first', () => {
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(cases, []), draft()).commodities
+    expect(rows[0].partNumber).toBe('CBL-100a')
+  })
+
+  it('still finds the wording saved against it', () => {
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(cases, []), draft(), {
+      descriptionsByPart: { 'CBL-100A': 'Braided copper cable' },
+    }).commodities
+    expect(rows[0]).toMatchObject({ description: 'Braided copper cable', describedByOperator: true })
+  })
+})
+
+describe('one wording printed two ways', () => {
+  it('is not offered as an alternative to itself', () => {
+    // The part number is stripped off the front of a description because it is already its
+    // own column. Counting the two spellings apart put `document also said: CABLE ASSY`
+    // beside a description reading exactly that.
+    const both = [
+      line({ id: 'a', partNumber: 'P-1', description: 'CABLE ASSY', quantity: 3 }),
+      line({ id: 'b', partNumber: 'P-1', description: 'P-1 CABLE ASSY', quantity: 1 }),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(both, []), draft()).commodities
+    expect(rows[0]).toMatchObject({ description: 'CABLE ASSY', otherDescriptions: [] })
+  })
+})
+
+describe('what a stored layout may be, not just what it may say', () => {
+  it('survives a columns value that is not an array', () => {
+    // What comes back from storage can be any shape. A TypeError here surfaces as an
+    // unhandled rejection inside the restore and loses the saved layout without a word.
+    expect(withDefaults({ columns: 'partNumber' as unknown as CommodityColumnId[] }).columns).toEqual(
+      DEFAULT_KEYING_OPTIONS.columns,
+    )
+    expect(withDefaults({ columns: null as unknown as CommodityColumnId[] }).columns).toEqual(
+      DEFAULT_KEYING_OPTIONS.columns,
+    )
+  })
+
+  it('counts a mixed row’s origins in document order', () => {
+    // `D, F`, as the field's own documentation says — not whichever origin printed first.
+    const foreignFirst = [
+      line({ id: 'a', partNumber: 'P-1', countryOfOrigin: 'Japan' }),
+      line({ id: 'b', partNumber: 'P-1', countryOfOrigin: 'United States' }),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(foreignFirst, []), draft(), {
+      options: { grouping: 'part-code' },
+    }).commodities
+    expect(rows[0].domesticForeign).toBe('D, F')
+  })
+})
+
+describe('a row whose lines do not all state an origin', () => {
+  it('does not read a foreign portion out of a blank', () => {
+    // `domesticForeign('')` answers F. Reading D/F off every line rather than off the
+    // origins the row has asserted a foreign portion nothing on the row supported — beside a
+    // country cell reading `US - United States`, with nothing prompting anybody to look.
+    const partial = [
+      line({ id: 'a', partNumber: 'P-1', countryOfOrigin: 'United States' }),
+      line({ id: 'b', partNumber: 'P-1', countryOfOrigin: '' }),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(partial, []), draft(), {
+      options: { grouping: 'part-code' },
+    }).commodities
+    // Blank, not `D` and not `D, F`. `D` would assert the origin-less pieces are domestic —
+    // unsupported, and the opposite of the `F` the SLI files for them. `F` would assert the
+    // reverse. The field cannot be stated from this row, so it is left to be stated.
+    expect(rows[0].domesticForeign).toBe('')
+    expect(rows[0].countryLabel).toContain('US - United States')
+    expect(rows[0].countryLabel).toContain('some lines state no origin')
+    expect(rows[0].needsCountryCode).toBe(true)
+  })
+
+  it('asks for a country when the row states none at all', () => {
+    const none = [line({ id: 'a', partNumber: 'P-1', countryOfOrigin: '' })]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(none, []), draft()).commodities
+    expect(rows[0]).toMatchObject({ countryOfManufacture: '', domesticForeign: '', needsCountryCode: true })
+  })
+})
+
+describe('rows that must not go out unremarked', () => {
+  it('prompts for a country the document never stated', () => {
+    // A blank cell beside a blank D/F prompts nobody — while the SLI files F for the same
+    // lines. The flag was being computed and not read.
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({ countryOfOrigin: '' })], []), draft())
+    const cell = String(keyingSheetToWorkbook(sheet)[0].rows[1][1])
+    expect(cell).toContain('enter it')
+  })
+
+  it('does not leave another part’s number inside a merged row’s wording', () => {
+    // part-code and df-code merge several parts into one row. Stripping only the first
+    // part's number left the others inside the description keyed against these goods.
+    const merged = [
+      line({ id: 'a', partNumber: 'P-1', countryOfOrigin: 'Japan', description: 'P-1 CABLE ASSY', quantity: 1 }),
+      line({ id: 'b', partNumber: 'P-2', countryOfOrigin: 'Japan', description: 'P-2 O-RING', quantity: 3 }),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(merged, []), draft(), {
+      options: { grouping: 'df-code' },
+    }).commodities
+    expect(rows[0].description).toBe('O-RING')
+    expect(rows[0].otherDescriptions).toEqual(['CABLE ASSY'])
+  })
+
+  it('states one country per origin, however the document spelled it', () => {
+    const spellings = [
+      line({ id: 'a', partNumber: 'P-1', countryOfOrigin: 'Ruritania' }),
+      line({ id: 'b', partNumber: 'P-1', countryOfOrigin: 'RURITANIA' }),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(spellings, []), draft(), {
+      options: { grouping: 'part-code' },
+    }).commodities
+    expect(rows[0].countryLabel).toBe('Ruritania — no code found, enter it')
+  })
+
+  it('never prints a column twice, however the stored layout repeats it', () => {
+    const rows = keyingSheetToWorkbook(
+      buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+        options: { columns: ['partNumber', 'quantity', 'partNumber'] },
+      }),
+    )[0].rows
+    expect(rows[0]).toEqual(['Part Number', 'Qty'])
+  })
+})
+
+describe('the mode defined by D/F', () => {
+  it('shows D/F, whatever columns were stored', () => {
+    // Grouping by D/F and then leaving the column off produces a table that cannot be
+    // checked against the filed form line for line, which is the only reason the mode exists.
+    const rows = keyingSheetToWorkbook(
+      buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+        options: { grouping: 'df-code', columns: ['partNumber', 'quantity'] },
+      }),
+    )[0].rows
+    expect(rows[0]).toEqual(['Part Number', 'D/F', 'Qty'])
+  })
+
+  it('leaves the other modes’ columns alone', () => {
+    const rows = keyingSheetToWorkbook(
+      buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+        options: { grouping: 'part-origin-code', columns: ['partNumber', 'quantity'] },
+      }),
+    )[0].rows
+    expect(rows[0]).toEqual(['Part Number', 'Qty'])
+  })
+})
+
+describe('a part number that prefixes another', () => {
+  it('does not claim the longer part’s description', () => {
+    // `5610` prefixes `5610-2`. Taking the shorter one first left `2 CABLE ASSY LONG`
+    // where the whole part number should have gone.
+    const prefixes = [
+      line({ id: 'a', partNumber: '5610', countryOfOrigin: 'Japan', description: '5610 CABLE ASSY', quantity: 1 }),
+      line({ id: 'b', partNumber: '5610-2', countryOfOrigin: 'Japan', description: '5610-2 CABLE ASSY LONG', quantity: 3 }),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(prefixes, []), draft(), {
+      options: { grouping: 'df-code' },
+    }).commodities
+    expect(rows[0].description).toBe('CABLE ASSY LONG')
+    expect(rows[0].otherDescriptions).toEqual(['CABLE ASSY'])
+  })
+})
+
+describe('the D/F column under the D/F grouping', () => {
+  it('carries the letter its own key was built from', () => {
+    // The key puts a blank-origin line in the F bucket, because `domesticForeign('')` is F
+    // and that is what the SLI files for it. Reading the cell from the stated origins
+    // instead blanked the one column this mode force-adds.
+    const rows = buildKeyingSheet(
+      'fedex-ship-manager',
+      fixture([line({ countryOfOrigin: '' })], []),
+      draft(),
+      { options: { grouping: 'df-code' } },
+    ).commodities
+    expect(rows[0].domesticForeign).toBe('F')
+    // And the missing origin is still asked for, beside it.
+    expect(rows[0].needsCountryCode).toBe(true)
+  })
+
+  it('leaves the other modes reading from the origins the row has', () => {
+    const rows = buildKeyingSheet(
+      'fedex-ship-manager',
+      fixture([line({ countryOfOrigin: '' })], []),
+      draft(),
+      { options: { grouping: 'part-origin-code' } },
+    ).commodities
+    expect(rows[0].domesticForeign).toBe('')
+  })
+})
+
+describe('the D/F column’s insertion', () => {
+  it('does not rearrange a layout that was given out of canonical order', () => {
+    // `columns` prints in the order it was given, and every other grouping honours that.
+    const rows = keyingSheetToWorkbook(
+      buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+        options: { grouping: 'df-code', columns: ['description', 'partNumber', 'quantity'] },
+      }),
+    )[0].rows
+    expect(rows[0]).toEqual(['Commodity Description', 'Part Number', 'D/F', 'Qty'])
+  })
+
+  it('appends it where nothing follows it canonically', () => {
+    const rows = keyingSheetToWorkbook(
+      buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+        options: { grouping: 'df-code', columns: ['partNumber'] },
+      }),
+    )[0].rows
+    expect(rows[0]).toEqual(['Part Number', 'D/F'])
+  })
+})
+
+describe('a prompt the column picker cannot silence', () => {
+  const noOrigin = [line({ countryOfOrigin: '' })]
+
+  it('reports rows needing a country even with the country column switched off', () => {
+    // The prompt used to live only in that cell. Turning the column off left a row whose
+    // origin the document never stated going out with nothing said about it anywhere.
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(noOrigin, []), draft(), {
+      options: { columns: ['partNumber', 'quantity', 'description'] },
+    })
+    const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
+    expect(notes['Country of manufacture']).toContain('1 of 1 rows need one entered by hand')
+  })
+
+  it('reports an unresolvable country name the same way', () => {
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({ countryOfOrigin: 'Ruritania' })], []), draft(), {
+      options: { columns: ['partNumber', 'quantity'] },
+    })
+    const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
+    expect(notes['Country of manufacture']).toContain('1 of 1 rows')
+  })
+
+  it('says nothing when every row resolved', () => {
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft())
+    const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
+    expect(notes['Country of manufacture']).toBeUndefined()
+  })
+})
+
+describe('the Notes tab does not point at columns that are switched off', () => {
+  const withColumns = (columns: CommodityColumnId[], over: Parameters<typeof buildKeyingSheet>[3] = {}) =>
+    Object.fromEntries(
+      keyingSheetToWorkbook(
+        buildKeyingSheet('fedex-ship-manager', fixture([line({ countryOfOrigin: 'Ruritania' })], []), draft(), {
+          ...over,
+          options: { ...over.options, columns },
+        }),
+      )[2].rows.map((r) => [String(r[0]), String(r[1])]),
+    )
+
+  it('says the country column is off when it is', () => {
+    expect(withColumns(['partNumber', 'quantity'])['Country of manufacture']).toContain('switched off')
+    expect(withColumns(['countryOfManufacture', 'quantity'])['Country of manufacture']).toContain(
+      'The country column says which',
+    )
+  })
+
+  it('says where the document’s own wording went when the Note column is off', () => {
+    const both = [
+      line({ id: 'a', countryOfOrigin: 'Japan', description: 'CBL 30M', quantity: 3 }),
+      line({ id: 'b', countryOfOrigin: 'Japan', description: 'Cable assembly', quantity: 1 }),
+    ]
+    const notes = (columns: CommodityColumnId[]) =>
+      Object.fromEntries(
+        keyingSheetToWorkbook(
+          buildKeyingSheet('fedex-ship-manager', fixture(both, []), draft(), { options: { columns } }),
+        )[2].rows.map((r) => [String(r[0]), String(r[1])]),
+      )
+    expect(notes(['partNumber', 'description']).Descriptions).toContain('Note column is switched off')
+    expect(notes(['partNumber', 'description', 'note']).Descriptions).not.toContain('switched off')
+  })
+})
+
+describe('stripping a repeated part number', () => {
+  it('does not eat the front of a word that merely starts the same way', () => {
+    // Part `CA` against description `CABLE ASSY` left `BLE ASSY` on the declaration.
+    const rows = buildKeyingSheet(
+      'fedex-ship-manager',
+      fixture([line({ partNumber: 'CA', description: 'CABLE ASSY' })], []),
+      draft(),
+    ).commodities
+    expect(rows[0].description).toBe('CABLE ASSY')
+  })
+
+  it('still strips a genuine repeat, with or without a separator', () => {
+    const at = (partNumber: string, description: string) =>
+      buildKeyingSheet('fedex-ship-manager', fixture([line({ partNumber, description })], []), draft())
+        .commodities[0].description
+    expect(at('44534-0730', '44534-0730 SA34-F1')).toBe('SA34-F1')
+    expect(at('44534-0730', '44534-0730: SA34-F1')).toBe('SA34-F1')
+    // A hyphen is not a boundary — part numbers contain them. `5610` must not take the front
+    // off `5610-2`, which is a different part.
+    expect(at('5610', '5610-2 CABLE ASSY LONG')).toBe('5610-2 CABLE ASSY LONG')
+    // But a hyphen *after* a real boundary is still tidied away.
+    expect(at('5610', '5610 - CABLE ASSY')).toBe('CABLE ASSY')
+    // Nothing left after the strip means the description was only the part number, which is
+    // already its own column — the original is kept rather than blanking the cell.
+    expect(at('44534-0730', '44534-0730')).toBe('44534-0730')
+  })
+})
+
+describe('a row the document gives no origin for at all', () => {
+  it('says the document has none, not that some of its lines lack one', () => {
+    const rows = buildKeyingSheet(
+      'fedex-ship-manager',
+      fixture([line({ countryOfOrigin: '' })], []),
+      draft(),
+    ).commodities
+    expect(rows[0].countryLabel).toBe('not on the document — enter it')
+    expect(rows[0].countryLabel).not.toContain('some lines')
+  })
+
+  it('reserves the other wording for a row that has both', () => {
+    const partial = [
+      line({ id: 'a', partNumber: 'P-1', countryOfOrigin: 'Japan' }),
+      line({ id: 'b', partNumber: 'P-1', countryOfOrigin: '' }),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(partial, []), draft(), {
+      options: { grouping: 'part-code' },
+    }).commodities
+    expect(rows[0].countryLabel).toContain('JP - Japan')
+    expect(rows[0].countryLabel).toContain('some lines state no origin')
+  })
+})
+
+describe('the Check note tells the truth about the TOTAL row', () => {
+  const check = (columns: CommodityColumnId[]) =>
+    Object.fromEntries(
+      keyingSheetToWorkbook(
+        buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), { options: { columns } }),
+      )[2].rows.map((r) => [String(r[0]), String(r[1])]),
+    ).Check
+
+  it('claims the grid sums only when it does', () => {
+    expect(check(['partNumber', 'quantity'])).toContain('equals the column above it')
+  })
+
+  it('says where the displaced figure went when every column is a total', () => {
+    // TOTAL takes the first column, so that column's figure is only stated in the note.
+    expect(check(['quantity', 'totalValue'])).toContain('only stated here')
+    expect(check(['quantity', 'totalValue'])).not.toContain('equals the column above it')
+  })
+})
+
+describe('a row that merged goods the document does not identify', () => {
+  const unnamed = [
+    line({ id: 'a', partNumber: 'P-1', countryOfOrigin: 'Japan', description: 'CABLE ASSY', quantity: 2 }),
+    line({ id: 'b', partNumber: '', countryOfOrigin: 'Japan', description: 'UNIDENTIFIED ITEM', quantity: 3 }),
+  ]
+
+  it('does not apply one part’s saved wording to it', () => {
+    // `parts` drops the blanks, so counting it alone made this row look like a single part —
+    // and a saved wording, once applied, discards what the document said about the rest.
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(unnamed, []), draft(), {
+      options: { grouping: 'df-code' },
+      descriptionsByPart: { 'P-1': 'Braided copper cable' },
+    }).commodities
+    expect(rows[0].describedByOperator).toBe(false)
+    expect(rows[0].description).toBe('UNIDENTIFIED ITEM')
+    expect(rows[0].otherDescriptions).toContain('CABLE ASSY')
+  })
+
+  it('says so on the Notes tab, where no column can hide it', () => {
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(unnamed, []), draft(), {
+      options: { grouping: 'df-code', columns: ['quantity', 'description'] },
+    })
+    const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
+    expect(notes['Part numbers']).toContain('1 of 1 rows')
+  })
+
+  it('still applies a saved wording where every line names the part', () => {
+    const named = unnamed.map((l) => ({ ...l, partNumber: 'P-1' }) as MergedLine)
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(named, []), draft(), {
+      options: { grouping: 'df-code' },
+      descriptionsByPart: { 'P-1': 'Braided copper cable' },
+    }).commodities
+    expect(rows[0]).toMatchObject({ description: 'Braided copper cable', describedByOperator: true })
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(named, []), draft())
+    const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
+    expect(notes['Part numbers']).toBeUndefined()
+  })
+})
+
+describe('the country-of-manufacture field holds codes', () => {
+  it('lists a code per origin where a row merged several', () => {
+    const two = [
+      line({ id: 'a', partNumber: 'P-1', countryOfOrigin: 'Malaysia' }),
+      line({ id: 'b', partNumber: 'P-1', countryOfOrigin: 'Japan' }),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(two, []), draft(), {
+      options: { grouping: 'part-code' },
+    }).commodities
+    expect(rows[0].countryOfManufacture).toBe('MY, JP')
+  })
+
+  it('leaves out a name it could not place, rather than passing it off as a code', () => {
+    const mixed = [
+      line({ id: 'a', partNumber: 'P-1', countryOfOrigin: 'Malaysia' }),
+      line({ id: 'b', partNumber: 'P-1', countryOfOrigin: 'Ruritania' }),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(mixed, []), draft(), {
+      options: { grouping: 'part-code' },
+    }).commodities
+    expect(rows[0].countryOfManufacture).toBe('MY')
+    // It is not lost — the label carries it with its own prompt, and the row is flagged.
+    expect(rows[0].countryLabel).toContain('Ruritania — no code found, enter it')
+    expect(rows[0].needsCountryCode).toBe(true)
+  })
+})
+
+describe('the heading description source', () => {
+  const lines = [
+    line({ id: 'a', description: 'CBL, OS32C-CBL-30M', commodityGroup: 'Electrical Conductors', quantity: 3 }),
+    line({ id: 'b', description: 'CBL, OS32C-CBL-30M', commodityGroup: 'Electrical Conductors', quantity: 1 }),
+  ]
+
+  it('still carries what the part itself was called', () => {
+    // Ranking headings alone left one entry and an empty Note column, while the Notes tab
+    // promised the alternatives were printed there.
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(lines, []), draft(), {
+      options: { descriptionSource: 'heading' },
+    }).commodities
+    expect(rows[0].description).toBe('Electrical Conductors')
+    expect(rows[0].otherDescriptions).toContain('CBL, OS32C-CBL-30M')
+  })
+
+  it('does not offer the heading back as an alternative to itself', () => {
+    const noDescription = lines.map((l) => ({ ...l, description: '' }) as MergedLine)
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(noDescription, []), draft(), {
+      options: { descriptionSource: 'heading' },
+    }).commodities
+    expect(rows[0]).toMatchObject({ description: 'Electrical Conductors', otherDescriptions: [] })
+  })
+})
+
+describe('df-code row order', () => {
+  it('matches the order the SLI files its rows in', () => {
+    // The mode exists to be read against that form line for line. In document order, row n
+    // sat beside a different commodity.
+    const outOfOrder = [
+      line({ id: 'a', countryOfOrigin: 'Japan', classification: '9999.99.9999' }),
+      line({ id: 'b', countryOfOrigin: 'Japan', classification: '1111.11.1111' }),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(outOfOrder, []), draft(), {
+      options: { grouping: 'df-code' },
+    }).commodities
+    expect(rows.map((r) => r.harmonizedCode)).toEqual(['1111.11.1111', '9999.99.9999'])
+  })
+
+  it('leaves the other modes in the order the invoice reads', () => {
+    const outOfOrder = [
+      line({ id: 'a', partNumber: 'P-1', classification: '9999.99.9999' }),
+      line({ id: 'b', partNumber: 'P-2', classification: '1111.11.1111' }),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(outOfOrder, []), draft()).commodities
+    expect(rows.map((r) => r.harmonizedCode)).toEqual(['9999.99.9999', '1111.11.1111'])
   })
 })

@@ -22,12 +22,27 @@ import type { MergedLine, Reconciliation } from '../../domain/types'
 import { KG_PER_LB, kgToLb as kilogramsToPounds } from '../../domain/units'
 import { buildXlsx, type CellValue, type Sheet } from '../../lib/xlsx'
 import type { SliDraft } from '../types'
-import { normalizeScheduleB } from '../../domain/schedule-b'
+import { canonicalUnit, formatScheduleB, normalizeScheduleB, type ScheduleBIndex } from '../../domain/schedule-b'
 import { partKey } from '../../domain/part-key'
-import { roundTo } from '../../domain/reconcile'
+import { domesticForeign, roundTo } from '../../domain/reconcile'
 import { toCountryPickerLabel, toIsoAlpha2 } from './countries'
 
+import {
+  COMMODITY_COLUMNS,
+  DESCRIPTION_LABELS,
+  DESCRIPTION_NOTES,
+  GROUPING_LABELS,
+  GROUPING_NOTES,
+  withDefaults,
+  type CommodityColumnId,
+  type DescriptionSource,
+  type GroupingMode,
+  type KeyingOptions,
+  type ScheduleBFallback,
+} from './options'
+
 export * from './countries'
+export * from './options'
 
 export type KeyingTarget = 'fedex-ship-manager' | 'ups-worldship'
 
@@ -50,12 +65,27 @@ export interface KeyingCommodityRow {
   /** True when the wording came from a saved per-part override rather than the document. */
   describedByOperator?: boolean
   /**
+   * Why this row carries the document's wording when the official one was asked for, or null
+   * when it does not. Surfaced on the row and counted on the Notes tab, because a sheet that
+   * says its descriptions are official must not quietly hold rows that are not — and the two
+   * reasons want different action, one from the classifier and one from whoever can get the
+   * dataset to load.
+   */
+  scheduleBUnavailable?: ScheduleBFallback
+  /**
    * Other wordings the document used for this part. Printed beside the row so the choice is
    * visible: the CIPL describes one part more than one way and does not say which is meant.
    */
   otherDescriptions: string[]
   harmonizedCode: string
-  /** ISO alpha-2, as the commodity record stores it. */
+  /**
+   * ISO alpha-2, as the commodity record stores it — comma-separated where a grouping mode
+   * merged several origins into one row.
+   *
+   * Only origins that resolved. A name this app could not place is not a code and does not
+   * belong in a field of codes; `countryLabel` carries it, with the prompt beside it, and
+   * `needsCountryCode` flags the row.
+   */
   countryOfManufacture: string
   /** `DO - Dominican Republic`: the code the record stores, and the name the picker lists. */
   countryLabel: string
@@ -67,6 +97,20 @@ export interface KeyingCommodityRow {
   weightLb: string
   weightKg: string
   partNumber: string
+  /**
+   * True when a line in this row carries no part number, so the names in `partNumber` do not
+   * account for all of it. Counted on the Notes tab: a saved wording is keyed to a part and
+   * cannot speak for goods the document does not identify.
+   */
+  partUnstated?: boolean
+  /**
+   * `D` (US origin), `F`, or `D, F` for a row that merged both.
+   *
+   * Read off every origin in the row, never off the seller or the ship-from location. A
+   * mixed row says so: the grouping modes that combine origins can produce one, and naming
+   * only the first origin's letter would misdeclare the rest.
+   */
+  domesticForeign: string
   /** Set when the country name could not be resolved to a code. */
   needsCountryCode?: boolean
 }
@@ -75,6 +119,8 @@ export interface KeyingSheet {
   target: KeyingTarget
   applicationName: string
   shipmentReference: string
+  /** The grouping, columns and description source these rows were built under. */
+  options: KeyingOptions
   sections: KeyingSection[]
   commodities: KeyingCommodityRow[]
   totals: {
@@ -90,6 +136,21 @@ export interface KeyingSheet {
     documentSet: string
     documentCurrency: string
     excludedSets: string
+  }
+  /**
+   * The shipment's own figures, from the invoice lines and unrounded.
+   *
+   * Separate from `totals`, which adds up the rows as printed. Both are true and they are not
+   * always equal: rounding each row to two decimals and summing is not the same as summing
+   * and rounding once, and which one is wanted depends on whether you are checking the
+   * application's running total or the shipment. Printing only the layout-dependent one would
+   * let a figure that moves with a dropdown be read as the filed value.
+   */
+  filed: {
+    quantity: number
+    customsValue: string
+    netWeightKg: string
+    grossWeightKg: string | null
   }
   /** Values the operator must supply; the CIPL does not contain them. */
   manualFields: string[]
@@ -112,58 +173,236 @@ const MANUAL = 'Not on the CIPL — enter manually'
 const CHOOSE = 'Not on the CIPL — choose in the application'
 
 /**
- * One commodity record per part, country of manufacture *and* commodity number.
+ * The commodity number this line is actually filed under.
  *
- * Country is a field on the commodity record, so two origins cannot share one: a real entry
- * for shipment vendorA4 splits its cable line into 4 from MY and 2 from JP, where the SLI
- * holds a single row of 6 under one Schedule B number. Grouping the way the SLI does would
- * make the operator take that row apart again at the keyboard, which is the manual step
- * this exists to remove.
+ * A reviewer who corrects a part's code corrects it for the SLI, and the keying sheet is
+ * typed into software that files the same shipment — printing the number the document got
+ * wrong would have the operator key the very code somebody just corrected away. Precedence
+ * matches `aggregateLines` exactly: the per-part correction is the narrower statement and
+ * beats a blanket code redirect. Truthiness, not `??`, because an empty string means "no
+ * override" and taking it would file a blank.
+ */
+function codeFor(line: MergedLine, corrections: CodeCorrections): string {
+  return (
+    corrections.codesByPart?.[partKey(line.partNumber)] ||
+    corrections.overrides?.[normalizeScheduleB(line.classification)] ||
+    line.classification
+  )
+}
+
+export interface CodeCorrections {
+  /** Commodity numbers a reviewer entered against a part. */
+  codesByPart?: Record<string, string>
+  /** Classification redirects, keyed by normalised source code. */
+  overrides?: Record<string, string>
+  /** The shipment-wide ECCN, for lines that print none. Only `df-code` reads it. */
+  eccn?: string | null
+}
+
+/**
+ * What makes two invoice lines one row.
  *
- * The description is deliberately *not* in the key, though it used to be. The CIPL prints a
- * commodity-group heading against some lines and the part's own description against others,
- * so one part came out as two identical records differing only in wording — shipment
+ * The default is part, country of manufacture and commodity number, because that is what a
+ * commodity record holds: a real Ship Manager entry for shipment vendorA4 splits its cable
+ * line into 4 from MY and 2 from JP, where the SLI holds a single row of 6 under one Schedule
+ * B number. Grouping the SLI's way by default would make the operator take that row apart
+ * again at the keyboard, which is the manual step this exists to remove — but checking a
+ * sheet *against* a filed SLI wants exactly those rows, so `df-code` is here too.
+ *
+ * The description is in none of the keys, though it used to be in the default. The CIPL
+ * prints a commodity-group heading against some lines and the part's own description against
+ * others, so one part came out as two identical records differing only in wording — shipment
  * vendorA5 keyed as eight commodities where six were called for, two of its parts each
  * appearing twice at the same code, country and unit price. The same part number is the same
  * goods; the wording is a property of how the document was printed.
+ *
+ * No mode merges two commodity numbers, because a row asserts one. `line` groups on the
+ * line's own identity, which is how "never group" is spelled without a special case.
  */
-function groupForKeying(lines: MergedLine[], descriptions: Record<string, string>): KeyingCommodityRow[] {
+function groupKeyFor(line: MergedLine, mode: GroupingMode, index: number, corrections: CodeCorrections): string {
+  const code = normalizeScheduleB(codeFor(line, corrections))
+  // In every mode, because a commodity record holds one unit and `aggregateLines` keys on it
+  // for the same reason. Without it, 2 PCS and 5 KG of one part merged into a row of 7 at a
+  // unit value averaged across two different things.
+  const unit = canonicalUnit(line.uom) ?? line.uom.trim().toUpperCase()
+  switch (mode) {
+    case 'line':
+      return `${index}|${line.id}`
+    case 'part-code':
+      return [partKey(line.partNumber), code, unit].join('|')
+    // Unit and ECCN join the key because the SLI's own rows carry them: `aggregateLines`
+    // keys on classification, D/F, ECCN, licence, SME *and* canonical unit. Licence and SME
+    // are shipment-wide, so those two are everything that varies per line here.
+    //
+    // The ECCN is resolved the way `aggregateLines` resolves it — a line's printed value, or
+    // the controlled one where it prints none. Treating a blank as its own bucket splits a
+    // row the filed SLI merges as soon as one line happens to print the controlled value
+    // outright, which is the opposite of what this mode is for.
+    case 'df-code':
+      return [domesticForeign(line.countryOfOrigin), code, unit, line.eccn || corrections.eccn || ''].join('|')
+    case 'part-origin-code':
+    default:
+      return [partKey(line.partNumber), partKey(line.countryOfOrigin), code, unit].join('|')
+  }
+}
+
+/**
+ * The unit to key: the first printed spelling, which is what `aggregateLines` puts in
+ * `sourceUom`.
+ *
+ * One value, never a list, and that is guaranteed rather than hoped for — every grouping mode
+ * keys on the canonical unit, so a row's lines all mean the same unit by construction. `PCS`
+ * and `EA` canonicalise alike and can share a row; `PCS` and `KG` cannot. Printing both
+ * spellings would put `PCS, EA` into a field that holds one value.
+ */
+function unitFor(group: MergedLine[]): string {
+  return group[0].uom
+}
+
+/** `MY - Malaysia`, or the name and a prompt where no code could be found for it. */
+function originLabel(origin: string): string {
+  const { known } = toIsoAlpha2(origin)
+  return known ? toCountryPickerLabel(origin) : `${origin} — no code found, enter it`
+}
+
+/**
+ * Distinct values in first-seen order, joined.
+ *
+ * A row that spans several parts or origins says so rather than showing the first and
+ * implying the rest away. `df-code` rows routinely do: that is what filing by D/F means.
+ */
+function joinDistinct(values: string[]): string {
+  return [...new Set(values.map((v) => v.trim()).filter(Boolean))].join(', ')
+}
+
+function groupForKeying(
+  lines: MergedLine[],
+  descriptions: Record<string, string>,
+  options: KeyingOptions,
+  scheduleB: ScheduleBIndex | null,
+  corrections: CodeCorrections,
+): KeyingCommodityRow[] {
   const groups = new Map<string, MergedLine[]>()
-  for (const line of lines) {
-    const key = [partKey(line.partNumber), partKey(line.countryOfOrigin), normalizeScheduleB(line.classification)].join('|')
+  lines.forEach((line, index) => {
+    const key = groupKeyFor(line, options.grouping, index, corrections)
     const bucket = groups.get(key)
     if (bucket) bucket.push(line)
     else groups.set(key, [line])
-  }
+  })
 
-  return [...groups.values()].map((group) => {
+  // `df-code` sorted the way `aggregateLines` sorts the SLI's own rows — ascending by
+  // normalised commodity number. The mode exists to be read against that form line for line,
+  // and document order put row n beside a different commodity. The other modes stay in
+  // document order, which is the order the invoice itself reads in.
+  const ordered =
+    options.grouping === 'df-code'
+      ? [...groups.entries()]
+          .sort((a, b) => normalizeScheduleB(codeFor(a[1][0], corrections)).localeCompare(
+            normalizeScheduleB(codeFor(b[1][0], corrections)),
+          ))
+          .map(([, lines]) => lines)
+      : [...groups.values()]
+
+  return ordered.map((group) => {
     const first = group[0]
     const quantity = group.reduce((sum, l) => sum + l.quantity, 0)
     const total = group.reduce((sum, l) => sum + (l.extendedValue ?? 0), 0)
     // Summed in kilograms and converted once. Converting each line and adding the rounded
     // pounds accumulates the rounding: the same shipment came out 0.005 lb heavy that way.
     const weightKg = group.reduce((sum, l) => sum + (l.netWeightKg ?? 0), 0)
-    const country = toIsoAlpha2(first.countryOfOrigin)
-    const saved = descriptions[partKey(first.partNumber)]
-    const chosen = describeGroup(group)
+    // Read from the distinct origins, not the first line's: a group whose first line prints
+    // no origin and whose second says Japan is a Japanese row, and taking `first` would
+    // give it an empty country cell with nothing prompting anybody to fill it in.
+    // Deduped case-insensitively, as `groupKeyFor` keys them: one unresolvable origin
+    // printed two ways gave `Ruritania, RURITANIA` in a cell that holds one country.
+    const origins = [...group.reduce((seen, l) => {
+      const name = l.countryOfOrigin.trim()
+      if (name && !seen.has(name.toUpperCase())) seen.set(name.toUpperCase(), name)
+      return seen
+    }, new Map<string, string>()).values()]
+    // `part-code` combines origins by design, which means it also absorbs lines that state
+    // none. The row's country and D/F can only speak for the origins it has, so the fact that
+    // some lines had none is part of what the row must say — otherwise 2 pieces from the US
+    // and 3 from nowhere print as 5 pieces of `D`, while the SLI files those 3 as `F`.
+    const originMissing = group.some((l) => !l.countryOfOrigin.trim())
+    const code = codeFor(first, corrections)
+    // Deduped the way the grouping keys them, which is case-insensitively. Trimming alone
+    // made one part printed in two cases look like two, which both dropped the operator's
+    // saved wording and put both spellings in a cell that holds one part number.
+    // A Map keeps the *last* value for a repeated key; the first spelling is the one to show.
+    const parts = [...group.reduce((seen, l) => {
+      const key = partKey(l.partNumber)
+      if (key && !seen.has(key)) seen.set(key, l.partNumber.trim())
+      return seen
+    }, new Map<string, string>()).values()]
+    // A saved wording is keyed to a part, so it only applies where the row is one part — and
+    // a row that merged a line stating no part number is not one part, however few names it
+    // carries. `parts` drops the blanks, so counting it alone made those rows look single and
+    // applied one part's wording to goods the document does not identify, discarding what it
+    // did say about them (`otherDescriptions` is emptied wherever a saved wording wins).
+    const partMissing = group.some((l) => !l.partNumber.trim())
+    const saved = parts.length === 1 && !partMissing ? descriptions[partKey(parts[0])] : undefined
+    const chosen = describeGroup(group, options.descriptionSource, scheduleB, code)
     return {
       description: saved || chosen.description,
       describedByOperator: Boolean(saved),
+      scheduleBUnavailable: saved ? null : chosen.fellBack,
       // Only meaningful when the app chose; the operator's own wording replaces all of them.
       otherDescriptions: saved ? [] : chosen.alternatives,
-      harmonizedCode: first.classification,
-      countryOfManufacture: country.code,
-      countryLabel: toCountryPickerLabel(first.countryOfOrigin),
-      needsCountryCode: !country.known && Boolean(first.countryOfOrigin),
+      // Formatted, because a per-part correction is stored normalised: `PartCodeInput` commits
+      // `normalizeScheduleB`, so the raw value is ten bare digits. The SLI formats it and the
+      // sheet must agree — an operator keying `8544491000` into a field expecting
+      // `8544.49.1000` is the transposition this whole sheet exists to prevent.
+      harmonizedCode: formatScheduleB(code),
+      countryOfManufacture: joinDistinct(
+        origins.map((o) => toIsoAlpha2(o)).filter((c) => c.known).map((c) => c.code),
+      ),
+      // One label per origin, each carrying its own verdict. A row of `MY, Ruritania` under a
+      // single "no code found" note loses which of the two resolved, and the operator has to
+      // work out for themselves that Malaysia was fine.
+      countryLabel: origins.length
+        ? joinDistinct([
+            ...origins.map(originLabel),
+            ...(originMissing ? ['some lines state no origin — enter it'] : []),
+          ])
+        : 'not on the document — enter it',
+      // Read off every origin in the row, not the first one. `part-code` merges origins by
+      // design, so a part shipped 2 from the US and 3 from Japan is one row — and stating D
+      // for it would declare three foreign pieces domestic. So it is read off the origins the
+      // row actually has: a line with no origin supplies no letter either, and
+      // `domesticForeign('')` answers F, which would assert a foreign portion nothing on the
+      // row supports. Sorted, so a mixed row reads `D, F` rather than whichever origin the
+      // invoice happened to print first.
+      //
+      // `df-code` is the exception, and has to be. Its key is the letter — including the F
+      // that a blank origin produces, which is also what the SLI files for those lines — so
+      // reading the cell from the origins instead would blank the one column that mode
+      // exists to be checked against. The missing origin is still flagged beside it.
+      //
+      // And blank, not a partial letter, where some lines state no origin at all: `D` over a
+      // row whose other three pieces have no stated origin asserts they are domestic, which
+      // is both unsupported and the opposite of the `F` the SLI files for them. A field that
+      // cannot be stated is left for the operator, who is told to state it.
+      domesticForeign:
+        options.grouping === 'df-code'
+          ? domesticForeign(first.countryOfOrigin)
+          : originMissing
+            ? ''
+            : joinDistinct(origins.map(domesticForeign).sort()),
+      // A row with no origin at all, or only some of one, needs one as much as a row with an
+      // unrecognised name.
+      needsCountryCode: originMissing || !origins.length || origins.some((o) => !toIsoAlpha2(o).known),
       quantity: String(roundTo(quantity, 3)),
-      unitOfMeasure: first.uom,
+      unitOfMeasure: unitFor(group),
       // Derived from the group's own total rather than copied off one line, so the unit
       // price and the total beside it can never disagree.
       unitValue: quantity ? (total / quantity).toFixed(6) : '',
       totalValue: total.toFixed(2),
       weightLb: weightKg ? kgToLb(weightKg).toFixed(2) : '',
       weightKg: weightKg ? roundTo(weightKg, 3).toFixed(3) : '',
-      partNumber: first.partNumber,
+      partNumber: joinDistinct(parts),
+      /** True when some line in the row carries no part number of its own. */
+      partUnstated: partMissing,
     }
   })
 }
@@ -188,45 +427,154 @@ function groupForKeying(lines: MergedLine[], descriptions: Record<string, string
  * others travel with the row and are printed beside it — the operator sees that a choice was
  * made and what the alternatives were, instead of a silent pick.
  *
+ * `schedule-b` is the one source that is not the document, and it is not composed either: it
+ * is the Census Bureau's own wording for the code being filed, which is as authoritative as
+ * text on an export declaration gets. It falls back to the document when a code is absent
+ * from the concordance, because a blank description is worse than a terse one — and a code
+ * the concordance does not hold has its own blocking check to answer for it.
+ *
  * A leading repeat of the part number is dropped: it is already its own column, and
  * `44534-0730 SA34-F1` in a description field is half a column of noise.
  */
-function describeGroup(group: MergedLine[]): { description: string; alternatives: string[] } {
+function describeGroup(
+  group: MergedLine[],
+  source: DescriptionSource,
+  scheduleB: ScheduleBIndex | null,
+  code: string,
+): { description: string; alternatives: string[]; fellBack: ScheduleBFallback } {
+  if (source === 'schedule-b') {
+    const official = scheduleB?.lookup(code)?.description?.trim()
+    // The document's own wordings still travel with the row: the official text describes the
+    // code, and whether the code describes these goods is the reviewer's call, not the app's.
+    if (official) {
+      return { description: official, alternatives: fromDocument(group, 'document').ranked, fellBack: null }
+    }
+  }
+  if (source === 'heading') {
+    const { ranked } = fromDocument(group, 'heading')
+    // The part's own wording travels with the row, as it does under `schedule-b`. Ranking
+    // headings alone left a row with one entry and nothing in the Note column — while the
+    // Notes tab promised the alternatives were printed there.
+    const alternatives = fromDocument(group, 'document').ranked.filter((text) => text !== ranked[0])
+    return { description: ranked[0] ?? '', alternatives, fellBack: null }
+  }
+  const { ranked } = fromDocument(group, 'document')
+  // A row that asked for the official wording and did not get it has to say so, and say which
+  // of the two reasons it was. "This code is not in the concordance" is a statement about the
+  // code, and repeating it for every row of a shipment because the dataset failed to load
+  // would send somebody looking for a classification problem that is not there.
+  return {
+    description: ranked[0] ?? '',
+    alternatives: ranked.slice(1),
+    fellBack: source !== 'schedule-b' ? null : scheduleB ? 'no-code' : 'no-index',
+  }
+}
+
+/** The document's own wordings for a group, most-invoiced first. */
+function fromDocument(group: MergedLine[], source: 'document' | 'heading'): { ranked: string[] } {
   const byText = new Map<string, number>()
   for (const line of group) {
-    const text = (line.description || line.commodityGroup || '').trim()
+    // Either source falls back to the other rather than leaving the row blank: the CIPL
+    // prints a heading against some lines and a description against others, and a row with
+    // no words on it is not a row anybody can key.
+    const text = (source === 'heading'
+      ? line.commodityGroup || line.description
+      : line.description || line.commodityGroup
+    ).trim()
     if (text) byText.set(text, (byText.get(text) ?? 0) + line.quantity)
   }
-  if (!byText.size) return { description: '', alternatives: [] }
+  if (!byText.size) return { ranked: [] }
 
-  const ranked = [...byText.entries()].sort((a, b) => b[1] - a[1])
-  const part = group[0].partNumber.trim()
-  const strip = (text: string) =>
-    part && text.toUpperCase().startsWith(part.toUpperCase())
-      ? text.slice(part.length).replace(/^[\s:,-]+/, '').trim() || text
-      : text
+  // Any of the row's parts, not just the first: `part-code` and `df-code` merge several into
+  // one row, and another part's number left inside the wording travels into the description
+  // keyed against these goods.
+  // Longest first: `5610` prefixes `5610-2`, and taking the shorter one first left `2 CABLE
+  // ASSY LONG` where the whole part number should have gone.
+  const parts = [...new Set(group.map((l) => l.partNumber.trim()).filter(Boolean))].sort(
+    (a, b) => b.length - a.length,
+  )
+  const strip = (text: string) => {
+    for (const part of parts) {
+      if (!text.toUpperCase().startsWith(part.toUpperCase())) continue
+      const rest = text.slice(part.length)
+      // The repeat has to end where the part number ends. Without that, a short part like
+      // `CA` matched `CABLE ASSY` and the row was described as `BLE ASSY`.
+      //
+      // A hyphen is not a boundary, whatever it is elsewhere: part numbers contain them, so
+      // `5610` against `5610-2 CABLE ASSY LONG` would take the front off a *different* part's
+      // number and describe the goods as `2 CABLE ASSY LONG`. Longest-first ordering only
+      // helps when both numbers happen to be in the same row, which under the default
+      // grouping they never are.
+      if (rest && !/^[\s:,]/.test(rest)) continue
+      return rest.replace(/^[\s:,-]+/, '').trim() || text
+    }
+    return text
+  }
 
-  return { description: strip(ranked[0][0]), alternatives: ranked.slice(1).map(([text]) => strip(text)) }
+  // Stripped before the tally, not after. `40649-0300 CABLE ASSY` and `CABLE ASSY` are the
+  // same wording printed two ways, and counting them apart put `document also said: CABLE
+  // ASSY` beside a description reading exactly that.
+  const stripped = new Map<string, number>()
+  for (const [text, quantity] of byText) {
+    const key = strip(text)
+    stripped.set(key, (stripped.get(key) ?? 0) + quantity)
+  }
+
+  return { ranked: [...stripped.entries()].sort((a, b) => b[1] - a[1]).map(([text]) => text) }
+}
+
+export interface KeyingInputs {
+  /** Commodity wording the operator saved against a part, keyed by normalised part number. */
+  descriptionsByPart?: Record<string, string>
+  /** The document these figures were read from, for the provenance block. */
+  sourceFile?: string
+  /** Document sets present but not used, e.g. a TP1 copy priced in another currency. */
+  excludedSets?: string[]
+  /** How rows are grouped, which columns print, and where descriptions come from. */
+  options?: Partial<KeyingOptions>
+  /** Needed only for the `schedule-b` description source. */
+  scheduleB?: ScheduleBIndex | null
+  /**
+   * Commodity numbers a reviewer entered against a part, and classification redirects — the
+   * same corrections `reconcile` was given. Without them the sheet prints the number the
+   * document got wrong and the operator keys the code somebody just corrected away.
+   */
+  codesByPart?: Record<string, string>
+  classificationOverrides?: Record<string, string>
+  /** The controlled ECCN the SLI rows were built with, so `df-code` partitions as they do. */
+  eccn?: string | null
 }
 
 export function buildKeyingSheet(
   target: KeyingTarget,
   reconciliation: Reconciliation,
   draft: SliDraft,
-  /** Commodity wording the operator saved against a part, keyed by normalised part number. */
-  descriptionsByPart: Record<string, string> = {},
-  /** The document these figures were read from, for the provenance block. */
-  sourceFile?: string,
-  /** Document sets present but not used, e.g. a TP1 copy priced in another currency. */
-  excludedSets: string[] = [],
+  inputs: KeyingInputs = {},
 ): KeyingSheet {
-  const { header, mergedLines, sliLines } = reconciliation
+  const { header, mergedLines } = reconciliation
+  const { descriptionsByPart = {}, sourceFile, excludedSets = [], scheduleB = null } = inputs
+  const options = withDefaults(inputs.options)
   const isFedex = target === 'fedex-ship-manager'
-  const commodities = groupForKeying(mergedLines, descriptionsByPart)
+  const commodities = groupForKeying(mergedLines, descriptionsByPart, options, scheduleB, {
+    codesByPart: inputs.codesByPart,
+    overrides: inputs.classificationOverrides,
+    eccn: inputs.eccn,
+  })
 
-  const customsValue = sliLines.reduce((sum, l) => sum + l.valueUsd, 0)
-  const netKg = sliLines.reduce((sum, l) => sum + l.weightKg, 0)
+  // Two different weights, because they answer two different questions.
+  //
+  // The shipment's own net weight comes from the lines, unrounded, so the package weight
+  // keyed into Ship Manager is the same figure whichever way the operator groups the table —
+  // a gross weight that moves by a gramme when somebody switches from part rows to D/F rows
+  // is a number nobody can reconcile against a scale.
+  //
+  // The TOTAL row instead sums the rows the sheet prints. It sits under a column somebody
+  // adds up, and a figure there that is not the sum of what is above it reads as an
+  // arithmetic error in the shipment with nothing on the sheet to say otherwise.
+  const netKg = mergedLines.reduce((sum, l) => sum + (l.netWeightKg ?? 0), 0)
   const grossKg = header.totalGrossWeightKg ?? netKg
+  const customsValue = commodities.reduce((sum, c) => sum + Number(c.totalValue || 0), 0)
+  const printedKg = commodities.reduce((sum, c) => sum + Number(c.weightKg || 0), 0)
 
   const consignee = draft.ultimateConsignee
   const [address1 = '', address2 = '', address3 = ''] = consignee.addressLines
@@ -385,6 +733,7 @@ export function buildKeyingSheet(
     target,
     applicationName: APPLICATION_NAMES[target],
     shipmentReference: header.invoiceNumber,
+    options,
     sections,
     commodities,
     totals: {
@@ -396,8 +745,18 @@ export function buildKeyingSheet(
         3,
       ),
       customsValue: customsValue.toFixed(2),
-      shipmentWeightLb: kgToLb(netKg).toFixed(2),
-      shipmentWeightKg: roundTo(netKg, 3).toFixed(3),
+      // Summed from the printed pounds rather than converted from the summed kilograms.
+      // Each row is keyed at the figure shown, so the application's running total is the sum
+      // of those rounded values — converting once is the more accurate number and the wrong
+      // one to check against. Two rows of 0.101 kg print 0.22 lb each and totalled 0.45.
+      shipmentWeightLb: commodities.reduce((sum, c) => sum + Number(c.weightLb || 0), 0).toFixed(2),
+      shipmentWeightKg: roundTo(printedKg, 3).toFixed(3),
+    },
+    filed: {
+      quantity: roundTo(mergedLines.reduce((sum, l) => sum + l.quantity, 0), 3),
+      customsValue: mergedLines.reduce((sum, l) => sum + (l.extendedValue ?? 0), 0).toFixed(2),
+      netWeightKg: roundTo(netKg, 3).toFixed(3),
+      grossWeightKg: header.totalGrossWeightKg == null ? null : roundTo(header.totalGrossWeightKg, 3).toFixed(3),
     },
     provenance: {
       sourceFile: sourceFile ?? '',
@@ -481,41 +840,91 @@ function describeShipment(rows: KeyingCommodityRow[]): string {
  * which copy of it, and how the weights were converted.
  */
 export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
-  const commodities: CellValue[][] = [
-    [
-      'Part Number',
-      'Country of Manufacture',
-      'Harmonized Code',
-      'Qty',
-      'UOM',
-      'Unit Value (USD)',
-      'Total Customs Value (USD)',
-      'Weight (lb)',
-      'Weight (kg)',
-      'Commodity Description',
-      'Note',
-    ],
-    ...sheet.commodities.map((row): CellValue[] => [
-      row.partNumber,
+  const columns = sheet.options.columns
+
+  /** One row's value for one column. Numbers stay numbers so a column sums. */
+  const cellFor = (row: KeyingCommodityRow, id: CommodityColumnId): CellValue => {
+    switch (id) {
+      case 'partNumber':
+        return row.partNumber
       // The code the commodity record stores, and the name the picker lists, together: an
       // operator given only one of the two has to translate before they can type anything.
-      row.needsCountryCode ? `${row.countryOfManufacture} — no code found, enter it` : row.countryLabel,
-      row.harmonizedCode,
-      numberOr(row.quantity),
-      row.unitOfMeasure,
-      numberOr(row.unitValue),
-      numberOr(row.totalValue),
-      numberOr(row.weightLb),
-      numberOr(row.weightKg),
-      row.description,
-      row.describedByOperator
-        ? 'your wording'
-        : row.otherDescriptions.length
-          ? `document also said: ${row.otherDescriptions.join('; ')}`
-          : '',
-    ]),
-    // Blank cells rather than zeroes in the columns a total is meaningless for.
-    ['TOTAL', null, null, sheet.totals.quantity, null, null, numberOr(sheet.totals.customsValue), numberOr(sheet.totals.shipmentWeightLb), numberOr(sheet.totals.shipmentWeightKg), null, null],
+      // `countryLabel` carries the whole verdict, origin by origin: the picker name where it
+      // resolved, the prompt where it did not, and the prompt on its own where the document
+      // states no origin at all. Nothing to re-derive here.
+      case 'countryOfManufacture':
+        return row.countryLabel
+      case 'domesticForeign':
+        return row.domesticForeign
+      case 'harmonizedCode':
+        return row.harmonizedCode
+      case 'quantity':
+        return numberOr(row.quantity)
+      case 'unitOfMeasure':
+        return row.unitOfMeasure
+      case 'unitValue':
+        return numberOr(row.unitValue)
+      case 'totalValue':
+        return numberOr(row.totalValue)
+      case 'weightLb':
+        return numberOr(row.weightLb)
+      case 'weightKg':
+        return numberOr(row.weightKg)
+      case 'description':
+        return row.description
+      case 'note': {
+        if (row.describedByOperator) return 'your wording'
+        // "also" only where the description itself came from the document. Beside Census
+        // wording it would assert the CIPL had used the official text, which it did not.
+        const fromDocument = sheet.options.descriptionSource !== 'schedule-b' || Boolean(row.scheduleBUnavailable)
+        const lead = fromDocument ? 'document also said' : 'document said'
+        const said = row.otherDescriptions.length ? `${lead}: ${row.otherDescriptions.join('; ')}` : ''
+        if (!row.scheduleBUnavailable) return said
+        const why =
+          row.scheduleBUnavailable === 'no-index'
+            ? 'Schedule B dataset not loaded — the document’s wording is used'
+            : 'no Schedule B wording for this code — the document’s is used'
+        return [why, said].filter(Boolean).join('; ')
+      }
+    }
+  }
+
+  /**
+   * The TOTAL row, which only totals what can be totalled.
+   *
+   * Blank cells rather than zeroes elsewhere: a zero under Unit Value reads as a price, and
+   * summing unit prices down a column is a figure that means nothing.
+   */
+  const TOTALLED = new Set<CommodityColumnId>(['quantity', 'totalValue', 'weightLb', 'weightKg'])
+  // The word goes in the leftmost column that is not itself a total, so it never displaces a
+  // figure. Where every chosen column carries one it takes the first anyway: an unlabelled
+  // row of figures at the foot of a grid is indistinguishable from another commodity, and
+  // somebody keys it. The figure it displaces is not lost — every total is written out again
+  // on the Notes tab.
+  const labelColumn = columns.find((id) => !TOTALLED.has(id)) ?? columns[0]
+  const labelDisplacesAFigure = !columns.some((id) => !TOTALLED.has(id))
+  const totalFor = (id: CommodityColumnId): CellValue => {
+    if (labelDisplacesAFigure && id === labelColumn) return 'TOTAL'
+    switch (id) {
+      case 'quantity':
+        return sheet.totals.quantity
+      case 'totalValue':
+        return numberOr(sheet.totals.customsValue)
+      case 'weightLb':
+        return numberOr(sheet.totals.shipmentWeightLb)
+      case 'weightKg':
+        return numberOr(sheet.totals.shipmentWeightKg)
+      default:
+        return id === labelColumn ? 'TOTAL' : null
+    }
+  }
+
+  const label = (id: CommodityColumnId) => COMMODITY_COLUMNS.find((c) => c.id === id)?.label ?? id
+
+  const commodities: CellValue[][] = [
+    columns.map(label),
+    ...sheet.commodities.map((row): CellValue[] => columns.map((id) => cellFor(row, id))),
+    columns.map(totalFor),
   ]
 
   const details: CellValue[][] = [['Tab', 'Section', 'Field', 'Value', 'Where it came from']]
@@ -524,6 +933,16 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
       details.push([section.tab, section.title, field.label, field.value || '—', field.note ?? ''])
     }
   }
+
+  const noIndex = sheet.commodities.filter((c) => c.scheduleBUnavailable === 'no-index').length
+  const noCode = sheet.commodities.filter((c) => c.scheduleBUnavailable === 'no-code').length
+  // Counted here as well as printed on the row, because the column picker can switch the
+  // country column off — and a prompt that lives only in a cell nobody chose to print is a
+  // prompt that does not exist. The Schedule B fallback is repeated here for the same reason.
+  const needCountry = sheet.commodities.filter((c) => c.needsCountryCode).length
+  const unnamedParts = sheet.commodities.filter((c) => c.partUnstated).length
+  const printed = new Set(sheet.options.columns)
+  const alternatives = sheet.commodities.some((c) => c.otherDescriptions.length || c.describedByOperator)
 
   const notes: CellValue[][] = [
     ['Note', 'Detail'],
@@ -536,17 +955,75 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
         ? `Used the ${sheet.provenance.documentSet} set, priced in ${sheet.provenance.documentCurrency}. ${sheet.provenance.excludedSets} describes the same goods and was excluded.`
         : `Used the ${sheet.provenance.documentSet} set, priced in ${sheet.provenance.documentCurrency}.`,
     ],
+    ['Grouping', `${GROUPING_LABELS[sheet.options.grouping]}. ${GROUPING_NOTES[sheet.options.grouping]}`],
     [
-      'Grouping',
-      'One row per part number, country of manufacture and commodity number. Lines the document split by wording were combined; a part shipped from two countries, or carrying two commodity numbers, stays on separate rows because those are fields on the record.',
+      'Weight basis',
+      `Each row's net weight is summed in kilograms and converted once at 1 kg = ${KG_PER_LB_LABEL} lb. ` +
+        'The TOTAL row adds the pounds as printed, because that is what the application will have added.',
     ],
-    ['Weight basis', `Net weights summed in kilograms and converted once at 1 kg = ${KG_PER_LB_LABEL} lb.`],
     [
       'Descriptions',
-      'Chosen from the wordings already on the document — the one most of the goods were invoiced under, by quantity. Where a part was described more than one way the alternatives are printed in the Note column, because the document does not say which is meant. Rows noted "your wording" carry a description saved against that part. Nothing here is composed by the application.',
+      `${DESCRIPTION_LABELS[sheet.options.descriptionSource]}. ${DESCRIPTION_NOTES[sheet.options.descriptionSource]} ` +
+        (noIndex
+          ? `The Schedule B dataset is not loaded on this machine, so ${noIndex} of ` +
+            `${sheet.commodities.length} rows carry the document’s wording instead — every row this app ` +
+            'described. That is a problem with this installation, not with these commodity numbers. '
+          : '') +
+        (noCode
+          ? `${noCode} of ${sheet.commodities.length} rows carry the document's wording instead, because their ` +
+            'commodity number is not in the concordance' +
+            (printed.has('note')
+              ? '; each one says so in the Note column. '
+              : ', and the Note column is switched off for this sheet, so they are not marked on it. ')
+          : '') +
+        (printed.has('note')
+          ? 'Rows noted "your wording" carry a description saved against that part. '
+          : alternatives
+            ? 'The Note column is switched off for this sheet, so what else the document called these goods — ' +
+              'and which rows carry a wording saved against the part — is not printed on it. '
+            : '') +
+        'Nothing here is composed by the application.',
     ],
-    ['Check', `${sheet.totals.commodities} commodities · ${sheet.totals.quantity} pcs · ${sheet.totals.customsValue} USD · ${sheet.totals.shipmentWeightLb} lb · ${sheet.totals.shipmentWeightKg} kg`],
+    [
+      'Check',
+      `This sheet: ${sheet.totals.commodities} commodities · ${sheet.totals.quantity} pcs · ` +
+        `${sheet.totals.customsValue} USD · ${sheet.totals.shipmentWeightLb} lb · ${sheet.totals.shipmentWeightKg} kg. ` +
+        'Those are the printed rows added up. ' +
+        (labelDisplacesAFigure
+          ? 'Every chosen column carries a total, so the word TOTAL sits in the first of them and that ' +
+            'one figure is only stated here.'
+          : 'The last row of the grid equals the column above it.'),
+    ],
+    [
+      'Shipment as filed',
+      `${sheet.filed.quantity} pcs · ${sheet.filed.customsValue} USD · ${sheet.filed.netWeightKg} kg net` +
+        `${sheet.filed.grossWeightKg ? ` · ${sheet.filed.grossWeightKg} kg gross` : ''}. ` +
+        'Taken from the invoice lines rather than the printed rows, so it does not move when the grouping ' +
+        'does. Where it differs from the line above, the difference is rounding a row at a time.',
+    ],
   ]
+
+  if (needCountry) {
+    notes.push([
+      'Country of manufacture',
+      `${needCountry} of ${sheet.commodities.length} rows need one entered by hand — the document either ` +
+        'states no origin for some of their lines, or names one this app could not resolve to a code. ' +
+        (printed.has('countryOfManufacture')
+          ? 'The country column says which. '
+          : 'The country column is switched off for this sheet, so it does not say which. ') +
+        'A commodity record needs the code either way.',
+    ])
+  }
+
+  if (unnamedParts) {
+    notes.push([
+      'Part numbers',
+      `${unnamedParts} of ${sheet.commodities.length} rows include a line the document gives no part number ` +
+        'for, so the Part Number cell does not account for the whole row. No wording saved against a part ' +
+        'was applied to those rows — a saved description speaks for the part it was saved against, and ' +
+        'nothing identifies these goods.',
+    ])
+  }
 
   if (sheet.manualFields.length) {
     notes.push(['Enter manually', sheet.manualFields.join(', ')])
