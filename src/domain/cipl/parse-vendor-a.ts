@@ -441,7 +441,7 @@ function continuationRows(rows: TextRow[], upTo: number): TextRow[] {
   let pastFurniture = false
   for (let i = 0; i < upTo; i++) {
     const text = rowText(rows[i])
-    if (isTotalsRow(text)) break
+    if (isTotalsRow(rows[i])) break
     if (!pastFurniture) {
       if (/MARKS & NOS\./i.test(text)) pastFurniture = true
       continue
@@ -531,13 +531,27 @@ function scaleFigure(value: number, divisor: number): number {
   return divisor === 1 ? value : Math.round(value * divisor * 1000) / 1000
 }
 
-function isTotalsRow(text: string): boolean {
-  return /^\s*TOTALS?:?\b/i.test(text) || /CARTONS ONLY/i.test(text) || /\bTOTALS\b/.test(text)
+/**
+ * The row that closes a page's line items.
+ *
+ * The leading-word test needs the row to carry more than one item, because a commodity
+ * heading may legitimately begin with it — `Total Station Instruments` is goods, not a total.
+ * A real totals row is a row of figures and never stands alone. Matching on the word alone
+ * cut that heading out of the look-ahead and out of the block slice, so the goods below it
+ * went out under the previous commodity's wording and a block described as `Total Station
+ * Instrument` came out with no description at all.
+ */
+function isTotalsRow(row: TextRow): boolean {
+  const text = rowText(row)
+  if (row.items.length > 1 && /^\s*TOTALS?:?\b/i.test(text)) return true
+  if (/CARTONS ONLY/i.test(text)) return true
+  // Upper case and unanchored: the packing list prints it mid-row. No heading spells it so.
+  return /\bTOTALS\b/.test(text)
 }
 
 function truncateAtPageTotals(rows: TextRow[], from: number, to: number): number {
   for (let i = from + 1; i < to; i++) {
-    if (isTotalsRow(rowText(rows[i]))) return i
+    if (isTotalsRow(rows[i])) return i
   }
   return to
 }

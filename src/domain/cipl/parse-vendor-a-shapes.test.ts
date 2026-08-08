@@ -382,6 +382,37 @@ describe('a heading the totals test used to swallow', () => {
     ])
   })
 
+  it('carries one stranded at the foot of a page', () => {
+    // The look-ahead is bounded by the totals row, and the same leading-word match cut this
+    // heading off before it — so the next page's goods kept the commodity above them.
+    const first = detailPage(2, [
+      ...block('00000001OP0010', '10000-0001', '8523.51.0000', 'MODEL-A', 'BUNDLE'),
+      row(['Total Station Instruments', 72]),
+    ])
+    const second = detailPage(3, block('00000002OP0010', '10000-0002', '9015.30.4000', 'MODEL-B', 'LEVEL'))
+    expect(invoiceLines([headerPage(), first, second]).map((l) => l.commodityGroup)).toEqual([
+      '',
+      'Total Station Instruments',
+    ])
+  })
+
+  it('keeps a description that begins with the word too', () => {
+    // The block slice is cut at the totals row as well, so a left-margin description starting
+    // with `Total` ended the block at its figures and the line went out with none at all.
+    const pages = [
+      headerPage(),
+      detailPage(2, [
+        row(['00000001OP0010', 72], ['00000001OP0010', 198], ['1', 246]),
+        row(['0001', 72], ['00000001X', 96], ['Japan', 198]),
+        row(['9015.30.4000', 72], ['PCS', 408], ['USD', 486], ['USD', 564]),
+        row(['5610', 24], ['MODEL-A', 72], ['10000-0001', 192], ['2', 421], ['1.000', 472], ['2.000', 550]),
+        row(['Total Station Instrument', 72]),
+        ...block('00000002OP0010', '10000-0002', '4016.93.0000', 'MODEL-B', 'O-RING'),
+      ]),
+    ]
+    expect(invoiceLines(pages)[0].description).toBe('Total Station Instrument')
+  })
+
   it('still never reads the totals row itself', () => {
     const first = detailPage(2, [
       ...block('00000001OP0010', '10000-0001', '8544.42.0000', 'MODEL-A', 'CABLE ASSY'),
