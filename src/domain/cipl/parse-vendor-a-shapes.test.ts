@@ -441,6 +441,20 @@ describe('a heading the totals test used to swallow', () => {
     expect(invoiceLines(pages)[0].description).toBe('Total Station Instrument')
   })
 
+  it('still finds a totals row the extractor emitted as one item', () => {
+    // Counting the row's items to tell a totals row from a heading was wrong the other way:
+    // an extractor that merges `TOTAL: 26 PCS` into a single string made the footer
+    // invisible, and the trade terms below it became the next page's heading.
+    const first = detailPage(2, [
+      ...block('00000001OP0010', '10000-0001', '8544.42.0000', 'MODEL-A', 'CABLE ASSY'),
+      row(['TOTAL: 26 PCS', 30]),
+      row(['Freight Prepaid Collect', 72]),
+    ])
+    const second = detailPage(3, block('00000002OP0010', '10000-0002', '4016.93.0000', 'MODEL-B', 'O-RING'))
+    const groups = invoiceLines([headerPage(), first, second]).map((l) => l.commodityGroup)
+    expect(groups).not.toContain('Freight Prepaid Collect')
+  })
+
   it('still never reads the totals row itself', () => {
     const first = detailPage(2, [
       ...block('00000001OP0010', '10000-0001', '8544.42.0000', 'MODEL-A', 'CABLE ASSY'),
@@ -484,6 +498,26 @@ describe('a block whose figures could not be read at all', () => {
       broken([row(['Gaskets', 72]), ...block('00000002OP0010', '10000-0002', '4016.93.0000', 'MODEL-B', 'O-RING')]),
     ]
     expect(invoiceLines(pages).map((l) => l.commodityGroup)).toEqual(['', 'Gaskets'])
+  })
+})
+
+describe('the labelled fields a detail page repeats', () => {
+  it('are not read as the first block’s commodity heading', () => {
+    // `COUNTRY OF ORIGIN` prints its value at x≈102, inside the heading column, and it sits
+    // between the column headings and the first block — exactly where a heading would. The
+    // label and value share a baseline, so the single-item guard already excludes the row;
+    // this pins that rather than proving a fix.
+    y = 700
+    const detail = page(2, [
+      row(['INVOICE NO', 36], ['S0000009', 90]),
+      row(['INVOICE', 276]),
+      row(['MARKS & NOS.', 24], ['DESCRIPTION OF GOODS', 144], ['ORIGIN', 276], ['QUANTITY', 390]),
+      row(['Example Consignee', 24]),
+      row(['C/NO', 24], ['5610 - 5610', 48]),
+      row(['COUNTRY OF ORIGIN', 24], ['Default Country', 102]),
+      ...block('00000001OP0010', '10000-0001', '8544.42.0000', 'MODEL-A', 'CABLE ASSY'),
+    ])
+    expect(invoiceLines([headerPage(), detail])[0].commodityGroup).toBe('')
   })
 })
 

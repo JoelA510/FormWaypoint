@@ -545,16 +545,22 @@ function scaleFigure(value: number, divisor: number): number {
 /**
  * The row that closes a page's line items.
  *
- * The leading-word test needs the row to carry more than one item, because a commodity
- * heading may legitimately begin with it — `Total Station Instruments` is goods, not a total.
- * A real totals row is a row of figures and never stands alone. Matching on the word alone
- * cut that heading out of the look-ahead and out of the block slice, so the goods below it
- * went out under the previous commodity's wording and a block described as `Total Station
- * Instrument` came out with no description at all.
+ * The word alone is not enough, because a commodity heading may legitimately begin with it —
+ * `Total Station Instruments` is goods. Matching on the word cut that heading out of both
+ * search windows and out of the block slice, so the goods below it went out under the
+ * previous commodity's wording and a block described as `Total Station Instrument` came out
+ * with no description at all.
+ *
+ * What separates them is what *follows* the word: a totals row is figures, so a colon or a
+ * number comes next, while a heading continues in words. Counting the row's items was the
+ * first attempt and was wrong in the other direction — an extractor that emits `TOTAL: 26
+ * PCS` as one item made the footer invisible, and the trade terms below it became the next
+ * page's commodity heading.
  */
 function isTotalsRow(row: TextRow): boolean {
   const text = rowText(row)
-  if (row.items.length > 1 && /^\s*TOTALS?:?\b/i.test(text)) return true
+  if (/^\s*TOTALS?\s*:/i.test(text)) return true
+  if (/^\s*TOTALS?\b[^A-Za-z]*\d/i.test(text)) return true
   if (/CARTONS ONLY/i.test(text)) return true
   // Upper case and unanchored: the packing list prints it mid-row. No heading spells it so.
   return /\bTOTALS\b/.test(text)
@@ -629,6 +635,12 @@ function isCommodityGroup(row: TextRow): string {
   const { str: text, x } = items[0]
   if (x < GROUP_COLUMN_MIN || x > GROUP_COLUMN_MAX) return ''
   if (!text || text.length < 3 || text.endsWith(':') || CLASSIFICATION.test(text)) return ''
+  // The labelled header fields a detail page repeats below its column headings. Excluded in
+  // `continuationRows` too — this is the other reader of the same rows. A value printed on
+  // its own baseline, away from its label, would be indistinguishable from a heading by
+  // anything here; this layout keeps the two on one line, which is what makes the label test
+  // sufficient rather than merely convenient.
+  if (DETAIL_PAGE_FURNITURE.test(text)) return ''
   // Deliberately no totals-row test here. A real totals row carries several items and fails
   // the single-item guard above, and `truncateAtPageTotals` already keeps both search windows
   // off it — while the test itself matched any heading whose first word is "Total", so
