@@ -568,8 +568,20 @@ function parseDetailLines(
     // Everything up to and including the previous block's last structural row belongs to it.
     // On the first block that is the *carried* block, whose tail finishes on this page above
     // it — without this it lends its own description row forward as this block's heading.
+    //
+    // Where that tail is *still* unfinished, every row above this block is the tail's and the
+    // floor sits directly beneath: a block with neither figures nor classification on this
+    // page gives `blockEndsAt` nothing to anchor on, so it would otherwise fall back to the
+    // top of the page and hand this block the broken line's description. No heading is read
+    // there at all, which is what the look-ahead does with the same rows in the same state —
+    // this block keeps the heading already in force, and the broken line is warned about.
     const previousStart = s === 0 ? (carryIn ? detailRowsBegin(rows, from) : -1) : starts[s - 1]
-    const floor = previousStart === -1 ? -1 : blockEndsAt(rows, previousStart, from, ctx.kind)
+    const floor =
+      previousStart === -1
+        ? -1
+        : s === 0 && carriedIncomplete
+          ? from - 1
+          : blockEndsAt(rows, previousStart, from, ctx.kind)
     group = commodityGroupBefore(rows, from, floor) || group
     const commodityGroup = group
     const line = parseBlock(block, commodityGroup, page.pageNumber)

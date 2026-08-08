@@ -601,6 +601,24 @@ describe('a carried tail that is still unfinished', () => {
     expect(result.warnings.join(' ')).toContain('its figures could not be read')
   })
 
+  it('does not lend it to a block starting on the same page either', () => {
+    // The mirror of the case above. With neither figures nor a classification on this page,
+    // the look-behind floor had nothing to anchor on and fell back to the top of the page,
+    // handing the new block the broken line's description as its heading.
+    const opening = detailPage(2, [
+      row(['00000001OP0010', 72], ['00000001OP0010', 198], ['1', 246]),
+      row(['0001', 72], ['00000001X', 96], ['Japan', 198]),
+      row(['8544.42.0000', 72], ['PCS', 408], ['USD', 486], ['USD', 564]),
+    ])
+    const tail = detailPage(3, [
+      row(['C/NO', 24], ['5610 - 5610', 48]),
+      row(['CBL, OS32C-CBL-30M', 72]),
+      ...block('00000002OP0010', '10000-0002', '4016.93.0000', 'MODEL-B', 'O-RING'),
+    ])
+    const groups = invoiceLines([headerPage(), opening, tail]).map((l) => l.commodityGroup)
+    expect(groups).not.toContain('CBL, OS32C-CBL-30M')
+  })
+
   it('still carries one when the tail was completed', () => {
     const opening = detailPage(2, [
       row(['00000001OP0010', 72], ['00000001OP0010', 198], ['1', 246]),
