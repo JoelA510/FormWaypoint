@@ -336,6 +336,31 @@ describe('a heading and a totals row on the same page', () => {
   })
 })
 
+describe('the two readers of a block’s value row', () => {
+  it('agree about which row it is when a figure is missing', () => {
+    // The two used different thresholds — three figures and two — so on a line printing a
+    // blank unit price they disagreed about where the block ended. Both readings happen to
+    // reach the same answer here, which is why this pins the behaviour rather than proving a
+    // defect; the thresholds are shared now so they cannot drift apart into one that doesn't.
+    const pages = [
+      headerPage(),
+      detailPage(2, [
+        row(['00000001OP0010', 72], ['00000001OP0010', 198], ['1', 246]),
+        row(['0001', 72], ['00000001X', 96], ['Japan', 198]),
+        row(['8544.42.0000', 72], ['PCS', 408], ['USD', 486], ['USD', 564]),
+        // Quantity and extended value, no unit price: two figures, not three.
+        row(['5610', 24], ['MODEL-A', 72], ['10000-0001', 192], ['2', 421], ['20.000', 550]),
+        row(['10000-0001', 72], ['CABLE ASSY', 192]),
+        row(['Gaskets', 72]),
+        ...block('00000002OP0010', '10000-0002', '4016.93.0000', 'MODEL-B', 'O-RING'),
+      ]),
+    ]
+    const lines = invoiceLines(pages)
+    expect(lines.map((l) => l.commodityGroup)).toEqual(['', 'Gaskets'])
+    expect(lines[0].description).toBe('CABLE ASSY')
+  })
+})
+
 describe('the second description cell', () => {
   it('is read, and beats the shorter one beside it', () => {
     // This layout prints two description cells on the row: a terse one at x=192 and a fuller

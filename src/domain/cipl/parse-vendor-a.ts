@@ -34,6 +34,17 @@ import {
 /** Quantity, unit price and extended value all sit right of this. */
 const FIGURE_COLUMN_MIN = 380
 
+/**
+ * How many figures right of that column mark a block's value row.
+ *
+ * Shared, because two readers used to disagree: `parseInvoiceBlock` wanted three and
+ * `figureRowIn` accepted two, so on a line printing a blank unit price they would have picked
+ * different rows — moving the heading floor and ceiling by one, and the heading is what
+ * `aggregateLines` files as the SLI row description. The invoice's three are quantity, unit
+ * price and extended value; the packing list's are net, gross and measurement.
+ */
+const FIGURES_PER_ROW = 3
+
 const CLASSIFICATION = /^\d{4}\.\d{2}\.\d{4}$/
 const LINE_NUMBER = /^\d{4}$/
 const ORDER_NUMBER = /^[0-9][0-9A-Z]{7,}$/
@@ -691,7 +702,7 @@ function detailRowsBegin(rows: TextRow[], upTo: number): number {
 function figureRowIn(rows: TextRow[], from: number, to: number): number {
   for (let i = from; i < to; i++) {
     const numeric = rows[i].items.filter((it) => it.x > FIGURE_COLUMN_MIN && parseNumber(it.str) !== null)
-    if (numeric.length >= 2) return i
+    if (numeric.length >= FIGURES_PER_ROW) return i
   }
   return -1
 }
@@ -791,7 +802,7 @@ function parseInvoiceBlock(
 
   for (let i = 1; i < block.length; i++) {
     const numeric = block[i].items.filter((it) => it.x > FIGURE_COLUMN_MIN && parseNumber(it.str) !== null)
-    if (numeric.length >= 3) {
+    if (numeric.length >= FIGURES_PER_ROW) {
       quantity = parseNumber(numeric[0].str) ?? 0
       unitValue = parseNumber(numeric[1].str) ?? undefined
       extendedValue = parseNumber(numeric[2].str) ?? undefined

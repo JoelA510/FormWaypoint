@@ -97,9 +97,12 @@ export function OutputPanel({
     // the D/F column when the D/F grouping is chosen, and without it here the checkbox showed
     // unchecked while the download carried the column — the panel describing a sheet the
     // operator was not getting.
+    // Marked before the no-op check, not after. Re-picking the grouping already selected, or
+    // unticking a column `withDefaults` puts straight back, is still the operator saying they
+    // have chosen — and leaving the flag unset let a stored layout land on top of it.
+    chosen.current = true
     const next = withDefaults(update(options))
     if (JSON.stringify(next) === JSON.stringify(options)) return
-    chosen.current = true
     setOptions(next)
     void localStore.saveKeyingOptions(next)
   }
