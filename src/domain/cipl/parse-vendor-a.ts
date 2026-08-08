@@ -604,7 +604,11 @@ function isCommodityGroup(row: TextRow): string {
   const { str: text, x } = items[0]
   if (x < GROUP_COLUMN_MIN || x > GROUP_COLUMN_MAX) return ''
   if (!text || text.length < 3 || text.endsWith(':') || CLASSIFICATION.test(text)) return ''
-  if (isTotalsRow(text)) return ''
+  // Deliberately no totals-row test here. A real totals row carries several items and fails
+  // the single-item guard above, and `truncateAtPageTotals` already keeps both search windows
+  // off it — while the test itself matched any heading whose first word is "Total", so
+  // `Total Station Instruments` was rejected and those goods went out under the heading of
+  // the commodity before them.
   return GROUP_TEXT.test(text) && readsAsProse(text) ? text : ''
 }
 
@@ -665,7 +669,20 @@ function commodityGroupAfter(rows: TextRow[], lastBlockStart: number, carried: b
  */
 function blockEndsAt(rows: TextRow[], from: number, to: number, kind: DocumentKind): number {
   const figures = figureRowIn(rows, from, to)
-  if (figures === -1) return from
+  // No figure row to end on — a block whose figures could not be read. Falling back to the
+  // block's own start collapsed the floor and let the look-behind read the previous line's
+  // description as the next line's heading, which is the leak the floor exists to stop.
+  //
+  // The classification row is the anchor instead: a block is order, line, classification,
+  // figures, description, so without the figures the description is the row after the
+  // classification. That is the same rule the figures branch applies one row further down —
+  // and it has to be a structural anchor rather than "the last row that does not look like a
+  // heading", because a description printed alone looks exactly like one. That ambiguity is
+  // decided the same way here as everywhere else in this file: the row belongs to the block.
+  if (figures === -1) {
+    const classification = classificationRowIn(rows, from, to)
+    return classification === -1 ? from : classification + 1
+  }
   if (kind !== 'INVOICE') return figures
   // The description row. This layout always prints one, and the alternative reading is not
   // available anyway: a block with no description row is followed directly by the next
@@ -698,6 +715,14 @@ function detailRowsBegin(rows: TextRow[], upTo: number): number {
   return 0
 }
 
+/** The row carrying a block's commodity number. */
+function classificationRowIn(rows: TextRow[], from: number, to: number): number {
+  for (let i = from; i < Math.min(to, rows.length); i++) {
+    if (rows[i].items.some((it) => CLASSIFICATION.test(it.str))) return i
+  }
+  return -1
+}
+
 /** The row carrying a block's quantity, price and value. */
 function figureRowIn(rows: TextRow[], from: number, to: number): number {
   for (let i = from; i < to; i++) {
@@ -716,6 +741,8 @@ interface BlockCore {
   uom: string
   classificationRowIdx: number
   lineNumberRowIdx: number
+  /** Index of the line-number cell within its row; the lot id sits immediately after it. */
+  lineNumberItemIdx: number
 }
 
 /** Fields common to both document kinds, located by content rather than column. */
@@ -728,6 +755,7 @@ function readBlockCore(block: TextRow[]): BlockCore | null {
   let lineNumber = ''
   let itemId = ''
   let lineNumberRowIdx = -1
+  let lineNumberItemIdx = -1
   for (let i = 1; i < block.length; i++) {
     const items = block[i].items
     const idx = items.findIndex((it) => LINE_NUMBER.test(it.str) && it.x < 130)
@@ -735,6 +763,7 @@ function readBlockCore(block: TextRow[]): BlockCore | null {
       lineNumber = items[idx].str
       itemId = items[idx + 1].str
       lineNumberRowIdx = i
+      lineNumberItemIdx = idx
       break
     }
   }
@@ -754,7 +783,17 @@ function readBlockCore(block: TextRow[]): BlockCore | null {
     }
   }
 
-  return { orderNumber, sequence, lineNumber, itemId, classification, uom, classificationRowIdx, lineNumberRowIdx }
+  return {
+    orderNumber,
+    sequence,
+    lineNumber,
+    itemId,
+    classification,
+    uom,
+    classificationRowIdx,
+    lineNumberRowIdx,
+    lineNumberItemIdx,
+  }
 }
 
 function parseInvoiceBlock(
@@ -781,8 +820,10 @@ function parseInvoiceBlock(
   let countryOfOrigin = ''
   if (core.lineNumberRowIdx !== -1) {
     const items = block[core.lineNumberRowIdx].items
-    const from = items.findIndex((it) => it.str === core.itemId) + 1
-    for (let k = from; k < items.length; k++) consume(core.lineNumberRowIdx, k)
+    // From the line number itself: it and the lot id beside it are identifiers the block has
+    // already been read for, and an unreadable block was coming out described as its lot id.
+    for (let k = Math.max(core.lineNumberItemIdx, 0); k < items.length; k++) consume(core.lineNumberRowIdx, k)
+    const from = core.lineNumberItemIdx + 2
     countryOfOrigin = items.slice(from).map((t) => t.str).join(' ').trim()
   }
 
@@ -905,11 +946,13 @@ function descriptionFrom(
   const longestIn = (min: number, max: number) => {
     let best = ''
     for (let i = from; i < to; i++) {
-      // Only where the search is unanchored, and it has to be only there. In the anchored
-      // window the row after the figures is the block's description row — and on this layout
-      // that row is often a lone one at the left margin, which is heading-shaped. Skipping it
-      // would lose the very description the fallback below exists to find.
-      if (!anchored && isCommodityGroup(block[i])) continue
+      // No heading skip. It was here to keep the next block's heading out of an unanchored
+      // scan, and it took the block's own description with it wherever that was printed alone
+      // at the left margin — the shape this file documents as real, and the one the fallback
+      // below exists for. The unanchored path is only reached by a block whose figures could
+      // not be read, which has no quantity or value and fails a blocking reconciliation check
+      // either way; between a description that might be the next heading and no description
+      // at all, the first is what the operator can see and correct.
       block[i].items.forEach((item, k) => {
         if (usable(item, k, i, min, max) && item.str.length > best.length) best = item.str
       })

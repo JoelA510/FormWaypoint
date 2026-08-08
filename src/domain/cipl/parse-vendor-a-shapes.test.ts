@@ -361,6 +361,73 @@ describe('the two readers of a block’s value row', () => {
   })
 })
 
+describe('a heading the totals test used to swallow', () => {
+  it('reads one whose first word is Total', () => {
+    // `isTotalsRow` matches anything starting with `Total`, and a rejected heading is not a
+    // blank one — the previous heading stays in force, so these goods went out under the
+    // commodity above them. A real totals row carries several items and is excluded by the
+    // single-item guard, and both search windows are bounded off it besides.
+    const pages = [
+      headerPage(),
+      detailPage(2, [
+        row(['Flash drive', 72]),
+        ...block('00000001OP0010', '10000-0001', '8523.51.0000', 'MODEL-A', 'BUNDLE'),
+        row(['Total Station Instruments', 72]),
+        ...block('00000002OP0010', '10000-0002', '9015.30.4000', 'MODEL-B', 'LEVEL'),
+      ]),
+    ]
+    expect(invoiceLines(pages).map((l) => l.commodityGroup)).toEqual([
+      'Flash drive',
+      'Total Station Instruments',
+    ])
+  })
+
+  it('still never reads the totals row itself', () => {
+    const first = detailPage(2, [
+      ...block('00000001OP0010', '10000-0001', '8544.42.0000', 'MODEL-A', 'CABLE ASSY'),
+      row(['TOTAL:', 30], ['26', 79], ['PCS', 114]),
+    ])
+    const second = detailPage(3, block('00000002OP0010', '10000-0002', '4016.93.0000', 'MODEL-B', 'O-RING'))
+    const groups = invoiceLines([headerPage(), first, second]).map((l) => l.commodityGroup)
+    expect(groups.some((g) => /TOTAL/i.test(g))).toBe(false)
+  })
+})
+
+describe('a block whose figures could not be read at all', () => {
+  const broken = (trailing: TextRow[]) =>
+    detailPage(2, [
+      row(['00000001OP0010', 72], ['00000001OP0010', 198], ['1', 246]),
+      row(['0001', 72], ['00000001X', 96], ['Japan', 198]),
+      row(['8544.42.0000', 72], ['PCS', 408], ['USD', 486], ['USD', 564]),
+      row(['CABLE ASSY, 30M', 72]),
+      ...trailing,
+    ])
+
+  it('is not described as its own lot id', () => {
+    // The line number and the lot id beside it are identifiers the block was already read
+    // for. Left in play, they were the only text a broken block had left to offer.
+    const pages = [headerPage(), broken([...block('00000002OP0010', '10000-0002', '4016.93.0000', 'MODEL-B', 'O-RING')])]
+    const first = invoiceLines(pages)[0]
+    expect(first.description).toBe('CABLE ASSY, 30M')
+    expect(first.description).not.toBe('00000001X')
+  })
+
+  it('does not lend its description to the block below as a heading', () => {
+    // With no figure row to end the block on, the floor collapsed to the block's own start
+    // and the look-behind read straight through it.
+    const pages = [headerPage(), broken([...block('00000002OP0010', '10000-0002', '4016.93.0000', 'MODEL-B', 'O-RING')])]
+    expect(invoiceLines(pages).map((l) => l.commodityGroup)).toEqual(['', ''])
+  })
+
+  it('still lets a real heading below it through', () => {
+    const pages = [
+      headerPage(),
+      broken([row(['Gaskets', 72]), ...block('00000002OP0010', '10000-0002', '4016.93.0000', 'MODEL-B', 'O-RING')]),
+    ]
+    expect(invoiceLines(pages).map((l) => l.commodityGroup)).toEqual(['', 'Gaskets'])
+  })
+})
+
 describe('the second description cell', () => {
   it('is read, and beats the shorter one beside it', () => {
     // This layout prints two description cells on the row: a terse one at x=192 and a fuller
