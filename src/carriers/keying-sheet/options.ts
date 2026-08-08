@@ -177,9 +177,22 @@ export function withDefaults(options?: Partial<KeyingOptions>): KeyingOptions {
   // off — which the defaults do — produces a table that cannot be checked against the filed
   // form line for line, which is the only reason the mode exists.
   if (resolved.grouping === 'df-code' && !resolved.columns.includes('domesticForeign')) {
+    // Inserted in place, not sorted in. `columns` is documented as printing in the order it
+    // was given, and every other grouping honours that — re-sorting the whole array would
+    // rearrange a caller's layout as a side effect of choosing a grouping.
+    //
+    // It goes after the last column that precedes it canonically, which puts it beside the
+    // part and country it belongs with in a canonical layout, and leaves everything else
+    // exactly where the caller put it.
     const order = COMMODITY_COLUMNS.map((c) => c.id)
-    const withDf: CommodityColumnId[] = [...resolved.columns, 'domesticForeign']
-    resolved.columns = withDf.sort((a, b) => order.indexOf(a) - order.indexOf(b))
+    const rank = order.indexOf('domesticForeign')
+    let at = 0
+    resolved.columns.forEach((id, i) => {
+      if (order.indexOf(id) < rank) at = i + 1
+    })
+    const next = [...resolved.columns]
+    next.splice(at, 0, 'domesticForeign')
+    resolved.columns = next
   }
 
   return resolved

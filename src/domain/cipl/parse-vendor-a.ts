@@ -657,9 +657,17 @@ function blockEndsAt(rows: TextRow[], from: number, to: number, kind: DocumentKi
   // block's heading, and one lone prose row after the figures looks exactly like the other.
   // Nothing in the document separates them.
   //
-  // So the parser takes the reading that keeps this line's own words on this line. Guessing
-  // the other way costs a commodity its description *and* gives the next one somebody else's
-  // wording; guessing this way costs only a heading, and the heading in force carries on.
+  // So the parser takes the reading that keeps this line's own words on this line: the row
+  // is the block's description row, and the heading below a *headingless* block is floored
+  // out. Both readings cost something, and this one is not free — where the row really was a
+  // heading, that commodity keeps the heading already in force rather than its own, and the
+  // block above ends up with no description at all (`descriptionFrom` skips heading-shaped
+  // rows, so it declines to steal it rather than printing the wrong words).
+  //
+  // The alternative reading is worse: a description printed without its part number is the
+  // shape this layout actually produces, and reading those as headings would hand the *next*
+  // commodity the previous line's wording — wrong words on a declaration rather than absent
+  // ones.
   return figures + 1
 }
 
@@ -882,6 +890,10 @@ function descriptionFrom(
   const longestIn = (min: number, max: number) => {
     let best = ''
     for (let i = from; i < to; i++) {
+      // Only where the search is unanchored, and it has to be only there. In the anchored
+      // window the row after the figures is the block's description row — and on this layout
+      // that row is often a lone one at the left margin, which is heading-shaped. Skipping it
+      // would lose the very description the fallback below exists to find.
       if (!anchored && isCommodityGroup(block[i])) continue
       block[i].items.forEach((item, k) => {
         if (usable(item, k, i, min, max) && item.str.length > best.length) best = item.str

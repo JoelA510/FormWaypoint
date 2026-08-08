@@ -1265,3 +1265,24 @@ describe('the D/F column under the D/F grouping', () => {
     expect(rows[0].domesticForeign).toBe('')
   })
 })
+
+describe('the D/F column’s insertion', () => {
+  it('does not rearrange a layout that was given out of canonical order', () => {
+    // `columns` prints in the order it was given, and every other grouping honours that.
+    const rows = keyingSheetToWorkbook(
+      buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+        options: { grouping: 'df-code', columns: ['description', 'partNumber', 'quantity'] },
+      }),
+    )[0].rows
+    expect(rows[0]).toEqual(['Commodity Description', 'Part Number', 'D/F', 'Qty'])
+  })
+
+  it('appends it where nothing follows it canonically', () => {
+    const rows = keyingSheetToWorkbook(
+      buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+        options: { grouping: 'df-code', columns: ['partNumber'] },
+      }),
+    )[0].rows
+    expect(rows[0]).toEqual(['Part Number', 'D/F'])
+  })
+})
