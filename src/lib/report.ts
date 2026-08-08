@@ -22,9 +22,16 @@ export function cell(text: string): string {
   return text.replace(/\s+/g, ' ').replace(/\|/g, '\\|').trim()
 }
 
-/** A CSV field, quoted only when it has to be. */
+/**
+ * A CSV field, quoted only when it has to be.
+ *
+ * A bare carriage return counts. Rows here are joined with `\n`, but a reader following
+ * RFC 4180 terminates on CR just as readily — and a lone CR does reach this function: an
+ * item-master cell containing one arrives through the workbook reader as `&#13;`, decoded.
+ * Unquoted, it splits one worklist row into two misaligned ones.
+ */
 export function csvField(value: string): string {
-  return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
+  return /[",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
 }
 
 /** A CSV document from a header row and its data rows. */

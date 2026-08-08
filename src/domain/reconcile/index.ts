@@ -184,7 +184,7 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
       detail: headerReadable
         ? `Header read from the ${set} document set.`
         : `No header could be read for the ${set} set, so there are no document totals to reconcile against. ` +
-          'This file is probably not the the vendor CIPL layout.',
+          'This file is probably not one of the supported CIPL layouts.',
       passed: headerReadable,
     },
     ...totalsChecks(header, mergedLines, sliLines, parsed.providesWeights),

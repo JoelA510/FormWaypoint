@@ -84,7 +84,21 @@ export function ShipmentSummary({ parsed, reconciliation }: { parsed: ParsedCipl
 }
 
 /** Reconciliation and compliance results, blocking failures first. */
-export function ChecksPanel({ checks, canGenerate }: { checks: CheckResult[]; canGenerate: boolean }) {
+export function ChecksPanel({
+  checks,
+  canGenerate,
+  description = 'Totals are proved against the source document before anything is generated.',
+}: {
+  checks: CheckResult[]
+  canGenerate: boolean
+  /**
+   * What these checks are proving. The default describes the CIPL reconciliation; the
+   * dangerous goods workflow shares the panel but proves something else entirely, and a
+   * heading that talks about a source document when there is no source document is worse
+   * than no heading at all.
+   */
+  description?: string
+}) {
   const failures = checks.filter((c) => !c.passed)
   const blocking = failures.filter((c) => c.severity === 'blocking')
   const advisory = failures.filter((c) => c.severity !== 'blocking')
@@ -94,7 +108,7 @@ export function ChecksPanel({ checks, canGenerate }: { checks: CheckResult[]; ca
     <Card>
       <CardHeader
         title="Checks"
-        description="Totals are proved against the source document before anything is generated."
+        description={description}
         actions={
           canGenerate ? (
             <Badge tone="pass">{blocking.length === 0 ? 'Ready to generate' : ''}</Badge>

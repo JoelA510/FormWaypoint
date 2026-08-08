@@ -14,6 +14,7 @@ import {
   type ItemLibraryEntry,
 } from '.'
 import { createScheduleBIndex, screenCode, type ScheduleBIndex } from '../schedule-b'
+import { partKey } from '../part-key'
 
 // ---------------------------------------------------------------------------
 // A minimal .xlsx writer, so the reader is tested against real ZIP + XML bytes
@@ -191,8 +192,53 @@ describe('workbook reading', () => {
     expect(await readXlsx(bytes)).toEqual([['BRACKET, L & R', 'X < Y', 'A']])
   })
 
+  it('leaves an undecodable numeric entity as text rather than throwing', async () => {
+    // `&#abc;` reaches the decimal branch because `abc` is valid hex, and `&#x110000;` names
+    // a code point that does not exist. String.fromCodePoint throws on both, which would
+    // take down the whole import over one bad cell.
+    const bytes = await zip({
+      'xl/workbook.xml': WORKBOOK_XML,
+      'xl/_rels/workbook.xml.rels': RELS_XML,
+      'xl/worksheets/sheet4.xml': sheetXml([['A&#x110000;B', 'C&#abc;D', 'E&#x41;F']]),
+    })
+    expect(await readXlsx(bytes)).toEqual([['A&#x110000;B', 'C&#abc;D', 'EAF']])
+  })
+
   it('rejects a file that is not a workbook', async () => {
     await expect(readXlsx(encoder.encode('this is not a zip'))).rejects.toBeInstanceOf(WorkbookError)
+  })
+
+  it('says a truncated workbook is damaged, rather than reporting a DataView bound', async () => {
+    // Every offset the directory walk follows comes out of the file. A half-downloaded
+    // workbook points past the end, and the raw RangeError goes straight to whoever picked
+    // the file — in place of the plain sentences the rest of this reader produces.
+    const whole = await zip({
+      'xl/workbook.xml': WORKBOOK_XML,
+      'xl/_rels/workbook.xml.rels': RELS_XML,
+      'xl/worksheets/sheet4.xml': sheetXml([['PART-1']]),
+    })
+    for (const keep of [0.55, 0.75, 0.9]) {
+      const truncated = whole.slice(0, Math.floor(whole.length * keep))
+      // The end-of-directory record lives at the tail, so most truncations lose it; the
+      // point is that whatever is left produces this reader's own error type.
+      await expect(readXlsx(truncated)).rejects.toBeInstanceOf(WorkbookError)
+    }
+  })
+
+  it('rejects a directory entry pointing outside the file', async () => {
+    const whole = await zip({
+      'xl/workbook.xml': WORKBOOK_XML,
+      'xl/_rels/workbook.xml.rels': RELS_XML,
+      'xl/worksheets/sheet4.xml': sheetXml([['PART-1']]),
+    })
+    // Point the first central-directory entry's local header far past the end.
+    const corrupt = whole.slice()
+    const view = new DataView(corrupt.buffer, corrupt.byteOffset, corrupt.byteLength)
+    let eocd = corrupt.length - 22
+    while (eocd >= 0 && view.getUint32(eocd, true) !== 0x06054b50) eocd--
+    const central = view.getUint32(eocd + 16, true)
+    view.setUint32(central + 42, 0x7fffffff, true)
+    await expect(readXlsx(corrupt)).rejects.toBeInstanceOf(WorkbookError)
   })
 
   it('maps spreadsheet column letters past Z', () => {
@@ -404,6 +450,24 @@ describe('import', () => {
     expect(summary.entries[0].partNumber).toBe('ABC-100')
     expect(summary.entries[0].displayPartNumber).toBe('abc-100')
     expect(indexByPart(summary.entries).get('ABC-100')).toBeDefined()
+  })
+
+  it('indexes through partKey, so an entry that skipped the import still resolves', () => {
+    // Entries reach this map from the import, which normalises, and from the saved library,
+    // which stores what the import wrote. Keying on `entry.partNumber` relied on that holding
+    // everywhere; the lookup side is `get(partKey(part))`, and a key merely assumed to match
+    // fails by returning nothing — every part shown as having no library record at all.
+    const raw: ItemLibraryEntry = {
+      partNumber: ' abc-100 ',
+      displayPartNumber: ' abc-100 ',
+      description: '',
+      exportCode: '',
+      importCode: '',
+      netWeightKg: null,
+      source: 'hand.xlsx',
+      importedAt: '2026-07-01T00:00:00.000Z',
+    }
+    expect(indexByPart([raw]).get(partKey('ABC-100'))).toBe(raw)
   })
 
   it('exposes weights as a part -> kg map, omitting parts with none', () => {

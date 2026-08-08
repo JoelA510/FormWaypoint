@@ -752,12 +752,25 @@ export function buildKeyingSheet(
  */
 const POSTCODE = /(\d{4,6}(?:-\d{2,4})?)\s*$/
 
-function postalCodeFrom(lines: string[]): string {
-  for (const line of [...lines].reverse()) {
-    const match = line.match(POSTCODE)
-    if (match) return match[1]
+/**
+ * The line the postcode is on — the *last* one that ends in one, not the first.
+ *
+ * Both fields have to read the same line, and they did not: the postcode was taken from the
+ * last match and the city from the first, so any address whose earlier lines end in a number
+ * split them apart. `Postbus 1234` above `'s-Hertogenbosch NA 5234` gave the right postcode
+ * and the city `Postbus` — a PO box label typed into the field a courier sorts on. A street
+ * number, a suite number and a building number all end an address line the same way.
+ */
+function postcodeLineIndex(lines: string[]): number {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (POSTCODE.test(lines[i])) return i
   }
-  return ''
+  return -1
+}
+
+function postalCodeFrom(lines: string[]): string {
+  const index = postcodeLineIndex(lines)
+  return index === -1 ? '' : (lines[index].match(POSTCODE)?.[1] ?? '')
 }
 
 /**
@@ -767,12 +780,12 @@ function postalCodeFrom(lines: string[]): string {
  * written in capitals survives intact.
  */
 function cityFrom(lines: string[]): string {
-  const index = lines.findIndex((l) => POSTCODE.test(l))
+  const index = postcodeLineIndex(lines)
   if (index === -1) return ''
   const withoutPostcode = lines[index].replace(POSTCODE, '').trim()
   const withoutState = withoutPostcode.replace(/[\s,]+[A-Z]{2,}$/, '').trim()
   const city = (withoutState || withoutPostcode).replace(/[,;]+$/, '').trim()
-  return city || lines[index - 1] || ''
+  return city || (index > 0 ? lines[index - 1] : '')
 }
 
 function describeShipment(rows: KeyingCommodityRow[]): string {

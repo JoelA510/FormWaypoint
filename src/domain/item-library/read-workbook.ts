@@ -61,24 +61,36 @@ async function unzip(data: Uint8Array, wanted: (name: string) => boolean): Promi
   const out = new Map<string, Uint8Array>()
   const decoder = new TextDecoder()
 
+  /**
+   * Every offset this walk follows comes out of the file itself.
+   *
+   * A truncated download or a file that is not really a workbook will point past the end,
+   * and `DataView` answers that with a `RangeError` about bounds — which is then shown to
+   * whoever picked the file, in place of the plain sentences the rest of this module takes
+   * care to produce. Checked rather than caught, so the message names the file's problem.
+   */
+  const within = (at: number, bytes: number) => at >= 0 && at + bytes <= view.byteLength
+  const damaged = () => new WorkbookError('This workbook’s ZIP directory is damaged.')
+
   for (let i = 0; i < entryCount; i++) {
-    if (view.getUint32(offset, true) !== CENTRAL_SIGNATURE) {
-      throw new WorkbookError('This workbook’s ZIP directory is damaged.')
-    }
+    if (!within(offset, 46) || view.getUint32(offset, true) !== CENTRAL_SIGNATURE) throw damaged()
     const method = view.getUint16(offset + 10, true)
     const compressedSize = view.getUint32(offset + 20, true)
     const nameLength = view.getUint16(offset + 28, true)
     const extraLength = view.getUint16(offset + 30, true)
     const commentLength = view.getUint16(offset + 32, true)
     const localOffset = view.getUint32(offset + 42, true)
+    if (!within(offset + 46, nameLength)) throw damaged()
     const name = decoder.decode(data.subarray(offset + 46, offset + 46 + nameLength))
 
     if (wanted(name)) {
       // The local header repeats the name and extra fields, and its extra-field length can
       // differ from the central one, so it has to be read rather than assumed.
+      if (!within(localOffset, 30)) throw damaged()
       const localNameLength = view.getUint16(localOffset + 26, true)
       const localExtraLength = view.getUint16(localOffset + 28, true)
       const start = localOffset + 30 + localNameLength + localExtraLength
+      if (!within(start, compressedSize)) throw damaged()
       out.set(name, await inflate(data.subarray(start, start + compressedSize), method, name))
     }
 
@@ -94,10 +106,25 @@ async function unzip(data: Uint8Array, wanted: (name: string) => boolean): Promi
 
 const ENTITIES: Record<string, string> = { lt: '<', gt: '>', quot: '"', apos: "'", amp: '&' }
 
+/**
+ * A numeric entity whose value is outside Unicode, or not a number at all.
+ *
+ * `String.fromCodePoint` throws on both, and the pattern this runs against is loose enough
+ * to reach them: `&#abc;` matches the decimal branch because `abc` is valid hex, and
+ * `&#x110000;` is a perfectly well-formed entity for a code point that does not exist. Either
+ * would take down the whole import with a `RangeError` about code points, so an entity that
+ * cannot be decoded is left standing as text instead — the same thing an unknown named
+ * entity already does.
+ */
+function codePoint(value: number): string | null {
+  if (!Number.isInteger(value) || value < 0 || value > 0x10ffff) return null
+  return String.fromCodePoint(value)
+}
+
 function decodeXml(text: string): string {
   return text.replace(/&(#x?[0-9a-fA-F]+|[a-z]+);/g, (match, body: string) => {
-    if (body.startsWith('#x') || body.startsWith('#X')) return String.fromCodePoint(parseInt(body.slice(2), 16))
-    if (body.startsWith('#')) return String.fromCodePoint(Number(body.slice(1)))
+    if (body.startsWith('#x') || body.startsWith('#X')) return codePoint(parseInt(body.slice(2), 16)) ?? match
+    if (body.startsWith('#')) return codePoint(Number(body.slice(1))) ?? match
     return ENTITIES[body] ?? match
   })
 }

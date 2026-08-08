@@ -121,6 +121,12 @@ export function parseVendorBPages(fileName: string, pages: TextPage[]): ParsedCi
     if (printedTotal != null) {
       header.totalValue = printedTotal
     } else {
+      // Zeroed, not left alone. The header was seeded from the first recognised page, and
+      // `parseHeader` reads the same label off whatever page that is — including a packing
+      // list, which this layout can also print it on. Leaving that figure standing would let
+      // the total-value check pass against a number the invoice never printed, underneath a
+      // warning saying the total could not be proved.
+      header.totalValue = 0
       warnings.push(
         'No "Total Net Value" could be read from this invoice, so the commodity values cannot be proved ' +
           'against the document. Check the total by hand before filing.',

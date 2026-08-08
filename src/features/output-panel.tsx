@@ -168,6 +168,10 @@ export function OutputPanel({
    * route the form can never take, which is the one thing the checks exist to prevent.
    */
   async function downloadKeyingSheet() {
+    // Guarded like the SLI: each run appends a history record, so a double-click would put
+    // two audit rows against one shipment.
+    if (busy) return
+    setBusy(true)
     setError(null)
     try {
       const sheet = buildKeyingSheet(target, reconciliation, draft, {
@@ -193,6 +197,8 @@ export function OutputPanel({
       onGenerated()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'The keying sheet could not be saved.')
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -285,7 +291,7 @@ export function OutputPanel({
               <option value="fedex-ship-manager">FedEx Ship Manager</option>
               <option value="ups-worldship">UPS WorldShip</option>
             </Select>
-            <Button onClick={() => void downloadKeyingSheet()} disabled={!canGenerate}>
+            <Button onClick={() => void downloadKeyingSheet()} disabled={!canGenerate || busy}>
               Download keying sheet
             </Button>
           </div>

@@ -1,5 +1,5 @@
 /**
- * Parser for the the vendor combined Commercial Invoice & Packing List layout.
+ * Parser for the Vendor A combined Commercial Invoice & Packing List layout.
  *
  * One PDF contains up to four documents, in this order:
  *
@@ -94,7 +94,7 @@ export function parseCiplPages(fileName: string, pages: TextPage[]): ParsedCipl 
     if (ctx.isHeaderPage) {
       // Keyed by set, not by kind: the invoice header supplies values and the packing-list
       // header supplies weights, and both describe the same shipment.
-      headers[ctx.set] = parseHeaderPage(page, headers[ctx.set])
+      headers[ctx.set] = parseHeaderPage(page, ctx.kind, headers[ctx.set])
     }
 
     // A block can only continue into the next page of the same set and kind. Anything else
@@ -137,6 +137,19 @@ export function parseCiplPages(fileName: string, pages: TextPage[]): ParsedCipl 
         warnings.push(
           `${set}: the header P/O field lists ${header.orderNumbers.length} order number(s) but the line items ` +
             `reference ${fromLines.length}. Using the line items (added: ${missing.join(', ')}).`,
+        )
+      }
+      // The reverse direction is the one that matters. Truncation only ever loses order
+      // numbers from the header, so a header carrying one the lines do not is not truncation —
+      // it means lines were lost, and those are the lines the whole form is built from. The
+      // line items still win, because a number with no line behind it cannot be filed against
+      // anything; but it is not dropped in silence.
+      const unreferenced = header.orderNumbers.filter((o) => !fromLines.includes(o))
+      if (unreferenced.length) {
+        warnings.push(
+          `${set}: the header P/O field lists order number(s) no line item references ` +
+            `(${unreferenced.join(', ')}). Lines belonging to them were probably not read. ` +
+            'Check the line count against the document before filing.',
         )
       }
       header.orderNumbers = fromLines
@@ -206,7 +219,7 @@ function findSetMarker(page: TextPage): DocumentSet | null {
 // Header page
 // ---------------------------------------------------------------------------
 
-function parseHeaderPage(page: TextPage, existing?: ShipmentHeader): ShipmentHeader {
+function parseHeaderPage(page: TextPage, kind: DocumentKind, existing?: ShipmentHeader): ShipmentHeader {
   const rows = page.rows
 
   const invoiceNumber = labelValue(rows, 'INVOICE NUMBER:') ?? existing?.invoiceNumber ?? ''
@@ -226,7 +239,12 @@ function parseHeaderPage(page: TextPage, existing?: ShipmentHeader): ShipmentHea
 
   const tradeTerms = tradeTermsValue(rows)
   const { totalQuantity, cartons } = totalsBlock(rows)
-  const { totalValue, documentCurrency } = invoiceTotal(rows)
+  // Only an invoice page may supply the money total. `invoiceTotal` matches any two-item
+  // row shaped `<number> <AAA>`, and a packing-list header row like `1113.140 KGS` fits
+  // that shape — read from the wrong kind of page it would coalesce over the invoice's
+  // real figure and currency, since fresh values win.
+  const { totalValue, documentCurrency } =
+    kind === 'INVOICE' ? invoiceTotal(rows) : { totalValue: null, documentCurrency: null }
   const weights = packingTotals(rows)
 
   const orderNumbers = headerOrderNumbers(rows)
