@@ -776,11 +776,11 @@ describe('what the sheet says versus what will be filed', () => {
     const rows = buildKeyingSheet('fedex-ship-manager', fixture(partial, []), draft(), {
       options: { grouping: 'part-code' },
     }).commodities
-    expect(rows[0]).toMatchObject({
-      countryOfManufacture: 'JP',
-      countryLabel: 'JP - Japan',
-      needsCountryCode: false,
-    })
+    expect(rows[0].countryOfManufacture).toBe('JP')
+    expect(rows[0].countryLabel).toContain('JP - Japan')
+    // And the line that stated none is not silently absorbed into Japan's.
+    expect(rows[0].countryLabel).toContain('some lines state no origin')
+    expect(rows[0].needsCountryCode).toBe(true)
   })
 
   it('blames the installation, not the classification, when the dataset never loaded', () => {
@@ -1142,7 +1142,12 @@ describe('a row whose lines do not all state an origin', () => {
     const rows = buildKeyingSheet('fedex-ship-manager', fixture(partial, []), draft(), {
       options: { grouping: 'part-code' },
     }).commodities
-    expect(rows[0]).toMatchObject({ countryLabel: 'US - United States', domesticForeign: 'D' })
+    // D, not `D, F`: nothing on the row says any of it is foreign. But the row does not
+    // pretend the missing origin away either — the SLI files those pieces as F.
+    expect(rows[0].domesticForeign).toBe('D')
+    expect(rows[0].countryLabel).toContain('US - United States')
+    expect(rows[0].countryLabel).toContain('some lines state no origin')
+    expect(rows[0].needsCountryCode).toBe(true)
   })
 
   it('asks for a country when the row states none at all', () => {
@@ -1193,5 +1198,43 @@ describe('rows that must not go out unremarked', () => {
       }),
     )[0].rows
     expect(rows[0]).toEqual(['Part Number', 'Qty'])
+  })
+})
+
+describe('the mode defined by D/F', () => {
+  it('shows D/F, whatever columns were stored', () => {
+    // Grouping by D/F and then leaving the column off produces a table that cannot be
+    // checked against the filed form line for line, which is the only reason the mode exists.
+    const rows = keyingSheetToWorkbook(
+      buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+        options: { grouping: 'df-code', columns: ['partNumber', 'quantity'] },
+      }),
+    )[0].rows
+    expect(rows[0]).toEqual(['Part Number', 'D/F', 'Qty'])
+  })
+
+  it('leaves the other modes’ columns alone', () => {
+    const rows = keyingSheetToWorkbook(
+      buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), {
+        options: { grouping: 'part-origin-code', columns: ['partNumber', 'quantity'] },
+      }),
+    )[0].rows
+    expect(rows[0]).toEqual(['Part Number', 'Qty'])
+  })
+})
+
+describe('a part number that prefixes another', () => {
+  it('does not claim the longer part’s description', () => {
+    // `5610` prefixes `5610-2`. Taking the shorter one first left `2 CABLE ASSY LONG`
+    // where the whole part number should have gone.
+    const prefixes = [
+      line({ id: 'a', partNumber: '5610', countryOfOrigin: 'Japan', description: '5610 CABLE ASSY', quantity: 1 }),
+      line({ id: 'b', partNumber: '5610-2', countryOfOrigin: 'Japan', description: '5610-2 CABLE ASSY LONG', quantity: 3 }),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(prefixes, []), draft(), {
+      options: { grouping: 'df-code' },
+    }).commodities
+    expect(rows[0].description).toBe('CABLE ASSY LONG')
+    expect(rows[0].otherDescriptions).toEqual(['CABLE ASSY'])
   })
 })

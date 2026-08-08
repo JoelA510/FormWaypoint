@@ -162,9 +162,9 @@ export function withDefaults(options?: Partial<KeyingOptions>): KeyingOptions {
     : []
   const grouping = options?.grouping
   const descriptionSource = options?.descriptionSource
-  return {
-    // `Object.hasOwn`, not `in`: a stored `"constructor"` satisfies `in` against any object
-    // literal and would reach the label tables as a function.
+  // `Object.hasOwn`, not `in`: a stored `"constructor"` satisfies `in` against any object
+  // literal and would reach the label tables as a function.
+  const resolved: KeyingOptions = {
     grouping: grouping && Object.hasOwn(GROUPING_LABELS, grouping) ? grouping : DEFAULT_KEYING_OPTIONS.grouping,
     descriptionSource:
       descriptionSource && Object.hasOwn(DESCRIPTION_LABELS, descriptionSource)
@@ -172,4 +172,15 @@ export function withDefaults(options?: Partial<KeyingOptions>): KeyingOptions {
         : DEFAULT_KEYING_OPTIONS.descriptionSource,
     columns: columns.length ? columns : DEFAULT_KEYING_OPTIONS.columns,
   }
+
+  // The mode whose rows *are* D/F has to show it. Grouping by it and then leaving the column
+  // off — which the defaults do — produces a table that cannot be checked against the filed
+  // form line for line, which is the only reason the mode exists.
+  if (resolved.grouping === 'df-code' && !resolved.columns.includes('domesticForeign')) {
+    const order = COMMODITY_COLUMNS.map((c) => c.id)
+    const withDf: CommodityColumnId[] = [...resolved.columns, 'domesticForeign']
+    resolved.columns = withDf.sort((a, b) => order.indexOf(a) - order.indexOf(b))
+  }
+
+  return resolved
 }

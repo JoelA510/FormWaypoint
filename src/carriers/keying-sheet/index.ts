@@ -295,6 +295,11 @@ function groupForKeying(
       if (name && !seen.has(name.toUpperCase())) seen.set(name.toUpperCase(), name)
       return seen
     }, new Map<string, string>()).values()]
+    // `part-code` combines origins by design, which means it also absorbs lines that state
+    // none. The row's country and D/F can only speak for the origins it has, so the fact that
+    // some lines had none is part of what the row must say — otherwise 2 pieces from the US
+    // and 3 from nowhere print as 5 pieces of `D`, while the SLI files those 3 as `F`.
+    const originMissing = group.some((l) => !l.countryOfOrigin.trim())
     const code = codeFor(first, corrections)
     // Deduped the way the grouping keys them, which is case-insensitively. Trimming alone
     // made one part printed in two cases look like two, which both dropped the operator's
@@ -323,7 +328,10 @@ function groupForKeying(
       // One label per origin, each carrying its own verdict. A row of `MY, Ruritania` under a
       // single "no code found" note loses which of the two resolved, and the operator has to
       // work out for themselves that Malaysia was fine.
-      countryLabel: joinDistinct(origins.map(originLabel)),
+      countryLabel: joinDistinct([
+        ...origins.map(originLabel),
+        ...(originMissing ? ['some lines state no origin — enter it'] : []),
+      ]),
       // Read off every origin in the row, not the first one. `part-code` merges origins by
       // design, so a part shipped 2 from the US and 3 from Japan is one row — and stating D
       // for it would declare three foreign pieces domestic. Read off the origins the row
@@ -332,8 +340,9 @@ function groupForKeying(
       // supports. Sorted, so a mixed row reads `D, F` rather than whichever origin the
       // invoice happened to print first.
       domesticForeign: joinDistinct(origins.map(domesticForeign).sort()),
-      // A row with no origin at all needs one as much as a row with an unrecognised one.
-      needsCountryCode: !origins.length || origins.some((o) => !toIsoAlpha2(o).known),
+      // A row with no origin at all, or only some of one, needs one as much as a row with an
+      // unrecognised name.
+      needsCountryCode: originMissing || !origins.length || origins.some((o) => !toIsoAlpha2(o).known),
       quantity: String(roundTo(quantity, 3)),
       unitOfMeasure: unitFor(group),
       // Derived from the group's own total rather than copied off one line, so the unit
@@ -420,7 +429,11 @@ function fromDocument(group: MergedLine[], source: 'document' | 'heading'): { ra
   // Any of the row's parts, not just the first: `part-code` and `df-code` merge several into
   // one row, and another part's number left inside the wording travels into the description
   // keyed against these goods.
-  const parts = [...new Set(group.map((l) => l.partNumber.trim()).filter(Boolean))]
+  // Longest first: `5610` prefixes `5610-2`, and taking the shorter one first left `2 CABLE
+  // ASSY LONG` where the whole part number should have gone.
+  const parts = [...new Set(group.map((l) => l.partNumber.trim()).filter(Boolean))].sort(
+    (a, b) => b.length - a.length,
+  )
   const strip = (text: string) => {
     for (const part of parts) {
       if (text.toUpperCase().startsWith(part.toUpperCase())) {
