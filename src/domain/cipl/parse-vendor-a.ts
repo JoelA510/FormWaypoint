@@ -533,6 +533,11 @@ function parseDetailLines(
       : parsePackingBlock(block, on, ctx, group)
   }
 
+  // Set when this page's copy of the carried block is *still* unfinished — which makes its
+  // closing rows the block's, not a stranded heading's, exactly as for a block that carries
+  // forward from here.
+  let carriedIncomplete = false
+
   // Finish a block that began on the previous page before reading this page's own.
   if (carryIn) {
     const block = [...carryIn.rows, ...continuationRows(rows, starts.length ? starts[0] : rows.length)]
@@ -543,6 +548,7 @@ function parseDetailLines(
       // shipment, which is the right outcome and an unhelpful one on its own: nothing said
       // which line was wrong or why. It does now.
       if (!isComplete(line, ctx.kind)) {
+        carriedIncomplete = true
         warnings.push(
           `${ctx.set} ${ctx.kind === 'INVOICE' ? 'invoice' : 'packing list'}: the line beginning on page ` +
             `${carryIn.page} continues onto page ${page.pageNumber} but its figures could not be read there. ` +
@@ -591,9 +597,13 @@ function parseDetailLines(
   // carried one — and a heading may be stranded below that tail exactly as below any other.
   // Guarding on `starts.length` alone dropped it, and the next page's first block kept the
   // heading from before the break.
+  // `carry` is only ever set by the block loop, so on a page with no starts it is null
+  // whatever happened to the carried tail — and reading `Boolean(carry)` there let the
+  // look-ahead run over an unfinished one, returning its own description row as the next
+  // page's heading. Which block is last decides which flag answers for it.
   const lastStart = starts.length ? starts[starts.length - 1] : carryIn ? detailRowsBegin(rows, rows.length) : -1
-  const nextGroup =
-    lastStart === -1 ? '' : commodityGroupAfter(rows, lastStart, Boolean(carry), ctx.kind)
+  const unfinished = starts.length ? Boolean(carry) : carriedIncomplete
+  const nextGroup = lastStart === -1 ? '' : commodityGroupAfter(rows, lastStart, unfinished, ctx.kind)
   return { lines, carry, group: nextGroup || group, warnings }
 }
 
