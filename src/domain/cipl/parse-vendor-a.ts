@@ -639,16 +639,19 @@ function scaleFigure(value: number, divisor: number): number {
  * previous commodity's wording and a block described as `Total Station Instrument` came out
  * with no description at all.
  *
- * What separates them is what *follows* the word: a totals row is figures, so a colon or a
- * number comes next, while a heading continues in words. Counting the row's items was the
- * first attempt and was wrong in the other direction — an extractor that emits `TOTAL: 26
- * PCS` as one item made the footer invisible, and the trade terms below it became the next
- * page's commodity heading.
+ * What separates them is that a totals row *has figures on it* — anywhere on the row, since
+ * the label may run to several words before them. A heading is words alone.
+ *
+ * Two narrower rules came first and were both wrong. Counting the row's items missed a footer
+ * an extractor emitted as one string. Requiring a colon or a digit immediately after the word
+ * missed `TOTAL PACKAGES 3` and `TOTAL NET WEIGHT 500.000` — and a missed totals row is worse
+ * than a missed heading: the block slice runs on, so a carried block absorbs the footer and
+ * reports the page totals as its own quantity and value, complete enough that the
+ * reconciliation has nothing to object to.
  */
 function isTotalsRow(row: TextRow): boolean {
   const text = rowText(row)
-  if (/^\s*TOTALS?\s*:/i.test(text)) return true
-  if (/^\s*TOTALS?\b[^A-Za-z]*\d/i.test(text)) return true
+  if (/^\s*TOTALS?\b/i.test(text) && /\d/.test(text)) return true
   if (/CARTONS ONLY/i.test(text)) return true
   // Upper case and unanchored: the packing list prints it mid-row. No heading spells it so.
   return /\bTOTALS\b/.test(text)

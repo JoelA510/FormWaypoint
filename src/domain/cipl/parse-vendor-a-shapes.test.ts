@@ -458,6 +458,37 @@ describe('a heading the totals test used to swallow', () => {
     expect(groups).not.toContain('Freight Prepaid Collect')
   })
 
+  it('finds a totals row whose label runs to several words', () => {
+    // `TOTAL PACKAGES 3` and `TOTAL NET WEIGHT 500.000` matched neither a colon nor a digit
+    // straight after the word, so the block slice ran on past them.
+    for (const footer of ['TOTAL PACKAGES  3', 'TOTAL NET WEIGHT  500.000']) {
+      const first = detailPage(2, [
+        ...block('00000001OP0010', '10000-0001', '8544.42.0000', 'MODEL-A', 'CABLE ASSY'),
+        row([footer, 30]),
+        row(['Freight Prepaid Collect', 72]),
+      ])
+      const second = detailPage(3, block('00000002OP0010', '10000-0002', '4016.93.0000', 'MODEL-B', 'O-RING'))
+      const groups = invoiceLines([headerPage(), first, second]).map((l) => l.commodityGroup)
+      expect(groups, footer).not.toContain('Freight Prepaid Collect')
+    }
+  })
+
+  it('does not let a carried block swallow the page totals as its own figures', () => {
+    // A missed totals row is worse than a missed heading: the block slice runs on, the
+    // carried block absorbs the footer, and the page totals are reported as the line's
+    // quantity and value — complete enough that the reconciliation has nothing to object to.
+    const opening = detailPage(2, [
+      row(['00000001OP0010', 72], ['00000001OP0010', 198], ['1', 246]),
+      row(['0001', 72], ['00000001X', 96], ['Japan', 198]),
+    ])
+    const tail = detailPage(3, [
+      row(['TOTAL NET WEIGHT', 30], ['26', 421], ['10.000', 472], ['7,765.290', 550]),
+    ])
+    const line = invoiceLines([headerPage(), opening, tail])[0]
+    expect(line.quantity).not.toBe(26)
+    expect(line.extendedValue).not.toBe(7765.29)
+  })
+
   it('still never reads the totals row itself', () => {
     const first = detailPage(2, [
       ...block('00000001OP0010', '10000-0001', '8544.42.0000', 'MODEL-A', 'CABLE ASSY'),
