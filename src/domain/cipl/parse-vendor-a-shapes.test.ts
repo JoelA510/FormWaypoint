@@ -10,6 +10,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { parseCiplPages } from './parse-vendor-a'
+import type { ParsedCipl } from '../types'
 import type { TextPage, TextRow } from './extract-text'
 
 let y = 700
@@ -52,8 +53,10 @@ const detailPage = (pageNumber: number, rows: TextRow[]): TextPage => {
   ])
 }
 
+const parsed = (pages: TextPage[]): ParsedCipl => parseCiplPages('shapes.pdf', pages)
+
 const invoiceLines = (pages: TextPage[]) =>
-  parseCiplPages('shapes.pdf', pages).lines.filter((l) => l.documentKind === 'INVOICE')
+  parsed(pages).lines.filter((l) => l.documentKind === 'INVOICE')
 
 describe('a heading stranded at the foot of a page', () => {
   it('governs the first block of the next page', () => {
@@ -498,6 +501,57 @@ describe('a block whose figures could not be read at all', () => {
       broken([row(['Gaskets', 72]), ...block('00000002OP0010', '10000-0002', '4016.93.0000', 'MODEL-B', 'O-RING')]),
     ]
     expect(invoiceLines(pages).map((l) => l.commodityGroup)).toEqual(['', 'Gaskets'])
+  })
+})
+
+describe('a block whose figures land on the next page', () => {
+  /** The block's first two rows, with its figures and description overleaf. */
+  const opening = () =>
+    detailPage(2, [
+      row(['00000001OP0010', 72], ['00000001OP0010', 198], ['1', 246]),
+      row(['0001', 72], ['00000001X', 96], ['Japan', 198]),
+    ])
+
+  const closing = (marks: string) => {
+    y = 700
+    return page(3, [
+      row(['INVOICE NO', 36], ['S0000009', 90]),
+      row(['INVOICE', 276]),
+      row(['MARKS & NOS.', 24], ['DESCRIPTION OF GOODS', 144], ['ORIGIN', 276], ['QUANTITY', 390]),
+      row(['COUNTRY OF ORIGIN', 24], ['Default Country', 102]),
+      row(['8544.42.0000', 72], ['PCS', 408], ['USD', 486], ['USD', 564]),
+      row([marks, 24], ['MODEL-A', 72], ['10000-0001', 192], ['2', 421], ['10.000', 472], ['20.000', 550]),
+      row(['10000-0001', 72], ['CABLE ASSY', 192]),
+    ])
+  }
+
+  it('keeps its figures when the shipping marks read like a header label', () => {
+    // The marks cell sits at the left margin of the figures row and reads `C/NO. ONE OF TWO`.
+    // Matching the furniture label against the whole joined row discarded that row, and the
+    // line came out with quantity 0 and no value at all.
+    const line = invoiceLines([headerPage(), opening(), closing('C/NO. ONE OF TWO')])[0]
+    expect(line).toMatchObject({ quantity: 2, extendedValue: 20, description: 'CABLE ASSY' })
+  })
+
+  it('reads the same block identically with ordinary marks', () => {
+    const line = invoiceLines([headerPage(), opening(), closing('5610')])[0]
+    expect(line).toMatchObject({ quantity: 2, extendedValue: 20, description: 'CABLE ASSY' })
+  })
+
+  it('says so when the figures really are not there', () => {
+    // Emitted quietly with quantity 0 before. The totals then fail and block the shipment,
+    // which is right and unhelpful on its own — nothing said which line was wrong.
+    y = 700
+    const stillBroken = page(3, [
+      row(['INVOICE NO', 36], ['S0000009', 90]),
+      row(['INVOICE', 276]),
+      row(['MARKS & NOS.', 24], ['DESCRIPTION OF GOODS', 144], ['ORIGIN', 276], ['QUANTITY', 390]),
+      row(['8544.42.0000', 72], ['PCS', 408], ['USD', 486], ['USD', 564]),
+      row(['10000-0001', 72], ['CABLE ASSY', 192]),
+    ])
+    const result = parsed([headerPage(), opening(), stillBroken])
+    expect(result.lines[0].quantity).toBe(0)
+    expect(result.warnings.join(' ')).toContain('continues onto page 3 but its figures could not be read')
   })
 })
 

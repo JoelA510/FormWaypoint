@@ -114,6 +114,7 @@ export function parseCiplPages(fileName: string, pages: TextPage[]): ParsedCipl 
       groupKind = ctx.kind
     }
     const detail = parseDetailLines(page, ctx, carry, lastGroup)
+    warnings.push(...detail.warnings)
     lines.push(...detail.lines)
     carry = detail.carry
     lastGroup = detail.group
@@ -446,6 +447,22 @@ function isComplete(line: SourceLine, kind: DocumentKind): boolean {
  */
 const DETAIL_PAGE_FURNITURE = /^(C\/NO|COUNTRY OF ORIGIN)\b/i
 
+/**
+ * Whether a row is one of those fields rather than part of a block.
+ *
+ * Two guards, because the label is not unique to the furniture: a block's own figures row
+ * begins with its shipping marks at the left margin, and those read `C/NO. ONE OF TWO`. So
+ * the test is on the leftmost *item* — not the whole row joined, which would match a block
+ * row on its marks alone — and the row must carry no figures, which furniture never does and
+ * a figures row always does. Matching the joined text discarded a carried block's figures
+ * and emitted the line with quantity 0.
+ */
+function isDetailPageFurniture(row: TextRow): boolean {
+  const first = row.items[0]
+  if (!first || !DETAIL_PAGE_FURNITURE.test(first.str)) return false
+  return !row.items.some((it) => it.x > FIGURE_COLUMN_MIN && parseNumber(it.str) !== null)
+}
+
 function continuationRows(rows: TextRow[], upTo: number): TextRow[] {
   const out: TextRow[] = []
   let pastFurniture = false
@@ -456,7 +473,7 @@ function continuationRows(rows: TextRow[], upTo: number): TextRow[] {
       if (/MARKS & NOS\./i.test(text)) pastFurniture = true
       continue
     }
-    if (DETAIL_PAGE_FURNITURE.test(text)) continue
+    if (isDetailPageFurniture(rows[i])) continue
     out.push(rows[i])
   }
   return out
@@ -467,7 +484,8 @@ function parseDetailLines(
   ctx: PageContext,
   carryIn: CarriedBlock | null,
   groupIn: string,
-): { lines: SourceLine[]; carry: CarriedBlock | null; group: string } {
+): { lines: SourceLine[]; carry: CarriedBlock | null; group: string; warnings: string[] } {
+  const warnings: string[] = []
   const rows = page.rows
   const starts: number[] = []
   for (let i = 0; i < rows.length; i++) if (isLineStart(rows[i])) starts.push(i)
@@ -488,7 +506,20 @@ function parseDetailLines(
   if (carryIn) {
     const block = [...carryIn.rows, ...continuationRows(rows, starts.length ? starts[0] : rows.length)]
     const line = parseBlock(block, carryIn.commodityGroup, carryIn.page)
-    if (line) lines.push(line)
+    if (line) {
+      // A carry that comes back still unfinished has always been emitted quietly, with
+      // quantity 0 and no figures. The reconciliation totals then fail and block the
+      // shipment, which is the right outcome and an unhelpful one on its own: nothing said
+      // which line was wrong or why. It does now.
+      if (!isComplete(line, ctx.kind)) {
+        warnings.push(
+          `${ctx.set} ${ctx.kind === 'INVOICE' ? 'invoice' : 'packing list'}: the line beginning on page ` +
+            `${carryIn.page} continues onto page ${page.pageNumber} but its figures could not be read there. ` +
+            'It is reported with no quantity or value.',
+        )
+      }
+      lines.push(line)
+    }
   }
 
   let carry: CarriedBlock | null = null
@@ -528,7 +559,7 @@ function parseDetailLines(
   const nextGroup = starts.length
     ? commodityGroupAfter(rows, starts[starts.length - 1], Boolean(carry), ctx.kind)
     : ''
-  return { lines, carry, group: nextGroup || group }
+  return { lines, carry, group: nextGroup || group, warnings }
 }
 
 /**
@@ -640,7 +671,7 @@ function isCommodityGroup(row: TextRow): string {
   // its own baseline, away from its label, would be indistinguishable from a heading by
   // anything here; this layout keeps the two on one line, which is what makes the label test
   // sufficient rather than merely convenient.
-  if (DETAIL_PAGE_FURNITURE.test(text)) return ''
+  if (isDetailPageFurniture(row)) return ''
   // Deliberately no totals-row test here. A real totals row carries several items and fails
   // the single-item guard above, and `truncateAtPageTotals` already keeps both search windows
   // off it — while the test itself matched any heading whose first word is "Total", so
