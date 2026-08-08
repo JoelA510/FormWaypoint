@@ -908,7 +908,10 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
           : '') +
         (noCode
           ? `${noCode} of ${sheet.commodities.length} rows carry the document's wording instead, because their ` +
-            'commodity number is not in the concordance; each one says so in the Note column. '
+            'commodity number is not in the concordance' +
+            (printed.has('note')
+              ? '; each one says so in the Note column. '
+              : ', and the Note column is switched off for this sheet, so they are not marked on it. ')
           : '') +
         (printed.has('note')
           ? 'Rows noted "your wording" carry a description saved against that part. '

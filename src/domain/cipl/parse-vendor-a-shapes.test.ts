@@ -304,6 +304,38 @@ describe('a description that reads like another field', () => {
   })
 })
 
+describe('a heading and a totals row on the same page', () => {
+  const totalsPage = (heading: TextRow[], footer: TextRow[]) => {
+    y = 700
+    return page(2, [
+      row(['INVOICE NO', 36], ['S0000009', 90]),
+      row(['INVOICE', 276]),
+      row(['MARKS & NOS.', 24], ['DESCRIPTION OF GOODS', 144], ['ORIGIN', 276], ['QUANTITY', 390]),
+      ...block('00000001OP0010', '10000-0001', '8544.42.0000', 'MODEL-A', 'CABLE ASSY'),
+      ...heading,
+      ...footer,
+    ])
+  }
+
+  it('reads a heading printed above the totals row', () => {
+    // Looking only at the page's final row missed it entirely: the totals row was last.
+    const first = totalsPage([row(['Gaskets', 72])], [row(['TOTAL:', 30], ['26', 79], ['PCS', 114])])
+    const second = detailPage(3, block('00000002OP0010', '10000-0002', '4016.93.0000', 'MODEL-B', 'O-RING'))
+    expect(invoiceLines([headerPage(), first, second]).map((l) => l.commodityGroup)).toEqual(['', 'Gaskets'])
+  })
+
+  it('never reads page-footer text printed below it', () => {
+    // The same inversion in the other direction: whatever sat last on the page won.
+    const first = totalsPage(
+      [],
+      [row(['TOTAL:', 30], ['26', 79], ['PCS', 114]), row(['Freight Prepaid Collect', 72])],
+    )
+    const second = detailPage(3, block('00000002OP0010', '10000-0002', '4016.93.0000', 'MODEL-B', 'O-RING'))
+    const groups = invoiceLines([headerPage(), first, second]).map((l) => l.commodityGroup)
+    expect(groups).not.toContain('Freight Prepaid Collect')
+  })
+})
+
 describe('the second description cell', () => {
   it('is read, and beats the shorter one beside it', () => {
     // This layout prints two description cells on the row: a terse one at x=192 and a fuller

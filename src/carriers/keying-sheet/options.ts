@@ -83,8 +83,6 @@ export const DESCRIPTION_NOTES: Record<DescriptionSource, string> = {
 export interface CommodityColumn {
   id: CommodityColumnId
   label: string
-  /** Right-aligned figures that a spreadsheet should total. */
-  numeric?: boolean
 }
 
 export type CommodityColumnId =
@@ -107,12 +105,12 @@ export const COMMODITY_COLUMNS: CommodityColumn[] = [
   { id: 'countryOfManufacture', label: 'Country of Manufacture' },
   { id: 'domesticForeign', label: 'D/F' },
   { id: 'harmonizedCode', label: 'Harmonized Code' },
-  { id: 'quantity', label: 'Qty', numeric: true },
+  { id: 'quantity', label: 'Qty' },
   { id: 'unitOfMeasure', label: 'UOM' },
-  { id: 'unitValue', label: 'Unit Value (USD)', numeric: true },
-  { id: 'totalValue', label: 'Total Customs Value (USD)', numeric: true },
-  { id: 'weightLb', label: 'Weight (lb)', numeric: true },
-  { id: 'weightKg', label: 'Weight (kg)', numeric: true },
+  { id: 'unitValue', label: 'Unit Value (USD)' },
+  { id: 'totalValue', label: 'Total Customs Value (USD)' },
+  { id: 'weightLb', label: 'Weight (lb)' },
+  { id: 'weightKg', label: 'Weight (kg)' },
   { id: 'description', label: 'Commodity Description' },
   { id: 'note', label: 'Note' },
 ]

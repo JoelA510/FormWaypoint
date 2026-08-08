@@ -617,11 +617,14 @@ function commodityGroupBefore(rows: TextRow[], startIdx: number, floor: number):
 /**
  * The heading left stranded at the very foot of a page, whose block begins on the next one.
  *
- * Only the last row is considered. A page that ends in a heading ends in *nothing else* —
- * that is what being stranded means — and searching further up finds the page footer instead,
- * which an intermediate detail page has no totals row to bound. The heading is what
- * `aggregateLines` writes as the SLI row description, so a footer reaching it puts the trade
- * terms on an export declaration.
+ * Only one row is considered — the last one before the page's totals row, or the last row on
+ * the page where it has none. A page that ends in a stranded heading ends in nothing else,
+ * which is what being stranded means, and searching further up finds the page footer instead.
+ * The heading is what `aggregateLines` writes as the SLI row description, so a footer
+ * reaching it puts the trade terms on an export declaration.
+ *
+ * Reading the page's final row alone was wrong in both directions at once: a heading printed
+ * above a totals row was never seen, and anything printed below one was taken.
  *
  * Not consulted at all when the page's last block runs overleaf. Those closing rows belong to
  * that unfinished block, and reading one as a heading hands the *next* page's goods a
@@ -634,9 +637,10 @@ function commodityGroupBefore(rows: TextRow[], startIdx: number, floor: number):
  * page's heading.
  */
 function commodityGroupAfter(rows: TextRow[], lastBlockStart: number, carried: boolean, kind: DocumentKind): string {
-  const last = rows.length - 1
   if (carried) return ''
-  return last > blockEndsAt(rows, lastBlockStart, rows.length, kind) ? isCommodityGroup(rows[last]) : ''
+  const end = truncateAtPageTotals(rows, lastBlockStart, rows.length)
+  const last = end - 1
+  return last > blockEndsAt(rows, lastBlockStart, end, kind) ? isCommodityGroup(rows[last]) : ''
 }
 
 /**
@@ -792,7 +796,7 @@ function parseInvoiceBlock(
       unitValue = parseNumber(numeric[1].str) ?? undefined
       extendedValue = parseNumber(numeric[2].str) ?? undefined
       valueRowIdx = i
-      const left = block[i].items.map((it, k) => ({ it, k })).filter(({ it }) => it.x < 380)
+      const left = block[i].items.map((it, k) => ({ it, k })).filter(({ it }) => it.x < FIGURE_COLUMN_MIN)
       // `[marks] model  partNumber` — marks (when present) is furthest left.
       model = left.length >= 2 ? left[left.length - 2].it.str : (left[0]?.it.str ?? '')
       partNumber = left.length >= 1 ? left[left.length - 1].it.str : ''
