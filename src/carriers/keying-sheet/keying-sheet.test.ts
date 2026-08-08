@@ -211,7 +211,10 @@ describe('commodity grouping', () => {
       fixture([line({ countryOfOrigin: 'Ruritania' })], [sli({})]),
       draft(),
     )
-    expect(sheet.commodities[0]).toMatchObject({ countryOfManufacture: 'Ruritania', needsCountryCode: true })
+    // The code field holds codes. An unplaced name is not one — it travels in the label,
+    // with the prompt beside it, and the row is flagged.
+    expect(sheet.commodities[0]).toMatchObject({ countryOfManufacture: '', needsCountryCode: true })
+    expect(sheet.commodities[0].countryLabel).toBe('Ruritania — no code found, enter it')
     const [, row] = keyingSheetToWorkbook(sheet)[0].rows
     expect(String(row[1])).toContain('no code found, enter it')
   })
@@ -1471,5 +1474,32 @@ describe('a row that merged goods the document does not identify', () => {
     const sheet = buildKeyingSheet('fedex-ship-manager', fixture(named, []), draft())
     const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
     expect(notes['Part numbers']).toBeUndefined()
+  })
+})
+
+describe('the country-of-manufacture field holds codes', () => {
+  it('lists a code per origin where a row merged several', () => {
+    const two = [
+      line({ id: 'a', partNumber: 'P-1', countryOfOrigin: 'Malaysia' }),
+      line({ id: 'b', partNumber: 'P-1', countryOfOrigin: 'Japan' }),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(two, []), draft(), {
+      options: { grouping: 'part-code' },
+    }).commodities
+    expect(rows[0].countryOfManufacture).toBe('MY, JP')
+  })
+
+  it('leaves out a name it could not place, rather than passing it off as a code', () => {
+    const mixed = [
+      line({ id: 'a', partNumber: 'P-1', countryOfOrigin: 'Malaysia' }),
+      line({ id: 'b', partNumber: 'P-1', countryOfOrigin: 'Ruritania' }),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(mixed, []), draft(), {
+      options: { grouping: 'part-code' },
+    }).commodities
+    expect(rows[0].countryOfManufacture).toBe('MY')
+    // It is not lost — the label carries it with its own prompt, and the row is flagged.
+    expect(rows[0].countryLabel).toContain('Ruritania — no code found, enter it')
+    expect(rows[0].needsCountryCode).toBe(true)
   })
 })

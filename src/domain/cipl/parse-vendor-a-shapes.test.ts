@@ -555,6 +555,27 @@ describe('a block whose figures land on the next page', () => {
   })
 })
 
+describe('a page holding only a carried block’s tail', () => {
+  it('still carries a heading stranded below it', () => {
+    // Guarding the look-ahead on "this page had block starts" dropped it, and the next
+    // page's first block kept the heading from before the break.
+    const opening = detailPage(2, [
+      row(['00000001OP0010', 72], ['00000001OP0010', 198], ['1', 246]),
+      row(['0001', 72], ['00000001X', 96], ['Japan', 198]),
+    ])
+    const tail = detailPage(3, [
+      row(['8544.42.0000', 72], ['PCS', 408], ['USD', 486], ['USD', 564]),
+      row(['5610', 24], ['MODEL-A', 72], ['10000-0001', 192], ['2', 421], ['10.000', 472], ['20.000', 550]),
+      row(['10000-0001', 72], ['CABLE ASSY', 192]),
+      row(['Gaskets', 72]),
+    ])
+    const last = detailPage(4, block('00000002OP0010', '10000-0002', '4016.93.0000', 'MODEL-B', 'O-RING'))
+    const lines = invoiceLines([headerPage(), opening, tail, last])
+    expect(lines[0]).toMatchObject({ quantity: 2, description: 'CABLE ASSY' })
+    expect(lines.map((l) => l.commodityGroup)).toEqual(['', 'Gaskets'])
+  })
+})
+
 describe('the labelled fields a detail page repeats', () => {
   it('are not read as the first block’s commodity heading', () => {
     // `COUNTRY OF ORIGIN` prints its value at x≈102, inside the heading column, and it sits

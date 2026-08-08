@@ -78,7 +78,14 @@ export interface KeyingCommodityRow {
    */
   otherDescriptions: string[]
   harmonizedCode: string
-  /** ISO alpha-2, as the commodity record stores it. */
+  /**
+   * ISO alpha-2, as the commodity record stores it — comma-separated where a grouping mode
+   * merged several origins into one row.
+   *
+   * Only origins that resolved. A name this app could not place is not a code and does not
+   * belong in a field of codes; `countryLabel` carries it, with the prompt beside it, and
+   * `needsCountryCode` flags the row.
+   */
   countryOfManufacture: string
   /** `DO - Dominican Republic`: the code the record stores, and the name the picker lists. */
   countryLabel: string
@@ -334,7 +341,9 @@ function groupForKeying(
       // sheet must agree — an operator keying `8544491000` into a field expecting
       // `8544.49.1000` is the transposition this whole sheet exists to prevent.
       harmonizedCode: formatScheduleB(code),
-      countryOfManufacture: joinDistinct(origins.map((o) => toIsoAlpha2(o).code)),
+      countryOfManufacture: joinDistinct(
+        origins.map((o) => toIsoAlpha2(o)).filter((c) => c.known).map((c) => c.code),
+      ),
       // One label per origin, each carrying its own verdict. A row of `MY, Ruritania` under a
       // single "no code found" note loses which of the two resolved, and the operator has to
       // work out for themselves that Malaysia was fine.

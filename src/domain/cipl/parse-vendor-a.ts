@@ -481,6 +481,19 @@ function isDetailPageFurniture(row: TextRow): boolean {
   return !row.items.some((it) => it.x > FIGURE_COLUMN_MIN && parseNumber(it.str) !== null)
 }
 
+/**
+ * A carried block's tail, from the top of the page to the next block.
+ *
+ * Known limit, stated rather than hidden: where the carry still cannot be completed and a
+ * heading for the *next* block sits in this range, that heading is swept into the incomplete
+ * block and can be read as its description, while the block it belongs to keeps whatever
+ * heading was already in force. It is the same ambiguity `blockEndsAt` documents — a lone
+ * prose row is a description on a block that has one and a heading on a block that does not,
+ * and nothing in the document separates them — and there is no reading that is right in both
+ * cases. What makes it survivable is that such a line has no quantity and no value, so it
+ * raises a warning naming the page and fails the reconciliation totals, which blocks the
+ * shipment. It is a visible failure, not a quiet one.
+ */
 function continuationRows(rows: TextRow[], upTo: number): TextRow[] {
   const out: TextRow[] = []
   let pastFurniture = false
@@ -574,9 +587,13 @@ function parseDetailLines(
   // new place: a page with no blocks at all is a header page, whose address block sits in the
   // detail column and reads exactly like a heading, and the text below the totals row is the
   // page footer. Only the gap between the last block and the totals can hold a heading.
-  const nextGroup = starts.length
-    ? commodityGroupAfter(rows, starts[starts.length - 1], Boolean(carry), ctx.kind)
-    : ''
+  // A page with no block starts at all still has a last block, when it holds the tail of a
+  // carried one — and a heading may be stranded below that tail exactly as below any other.
+  // Guarding on `starts.length` alone dropped it, and the next page's first block kept the
+  // heading from before the break.
+  const lastStart = starts.length ? starts[starts.length - 1] : carryIn ? detailRowsBegin(rows, rows.length) : -1
+  const nextGroup =
+    lastStart === -1 ? '' : commodityGroupAfter(rows, lastStart, Boolean(carry), ctx.kind)
   return { lines, carry, group: nextGroup || group, warnings }
 }
 
@@ -719,10 +736,13 @@ function commodityGroupBefore(rows: TextRow[], startIdx: number, floor: number):
  * The heading left stranded at the very foot of a page, whose block begins on the next one.
  *
  * Searched upwards from the totals row — or from the foot of the page where there is none —
- * down to the last row the block itself owns. Both ends matter. Below the totals is the page
- * footer, and the heading is what `aggregateLines` writes as the SLI row description, so
- * letting that in puts the trade terms on an export declaration. Above the block's own last
- * row is the block.
+ * down to the last row the block itself owns. Above the block's own last row is the block.
+ *
+ * The totals row is a weaker bound than it looks: this layout prints the trade terms *above*
+ * `TOTAL: n PCS`, so the first footer row is inside the window. What actually keeps it out is
+ * the column test — the trade terms sit at x≈447, far right of the detail column — and the
+ * single-item test, since that row carries a figure and a currency beside it. Those are the
+ * guards; the bound only removes everything below.
  *
  * Between those two, every row is skipped until one looks like a heading, which is the same
  * thing `commodityGroupBefore` does in the other direction. Reading exactly one row instead
@@ -733,6 +753,9 @@ function commodityGroupBefore(rows: TextRow[], startIdx: number, floor: number):
  * Not consulted at all when the page's last block runs overleaf. Those closing rows belong to
  * that unfinished block, and reading one as a heading hands the *next* page's goods a
  * description taken from the middle of a line that has not been read yet.
+ *
+ * A page holding only a carried block's tail still has a last block, and a heading can be
+ * stranded below it like any other.
  *
  * Nor when the row is still inside the last block. A block is figures then description, so
  * anything at or before the row after the figures is the block's own; only what follows it
