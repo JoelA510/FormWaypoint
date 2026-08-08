@@ -234,17 +234,16 @@ function groupKeyFor(line: MergedLine, mode: GroupingMode, index: number, correc
 }
 
 /**
- * The unit to key, which is a single value wherever the document means a single thing.
+ * The unit to key: the first printed spelling, which is what `aggregateLines` puts in
+ * `sourceUom`.
  *
- * `PCS` and `EA` canonicalise alike, and `df-code` groups on the canonical unit — so a row
- * could print `PCS, EA` into a field that holds one value, disagreeing with the SLI row it
- * exists to be checked against. Where every line agrees canonically the first printed form is
- * used, matching what `aggregateLines` puts in `sourceUom`. Where they genuinely differ the
- * row says so rather than picking one.
+ * One value, never a list, and that is guaranteed rather than hoped for — every grouping mode
+ * keys on the canonical unit, so a row's lines all mean the same unit by construction. `PCS`
+ * and `EA` canonicalise alike and can share a row; `PCS` and `KG` cannot. Printing both
+ * spellings would put `PCS, EA` into a field that holds one value.
  */
 function unitFor(group: MergedLine[]): string {
-  const canonical = new Set(group.map((l) => canonicalUnit(l.uom) ?? l.uom.trim().toUpperCase()))
-  return canonical.size === 1 ? group[0].uom : joinDistinct(group.map((l) => l.uom))
+  return group[0].uom
 }
 
 /** `MY - Malaysia`, or the name and a prompt where no code could be found for it. */
@@ -328,10 +327,12 @@ function groupForKeying(
       // One label per origin, each carrying its own verdict. A row of `MY, Ruritania` under a
       // single "no code found" note loses which of the two resolved, and the operator has to
       // work out for themselves that Malaysia was fine.
-      countryLabel: joinDistinct([
-        ...origins.map(originLabel),
-        ...(originMissing ? ['some lines state no origin — enter it'] : []),
-      ]),
+      countryLabel: origins.length
+        ? joinDistinct([
+            ...origins.map(originLabel),
+            ...(originMissing ? ['some lines state no origin — enter it'] : []),
+          ])
+        : 'not on the document — enter it',
       // Read off every origin in the row, not the first one. `part-code` merges origins by
       // design, so a part shipped 2 from the US and 3 from Japan is one row — and stating D
       // for it would declare three foreign pieces domestic. So it is read off the origins the
@@ -451,9 +452,12 @@ function fromDocument(group: MergedLine[], source: 'document' | 'heading'): { ra
   )
   const strip = (text: string) => {
     for (const part of parts) {
-      if (text.toUpperCase().startsWith(part.toUpperCase())) {
-        return text.slice(part.length).replace(/^[\s:,-]+/, '').trim() || text
-      }
+      if (!text.toUpperCase().startsWith(part.toUpperCase())) continue
+      const rest = text.slice(part.length)
+      // The repeat has to end where the part number ends. Without that, a short part like
+      // `CA` matched `CABLE ASSY` and the row was described as `BLE ASSY`.
+      if (rest && !/^[\s:,-]/.test(rest)) continue
+      return rest.replace(/^[\s:,-]+/, '').trim() || text
     }
     return text
   }
@@ -783,12 +787,11 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
         return row.partNumber
       // The code the commodity record stores, and the name the picker lists, together: an
       // operator given only one of the two has to translate before they can type anything.
-      // `countryLabel` already carries a per-origin verdict, so a mixed row keeps the picker
-      // name for the origins that did resolve. A row whose lines state no origin at all has
-      // no label to carry one, and a blank cell beside a blank D/F prompts nobody — while
-      // the SLI files `F` for those same lines.
+      // `countryLabel` carries the whole verdict, origin by origin: the picker name where it
+      // resolved, the prompt where it did not, and the prompt on its own where the document
+      // states no origin at all. Nothing to re-derive here.
       case 'countryOfManufacture':
-        return row.countryLabel || (row.needsCountryCode ? 'not on the document — enter it' : '')
+        return row.countryLabel
       case 'domesticForeign':
         return row.domesticForeign
       case 'harmonizedCode':
@@ -919,7 +922,11 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
       'Check',
       `This sheet: ${sheet.totals.commodities} commodities · ${sheet.totals.quantity} pcs · ` +
         `${sheet.totals.customsValue} USD · ${sheet.totals.shipmentWeightLb} lb · ${sheet.totals.shipmentWeightKg} kg. ` +
-        'Those are the printed rows added up, so the last row of the grid always equals the column above it.',
+        'Those are the printed rows added up. ' +
+        (labelDisplacesAFigure
+          ? 'Every chosen column carries a total, so the word TOTAL sits in the first of them and that ' +
+            'one figure is only stated here.'
+          : 'The last row of the grid equals the column above it.'),
     ],
     [
       'Shipment as filed',

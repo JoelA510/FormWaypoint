@@ -1349,3 +1349,69 @@ describe('the Notes tab does not point at columns that are switched off', () => 
     expect(notes(['partNumber', 'description', 'note']).Descriptions).not.toContain('switched off')
   })
 })
+
+describe('stripping a repeated part number', () => {
+  it('does not eat the front of a word that merely starts the same way', () => {
+    // Part `CA` against description `CABLE ASSY` left `BLE ASSY` on the declaration.
+    const rows = buildKeyingSheet(
+      'fedex-ship-manager',
+      fixture([line({ partNumber: 'CA', description: 'CABLE ASSY' })], []),
+      draft(),
+    ).commodities
+    expect(rows[0].description).toBe('CABLE ASSY')
+  })
+
+  it('still strips a genuine repeat, with or without a separator', () => {
+    const at = (partNumber: string, description: string) =>
+      buildKeyingSheet('fedex-ship-manager', fixture([line({ partNumber, description })], []), draft())
+        .commodities[0].description
+    expect(at('44534-0730', '44534-0730 SA34-F1')).toBe('SA34-F1')
+    expect(at('44534-0730', '44534-0730: SA34-F1')).toBe('SA34-F1')
+    // Nothing left after the strip means the description was only the part number, which is
+    // already its own column — the original is kept rather than blanking the cell.
+    expect(at('44534-0730', '44534-0730')).toBe('44534-0730')
+  })
+})
+
+describe('a row the document gives no origin for at all', () => {
+  it('says the document has none, not that some of its lines lack one', () => {
+    const rows = buildKeyingSheet(
+      'fedex-ship-manager',
+      fixture([line({ countryOfOrigin: '' })], []),
+      draft(),
+    ).commodities
+    expect(rows[0].countryLabel).toBe('not on the document — enter it')
+    expect(rows[0].countryLabel).not.toContain('some lines')
+  })
+
+  it('reserves the other wording for a row that has both', () => {
+    const partial = [
+      line({ id: 'a', partNumber: 'P-1', countryOfOrigin: 'Japan' }),
+      line({ id: 'b', partNumber: 'P-1', countryOfOrigin: '' }),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(partial, []), draft(), {
+      options: { grouping: 'part-code' },
+    }).commodities
+    expect(rows[0].countryLabel).toContain('JP - Japan')
+    expect(rows[0].countryLabel).toContain('some lines state no origin')
+  })
+})
+
+describe('the Check note tells the truth about the TOTAL row', () => {
+  const check = (columns: CommodityColumnId[]) =>
+    Object.fromEntries(
+      keyingSheetToWorkbook(
+        buildKeyingSheet('fedex-ship-manager', fixture([line({})], []), draft(), { options: { columns } }),
+      )[2].rows.map((r) => [String(r[0]), String(r[1])]),
+    ).Check
+
+  it('claims the grid sums only when it does', () => {
+    expect(check(['partNumber', 'quantity'])).toContain('equals the column above it')
+  })
+
+  it('says where the displaced figure went when every column is a total', () => {
+    // TOTAL takes the first column, so that column's figure is only stated in the note.
+    expect(check(['quantity', 'totalValue'])).toContain('only stated here')
+    expect(check(['quantity', 'totalValue'])).not.toContain('equals the column above it')
+  })
+})
