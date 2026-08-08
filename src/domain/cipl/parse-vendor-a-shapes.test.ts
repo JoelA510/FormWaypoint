@@ -324,6 +324,34 @@ describe('a heading and a totals row on the same page', () => {
     expect(invoiceLines([headerPage(), first, second]).map((l) => l.commodityGroup)).toEqual(['', 'Gaskets'])
   })
 
+  it('reads one with the page footer between it and the totals row', () => {
+    // This layout's footer is two rows — trade terms, then `TOTAL: n PCS`. Inspecting only
+    // the row above the totals saw the trade terms and never the heading above them.
+    const first = totalsPage(
+      [row(['Gaskets', 72])],
+      [
+        row(['FOB Origin - Collect', 447], ['20.000', 550], ['USD', 588]),
+        row(['TOTAL:', 30], ['26', 79], ['PCS', 114]),
+      ],
+    )
+    const second = detailPage(3, block('00000002OP0010', '10000-0002', '4016.93.0000', 'MODEL-B', 'O-RING'))
+    expect(invoiceLines([headerPage(), first, second]).map((l) => l.commodityGroup)).toEqual(['', 'Gaskets'])
+  })
+
+  it('does not mistake the footer itself for the heading', () => {
+    // The rows between the block and the totals are skipped until one looks like a heading;
+    // the trade terms sit at x=447 and carry three items, so they never can.
+    const first = totalsPage(
+      [],
+      [
+        row(['FOB Origin - Collect', 447], ['20.000', 550], ['USD', 588]),
+        row(['TOTAL:', 30], ['26', 79], ['PCS', 114]),
+      ],
+    )
+    const second = detailPage(3, block('00000002OP0010', '10000-0002', '4016.93.0000', 'MODEL-B', 'O-RING'))
+    expect(invoiceLines([headerPage(), first, second]).map((l) => l.commodityGroup)).toEqual(['', ''])
+  })
+
   it('never reads page-footer text printed below it', () => {
     // The same inversion in the other direction: whatever sat last on the page won.
     const first = totalsPage(

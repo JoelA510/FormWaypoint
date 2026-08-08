@@ -646,14 +646,17 @@ function commodityGroupBefore(rows: TextRow[], startIdx: number, floor: number):
 /**
  * The heading left stranded at the very foot of a page, whose block begins on the next one.
  *
- * Only one row is considered — the last one before the page's totals row, or the last row on
- * the page where it has none. A page that ends in a stranded heading ends in nothing else,
- * which is what being stranded means, and searching further up finds the page footer instead.
- * The heading is what `aggregateLines` writes as the SLI row description, so a footer
- * reaching it puts the trade terms on an export declaration.
+ * Searched upwards from the totals row — or from the foot of the page where there is none —
+ * down to the last row the block itself owns. Both ends matter. Below the totals is the page
+ * footer, and the heading is what `aggregateLines` writes as the SLI row description, so
+ * letting that in puts the trade terms on an export declaration. Above the block's own last
+ * row is the block.
  *
- * Reading the page's final row alone was wrong in both directions at once: a heading printed
- * above a totals row was never seen, and anything printed below one was taken.
+ * Between those two, every row is skipped until one looks like a heading, which is the same
+ * thing `commodityGroupBefore` does in the other direction. Reading exactly one row instead
+ * was too literal a reading of "stranded": this layout's footer is two rows, trade terms then
+ * `TOTAL: n PCS`, so the single row inspected was the trade terms and the heading above them
+ * was never seen at all.
  *
  * Not consulted at all when the page's last block runs overleaf. Those closing rows belong to
  * that unfinished block, and reading one as a heading hands the *next* page's goods a
@@ -668,8 +671,12 @@ function commodityGroupBefore(rows: TextRow[], startIdx: number, floor: number):
 function commodityGroupAfter(rows: TextRow[], lastBlockStart: number, carried: boolean, kind: DocumentKind): string {
   if (carried) return ''
   const end = truncateAtPageTotals(rows, lastBlockStart, rows.length)
-  const last = end - 1
-  return last > blockEndsAt(rows, lastBlockStart, end, kind) ? isCommodityGroup(rows[last]) : ''
+  const floor = blockEndsAt(rows, lastBlockStart, end, kind)
+  for (let i = end - 1; i > floor; i--) {
+    const heading = isCommodityGroup(rows[i])
+    if (heading) return heading
+  }
+  return ''
 }
 
 /**
