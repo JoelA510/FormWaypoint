@@ -1238,3 +1238,30 @@ describe('a part number that prefixes another', () => {
     expect(rows[0].otherDescriptions).toEqual(['CABLE ASSY'])
   })
 })
+
+describe('the D/F column under the D/F grouping', () => {
+  it('carries the letter its own key was built from', () => {
+    // The key puts a blank-origin line in the F bucket, because `domesticForeign('')` is F
+    // and that is what the SLI files for it. Reading the cell from the stated origins
+    // instead blanked the one column this mode force-adds.
+    const rows = buildKeyingSheet(
+      'fedex-ship-manager',
+      fixture([line({ countryOfOrigin: '' })], []),
+      draft(),
+      { options: { grouping: 'df-code' } },
+    ).commodities
+    expect(rows[0].domesticForeign).toBe('F')
+    // And the missing origin is still asked for, beside it.
+    expect(rows[0].needsCountryCode).toBe(true)
+  })
+
+  it('leaves the other modes reading from the origins the row has', () => {
+    const rows = buildKeyingSheet(
+      'fedex-ship-manager',
+      fixture([line({ countryOfOrigin: '' })], []),
+      draft(),
+      { options: { grouping: 'part-origin-code' } },
+    ).commodities
+    expect(rows[0].domesticForeign).toBe('')
+  })
+})

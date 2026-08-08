@@ -334,12 +334,20 @@ function groupForKeying(
       ]),
       // Read off every origin in the row, not the first one. `part-code` merges origins by
       // design, so a part shipped 2 from the US and 3 from Japan is one row — and stating D
-      // for it would declare three foreign pieces domestic. Read off the origins the row
-      // actually has, not off every line: a line with no origin supplies no letter either,
-      // and `domesticForeign('')` answers F — asserting a foreign portion nothing on the row
-      // supports. Sorted, so a mixed row reads `D, F` rather than whichever origin the
+      // for it would declare three foreign pieces domestic. So it is read off the origins the
+      // row actually has: a line with no origin supplies no letter either, and
+      // `domesticForeign('')` answers F, which would assert a foreign portion nothing on the
+      // row supports. Sorted, so a mixed row reads `D, F` rather than whichever origin the
       // invoice happened to print first.
-      domesticForeign: joinDistinct(origins.map(domesticForeign).sort()),
+      //
+      // `df-code` is the exception, and has to be. Its key is the letter — including the F
+      // that a blank origin produces, which is also what the SLI files for those lines — so
+      // reading the cell from the origins instead would blank the one column that mode
+      // exists to be checked against. The missing origin is still flagged beside it.
+      domesticForeign:
+        options.grouping === 'df-code'
+          ? domesticForeign(first.countryOfOrigin)
+          : joinDistinct(origins.map(domesticForeign).sort()),
       // A row with no origin at all, or only some of one, needs one as much as a row with an
       // unrecognised name.
       needsCountryCode: originMissing || !origins.length || origins.some((o) => !toIsoAlpha2(o).known),

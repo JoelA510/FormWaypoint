@@ -93,8 +93,12 @@ export function OutputPanel({
   // than once under StrictMode, and a write in there persists layouts from renders that were
   // thrown away. `options` is the committed value, so deriving from it is also the honest one.
   const changeOptions = (update: (current: KeyingOptions) => KeyingOptions) => {
-    const next = update(options)
-    if (next === options) return
+    // Through `withDefaults`, exactly as the restore path and `buildKeyingSheet` do. It adds
+    // the D/F column when the D/F grouping is chosen, and without it here the checkbox showed
+    // unchecked while the download carried the column — the panel describing a sheet the
+    // operator was not getting.
+    const next = withDefaults(update(options))
+    if (JSON.stringify(next) === JSON.stringify(options)) return
     chosen.current = true
     setOptions(next)
     void localStore.saveKeyingOptions(next)
