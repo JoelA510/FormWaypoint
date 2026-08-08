@@ -1415,3 +1415,42 @@ describe('the Check note tells the truth about the TOTAL row', () => {
     expect(check(['quantity', 'totalValue'])).not.toContain('equals the column above it')
   })
 })
+
+describe('a row that merged goods the document does not identify', () => {
+  const unnamed = [
+    line({ id: 'a', partNumber: 'P-1', countryOfOrigin: 'Japan', description: 'CABLE ASSY', quantity: 2 }),
+    line({ id: 'b', partNumber: '', countryOfOrigin: 'Japan', description: 'UNIDENTIFIED ITEM', quantity: 3 }),
+  ]
+
+  it('does not apply one part’s saved wording to it', () => {
+    // `parts` drops the blanks, so counting it alone made this row look like a single part —
+    // and a saved wording, once applied, discards what the document said about the rest.
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(unnamed, []), draft(), {
+      options: { grouping: 'df-code' },
+      descriptionsByPart: { 'P-1': 'Braided copper cable' },
+    }).commodities
+    expect(rows[0].describedByOperator).toBe(false)
+    expect(rows[0].description).toBe('UNIDENTIFIED ITEM')
+    expect(rows[0].otherDescriptions).toContain('CABLE ASSY')
+  })
+
+  it('says so on the Notes tab, where no column can hide it', () => {
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(unnamed, []), draft(), {
+      options: { grouping: 'df-code', columns: ['quantity', 'description'] },
+    })
+    const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
+    expect(notes['Part numbers']).toContain('1 of 1 rows')
+  })
+
+  it('still applies a saved wording where every line names the part', () => {
+    const named = unnamed.map((l) => ({ ...l, partNumber: 'P-1' }) as MergedLine)
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(named, []), draft(), {
+      options: { grouping: 'df-code' },
+      descriptionsByPart: { 'P-1': 'Braided copper cable' },
+    }).commodities
+    expect(rows[0]).toMatchObject({ description: 'Braided copper cable', describedByOperator: true })
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(named, []), draft())
+    const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
+    expect(notes['Part numbers']).toBeUndefined()
+  })
+})

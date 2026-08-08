@@ -91,6 +91,12 @@ export interface KeyingCommodityRow {
   weightKg: string
   partNumber: string
   /**
+   * True when a line in this row carries no part number, so the names in `partNumber` do not
+   * account for all of it. Counted on the Notes tab: a saved wording is keyed to a part and
+   * cannot speak for goods the document does not identify.
+   */
+  partUnstated?: boolean
+  /**
    * `D` (US origin), `F`, or `D, F` for a row that merged both.
    *
    * Read off every origin in the row, never off the seller or the ship-from location. A
@@ -309,8 +315,13 @@ function groupForKeying(
       if (key && !seen.has(key)) seen.set(key, l.partNumber.trim())
       return seen
     }, new Map<string, string>()).values()]
-    // A saved wording is keyed to a part, so it only applies where the row is one part.
-    const saved = parts.length === 1 ? descriptions[partKey(parts[0])] : undefined
+    // A saved wording is keyed to a part, so it only applies where the row is one part — and
+    // a row that merged a line stating no part number is not one part, however few names it
+    // carries. `parts` drops the blanks, so counting it alone made those rows look single and
+    // applied one part's wording to goods the document does not identify, discarding what it
+    // did say about them (`otherDescriptions` is emptied wherever a saved wording wins).
+    const partMissing = group.some((l) => !l.partNumber.trim())
+    const saved = parts.length === 1 && !partMissing ? descriptions[partKey(parts[0])] : undefined
     const chosen = describeGroup(group, options.descriptionSource, scheduleB, code)
     return {
       description: saved || chosen.description,
@@ -368,6 +379,8 @@ function groupForKeying(
       weightLb: weightKg ? kgToLb(weightKg).toFixed(2) : '',
       weightKg: weightKg ? roundTo(weightKg, 3).toFixed(3) : '',
       partNumber: joinDistinct(parts),
+      /** True when some line in the row carries no part number of its own. */
+      partUnstated: partMissing,
     }
   })
 }
@@ -878,6 +891,7 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
   // country column off — and a prompt that lives only in a cell nobody chose to print is a
   // prompt that does not exist. The Schedule B fallback is repeated here for the same reason.
   const needCountry = sheet.commodities.filter((c) => c.needsCountryCode).length
+  const unnamedParts = sheet.commodities.filter((c) => c.partUnstated).length
   const printed = new Set(sheet.options.columns)
   const alternatives = sheet.commodities.some((c) => c.otherDescriptions.length || c.describedByOperator)
 
@@ -949,6 +963,16 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
           ? 'The country column says which. '
           : 'The country column is switched off for this sheet, so it does not say which. ') +
         'A commodity record needs the code either way.',
+    ])
+  }
+
+  if (unnamedParts) {
+    notes.push([
+      'Part numbers',
+      `${unnamedParts} of ${sheet.commodities.length} rows include a line the document gives no part number ` +
+        'for, so the Part Number cell does not account for the whole row. No wording saved against a part ' +
+        'was applied to those rows — a saved description speaks for the part it was saved against, and ' +
+        'nothing identifies these goods.',
     ])
   }
 
