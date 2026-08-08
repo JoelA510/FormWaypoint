@@ -469,7 +469,13 @@ function fromDocument(group: MergedLine[], source: 'document' | 'heading'): { ra
       const rest = text.slice(part.length)
       // The repeat has to end where the part number ends. Without that, a short part like
       // `CA` matched `CABLE ASSY` and the row was described as `BLE ASSY`.
-      if (rest && !/^[\s:,-]/.test(rest)) continue
+      //
+      // A hyphen is not a boundary, whatever it is elsewhere: part numbers contain them, so
+      // `5610` against `5610-2 CABLE ASSY LONG` would take the front off a *different* part's
+      // number and describe the goods as `2 CABLE ASSY LONG`. Longest-first ordering only
+      // helps when both numbers happen to be in the same row, which under the default
+      // grouping they never are.
+      if (rest && !/^[\s:,]/.test(rest)) continue
       return rest.replace(/^[\s:,-]+/, '').trim() || text
     }
     return text

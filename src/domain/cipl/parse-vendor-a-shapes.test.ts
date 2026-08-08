@@ -487,6 +487,35 @@ describe('a block whose figures could not be read at all', () => {
   })
 })
 
+describe('a carried block completed on the next page', () => {
+  it('is not described as the detail page’s own COUNTRY OF ORIGIN field', () => {
+    // A detail page repeats labelled header fields between its column headings and its first
+    // block, and `COUNTRY OF ORIGIN` prints its value at x≈102 — inside the detail column.
+    // Spliced into a carried block, it was the only text that block had to offer.
+    const first = detailPage(2, [
+      row(['00000001OP0010', 72], ['00000001OP0010', 198], ['1', 246]),
+      row(['0001', 72], ['00000001X', 96], ['Japan', 198]),
+    ])
+    y = 700
+    const second = page(3, [
+      row(['INVOICE NO', 36], ['S0000009', 90]),
+      row(['INVOICE', 276]),
+      row(['MARKS & NOS.', 24], ['DESCRIPTION OF GOODS', 144], ['ORIGIN', 276], ['QUANTITY', 390]),
+      row(['Example Consignee', 24]),
+      row(['C/NO', 24], ['5610 - 5610', 48]),
+      row(['COUNTRY OF ORIGIN', 24], ['Default Country', 102]),
+      // Still no figure row, and the description printed at the left margin rather than in
+      // its own column — so the fallback runs, and it spans the country value's x too.
+      row(['8544.42.0000', 72], ['PCS', 408], ['USD', 486], ['USD', 564]),
+      row(['CABLE ASSY', 72]),
+      ...block('00000002OP0010', '10000-0002', '4016.93.0000', 'MODEL-B', 'O-RING'),
+    ])
+    const lines = invoiceLines([headerPage(), first, second])
+    expect(lines[0].description).not.toBe('Default Country')
+    expect(lines[0].description).toBe('CABLE ASSY')
+  })
+})
+
 describe('the second description cell', () => {
   it('is read, and beats the shorter one beside it', () => {
     // This layout prints two description cells on the row: a terse one at x=192 and a fuller

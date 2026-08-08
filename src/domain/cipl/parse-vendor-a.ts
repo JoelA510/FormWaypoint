@@ -436,6 +436,16 @@ function isComplete(line: SourceLine, kind: DocumentKind): boolean {
  * remaining rows follow it. The consignee and `C/NO` lines that sit between are harmless —
  * the block parser locates fields by shape and position, and none of them match.
  */
+/**
+ * Labelled header fields a detail page repeats below its column headings.
+ *
+ * They sit between `MARKS & NOS.` and the first block, so passing the column headings is not
+ * enough to be past the furniture. `COUNTRY OF ORIGIN` prints its value at x≈102 — inside the
+ * detail column — and spliced into a carried block it became that line's description, so a
+ * shipment came out declared as its own country.
+ */
+const DETAIL_PAGE_FURNITURE = /^(C\/NO|COUNTRY OF ORIGIN)\b/i
+
 function continuationRows(rows: TextRow[], upTo: number): TextRow[] {
   const out: TextRow[] = []
   let pastFurniture = false
@@ -446,6 +456,7 @@ function continuationRows(rows: TextRow[], upTo: number): TextRow[] {
       if (/MARKS & NOS\./i.test(text)) pastFurniture = true
       continue
     }
+    if (DETAIL_PAGE_FURNITURE.test(text)) continue
     out.push(rows[i])
   }
   return out

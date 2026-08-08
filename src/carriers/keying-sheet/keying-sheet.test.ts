@@ -1367,6 +1367,11 @@ describe('stripping a repeated part number', () => {
         .commodities[0].description
     expect(at('44534-0730', '44534-0730 SA34-F1')).toBe('SA34-F1')
     expect(at('44534-0730', '44534-0730: SA34-F1')).toBe('SA34-F1')
+    // A hyphen is not a boundary — part numbers contain them. `5610` must not take the front
+    // off `5610-2`, which is a different part.
+    expect(at('5610', '5610-2 CABLE ASSY LONG')).toBe('5610-2 CABLE ASSY LONG')
+    // But a hyphen *after* a real boundary is still tidied away.
+    expect(at('5610', '5610 - CABLE ASSY')).toBe('CABLE ASSY')
     // Nothing left after the strip means the description was only the part number, which is
     // already its own column — the original is kept rather than blanking the cell.
     expect(at('44534-0730', '44534-0730')).toBe('44534-0730')
