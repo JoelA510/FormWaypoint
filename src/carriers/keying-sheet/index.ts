@@ -290,7 +290,20 @@ function groupForKeying(
     else groups.set(key, [line])
   })
 
-  return [...groups.values()].map((group) => {
+  // `df-code` sorted the way `aggregateLines` sorts the SLI's own rows — ascending by
+  // normalised commodity number. The mode exists to be read against that form line for line,
+  // and document order put row n beside a different commodity. The other modes stay in
+  // document order, which is the order the invoice itself reads in.
+  const ordered =
+    options.grouping === 'df-code'
+      ? [...groups.entries()]
+          .sort((a, b) => normalizeScheduleB(codeFor(a[1][0], corrections)).localeCompare(
+            normalizeScheduleB(codeFor(b[1][0], corrections)),
+          ))
+          .map(([, lines]) => lines)
+      : [...groups.values()]
+
+  return ordered.map((group) => {
     const first = group[0]
     const quantity = group.reduce((sum, l) => sum + l.quantity, 0)
     const total = group.reduce((sum, l) => sum + (l.extendedValue ?? 0), 0)
@@ -437,7 +450,15 @@ function describeGroup(
       return { description: official, alternatives: fromDocument(group, 'document').ranked, fellBack: null }
     }
   }
-  const { ranked } = fromDocument(group, source === 'heading' ? 'heading' : 'document')
+  if (source === 'heading') {
+    const { ranked } = fromDocument(group, 'heading')
+    // The part's own wording travels with the row, as it does under `schedule-b`. Ranking
+    // headings alone left a row with one entry and nothing in the Note column — while the
+    // Notes tab promised the alternatives were printed there.
+    const alternatives = fromDocument(group, 'document').ranked.filter((text) => text !== ranked[0])
+    return { description: ranked[0] ?? '', alternatives, fellBack: null }
+  }
+  const { ranked } = fromDocument(group, 'document')
   // A row that asked for the official wording and did not get it has to say so, and say which
   // of the two reasons it was. "This code is not in the concordance" is a statement about the
   // code, and repeating it for every row of a shipment because the dataset failed to load

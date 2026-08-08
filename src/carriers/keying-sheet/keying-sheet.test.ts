@@ -1503,3 +1503,52 @@ describe('the country-of-manufacture field holds codes', () => {
     expect(rows[0].needsCountryCode).toBe(true)
   })
 })
+
+describe('the heading description source', () => {
+  const lines = [
+    line({ id: 'a', description: 'CBL, OS32C-CBL-30M', commodityGroup: 'Electrical Conductors', quantity: 3 }),
+    line({ id: 'b', description: 'CBL, OS32C-CBL-30M', commodityGroup: 'Electrical Conductors', quantity: 1 }),
+  ]
+
+  it('still carries what the part itself was called', () => {
+    // Ranking headings alone left one entry and an empty Note column, while the Notes tab
+    // promised the alternatives were printed there.
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(lines, []), draft(), {
+      options: { descriptionSource: 'heading' },
+    }).commodities
+    expect(rows[0].description).toBe('Electrical Conductors')
+    expect(rows[0].otherDescriptions).toContain('CBL, OS32C-CBL-30M')
+  })
+
+  it('does not offer the heading back as an alternative to itself', () => {
+    const noDescription = lines.map((l) => ({ ...l, description: '' }) as MergedLine)
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(noDescription, []), draft(), {
+      options: { descriptionSource: 'heading' },
+    }).commodities
+    expect(rows[0]).toMatchObject({ description: 'Electrical Conductors', otherDescriptions: [] })
+  })
+})
+
+describe('df-code row order', () => {
+  it('matches the order the SLI files its rows in', () => {
+    // The mode exists to be read against that form line for line. In document order, row n
+    // sat beside a different commodity.
+    const outOfOrder = [
+      line({ id: 'a', countryOfOrigin: 'Japan', classification: '9999.99.9999' }),
+      line({ id: 'b', countryOfOrigin: 'Japan', classification: '1111.11.1111' }),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(outOfOrder, []), draft(), {
+      options: { grouping: 'df-code' },
+    }).commodities
+    expect(rows.map((r) => r.harmonizedCode)).toEqual(['1111.11.1111', '9999.99.9999'])
+  })
+
+  it('leaves the other modes in the order the invoice reads', () => {
+    const outOfOrder = [
+      line({ id: 'a', partNumber: 'P-1', classification: '9999.99.9999' }),
+      line({ id: 'b', partNumber: 'P-2', classification: '1111.11.1111' }),
+    ]
+    const rows = buildKeyingSheet('fedex-ship-manager', fixture(outOfOrder, []), draft()).commodities
+    expect(rows.map((r) => r.harmonizedCode)).toEqual(['9999.99.9999', '1111.11.1111'])
+  })
+})

@@ -644,10 +644,16 @@ function scaleFigure(value: number, divisor: number): number {
  *
  * Two narrower rules came first and were both wrong. Counting the row's items missed a footer
  * an extractor emitted as one string. Requiring a colon or a digit immediately after the word
- * missed `TOTAL PACKAGES 3` and `TOTAL NET WEIGHT 500.000` — and a missed totals row is worse
- * than a missed heading: the block slice runs on, so a carried block absorbs the footer and
- * reports the page totals as its own quantity and value, complete enough that the
- * reconciliation has nothing to object to.
+ * missed `TOTAL PACKAGES 3` and `TOTAL NET WEIGHT 500.000`.
+ *
+ * The residual is a heading that begins with the word *and* carries a figure — `Total Station
+ * Instruments 2000` would be read as a totals row, and a heading stranded below it would go
+ * unseen. That is the error this rule chooses, deliberately, because the opposite one is
+ * worse: a missed totals row lets the block slice run past it, so a carried block absorbs the
+ * footer and reports the page totals as its own quantity and value — complete enough that the
+ * reconciliation has nothing to object to. A missed heading leaves the previous one in force,
+ * which is wrong wording on a row; a missed totals row puts the whole shipment's figures on
+ * one line and passes every check.
  */
 function isTotalsRow(row: TextRow): boolean {
   const text = rowText(row)
