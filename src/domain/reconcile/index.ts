@@ -297,6 +297,25 @@ function totalsChecks(
     actual: String(quantity),
   })
 
+  // A line with no readable quantity parses as zero, and for a format whose quantity
+  // total is the sum of its own lines (`vendor-b`, `omron-ci`) the total-quantity check
+  // above then agrees with itself. Zero pieces of a real part is never a correct customs
+  // line — it is an incomplete one, and it must hold the shipment rather than file as
+  // nothing.
+  const zeroQuantity = merged.filter((line) => !(line.quantity > 0))
+  results.push({
+    id: 'line-quantities',
+    severity: 'blocking',
+    title: 'Every invoice line has a quantity',
+    detail: zeroQuantity.length
+      ? `${zeroQuantity.length} line(s) have no readable quantity: ` +
+        `${zeroQuantity.map((l) => l.partNumber || l.description || l.id).join(', ')}. ` +
+        'A blank quantity must not be filed as zero.'
+      : 'Every line states a positive quantity.',
+    passed: zeroQuantity.length === 0,
+    refs: zeroQuantity.map((l) => l.id),
+  })
+
   const value = roundTo(sliLines.reduce((s, l) => s + l.valueUsd, 0), 2)
   const valueOk = Math.abs(value - header.totalValue) <= MONEY_TOLERANCE
   results.push({
@@ -316,19 +335,40 @@ function totalsChecks(
   // problem — an unverified weight is not the same as a verified one.
   const weight = roundTo(sliLines.reduce((s, l) => s + l.weightKg, 0), 3)
   if (!providesWeights) {
-    // A format that prints no weights cannot have them proved against it. Say so plainly
-    // rather than reporting a reconciliation that did not happen; the per-line
-    // `weights-present` check below is what actually guards the output here.
-    results.push({
-      id: 'total-weight',
-      severity: 'info',
-      title: 'Weights come from the saved per-part table',
-      detail:
-        'This document states no weights, so there is nothing to reconcile against. Rows total ' +
-        `${weight.toFixed(3)} kg from the per-part figures — confirm them before filing.`,
-      passed: true,
-      actual: weight.toFixed(3),
-    })
+    if (header.totalNetWeightKg != null) {
+      // No per-line weights, but the header carries a net total (the `omron-ci` form
+      // prints one, typed by the preparer). Both sides are supplied figures rather than
+      // document-proved ones, so this is a cross-check between the per-part table and the
+      // form — a warning that catches a stale or mistyped unit weight, not proof.
+      const weightOk = Math.abs(weight - header.totalNetWeightKg) <= WEIGHT_TOLERANCE
+      results.push({
+        id: 'total-weight',
+        severity: 'warning',
+        title: 'Supplied weights agree with the form’s net total',
+        detail: weightOk
+          ? `Rows total ${weight.toFixed(3)} kg net from the per-part figures, matching the total entered on the form.`
+          : `Rows total ${weight.toFixed(3)} kg from the per-part figures but the form states ` +
+            `${header.totalNetWeightKg.toFixed(3)} kg. One of the two is wrong — check the per-part weights ` +
+            'and the form before filing.',
+        passed: weightOk,
+        expected: header.totalNetWeightKg.toFixed(3),
+        actual: weight.toFixed(3),
+      })
+    } else {
+      // A format that prints no weights cannot have them proved against it. Say so plainly
+      // rather than reporting a reconciliation that did not happen; the per-line
+      // `weights-present` check below is what actually guards the output here.
+      results.push({
+        id: 'total-weight',
+        severity: 'info',
+        title: 'Weights come from the saved per-part table',
+        detail:
+          'This document states no weights, so there is nothing to reconcile against. Rows total ' +
+          `${weight.toFixed(3)} kg from the per-part figures — confirm them before filing.`,
+        passed: true,
+        actual: weight.toFixed(3),
+      })
+    }
   } else if (header.totalNetWeightKg == null) {
     results.push({
       id: 'total-weight',
@@ -733,18 +773,25 @@ function exportControlChecks(options: ReconcileOptions, merged: MergedLine[]): C
 }
 
 /**
- * Rows whose ECCN came from the CIPL rather than from the blanket value.
+ * Rows the document classifies under a *controlled* ECCN.
  *
  * Surfaced because the substitution runs the other way in the historical data: shipment
  * vendorB1 states `ECCN: 5A992.C` against its T20 pendant kit, and the SLI filed for it says
  * EAR99. A stated ECCN is a classification the exporter already made, so it wins — but the
  * reviewer is told, because it changes what is being declared.
+ *
+ * A stated EAR99 is deliberately not reported. The `omron-ci` form states an ECCN on every
+ * line and EAR99 is the common value, so flagging every stated value would turn this into a
+ * warning the reader learns to skip — and the declaration a stated EAR99 produces is the
+ * same one the blanket default would have.
  */
 function sourceEccnChecks(sliLines: SLILine[], merged: MergedLine[]): CheckResult[] {
   const byId = new Map(merged.map((l) => [l.id, l]))
   const stated = sliLines.flatMap((line, i) => {
     const sourceEccn = line.sourceLineIds.map((id) => byId.get(id)?.eccn).find(Boolean)
-    return sourceEccn ? [{ row: i + 1, scheduleB: line.scheduleB, eccn: sourceEccn }] : []
+    return sourceEccn && sourceEccn.trim().toUpperCase() !== 'EAR99'
+      ? [{ row: i + 1, scheduleB: line.scheduleB, eccn: sourceEccn }]
+      : []
   })
 
   if (!stated.length) return []
@@ -753,12 +800,12 @@ function sourceEccnChecks(sliLines: SLILine[], merged: MergedLine[]): CheckResul
     {
       id: 'eccn-from-document',
       severity: 'warning',
-      title: 'The CIPL states an ECCN for some rows',
+      title: 'The document states a controlled ECCN for some rows',
       detail:
         stated
-          .map((s) => `Row ${s.row} (${s.scheduleB}) will be filed as ${s.eccn}, as printed on the CIPL`)
+          .map((s) => `Row ${s.row} (${s.scheduleB}) will be filed as ${s.eccn}, as printed on the document`)
           .join('; ') +
-        '. A stated ECCN is not EAR99 — confirm it before signing.',
+        '. A stated classification beats the blanket value — confirm it before signing.',
       passed: false,
       refs: stated.map((s) => `row-${s.row}`),
     },

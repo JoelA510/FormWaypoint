@@ -8,7 +8,7 @@
  * Adding a format means adding a detector and a parser here — nothing downstream changes.
  */
 import type { CiplFormat, ParsedCipl } from '../types'
-import { readXlsx, WorkbookError } from '../item-library/read-workbook'
+import { isZip, readXlsx, WorkbookError } from '../item-library/read-workbook'
 import { extractTextPages, rowText, type TextPage } from './extract-text'
 import { isOmronCiPdf, isOmronCiWorkbook, parseOmronCiPdf, parseOmronCiWorkbook } from './parse-omron-ci'
 import { parseCiplPages as parseVendorAPages } from './parse-vendor-a'
@@ -75,9 +75,6 @@ export async function parseCipl(fileName: string, data: ArrayBuffer | Uint8Array
   }
   return format.parse(fileName, pages)
 }
-
-/** The PK ZIP signature every .xlsx starts with. */
-const isZip = (bytes: Uint8Array): boolean => bytes[0] === 0x50 && bytes[1] === 0x4b
 
 /**
  * Parse a shipment document of any supported kind — a CIPL PDF or the Commercial Invoice

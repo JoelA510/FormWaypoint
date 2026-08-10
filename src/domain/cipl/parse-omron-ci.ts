@@ -23,6 +23,7 @@
  */
 import type { ParsedCipl, PartyAddress, ShipmentHeader, SourceLine } from '../types'
 import type { SheetRows } from '../item-library/read-workbook'
+import { roundTo } from '../reconcile/lines'
 import { parseNumber, rowText, type TextItem, type TextPage, type TextRow } from './extract-text'
 
 /** The document number printed in the title bar; the strongest possible detector. */
@@ -274,7 +275,7 @@ function buildHeader(
   const freight = field('FREIGHT CHARGES').toUpperCase()
   return {
     invoiceNumber: field('INVOICE #'),
-    invoiceDate: field('INVOICE DATE'),
+    invoiceDate: dateText(field('INVOICE DATE')),
     onOrAboutDate: null,
     // BILL TO / SOLD TO is only filled in when it differs from the consignee.
     soldTo: parties.billTo.name ? parties.billTo : parties.consignee,
@@ -310,9 +311,25 @@ function buildHeader(
   }
 }
 
-function roundTo(value: number, decimals: number): number {
-  const factor = 10 ** decimals
-  return Math.round(value * factor) / factor
+/**
+ * A date cell as text, converting an Excel serial where the workbook stored one.
+ *
+ * Typing `8/10/2026` into the form's date cell makes Excel store the number 46244 with a
+ * date format, and `readXlsx` reads the raw value — so without this, importing the very
+ * workbook the form ships as would put a five-digit number where the review screen
+ * expects a date. The range covers 1990–2100; anything outside it is not plausibly a date
+ * on a live shipping document and passes through as the text it is.
+ */
+function dateText(value: string): string {
+  if (!/^\d{5}(\.\d+)?$/.test(value)) return value
+  const serial = Number(value)
+  if (serial < 32874 || serial > 73415) return value
+  // Excel's day 1 is 1900-01-01 with the fictitious 1900-02-29 baked in, so the epoch
+  // that makes modern serials come out right is 1899-12-30.
+  const date = new Date(Date.UTC(1899, 11, 30) + Math.round(serial) * 86400_000)
+  const mm = String(date.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(date.getUTCDate()).padStart(2, '0')
+  return `${mm}/${dd}/${date.getUTCFullYear()}`
 }
 
 // ---------------------------------------------------------------------------
@@ -337,6 +354,17 @@ export function isOmronCiPdf(pages: TextPage[]): boolean {
  * columns share an x position.
  */
 export function parseOmronCiPdf(fileName: string, pages: TextPage[]): ParsedCipl {
+  // The form is a single page by design (its PAGE box is preprinted "1 of 1"), and the
+  // geometry below depends on that: PDF y restarts on every page, so a second page's
+  // blocks would collide with the first's by baseline and merge into garbage. A
+  // multi-page print is a misprint or a layout this parser does not know — refuse it
+  // loudly rather than filing a corrupted table.
+  if (pages.length > 1) {
+    throw new Error(
+      `${fileName} has ${pages.length} pages, but the Commercial Invoice form (00004-00202) is a ` +
+        'single page. Re-print it to one page, or import the .xlsx workbook instead.',
+    )
+  }
   const grid = pagesToGrid(pages)
   return parseOmronCiWorkbook(fileName, grid)
 }
@@ -503,7 +531,6 @@ function tableRowsToBlocks(rows: TextRow[], anchors: Anchors): SheetRows {
   interface Block {
     ln: string
     y: number
-    topY: number | null
     top: Map<string, TextItem[]>
     bottom: Map<string, TextItem[]>
   }
@@ -511,7 +538,7 @@ function tableRowsToBlocks(rows: TextRow[], anchors: Anchors): SheetRows {
   const blocks: Block[] = []
   for (const row of rows) {
     for (const item of row.items) {
-      if (isLnCell(item, anchors)) blocks.push({ ln: item.str, y: item.y, topY: null, top: new Map(), bottom: new Map() })
+      if (isLnCell(item, anchors)) blocks.push({ ln: item.str, y: item.y, top: new Map(), bottom: new Map() })
     }
   }
   if (!blocks.length) return []
@@ -563,9 +590,12 @@ function tableRowsToBlocks(rows: TextRow[], anchors: Anchors): SheetRows {
         continue
       }
 
-      if (block.topY === null) block.topY = item.y
-      const isTop = item.y >= block.topY - pitch / 8
-      if (isTop) {
+      // The LN cell is vertically centred in the block, so its baseline divides the
+      // part/description row (above it — PDF y grows upward) from the compliance row
+      // (below it). Judged against the block's own geometry rather than first-item-seen,
+      // so a block whose part and description are blank still routes its compliance
+      // values to the compliance columns.
+      if (item.y > block.y) {
         push(block.top, item.x < partDescriptionBorder ? 'part' : 'description', item)
       } else {
         const column = nearest(item.x, ['coo', 'hts', 'eccn', 'license', 'sme'])

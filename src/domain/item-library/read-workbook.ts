@@ -269,6 +269,9 @@ function guessDelimiter(text: string): string {
   return ','
 }
 
+/** The PK magic number every ZIP container — and therefore every .xlsx — starts with. */
+export const isZip = (data: Uint8Array): boolean => data[0] === 0x50 && data[1] === 0x4b
+
 /** Reads whichever of the supported formats `fileName` names. */
 export async function readWorkbook(fileName: string, data: Uint8Array): Promise<SheetRows> {
   if (/\.(csv|tsv|txt)$/i.test(fileName)) return readDelimited(new TextDecoder().decode(data))
@@ -277,6 +280,6 @@ export async function readWorkbook(fileName: string, data: Uint8Array): Promise<
     throw new WorkbookError('The old .xls format is not supported. Open it in Excel and save as .xlsx or .csv.')
   }
   // No recognised extension: sniff the ZIP magic number rather than refusing outright.
-  if (data[0] === 0x50 && data[1] === 0x4b) return readXlsx(data)
+  if (isZip(data)) return readXlsx(data)
   return readDelimited(new TextDecoder().decode(data))
 }

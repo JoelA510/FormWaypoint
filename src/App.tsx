@@ -586,6 +586,8 @@ export function App() {
                 codesByPart={codesByPart}
                 classificationOverrides={overridesToMap(overrides)}
                 eccn={settings.eccn || null}
+                license={settings.license || null}
+                sme={settings.sme || null}
               />
               <HistoryPanel shipments={shipments} onClear={() => void clearAll()} />
             </>

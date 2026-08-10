@@ -58,7 +58,7 @@ export function simpleOmronCi(): OmronCiSpec {
     consigneeName: 'Example Consignee Pte. Ltd.',
     consigneeLines: ['1 Harbour Way', 'Singapore 018989', 'Singapore'],
     pieces: 2,
-    netWeightKg: 3.4,
+    netWeightKg: 3.2,
     grossWeightKg: 4.1,
     lines: [
       {

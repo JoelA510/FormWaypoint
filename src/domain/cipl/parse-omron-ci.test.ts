@@ -32,7 +32,7 @@ describe('the workbook grid', () => {
     expect(header.vesselAgent).toBe('Nippon Express')
     expect(header.documentCurrency).toBe('USD')
     expect(header.cartons).toBe(2)
-    expect(header.totalNetWeightKg).toBeCloseTo(3.4, 3)
+    expect(header.totalNetWeightKg).toBeCloseTo(3.2, 3)
     expect(header.totalGrossWeightKg).toBeCloseTo(4.1, 3)
     expect(header.consignedTo.name).toBe('Example Consignee Pte. Ltd.')
     expect(header.consignedTo.lines).toEqual(['1 Harbour Way', 'Singapore 018989', 'Singapore'])
@@ -92,11 +92,54 @@ describe('the workbook grid', () => {
 
   it('reconciles, with per-line export control satisfying the triplet check', () => {
     const result = reconcile(parseGrid(), null, { ...BLANK_CONTROLS, unitWeightsByPart: UNIT_WEIGHTS })
-    for (const id of ['total-quantity', 'total-value', 'weights-present', 'line-coverage', 'header-readable']) {
+    for (const id of ['total-quantity', 'total-value', 'weights-present', 'line-coverage', 'header-readable', 'line-quantities']) {
       expect(result.checks.find((c) => c.id === id), id).toMatchObject({ passed: true })
     }
     expect(result.checks.find((c) => c.id === 'export-control')).toMatchObject({ passed: true })
     expect(result.canGenerate).toBe(true)
+  })
+
+  it('converts an Excel date serial into the date the cell displayed', () => {
+    const grid = omronCiGrid(simpleOmronCi())
+    const row = grid.find((r) => r[1] === 'INVOICE #:')!
+    row[7] = '46244' // what readXlsx returns for a date-formatted 08/10/2026
+    const header = parseOmronCiWorkbook('ci.xlsx', grid).headers.FC
+    expect(header.invoiceDate).toBe('08/10/2026')
+  })
+
+  it('does not flag a stated EAR99, but flags a stated controlled ECCN', () => {
+    const result = reconcile(parseGrid(), null, { ...BLANK_CONTROLS, unitWeightsByPart: UNIT_WEIGHTS })
+    const check = result.checks.find((c) => c.id === 'eccn-from-document')
+    expect(check).toBeDefined()
+    // The 5A992.c line is reported; the EAR99 line is not.
+    expect(check!.detail).toContain('5A992.c')
+    expect(check!.detail).not.toContain('EAR99,')
+    expect(check!.refs).toHaveLength(1)
+  })
+
+  it('blocks a line whose quantity could not be read instead of filing zero', () => {
+    const spec = simpleOmronCi()
+    const grid = omronCiGrid(spec)
+    const firstTop = grid.findIndex((row) => row[2] === '10000-0001')
+    grid[firstTop][7] = '' // blank QTY on a real part
+    grid[firstTop][10] = ''
+    const parsed = parseOmronCiWorkbook('ci.xlsx', grid)
+    const result = reconcile(parsed, null, { ...BLANK_CONTROLS, unitWeightsByPart: UNIT_WEIGHTS })
+    expect(result.checks.find((c) => c.id === 'line-quantities')).toMatchObject({ passed: false, severity: 'blocking' })
+    expect(result.canGenerate).toBe(false)
+  })
+
+  it('cross-checks supplied per-part weights against the net total typed on the form', () => {
+    const agreeing = reconcile(parseGrid(), null, { ...BLANK_CONTROLS, unitWeightsByPart: UNIT_WEIGHTS })
+    expect(agreeing.checks.find((c) => c.id === 'total-weight')).toMatchObject({ passed: true, severity: 'warning' })
+
+    const stale = reconcile(parseGrid(), null, {
+      ...BLANK_CONTROLS,
+      unitWeightsByPart: { '10000-0001': 5, '20000-0002': 5 },
+    })
+    expect(stale.checks.find((c) => c.id === 'total-weight')).toMatchObject({ passed: false, severity: 'warning' })
+    // A disagreement between two supplied figures warns; it does not block.
+    expect(stale.canGenerate).toBe(true)
   })
 
   it('keeps lines with different export control in separate rows', () => {
@@ -163,5 +206,26 @@ describe('the printed PDF', () => {
   it('goes through the file entry point by content sniffing', async () => {
     const parsed = await parseCiplFile('ci.pdf', await buildOmronCiPdf(simpleOmronCi()))
     expect(parsed.format).toBe('omron-ci')
+  })
+
+  it('routes a compliance row correctly even when part and description are blank', async () => {
+    const spec = simpleOmronCi()
+    spec.lines[0] = { ...spec.lines[0], partNumber: '', description: '' }
+    const parsed = await parseCipl('ci.pdf', await buildOmronCiPdf(spec))
+    // The blank-part line still carries its compliance values in the right columns —
+    // COO must not surface as a part number.
+    const line = parsed.lines.find((l) => l.classification === '8544.42.0000')
+    expect(line).toBeDefined()
+    expect(line!.partNumber).toBe('')
+    expect(line!.countryOfOrigin).toBe('US')
+    expect(line!.eccn).toBe('EAR99')
+  })
+
+  it('refuses a multi-page print instead of merging its pages into garbage', async () => {
+    const doc = await (await import('pdf-lib')).PDFDocument.load(await buildOmronCiPdf(simpleOmronCi()))
+    const copy = await (await import('pdf-lib')).PDFDocument.load(await buildOmronCiPdf(simpleOmronCi()))
+    const [page] = await doc.copyPages(copy, [0])
+    doc.addPage(page)
+    await expect(parseCipl('ci.pdf', (await doc.save()).buffer as ArrayBuffer)).rejects.toThrow(/single page/)
   })
 })
