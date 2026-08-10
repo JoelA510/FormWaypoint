@@ -194,7 +194,7 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
     ...partCodeOverrideChecks(mergedLines, options.codesByPart),
     ...classificationChecks(sliLines, mergedLines, index),
     ...exportControlChecks(options, mergedLines),
-    ...sourceEccnChecks(sliLines, mergedLines),
+    ...sourceEccnChecks(sliLines, mergedLines, options.eccn),
     ...capacityCheck(sliLines, options.maxRows),
   ]
 
@@ -340,7 +340,14 @@ function totalsChecks(
       // prints one, typed by the preparer). Both sides are supplied figures rather than
       // document-proved ones, so this is a cross-check between the per-part table and the
       // form — a warning that catches a stale or mistyped unit weight, not proof.
-      const weightOk = Math.abs(weight - header.totalNetWeightKg) <= WEIGHT_TOLERANCE
+      //
+      // The tolerance is far looser than the printed-total branch below: the form's box
+      // is typically typed to one decimal while the per-part sum carries three, so the
+      // two can legitimately disagree by rounding. Holding them to a gram would fail
+      // routinely-correct shipments and train the reader to skip the one warning meant
+      // to catch a genuinely stale figure.
+      const suppliedTolerance = Math.max(0.05, header.totalNetWeightKg * 0.005)
+      const weightOk = Math.abs(weight - header.totalNetWeightKg) <= suppliedTolerance
       results.push({
         id: 'total-weight',
         severity: 'warning',
@@ -773,23 +780,25 @@ function exportControlChecks(options: ReconcileOptions, merged: MergedLine[]): C
 }
 
 /**
- * Rows the document classifies under a *controlled* ECCN.
+ * Rows whose stated ECCN changes what would otherwise be filed.
  *
- * Surfaced because the substitution runs the other way in the historical data: shipment
+ * Surfaced because the substitution runs both ways in the historical data: shipment
  * vendorB1 states `ECCN: 5A992.C` against its T20 pendant kit, and the SLI filed for it says
  * EAR99. A stated ECCN is a classification the exporter already made, so it wins — but the
  * reviewer is told, because it changes what is being declared.
  *
- * A stated EAR99 is deliberately not reported. The `omron-ci` form states an ECCN on every
- * line and EAR99 is the common value, so flagging every stated value would turn this into a
- * warning the reader learns to skip — and the declaration a stated EAR99 produces is the
- * same one the blanket default would have.
+ * "Changes" is judged against the blanket value: with no blanket entered, EAR99 is the
+ * unremarkable case (the `omron-ci` form states an ECCN on every line and EAR99 is the
+ * norm, so flagging each one would train the reader to skip the warning) — but a stated
+ * EAR99 *under a controlled blanket* is a downgrade of a classification a person entered,
+ * which is exactly what must not pass silently.
  */
-function sourceEccnChecks(sliLines: SLILine[], merged: MergedLine[]): CheckResult[] {
+function sourceEccnChecks(sliLines: SLILine[], merged: MergedLine[], blanketEccn: string | null): CheckResult[] {
+  const unremarkable = (blanketEccn ?? '').trim().toUpperCase() || 'EAR99'
   const byId = new Map(merged.map((l) => [l.id, l]))
   const stated = sliLines.flatMap((line, i) => {
     const sourceEccn = line.sourceLineIds.map((id) => byId.get(id)?.eccn).find(Boolean)
-    return sourceEccn && sourceEccn.trim().toUpperCase() !== 'EAR99'
+    return sourceEccn && sourceEccn.trim().toUpperCase() !== unremarkable
       ? [{ row: i + 1, scheduleB: line.scheduleB, eccn: sourceEccn }]
       : []
   })
@@ -800,7 +809,7 @@ function sourceEccnChecks(sliLines: SLILine[], merged: MergedLine[]): CheckResul
     {
       id: 'eccn-from-document',
       severity: 'warning',
-      title: 'The document states a controlled ECCN for some rows',
+      title: 'The document states an ECCN that changes what is declared',
       detail:
         stated
           .map((s) => `Row ${s.row} (${s.scheduleB}) will be filed as ${s.eccn}, as printed on the document`)

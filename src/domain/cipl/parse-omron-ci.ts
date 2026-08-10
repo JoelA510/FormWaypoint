@@ -200,19 +200,36 @@ function readLines(rows: SheetRows, purchaseOrder: string, invoiceNumber: string
     sme: sub.indexOf('SME (Y/N)'),
   }
 
+  const isLineNumber = (cell: string): boolean => {
+    const value = parseNumber(cell)
+    return value != null && Number.isInteger(value) && value >= 1
+  }
+
   const lines: SourceLine[] = []
-  for (let r = subIndex + 1; r + 1 < rows.length; r += 2) {
+  for (let r = subIndex + 1; r < rows.length; ) {
     const top = rows[r]
-    const bottom = rows[r + 1]
     const lineNumber = parseNumber(top[columns.ln] ?? '')
     // The table ends at the first row whose LN cell is not a line number (the totals band).
     if (lineNumber == null || !Number.isInteger(lineNumber) || lineNumber < 1) break
+
+    let bottom = rows[r + 1] ?? []
+    let stride = 2
+    // If the next row starts its own block, this block's compliance row was collapsed away
+    // (a writer that omits rows with no content). Read it as empty and resync, rather than
+    // letting the stride mis-pair every following block's export-control cells.
+    if (isLineNumber(bottom[columns.ln] ?? '')) {
+      bottom = []
+      stride = 1
+    }
 
     const cell = (row: string[], column: number): string => (column >= 0 ? (row[column] ?? '').trim() : '')
     const partNumber = cell(top, columns.part)
     const description = cell(top, columns.description)
     const quantity = parseNumber(cell(top, columns.qty))
-    if (!partNumber && !description && quantity == null) continue
+    if (!partNumber && !description && quantity == null) {
+      r += stride
+      continue
+    }
 
     const unitValue = parseNumber(cell(top, columns.unitPrice))
     // Prefer the sheet's own cached AMOUNT; fall back to the arithmetic when the cell has
@@ -251,6 +268,7 @@ function readLines(rows: SheetRows, purchaseOrder: string, invoiceNumber: string
       ...(unitValue != null ? { unitValue } : {}),
       ...(extendedValue != null ? { extendedValue } : {}),
     })
+    r += stride
   }
   return lines
 }
@@ -428,10 +446,16 @@ function pagesToGrid(pages: TextPage[]): SheetRows {
   }
 
   // Everything between the table headings and the totals band belongs to line blocks.
+  // The band is recognised by its own printed cells as *whole* cells, never as substrings
+  // of row text — a commodity described as "Warranty replacement - NO CHARGE" is line
+  // data, and truncating the table at it would silently drop every following line.
   let tableEnd = rows.length
   for (let i = subIndex + 1; i < rows.length; i++) {
-    const text = rowText(rows[i]).toUpperCase()
-    if (text.includes('NO CHARGE') || text.includes('SUBTOTAL')) {
+    const isTotalsBand = rows[i].items.some((item) => {
+      const cell = item.str.toUpperCase()
+      return cell === 'SUBTOTAL' || cell === 'TOTAL (USD)'
+    })
+    if (isTotalsBand) {
       tableEnd = i
       break
     }

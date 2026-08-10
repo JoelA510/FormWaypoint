@@ -117,6 +117,33 @@ describe('the workbook grid', () => {
     expect(check!.refs).toHaveLength(1)
   })
 
+  it('flags a stated EAR99 that downgrades a controlled blanket ECCN', () => {
+    const result = reconcile(parseGrid(), null, {
+      eccn: '5A992.c',
+      sme: null,
+      license: null,
+      unitWeightsByPart: UNIT_WEIGHTS,
+    })
+    const check = result.checks.find((c) => c.id === 'eccn-from-document')
+    // The EAR99 line now changes what would be filed, so it is the one reported;
+    // the 5A992.c line matches the blanket and is unremarkable.
+    expect(check).toBeDefined()
+    expect(check!.detail).toContain('EAR99')
+    expect(check!.refs).toHaveLength(1)
+  })
+
+  it('resyncs when a collapsed empty compliance row shifts the block stride', () => {
+    const spec = simpleOmronCi()
+    const grid = omronCiGrid(spec)
+    // Drop the empty compliance row of unused line 3, as a writer that omits blank
+    // rows would. Line blocks after the gap must still pair top and bottom correctly.
+    const line3Top = grid.findIndex((row) => row[1] === '3')
+    grid.splice(line3Top + 1, 1)
+    const parsed = parseOmronCiWorkbook('ci.xlsx', grid)
+    expect(parsed.lines).toHaveLength(2)
+    expect(parsed.lines[1]).toMatchObject({ partNumber: '20000-0002', countryOfOrigin: 'JP' })
+  })
+
   it('blocks a line whose quantity could not be read instead of filing zero', () => {
     const spec = simpleOmronCi()
     const grid = omronCiGrid(spec)
@@ -165,7 +192,17 @@ describe('the .xlsx round trip', () => {
 
   it('refuses a workbook that is not the form', async () => {
     const bytes = buildXlsx([{ name: 'Sheet1', rows: [['Part', 'Qty'], ['A', '1']] }])
-    await expect(parseCiplFile('other.xlsx', bytes)).rejects.toThrow(/not the Commercial Invoice form/)
+    await expect(parseCiplFile('other.xlsx', bytes)).rejects.toThrow(/Commercial Invoice/)
+  })
+
+  it('finds the form behind a cover sheet', async () => {
+    const bytes = buildXlsx([
+      { name: 'Cover', rows: [['Revision History'], ['Rev C — proposal']] },
+      { name: 'INV', rows: omronCiGrid(simpleOmronCi()) },
+    ])
+    const parsed = await parseCiplFile('ci.xlsx', bytes)
+    expect(parsed.format).toBe('omron-ci')
+    expect(parsed.lines).toHaveLength(2)
   })
 })
 
@@ -219,6 +256,14 @@ describe('the printed PDF', () => {
     expect(line!.partNumber).toBe('')
     expect(line!.countryOfOrigin).toBe('US')
     expect(line!.eccn).toBe('EAR99')
+  })
+
+  it('keeps a line whose description mentions NO CHARGE', async () => {
+    const spec = simpleOmronCi()
+    spec.lines[0] = { ...spec.lines[0], description: 'Warranty replacement - NO CHARGE' }
+    const parsed = await parseCipl('ci.pdf', await buildOmronCiPdf(spec))
+    expect(parsed.lines).toHaveLength(2)
+    expect(parsed.lines[0].description).toBe('Warranty replacement - NO CHARGE')
   })
 
   it('refuses a multi-page print instead of merging its pages into garbage', async () => {

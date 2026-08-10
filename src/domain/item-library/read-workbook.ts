@@ -148,28 +148,39 @@ export function columnToIndex(reference: string): number {
 // ---------------------------------------------------------------------------
 
 /**
- * Resolves the path of the first worksheet through the workbook's relationships.
+ * Resolves worksheet paths through the workbook's relationships, in tab order.
  *
  * Sheet order in `workbook.xml` is the order shown in Excel's tab bar, which is not
  * necessarily `sheet1.xml` — a workbook whose first tab was deleted and re-added starts at
  * `sheet2.xml`. Falling back to the lowest-numbered file would silently read the wrong tab.
  */
-function firstSheetPath(workbookXml: string, relsXml: string): string | null {
-  const sheet = workbookXml.match(/<sheet\b[^>]*\/?>/)?.[0]
-  const relationId = sheet?.match(/r:id="([^"]+)"/)?.[1]
-  if (!relationId) return null
-
+function sheetPaths(workbookXml: string, relsXml: string): string[] {
+  const targets = new Map<string, string>()
   for (const relation of relsXml.matchAll(/<Relationship\b[^>]*>/g)) {
-    if (relation[0].match(/Id="([^"]+)"/)?.[1] !== relationId) continue
+    const id = relation[0].match(/Id="([^"]+)"/)?.[1]
     const target = relation[0].match(/Target="([^"]+)"/)?.[1]
-    if (!target) return null
-    return target.startsWith('/') ? target.slice(1) : `xl/${target.replace(/^\.\//, '')}`
+    if (id && target) {
+      targets.set(id, target.startsWith('/') ? target.slice(1) : `xl/${target.replace(/^\.\//, '')}`)
+    }
   }
-  return null
+
+  const paths: string[] = []
+  for (const sheet of workbookXml.matchAll(/<sheet\b[^>]*\/?>/g)) {
+    const relationId = sheet[0].match(/r:id="([^"]+)"/)?.[1]
+    const path = relationId ? targets.get(relationId) : undefined
+    if (path) paths.push(path)
+  }
+  return paths
 }
 
-/** Reads the first worksheet of an .xlsx file. */
-export async function readXlsx(data: Uint8Array): Promise<SheetRows> {
+/**
+ * Reads every worksheet of an .xlsx file, in tab order.
+ *
+ * Most callers want only the first (an item master is one table), but the Commercial
+ * Invoice form can sit behind a cover or revision-history tab in a controlled document,
+ * and refusing the workbook because the wrong tab came first would be a wrong answer.
+ */
+export async function readXlsxSheets(data: Uint8Array): Promise<SheetRows[]> {
   const decoder = new TextDecoder()
   const parts = await unzip(
     data,
@@ -184,12 +195,17 @@ export async function readXlsx(data: Uint8Array): Promise<SheetRows> {
   if (!workbookXml) throw new WorkbookError('Not a .xlsx workbook — xl/workbook.xml is missing.')
 
   const relsXml = parts.get('xl/_rels/workbook.xml.rels')
-  const path = relsXml ? firstSheetPath(decoder.decode(workbookXml), decoder.decode(relsXml)) : null
-  const sheetBytes =
-    (path ? parts.get(path) : undefined) ??
-    parts.get('xl/worksheets/sheet1.xml') ??
-    [...parts.entries()].filter(([name]) => name.startsWith('xl/worksheets/')).sort(([a], [b]) => a.localeCompare(b))[0]?.[1]
-  if (!sheetBytes) throw new WorkbookError('This workbook contains no worksheets.')
+  const ordered = relsXml ? sheetPaths(decoder.decode(workbookXml), decoder.decode(relsXml)) : []
+  const sheetParts = ordered.map((path) => parts.get(path)).filter((bytes): bytes is Uint8Array => bytes != null)
+  if (!sheetParts.length) {
+    // No resolvable relationships: fall back to the worksheet files by name.
+    const byName = [...parts.entries()]
+      .filter(([name]) => name.startsWith('xl/worksheets/'))
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([, bytes]) => bytes)
+    sheetParts.push(...byName)
+  }
+  if (!sheetParts.length) throw new WorkbookError('This workbook contains no worksheets.')
 
   const shared: string[] = []
   const sharedBytes = parts.get('xl/sharedStrings.xml')
@@ -197,12 +213,28 @@ export async function readXlsx(data: Uint8Array): Promise<SheetRows> {
     for (const item of decoder.decode(sharedBytes).matchAll(/<si>([\s\S]*?)<\/si>/g)) shared.push(textRuns(item[1]))
   }
 
+  return sheetParts.map((bytes) => sheetRows(decoder.decode(bytes), shared))
+}
+
+/** Reads the first worksheet of an .xlsx file. */
+export async function readXlsx(data: Uint8Array): Promise<SheetRows> {
+  return (await readXlsxSheets(data))[0]
+}
+
+function sheetRows(sheetXml: string, shared: string[]): SheetRows {
   const rows: SheetRows = []
-  for (const row of decoder.decode(sheetBytes).matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
+  for (const row of sheetXml.matchAll(/<row\b([^>]*)>([\s\S]*?)<\/row>/g)) {
+    // Honour the row's own index. Excel and LibreOffice omit <row> records that hold no
+    // cells, and a consumer that reads the grid positionally (the Commercial Invoice
+    // form's two-rows-per-line table) must not see later rows shifted up into the gap.
+    const declaredIndex = Number(row[1].match(/r="(\d+)"/)?.[1])
+    if (Number.isInteger(declaredIndex)) {
+      while (rows.length < declaredIndex - 1) rows.push([])
+    }
     const cells: string[] = []
     // Matches both `<c ...>...</c>` and the self-closing `<c ... />` Excel writes for a
     // cell that carries only formatting.
-    for (const cell of row[1].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+    for (const cell of row[2].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
       const attributes = cell[1]
       const body = cell[2] ?? ''
       const reference = attributes.match(/r="([A-Z]+)\d+"/)?.[1]

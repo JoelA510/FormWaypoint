@@ -8,7 +8,7 @@
  * Adding a format means adding a detector and a parser here — nothing downstream changes.
  */
 import type { CiplFormat, ParsedCipl } from '../types'
-import { isZip, readXlsx, WorkbookError } from '../item-library/read-workbook'
+import { isZip, readXlsxSheets, WorkbookError } from '../item-library/read-workbook'
 import { extractTextPages, rowText, type TextPage } from './extract-text'
 import { isOmronCiPdf, isOmronCiWorkbook, parseOmronCiPdf, parseOmronCiWorkbook } from './parse-omron-ci'
 import { parseCiplPages as parseVendorAPages } from './parse-vendor-a'
@@ -87,17 +87,21 @@ export async function parseCiplFile(fileName: string, data: ArrayBuffer | Uint8A
   const bytes = data instanceof Uint8Array ? data : new Uint8Array(data)
   if (!isZip(bytes)) return parseCipl(fileName, bytes)
 
-  let rows
+  let sheets
   try {
-    rows = await readXlsx(bytes)
+    sheets = await readXlsxSheets(bytes)
   } catch (error) {
     if (error instanceof WorkbookError) throw new Error(`${fileName}: ${error.message}`)
     throw error
   }
-  if (!isOmronCiWorkbook(rows)) {
+  // Every tab, not just the first: a controlled document's form can sit behind a cover or
+  // revision-history sheet, and the doc number identifies the right one wherever it is.
+  const rows = sheets.find(isOmronCiWorkbook)
+  if (!rows) {
     throw new Error(
-      `${fileName} is a workbook, but not the Commercial Invoice form (00004-00202) this tool reads. ` +
-        'Workbook import supports that form only; CIPLs from other systems are read from their PDFs.',
+      `${fileName} is a workbook, but none of its ${sheets.length} sheet(s) is the Commercial Invoice ` +
+        'form (00004-00202) this tool reads. Workbook import supports that form only; CIPLs from other ' +
+        'systems are read from their PDFs.',
     )
   }
   return parseOmronCiWorkbook(fileName, rows)
