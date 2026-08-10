@@ -8,11 +8,14 @@
  * Adding a format means adding a detector and a parser here — nothing downstream changes.
  */
 import type { CiplFormat, ParsedCipl } from '../types'
+import { readXlsx, WorkbookError } from '../item-library/read-workbook'
 import { extractTextPages, rowText, type TextPage } from './extract-text'
+import { isOmronCiPdf, isOmronCiWorkbook, parseOmronCiPdf, parseOmronCiWorkbook } from './parse-omron-ci'
 import { parseCiplPages as parseVendorAPages } from './parse-vendor-a'
 import { isVendorBFormat, parseVendorBPages } from './parse-vendor-b'
 
 export * from './extract-text'
+export { isOmronCiWorkbook, parseOmronCiWorkbook } from './parse-omron-ci'
 
 export interface FormatDescriptor {
   id: CiplFormat
@@ -23,11 +26,17 @@ export interface FormatDescriptor {
 }
 
 /**
- * Order matters: the most specific detector runs first. `vendor-b` is identified by
- * its shipment-number banner; the FC/TP1 layout by its currency-set marker plus the
- * invoice-number label.
+ * Order matters: the most specific detector runs first. `omron-ci` is identified by its
+ * printed document number; `vendor-b` by its shipment-number banner; the FC/TP1 layout by
+ * its currency-set marker plus the invoice-number label.
  */
 export const CIPL_FORMATS: FormatDescriptor[] = [
+  {
+    id: 'omron-ci',
+    label: 'Omron Commercial Invoice (form 00004-00202)',
+    matches: isOmronCiPdf,
+    parse: parseOmronCiPdf,
+  },
   {
     id: 'vendor-b',
     label: 'Vendor B (commercial invoice + master packing list)',
@@ -65,4 +74,34 @@ export async function parseCipl(fileName: string, data: ArrayBuffer | Uint8Array
     )
   }
   return format.parse(fileName, pages)
+}
+
+/** The PK ZIP signature every .xlsx starts with. */
+const isZip = (bytes: Uint8Array): boolean => bytes[0] === 0x50 && bytes[1] === 0x4b
+
+/**
+ * Parse a shipment document of any supported kind — a CIPL PDF or the Commercial Invoice
+ * workbook (form 00004-00202) as .xlsx.
+ *
+ * Dispatch is by content, not extension: a workbook is a ZIP whatever it is called, and a
+ * PDF renamed .xlsx should be read as the PDF it is rather than refused for its name.
+ */
+export async function parseCiplFile(fileName: string, data: ArrayBuffer | Uint8Array): Promise<ParsedCipl> {
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data)
+  if (!isZip(bytes)) return parseCipl(fileName, bytes)
+
+  let rows
+  try {
+    rows = await readXlsx(bytes)
+  } catch (error) {
+    if (error instanceof WorkbookError) throw new Error(`${fileName}: ${error.message}`)
+    throw error
+  }
+  if (!isOmronCiWorkbook(rows)) {
+    throw new Error(
+      `${fileName} is a workbook, but not the Commercial Invoice form (00004-00202) this tool reads. ` +
+        'Workbook import supports that form only; CIPLs from other systems are read from their PDFs.',
+    )
+  }
+  return parseOmronCiWorkbook(fileName, rows)
 }

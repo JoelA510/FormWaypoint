@@ -193,7 +193,7 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
     ...partCodeChecks(mergedLines, index, options.itemsByPart),
     ...partCodeOverrideChecks(mergedLines, options.codesByPart),
     ...classificationChecks(sliLines, mergedLines, index),
-    ...exportControlChecks(options),
+    ...exportControlChecks(options, mergedLines),
     ...sourceEccnChecks(sliLines, mergedLines),
     ...capacityCheck(sliLines, options.maxRows),
   ]
@@ -693,20 +693,29 @@ function classificationChecks(
 }
 
 /**
- * The export-control triplet is a decision, not an extraction.
+ * The export-control triplet is a decision, not an extraction — with one exception.
  *
- * A CIPL never carries an ECCN. Treating its absence as EAR99, or EAR99 as automatically
- * meaning NLR, is precisely the inference an export-compliance tool must not make, so these
- * are surfaced as an unanswered question rather than filled in.
+ * The vendor CIPLs never carry it (beyond `vendor-b`'s occasional ECCN). Treating absence
+ * as EAR99, or EAR99 as automatically meaning NLR, is precisely the inference an
+ * export-compliance tool must not make, so an unanswered blanket value is surfaced as an
+ * unanswered question rather than filled in.
+ *
+ * The `omron-ci` form is the exception: it states ECCN, license and SME per line, and a
+ * stated value is a classification the exporter already made. A component of the triplet
+ * is therefore only "missing" when the blanket value is unset *and* some line does not
+ * state its own.
  */
-function exportControlChecks(options: ReconcileOptions): CheckResult[] {
+function exportControlChecks(options: ReconcileOptions, merged: MergedLine[]): CheckResult[] {
+  const statedEverywhere = (value: (line: MergedLine) => string | undefined): boolean =>
+    merged.length > 0 && merged.every((line) => value(line))
+
   const missing = [
-    ['ECCN / EAR99 / USML category', options.eccn],
-    ['SME', options.sme],
-    ['Licence, exception or NLR', options.license],
+    ['ECCN / EAR99 / USML category', options.eccn, (line: MergedLine) => line.eccn],
+    ['SME', options.sme, (line: MergedLine) => line.sme],
+    ['Licence, exception or NLR', options.license, (line: MergedLine) => line.license],
   ]
-    .filter(([, value]) => !value)
-    .map(([label]) => label)
+    .filter(([, blanket, stated]) => !blanket && !statedEverywhere(stated as (line: MergedLine) => string | undefined))
+    .map(([label]) => label as string)
 
   return [
     {
@@ -716,7 +725,8 @@ function exportControlChecks(options: ReconcileOptions): CheckResult[] {
       detail: missing.length
         ? `Not yet set: ${missing.join(', ')}. These are not on the CIPL and are never inferred — ` +
           'an absent ECCN does not establish EAR99, and EAR99 does not by itself establish NLR.'
-        : `Every row will be filed as ${options.eccn} / SME ${options.sme} / ${options.license}, as entered.`,
+        : 'Every row carries a full export-control triplet, from the document line where stated and the ' +
+          'entered blanket value otherwise.',
       passed: missing.length === 0,
     },
   ]

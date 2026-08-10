@@ -194,17 +194,21 @@ export function aggregateLines(lines: MergedLine[], options: AggregationOptions)
       options.overrides?.[sourceCode] ||
       line.classification
     const df = domesticForeign(line.countryOfOrigin)
-    // An ECCN printed on the CIPL is authoritative and beats the blanket value. Filing
-    // EAR99 over a stated 5A992.C would be a misdeclaration, and it is also part of the
-    // grouping key: two lines that differ in export control are not one commodity row.
+    // An export-control value printed on the document is authoritative and beats the
+    // blanket value. Filing EAR99 over a stated 5A992.C would be a misdeclaration, and the
+    // same holds for a stated license or SME (the `omron-ci` form prints all three per
+    // line). All three are part of the grouping key: two lines that differ in export
+    // control are not one commodity row.
     const eccn = line.eccn || options.eccn
+    const license = line.license || options.license
+    const sme = line.sme || options.sme
 
     const key = [
       normalizeScheduleB(code),
       df,
       eccn ?? '',
-      options.license ?? '',
-      options.sme ?? '',
+      license ?? '',
+      sme ?? '',
       canonicalUnit(line.uom) ?? '',
     ].join('|')
 
@@ -233,8 +237,8 @@ export function aggregateLines(lines: MergedLine[], options: AggregationOptions)
         weightKg: line.netWeightKg ?? 0,
         valueUsd: line.extendedValue ?? 0,
         eccn,
-        sme: options.sme,
-        license: options.license,
+        sme,
+        license,
         countriesOfOrigin: [line.countryOfOrigin],
       })
     }

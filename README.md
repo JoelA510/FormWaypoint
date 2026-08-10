@@ -29,6 +29,7 @@ but a Windows runner.
 | --- | --- | --- | --- |
 | Vendor A (FC/TP1 dual-currency) | Invoice + packing list, printed twice (USD and destination currency) | per line | not stated |
 | the vendor shipment (`SHIPMENT#`) | Commercial invoice + master packing list, single copy | **none — supplied per part** | stated per line |
+| Omron Commercial Invoice (form 00004-00202) | The in-house fixed-grid invoice, read from the **.xlsx workbook itself** or a PDF printed from it | **none — supplied per part** | full triplet (ECCN, license, SME) stated per line |
 
 The format is detected from the document and dispatched to its own parser; everything
 downstream is shared. Adding a third means adding a detector and a parser, nothing else.
