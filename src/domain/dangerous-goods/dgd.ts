@@ -22,7 +22,7 @@
  *    that says "Page 1 of 1" on the first of two sheets is a defective document.
  */
 import { localDate } from '../../lib/report'
-import { groupByClassification, packageCountInConsignment, type DgAssessment } from './assess'
+import { groupByClassification, packageCountInConsignment, type DgAssessment, type EntryAssessment } from './assess'
 import type { DgConsignment, Overpack } from './types'
 
 /**
@@ -225,9 +225,7 @@ export function buildDeclaration(consignment: DgConsignment, assessment: DgAsses
     // the Shipper's Declaration would declare goods the declaration does not cover. A
     // mixed consignment therefore prints only its fully regulated entries, and the notes
     // say the Section II packages travel beside them.
-    const groups = groupByClassification(
-      packageAssessment.entries.filter((e) => e.classification.declarationRequired),
-    )
+    const groups = groupByClassification(applyA181(packageAssessment.entries.filter((e) => e.classification.declarationRequired)))
 
     const overpack = pkg.overpackId ? consignment.overpacks.find((o) => o.id === pkg.overpackId) : null
     const groupList = [...groups.values()]
@@ -290,6 +288,31 @@ export function buildDeclaration(consignment: DgConsignment, assessment: DgAsses
     lines,
     notes: declarationNotes(consignment, assessment),
   }
+}
+
+/**
+ * Special provision A181, applied to the entries a package puts on the declaration.
+ *
+ * A package holding batteries both packed with equipment and contained in equipment *is*
+ * described as packed with equipment — the package and the shipping paper alike, which is
+ * what the `dg.a181` check tells the shipper. Printing the contained-in entry as its own
+ * line contradicted that in the one place it is read: two entries on the paper, one of
+ * them naming a description the provision says does not apply to this package.
+ *
+ * Only the description changes. The batteries are the same batteries and their mass is the
+ * same mass — it lands on the packed-with line, which is where A181 puts the total.
+ */
+function applyA181(entries: EntryAssessment[]): EntryAssessment[] {
+  const packedWith = entries.find((e) => e.entry.spec.configuration === 'packed-with-equipment')
+  if (!packedWith || !entries.some((e) => e.entry.spec.configuration === 'contained-in-equipment')) {
+    return entries
+  }
+  return entries.map((e) =>
+    e.entry.spec.configuration === 'contained-in-equipment' &&
+    e.classification.unNumber === packedWith.classification.unNumber
+      ? { ...e, classification: packedWith.classification }
+      : e,
+  )
 }
 
 /** Box 18. The emergency contact first, because that is what it is read for. */

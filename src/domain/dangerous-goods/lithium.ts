@@ -489,9 +489,15 @@ export function classifyForAir(
   const isSectionII = section === 'II'
   // Section I and IA are the fully regulated sections that demand performance packaging;
   // IB is fully regulated but takes a strong rigid outer packaging instead.
-  const isSectionIOrIA = section === 'IA' || section === 'I'
+  //
+  // A null section is *not* a lesser case: PI 976 has none at all and every standalone
+  // sodium ion battery under it is fully regulated, and an unknown energy band is read
+  // conservatively as fully regulated too. Treating those as though Section IB's A802
+  // exception covered them let them skip the packaging check entirely, under a message
+  // citing an exception written for two other packing instructions.
+  const performancePackagingSection = section === 'IA' || section === 'I' || section === null
   // Equipment is its own enclosure, so contained-in never takes performance packaging.
-  const unSpecificationPackaging = isSectionIOrIA && spec.configuration !== 'contained-in-equipment'
+  const unSpecificationPackaging = performancePackagingSection && spec.configuration !== 'contained-in-equipment'
 
   return {
     spec,

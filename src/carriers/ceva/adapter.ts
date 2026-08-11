@@ -140,7 +140,9 @@ export function createCevaAdapter(): CarrierAdapter {
           `Rows on this shipment carry different ECCNs (${eccns.join(', ')}), but the form has one box for all ` +
             'of them. Both were written; split the shipment or annotate box 24 before signing.',
         )
-      } else if (eccns.length === 1 && eccns[0] !== 'EAR99') {
+        // Compared the way `distinct` compares, which is case-insensitively: a hand-typed
+        // `ear99` is the same classification as `EAR99` and belongs in the same blank box.
+      } else if (eccns.length === 1 && eccns[0].trim().toUpperCase() !== 'EAR99') {
         setText(ctx, F.eccn, eccns[0])
       }
 

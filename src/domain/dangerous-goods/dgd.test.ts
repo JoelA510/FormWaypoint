@@ -524,3 +524,42 @@ describe('warnings across a multi-sheet declaration', () => {
     expect(new Set(warnings).size).toBe(warnings.length)
   })
 })
+
+describe('special provision A181 on the declaration', () => {
+  it('describes a package holding both configurations as packed with equipment, on one line', () => {
+    // Both fully regulated, so both would otherwise print — one of them naming the
+    // description A181 says does not apply to this package.
+    const shipment = consignment([
+      pkg('p1', [
+        entry('e1', { configuration: 'packed-with-equipment', wattHours: 300 }, { netWeightKgPerPackage: 2 }),
+        entry('e2', { configuration: 'contained-in-equipment', wattHours: 300 }, {
+          netWeightKgPerPackage: 1,
+          countPerPackage: 1,
+        }),
+      ]),
+    ])
+    const declaration = buildDeclaration(shipment, assess(shipment))
+    expect(declaration.lines).toHaveLength(1)
+    expect(declaration.lines[0]).toMatchObject({
+      unNumber: 'UN3481',
+      properShippingName: ['Lithium ion batteries packed', 'with equipment'],
+      packingInstruction: '966 I',
+    })
+    // The mass is the same mass: A181 puts the package total on that line.
+    expect(declaration.lines[0].quantityAndType.join(' ')).toBe('1 Fibreboard box x 3 kg')
+  })
+
+  it('leaves a package with only one configuration alone', () => {
+    const shipment = consignment([
+      pkg('p1', [entry('e1', { configuration: 'contained-in-equipment', wattHours: 300 }, {
+        netWeightKgPerPackage: 2,
+        countPerPackage: 1,
+      })]),
+    ])
+    const declaration = buildDeclaration(shipment, assess(shipment))
+    expect(declaration.lines[0]).toMatchObject({
+      properShippingName: ['Lithium ion batteries', 'contained in equipment'],
+      packingInstruction: '967 I',
+    })
+  })
+})

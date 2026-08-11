@@ -873,8 +873,15 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
       severity: 'info',
       title: `${label}: strong rigid outer packaging`,
       detail:
-        'This section does not require UN specification packaging — special provision A802 expressly excepts ' +
-        'Section IB of PI 965 and PI 968 — but the package must still be a strong, rigid outer packaging' +
+        'This section does not require UN specification packaging' +
+        // Cited only where it is the reason. A802's exception is written for Section IB of
+        // PI 965 and PI 968; a Section II package is outside the requirement for its own
+        // reasons, and naming A802 there reads as though an exception had been applied to
+        // it that never mentions it.
+        (entries.some((e) => e.classification.section === 'IB')
+          ? ' — special provision A802 expressly excepts Section IB of PI 965 and PI 968 —'
+          : '') +
+        ' but the package must still be a strong, rigid outer packaging' +
         (entries.some((e) => e.classification.dropTestRequired) ? ', capable of a 1.2 m drop test' : '') +
         (entries.some((e) => e.classification.stackTestRequired)
           ? ' and of a 3 m stack test held for 24 hours'
