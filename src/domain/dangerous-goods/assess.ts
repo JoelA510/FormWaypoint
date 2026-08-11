@@ -54,8 +54,6 @@ export interface PackageAssessment {
   entries: EntryAssessment[]
   /** Net battery weight in **one** package, summed over its entries. */
   netWeightKg: number
-  /** The net quantity ceiling actually in force — the lower of the PI figure and the box's own. */
-  effectiveLimitKg: number | null
   /** Marks and labels this package must carry, after the consignment-level exemptions. */
   hazardCommunication: string[]
   /** Why the battery mark may be omitted, or null when it must be applied. */
@@ -211,7 +209,6 @@ export function assess(consignment: DgConsignment): DgAssessment {
     (sum, p) => sum + packageCountInConsignment(p, consignment),
     0,
   )
-  const usingPassenger = consignment.aircraft === 'passenger-and-cargo'
 
   for (const pkg of consignment.packages) {
     const entries: EntryAssessment[] = pkg.entries.map((entry) => ({
@@ -226,19 +223,11 @@ export function assess(consignment: DgConsignment): DgAssessment {
 
     const netWeightKg = kg(entries.reduce((sum, e) => sum + (e.entry.netWeightKgPerPackage ?? 0), 0))
     const exemption = batteryMarkExemption(entries, totalPackages)
-    const instructionLimit = entries.length
-      ? Math.min(
-          ...entries.map((e) =>
-            usingPassenger ? (e.classification.limits.passengerKg ?? Infinity) : e.classification.limits.cargoKg,
-          ),
-        )
-      : Infinity
 
     packages.push({
       pkg,
       entries,
       netWeightKg,
-      effectiveLimitKg: effectiveLimit(instructionLimit, pkg.packagingAuthorizationLimitKg),
       hazardCommunication: packageHazardCommunication(entries, consignment, pkg, exemption),
       batteryMarkExemption: exemption,
       declarationRequired: entries.some((e) => e.classification.declarationRequired),
@@ -293,19 +282,6 @@ export function assess(consignment: DgConsignment): DgAssessment {
         : null,
     },
   }
-}
-
-/**
- * The net quantity ceiling actually in force for a package.
- *
- * The packing instruction states the regulatory maximum; the tested design type states what
- * this box was proved to hold. Where the box's own authorization is lower it governs, because
- * a package filled to the regulatory figure in a container never tested for it is not a
- * compliant package — it is an untested one.
- */
-function effectiveLimit(instructionLimitKg: number, authorizationLimitKg: number | null): number | null {
-  const candidates = [instructionLimitKg, authorizationLimitKg ?? Infinity].filter((v) => Number.isFinite(v))
-  return candidates.length ? Math.min(...candidates) : null
 }
 
 /** The consignment has to describe something before any of it can be checked. */

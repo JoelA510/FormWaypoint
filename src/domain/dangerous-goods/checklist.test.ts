@@ -159,6 +159,29 @@ describe('the checklist states each entry against its own allowance', () => {
     expect(markdown).toContain('UN3480: 8 kg in this package, at or below the 10 kg')
     expect(markdown).toContain('UN3090: 2 kg in this package, at or below the 2.5 kg')
   })
+
+  it('states one allowance for a package A181 makes one entry of', () => {
+    // Prepared to Section I, so both are declared. A181 makes them one entry: the bench
+    // checklist listed two, each against its own configuration's allowance, while the
+    // declaration in the same envelope printed one merged line.
+    const shipment = consignment([
+      pkg('p1', [
+        entry('e1', { configuration: 'packed-with-equipment', wattHours: 90 }, {
+          netWeightKgPerPackage: 2,
+          prepareToSectionI: true,
+        }),
+        entry('e2', { configuration: 'contained-in-equipment', wattHours: 90 }, {
+          netWeightKgPerPackage: 2,
+          countPerPackage: 1,
+          prepareToSectionI: true,
+        }),
+      ]),
+    ])
+    const markdown = buildChecklist(shipment, assess(shipment), '2026-08-06')
+    const allowances = markdown.split('\n').filter((l) => l.includes('in this package, at or below'))
+    expect(allowances).toHaveLength(1)
+    expect(allowances[0]).toContain('UN3481: 4 kg in this package')
+  })
 })
 
 describe('the prepared date shown beside the retention date', () => {

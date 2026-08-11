@@ -13,7 +13,7 @@
  * rather than a summary of findings.
  */
 import { cell } from '../../lib/report'
-import { groupByClassification, packageCountInConsignment, type DgAssessment } from './assess'
+import { applyA181, groupByClassification, packageCountInConsignment, type DgAssessment } from './assess'
 import { formatKg } from './dgd'
 import {
   CHEMISTRY_LABELS,
@@ -210,7 +210,11 @@ export function buildChecklist(
     // Per regulatory entry, because that is how the limits are written and how the checks
     // apply them: stating the lowest of them as a package ceiling told the packer a 10 kg
     // box of UN3480 had to come in under the 2.5 kg its UN3090 line is allowed.
-    for (const [, { classification, weightKg }] of groupByClassification(assessed.entries)) {
+    // Through `applyA181` first, like the declaration and the shared-packaging count. A box
+    // holding one UN number both packed with and contained in equipment is one entry under
+    // that provision; listing two here would have the packer checking two allowances
+    // against a package the paper describes as one.
+    for (const [, { classification, weightKg }] of groupByClassification(applyA181(assessed.entries))) {
       const limit =
         consignment.aircraft === 'passenger-and-cargo'
           ? classification.limits.passengerKg

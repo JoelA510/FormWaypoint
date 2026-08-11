@@ -348,7 +348,15 @@ export function App() {
 
   const handleDgPrepared = useCallback(async (record: DgConsignmentRecord) => {
     await localStore.saveDgConsignment(record)
-    setDgConsignments(await localStore.listDgConsignments())
+    // Refreshing the list on screen is not part of the obligation the write satisfies. The
+    // caller reports a rejection here as "this machine did not record that it was
+    // prepared", which would be false if the record went in and only the read back failed —
+    // and would send someone to duplicate evidence that is already on file.
+    try {
+      setDgConsignments(await localStore.listDgConsignments())
+    } catch {
+      // The retention list is re-read on the next load; the record itself is written.
+    }
   }, [])
 
   const importItemLibrary = useCallback(async (entries: ItemLibraryEntry[], mode: ImportMode) => {
