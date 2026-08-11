@@ -891,3 +891,37 @@ describe('an overpack holding only excepted packages', () => {
     expect(marks).toContain('#A001')
   })
 })
+
+describe('the packaging authorization binds the package, not each entry in it', () => {
+  it('blocks a box tested for 6 kg holding 5 kg of each of two UN numbers', () => {
+    const overfilled = consignment([
+      pkg('p1', [
+        entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 5 }),
+        entry('e2', { chemistry: 'lithium-metal', lithiumContentG: 1 }, {
+          netWeightKgPerPackage: 2,
+          wattHourMarkedOnCase: false,
+        }),
+      ], { packagingAuthorizationLimitKg: 6 }),
+    ])
+    const result = assess(overfilled)
+    // Each entry is inside its own allowance — 5 of 10 kg, 2 of 2.5 kg — and the box still
+    // holds 7 kg it was never tested for.
+    expect(result.checks.filter((c) => c.id.startsWith('dg.limit.p1')).every((c) => c.passed)).toBe(true)
+    expect(check(result, 'dg.package-authorization.p1')).toMatchObject({
+      severity: 'blocking',
+      passed: false,
+      expected: '≤ 6 kg',
+      actual: '7 kg',
+    })
+    expect(result.canGenerate).toBe(false)
+  })
+
+  it('passes when the total is inside the tested weight', () => {
+    const fine = consignment([
+      pkg('p1', [entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 5 })], {
+        packagingAuthorizationLimitKg: 6,
+      }),
+    ])
+    expect(check(assess(fine), 'dg.package-authorization.p1')).toMatchObject({ passed: true })
+  })
+})

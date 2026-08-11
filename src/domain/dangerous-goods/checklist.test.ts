@@ -142,3 +142,20 @@ describe('a package holding loose cells beside equipment', () => {
     expect(markdown).toContain('- [ ] Equipment secured against movement')
   })
 })
+
+describe('the checklist states each entry against its own allowance', () => {
+  it('does not hold a 10 kg UN3480 line to the 2.5 kg its UN3090 neighbour is allowed', () => {
+    const shipment = consignment([
+      pkg('p1', [
+        entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 8 }),
+        entry('e2', { chemistry: 'lithium-metal', lithiumContentG: 1 }, {
+          netWeightKgPerPackage: 2,
+          wattHourMarkedOnCase: false,
+        }),
+      ]),
+    ])
+    const markdown = buildChecklist(shipment, assess(shipment), '2026-08-06')
+    expect(markdown).toContain('UN3480: 8 kg in this package, at or below the 10 kg')
+    expect(markdown).toContain('UN3090: 2 kg in this package, at or below the 2.5 kg')
+  })
+})

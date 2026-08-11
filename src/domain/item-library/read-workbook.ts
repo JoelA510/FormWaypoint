@@ -246,6 +246,15 @@ export async function readXlsx(data: Uint8Array): Promise<SheetRows> {
   return (await readXlsxSheets(data, 1))[0]
 }
 
+/**
+ * The widest run of omitted rows this will reproduce.
+ *
+ * Generous against any real document — the Commercial Invoice form's whole print area is
+ * fifty-odd rows — and small enough that a file claiming a row index in the hundreds of
+ * thousands cannot turn an import into an out-of-memory.
+ */
+const MAX_ROW_GAP = 4096
+
 function sheetRows(sheetXml: string, shared: string[]): SheetRows {
   const rows: SheetRows = []
   // Both `<row ...>…</row>` and the self-closing `<row .../>` Excel writes for a row that
@@ -258,7 +267,11 @@ function sheetRows(sheetXml: string, shared: string[]): SheetRows {
     // cells, and a consumer that reads the grid positionally (the Commercial Invoice
     // form's two-rows-per-line table) must not see later rows shifted up into the gap.
     const declaredIndex = Number(row[1].match(/r="(\d+)"/)?.[1])
-    if (Number.isInteger(declaredIndex)) {
+    // Bounded: `r` comes out of the file, and a worksheet carrying a stray styled row near
+    // Excel's millionth row would otherwise allocate a million empty arrays — per sheet,
+    // for every tab searched. A gap wider than any real form is a defect in the file, not
+    // a layout to reproduce, so the rows are simply read in order past it.
+    if (Number.isInteger(declaredIndex) && declaredIndex - 1 - rows.length <= MAX_ROW_GAP) {
       while (rows.length < declaredIndex - 1) rows.push([])
     }
     const cells: string[] = []

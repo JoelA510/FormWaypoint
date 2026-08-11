@@ -776,6 +776,31 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
     })
   }
 
+  // --- The packaging's own ceiling ---------------------------------------
+  // The instruction limits above are per regulatory entry — two UN numbers in one box each
+  // get their own allowance — but a tested design type holds what it was proved to hold,
+  // whatever is inside it. Applied per entry only, a box authorized for 6 kg passes twice
+  // at 5 kg apiece and travels with 10 kg in it.
+  const authorization = pkg.packagingAuthorizationLimitKg
+  if (authorization != null && entries.length) {
+    const within = assessment.netWeightKg <= authorization
+    checks.push({
+      id: `dg.package-authorization.${pkg.id}`,
+      severity: 'blocking',
+      title: `${label}: total net weight within the packaging’s authorization`,
+      detail: within
+        ? `${assessment.netWeightKg} kg of batteries in a package authorized for ${authorization} kg. The ` +
+          'per-entry allowances above are regulatory maxima; this is what this design type was tested to hold.'
+        : `${assessment.netWeightKg} kg of batteries in a package authorized for ${authorization} kg. Each entry ` +
+          'may be inside its own allowance and the package still over its tested weight — the design type ' +
+          'holds what it was proved to hold, whatever the mix inside it.',
+      passed: within,
+      expected: `≤ ${authorization} kg`,
+      actual: `${assessment.netWeightKg} kg`,
+      refs: [pkg.id],
+    })
+  }
+
   // --- Combined contents -------------------------------------------------
   // Special provision A181 governs a package holding both packed-with and contained-in
   // batteries: the *total* mass is what the column limits apply to, and the package and the
