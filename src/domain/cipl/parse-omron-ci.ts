@@ -115,9 +115,21 @@ const TABLE_HEADINGS = new Set<string>([...Object.values(TOP_COLUMNS), ...Object
 export function isOmronCiWorkbook(rows: SheetRows): boolean {
   return (
     rows.some((row) => row.some((cell) => cell.includes(DOC_NUMBER))) &&
-    rows.some((row) => row.includes(TOP_COLUMNS.part)) &&
-    rows.some((row) => row.includes(SUB_COLUMNS.coo))
+    rows.some((row) => headingAt(row, TOP_COLUMNS.part) >= 0) &&
+    rows.some((row) => headingAt(row, SUB_COLUMNS.coo) >= 0)
   )
+}
+
+/**
+ * Where a heading sits in a row, or -1.
+ *
+ * Compared without case or surrounding space, like every other label on this form and like
+ * the whole of the PDF path. Matched exactly, a title-cased revision of the workbook was
+ * refused as "not the Commercial Invoice form" while its own printed PDF parsed cleanly —
+ * two answers about one document, decided by the shift key.
+ */
+function headingAt(row: string[], heading: string): number {
+  return row.findIndex((cell) => cell.trim().toUpperCase() === heading)
 }
 
 export function parseOmronCiWorkbook(fileName: string, rows: SheetRows): ParsedCipl {
@@ -226,21 +238,24 @@ function readParties(rows: SheetRows): { shipper: PartyAddress; consignee: Party
  * where an incomplete line gets held, with the person who can fix it looking at it.
  */
 function readLines(rows: SheetRows, purchaseOrder: string, invoiceNumber: string, warnings: string[]): SourceLine[] {
-  const headIndex = rows.findIndex((row) => row.includes(TOP_COLUMNS.part) && row.includes(TOP_COLUMNS.qty))
+  const headIndex = rows.findIndex(
+    (row) => headingAt(row, TOP_COLUMNS.part) >= 0 && headingAt(row, TOP_COLUMNS.qty) >= 0,
+  )
   const subIndex = headIndex === -1 ? -1 : headIndex + 1
-  if (headIndex === -1 || !rows[subIndex]?.includes(SUB_COLUMNS.coo)) {
+  const subRow = subIndex === -1 ? undefined : rows[subIndex]
+  if (headIndex === -1 || !subRow || headingAt(subRow, SUB_COLUMNS.coo) < 0) {
     warnings.push('The commodity table headings were not found; no lines were read.')
     return []
   }
 
   const head = rows[headIndex]
-  const sub = rows[subIndex]
+  const sub = subRow
   const columns = {
     ...(Object.fromEntries(
-      Object.entries(TOP_COLUMNS).map(([key, heading]) => [key, head.indexOf(heading)]),
+      Object.entries(TOP_COLUMNS).map(([key, heading]) => [key, headingAt(head, heading)]),
     ) as Record<keyof typeof TOP_COLUMNS, number>),
     ...(Object.fromEntries(
-      Object.entries(SUB_COLUMNS).map(([key, heading]) => [key, sub.indexOf(heading)]),
+      Object.entries(SUB_COLUMNS).map(([key, heading]) => [key, headingAt(sub, heading)]),
     ) as Record<keyof typeof SUB_COLUMNS, number>),
   }
 

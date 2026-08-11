@@ -233,47 +233,96 @@ type Schema = IDBPDatabase<unknown>
 
 let dbPromise: Promise<Schema> | null = null
 
+/**
+ * The open database, opened once.
+ *
+ * Wrapped rather than handed straight back from `openDB` because of what happens when the
+ * version changes under a browser that already has this app open somewhere else. IndexedDB
+ * will not upgrade while an older connection is live: the new tab's open request goes to
+ * `blocked` and stays pending *forever*. Memoized, that pending promise is every store call
+ * in the application, so the panels sit empty and the Generate buttons stay disabled with
+ * nothing said — the `finally` that clears `busy` never runs.
+ *
+ * So both sides are handled. A tab holding the old version closes its connection when it is
+ * told it is blocking one, and a tab that finds itself blocked fails with a sentence a
+ * person can act on instead of hanging. Either way the memo is cleared, so the next call
+ * tries again rather than inheriting the failure for the life of the page.
+ */
 function db(): Promise<Schema> {
   if (!dbPromise) {
-    dbPromise = openDB(DB_NAME, DB_VERSION, {
-      upgrade(database, oldVersion) {
-        if (!database.objectStoreNames.contains('profile')) database.createObjectStore('profile')
-        if (!database.objectStoreNames.contains('consignees')) {
-          database.createObjectStore('consignees', { keyPath: 'name' })
-        }
-        if (!database.objectStoreNames.contains('overrides')) {
-          database.createObjectStore('overrides', { keyPath: 'sourceCode' })
-        }
-        // v3 adds per-part weights, needed by formats that print none.
-        if (!database.objectStoreNames.contains('partWeights')) {
-          database.createObjectStore('partWeights', { keyPath: 'partNumber' })
-        }
-        // v4 adds the imported item master.
-        if (!database.objectStoreNames.contains('items')) {
-          database.createObjectStore('items', { keyPath: 'partNumber' })
-        }
-        // v5 adds dangerous goods consignments, which are kept to satisfy the two-year
-        // retention rule rather than for autofill.
-        if (!database.objectStoreNames.contains('dgConsignments')) {
-          const dg = database.createObjectStore('dgConsignments', { keyPath: 'id' })
-          dg.createIndex('preparedAt', 'preparedAt')
-        }
-        // v1 keyed shipments on invoiceNumber, which silently overwrote re-runs. v2 keys
-        // on a per-run id; the old store is dropped rather than migrated because it only
-        // ever held the most recent attempt per invoice.
-        if (!database.objectStoreNames.contains('shipments')) {
-          const shipments = database.createObjectStore('shipments', { keyPath: 'id' })
-          shipments.createIndex('processedAt', 'processedAt')
-          shipments.createIndex('invoiceNumber', 'invoiceNumber')
-        } else if (oldVersion < 2) {
-          // v1 keyed on invoiceNumber, which silently overwrote re-runs. Rebuild on the
-          // per-run id; the old store only ever held the latest attempt per invoice.
-          database.deleteObjectStore('shipments')
-          const shipments = database.createObjectStore('shipments', { keyPath: 'id' })
-          shipments.createIndex('processedAt', 'processedAt')
-          shipments.createIndex('invoiceNumber', 'invoiceNumber')
-        }
-      },
+    let settled = false
+    const attempt = new Promise<Schema>((resolve, reject) => {
+      openDB(DB_NAME, DB_VERSION, {
+        blocked() {
+          settled = true
+          reject(
+            new Error(
+              'Another tab has this application open on an older version and is holding the local database. ' +
+                'Close the other tabs and reload this one.',
+            ),
+          )
+        },
+        blocking(_current, _blocked, event) {
+          // This tab is the old one. Letting go is what unblocks the other; holding on
+          // would leave it waiting on a connection nobody is going to use again.
+          ;(event.target as IDBDatabase | null)?.close()
+          dbPromise = null
+        },
+        terminated() {
+          dbPromise = null
+        },
+        upgrade(database, oldVersion) {
+          if (!database.objectStoreNames.contains('profile')) database.createObjectStore('profile')
+          if (!database.objectStoreNames.contains('consignees')) {
+            database.createObjectStore('consignees', { keyPath: 'name' })
+          }
+          if (!database.objectStoreNames.contains('overrides')) {
+            database.createObjectStore('overrides', { keyPath: 'sourceCode' })
+          }
+          // v3 adds per-part weights, needed by formats that print none.
+          if (!database.objectStoreNames.contains('partWeights')) {
+            database.createObjectStore('partWeights', { keyPath: 'partNumber' })
+          }
+          // v4 adds the imported item master.
+          if (!database.objectStoreNames.contains('items')) {
+            database.createObjectStore('items', { keyPath: 'partNumber' })
+          }
+          // v5 adds dangerous goods consignments, which are kept to satisfy the two-year
+          // retention rule rather than for autofill.
+          if (!database.objectStoreNames.contains('dgConsignments')) {
+            const dg = database.createObjectStore('dgConsignments', { keyPath: 'id' })
+            dg.createIndex('preparedAt', 'preparedAt')
+          }
+          // v1 keyed shipments on invoiceNumber, which silently overwrote re-runs. v2 keys
+          // on a per-run id; the old store is dropped rather than migrated because it only
+          // ever held the most recent attempt per invoice.
+          if (!database.objectStoreNames.contains('shipments')) {
+            const shipments = database.createObjectStore('shipments', { keyPath: 'id' })
+            shipments.createIndex('processedAt', 'processedAt')
+            shipments.createIndex('invoiceNumber', 'invoiceNumber')
+          } else if (oldVersion < 2) {
+            // v1 keyed on invoiceNumber, which silently overwrote re-runs. Rebuild on the
+            // per-run id; the old store only ever held the latest attempt per invoice.
+            database.deleteObjectStore('shipments')
+            const shipments = database.createObjectStore('shipments', { keyPath: 'id' })
+            shipments.createIndex('processedAt', 'processedAt')
+            shipments.createIndex('invoiceNumber', 'invoiceNumber')
+          }
+        },
+      }).then(
+        (database) => {
+          // The open can still succeed after `blocked` gave up on it — the other tab closed
+          // in the meantime. Nobody is waiting on this handle, so it is closed rather than
+          // left as a connection that would block the next upgrade in its turn.
+          if (settled) database.close()
+          else resolve(database)
+        },
+        (error) => reject(error),
+      )
+    })
+    dbPromise = attempt
+    attempt.catch(() => {
+      if (dbPromise === attempt) dbPromise = null
     })
   }
   return dbPromise

@@ -11,7 +11,7 @@
  * Nothing here is uploaded, and nothing here is inferred. Every field the regulations turn on
  * is asked, and an unanswered one blocks rather than defaults.
  */
-import { useCallback, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
+import { useCallback, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import {
   Badge,
   Button,
@@ -137,14 +137,29 @@ export function DangerousGoodsPanel({
     }))
   }, [setConsignment])
 
+  /**
+   * The identity of the last record written, and the consignment it was written for.
+   *
+   * Downloading the declaration and then the checklist is one preparation of one
+   * consignment, not two. Minting a fresh `preparedAt` for each put two indistinguishable
+   * rows in the retention list — the `busy` guards only ever stopped a double-click on one
+   * button. So an unchanged consignment reuses its id, and the second write lands on top of
+   * the first. Edit anything and it is a new preparation, with its own row.
+   */
+  const lastRecord = useRef<{ consignment: string; preparedAt: string } | null>(null)
+
   /** Records what was prepared, which is the two-year retention obligation in practice. */
   const record = useCallback((): DgConsignmentRecord => {
-    const now = new Date()
-    const preparedAt = now.toISOString()
+    const fingerprint = JSON.stringify(consignment)
+    const preparedAt =
+      lastRecord.current?.consignment === fingerprint
+        ? lastRecord.current.preparedAt
+        : new Date().toISOString()
+    lastRecord.current = { consignment: fingerprint, preparedAt }
     return {
       id: `${consignment.airWaybillNumber || consignment.shippersReference || 'consignment'}@${preparedAt}`,
       preparedAt,
-      retainUntil: retainUntil(now),
+      retainUntil: retainUntil(new Date(preparedAt)),
       airWaybillNumber: consignment.airWaybillNumber,
       shippersReference: consignment.shippersReference,
       consigneeName: consignment.consignee.name,

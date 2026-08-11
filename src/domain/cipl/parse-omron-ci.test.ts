@@ -151,6 +151,24 @@ describe('the workbook grid', () => {
     expect(parsed.lines[1]).toMatchObject({ partNumber: '20000-0002', countryOfOrigin: 'JP' })
   })
 
+  it('accepts a title-cased revision of the form, as the printed PDF path already does', () => {
+    // Every other label on this form is matched uppercased. Matched exactly, a workbook
+    // whose headings were re-typed in title case was refused as "not the Commercial Invoice
+    // form" while its own printed PDF parsed cleanly.
+    const grid = omronCiGrid(simpleOmronCi()).map((row) =>
+      row.map((cell) =>
+        ['LN', 'PART #', 'DESCRIPTION OF GOODS', 'QTY', 'UOM', 'UNIT PRICE', 'AMOUNT',
+         'COO', 'HTS / SCHEDULE B', 'ECCN / EAR99', 'LICENSE / NLR', 'SME (Y/N)'].includes(cell)
+          ? cell.toLowerCase()
+          : cell,
+      ),
+    )
+    expect(isOmronCiWorkbook(grid)).toBe(true)
+    const parsed = parseOmronCiWorkbook('ci.xlsx', grid)
+    expect(parsed.lines).toHaveLength(2)
+    expect(parsed.lines[0]).toMatchObject({ partNumber: '10000-0001', countryOfOrigin: 'US', eccn: 'EAR99' })
+  })
+
   it('does not mistake the header grid’s SHIPPER and CONSIGNEE labels for the address band', () => {
     // `SHIPPER EIN / TAX ID:` and `CONSIGNEE EORI / USCI / VAT:` share a row of the header
     // grid, and between them they satisfy the band's own test. The band is located first

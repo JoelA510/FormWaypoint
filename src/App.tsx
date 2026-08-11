@@ -86,6 +86,7 @@ export function App() {
   const [scheduleB, setScheduleB] = useState<ScheduleBIndex | null>(null)
   const [scheduleBPayload, setScheduleBPayload] = useState<RawPayload | null>(null)
   const [scheduleBError, setScheduleBError] = useState<string | null>(null)
+  const [restoreError, setRestoreError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -113,21 +114,42 @@ export function App() {
       }
     })()
 
+    // Settled rather than all-or-nothing, and reported rather than swallowed. One rejecting
+    // read used to discard the other five, so a browser that refused a single store left the
+    // profile blank and the retention panel reading "Nothing prepared yet" for consignments
+    // still inside their two-year window — with no indication that anything had failed.
     void (async () => {
-      const [saved, savedOverrides, savedPartOverrides, savedItems, history, dgHistory] = await Promise.all([
-        localStore.getProfile(),
-        localStore.listOverrides(),
-        localStore.listPartOverrides(),
-        localStore.listItems(),
-        localStore.listShipments(),
-        localStore.listDgConsignments(),
-      ])
-      if (saved) setProfile(saved)
-      setOverrides(savedOverrides)
-      setPartOverrides(savedPartOverrides)
-      setItems(savedItems)
-      setShipments(history)
-      setDgConsignments(dgHistory)
+      const [saved, savedOverrides, savedPartOverrides, savedItems, history, dgHistory] =
+        await Promise.allSettled([
+          localStore.getProfile(),
+          localStore.listOverrides(),
+          localStore.listPartOverrides(),
+          localStore.listItems(),
+          localStore.listShipments(),
+          localStore.listDgConsignments(),
+        ])
+      if (saved.status === 'fulfilled' && saved.value) setProfile(saved.value)
+      if (savedOverrides.status === 'fulfilled') setOverrides(savedOverrides.value)
+      if (savedPartOverrides.status === 'fulfilled') setPartOverrides(savedPartOverrides.value)
+      if (savedItems.status === 'fulfilled') setItems(savedItems.value)
+      if (history.status === 'fulfilled') setShipments(history.value)
+      if (dgHistory.status === 'fulfilled') setDgConsignments(dgHistory.value)
+
+      const failed = [
+        [saved, 'the exporter profile'],
+        [savedOverrides, 'the classification overrides'],
+        [savedPartOverrides, 'the per-part weights'],
+        [savedItems, 'the item library'],
+        [history, 'the shipment history'],
+        [dgHistory, 'the dangerous goods retention records'],
+      ] as const
+      const missing = failed.filter(([result]) => result.status === 'rejected').map(([, label]) => label)
+      if (missing.length) {
+        setRestoreError(
+          `This machine's stored data could not be read: ${missing.join(', ')}. What is shown is incomplete — ` +
+            'do not take an empty panel as evidence that nothing was saved.',
+        )
+      }
     })()
   }, [bridge])
 
@@ -441,6 +463,13 @@ export function App() {
       </header>
 
       <main className="mx-auto max-w-6xl space-y-4 px-5 py-6">
+        {/* Above the tabs, because a failed restore empties panels on both of them. */}
+        {restoreError ? (
+          <p className="rounded-md border border-[var(--color-block)] bg-[var(--color-block-soft)] px-3 py-2 text-sm">
+            {restoreError}
+          </p>
+        ) : null}
+
         {workflow === 'dangerous-goods' ? (
           <DangerousGoodsPanel
             profile={profile}
