@@ -259,6 +259,29 @@ describe('an unstated rating', () => {
   })
 })
 
+describe('the special provisions listed against an entry', () => {
+  it('gives every standalone battery its passenger-aircraft provision', () => {
+    // Both are forbidden on passenger aircraft and both have a provision naming the
+    // approval that relieves it. Lithium metal carried none, under a blocking check that
+    // cites A201 and A334 by number.
+    const metal = classifyForAir(spec({ chemistry: 'lithium-metal', lithiumContentG: 1 })).specialProvisions
+    expect(metal.some((p) => p.startsWith('A201'))).toBe(true)
+    // A331 is a state of charge provision; lithium metal is not rechargeable.
+    expect(metal.some((p) => p.startsWith('A331'))).toBe(false)
+
+    const ion = classifyForAir(spec({ wattHours: 95 })).specialProvisions
+    expect(ion.some((p) => p.startsWith('A334'))).toBe(true)
+    expect(ion.some((p) => p.startsWith('A331'))).toBe(true)
+  })
+
+  it('does not put a passenger-aircraft approval against equipment, which may fly', () => {
+    const equipment = classifyForAir(
+      spec({ configuration: 'contained-in-equipment', wattHours: 90 }),
+    ).specialProvisions
+    expect(equipment.some((p) => p.startsWith('A201') || p.startsWith('A334'))).toBe(false)
+  })
+})
+
 describe('standalone sodium ion', () => {
   it('carries the 30% limit under A331, named for its own chemistry', () => {
     const rule = classifyForAir(spec({ chemistry: 'sodium-ion', wattHours: 60 })).stateOfCharge

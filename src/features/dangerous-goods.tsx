@@ -794,6 +794,20 @@ function PackagesEditor({
                           </span>
                         </p>
                       ) : null}
+                      {/*
+                        Column M, on screen beside the entry it belongs to. The checks cite
+                        individual provisions where one decides an answer, but a shipper
+                        reading a classification needs the list itself — it is what the
+                        column is for, and the ones that do not decide anything here are
+                        still the ones a state or operator variation is written against.
+                      */}
+                      {classification?.specialProvisions.length ? (
+                        <ul className="mt-2 space-y-0.5 text-xs text-[var(--color-ink-faint)]">
+                          {classification.specialProvisions.map((provision) => (
+                            <li key={provision}>{provision}</li>
+                          ))}
+                        </ul>
+                      ) : null}
                     </div>
                   )
                 })}

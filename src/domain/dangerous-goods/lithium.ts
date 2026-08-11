@@ -448,13 +448,19 @@ function hazardCommunicationFor(section: PackingSection, aircraft: AircraftLimit
  */
 function specialProvisionsFor(spec: BatterySpec, unSpecificationRequired: boolean): string[] {
   const provisions = ['A154 — damaged or defective cells and batteries are forbidden for transport by air']
-  if (spec.chemistry === 'lithium-ion' || spec.chemistry === 'sodium-ion') {
-    if (spec.configuration === 'standalone') {
+  if (spec.configuration === 'standalone') {
+    // A331 is a state of charge provision, so it reaches only the rechargeable chemistries.
+    // The passenger-aircraft approval is not: every standalone battery is forbidden on
+    // passenger aircraft and every one of them has a provision naming the approval that
+    // relieves it — A201 for lithium metal, A334 for lithium ion and sodium ion. Nesting
+    // the second inside the first left UN3090 with no passenger provision at all, under a
+    // blocking check that cites both by number.
+    if (spec.chemistry === 'lithium-metal') {
+      provisions.push('A201 — state approval required to carry standalone lithium metal batteries on passenger aircraft')
+    } else {
       provisions.push('A331 — state approval required above 30% state of charge')
       provisions.push('A334 — state approval required to carry standalone batteries on passenger aircraft')
     }
-  }
-  if (spec.configuration === 'standalone') {
     provisions.push('A183 — waste batteries for recycling or disposal are forbidden without competent authority approval')
   }
   // Listed for exactly the entries the packaging check holds to it. Gating this on the

@@ -929,6 +929,10 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
       refs: [pkg.id],
     })
   } else {
+    const packagingCapabilities = [
+      entries.some((e) => e.classification.dropTestRequired) ? 'a 1.2 m drop test' : '',
+      entries.some((e) => e.classification.stackTestRequired) ? 'a 3 m stack test held for 24 hours' : '',
+    ].filter(Boolean)
     checks.push({
       id: `dg.packaging.${pkg.id}`,
       severity: 'info',
@@ -943,10 +947,11 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
           ? ' — special provision A802 expressly excepts Section IB of PI 965 and PI 968 —'
           : '') +
         ' but the package must still be a strong, rigid outer packaging' +
-        (entries.some((e) => e.classification.dropTestRequired) ? ', capable of a 1.2 m drop test' : '') +
-        (entries.some((e) => e.classification.stackTestRequired)
-          ? ' and of a 3 m stack test held for 24 hours'
-          : '') +
+        // Joined rather than concatenated. Written as two independent clauses, a package
+        // needing the stack test but not the drop test read "...outer packaging and of a
+        // 3 m stack test", which is the commonest excepted shipment there is — batteries
+        // contained in equipment, Section II.
+        (packagingCapabilities.length ? `, capable of ${packagingCapabilities.join(' and of ')}` : '') +
         '. The capability is a property of the design and may be demonstrated by testing, assessment or ' +
         'experience, so it is established once per design rather than per box.',
       passed: true,
