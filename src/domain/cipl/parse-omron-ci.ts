@@ -509,7 +509,8 @@ function pagesToGrid(pages: TextPage[]): SheetRows {
     [...Object.entries(TOP_COLUMNS), ...Object.entries(SUB_COLUMNS)].map(([key, heading]) => [key, bandX(heading)]),
   ) as Anchors
 
-  // Every column has to have been located before any value can be assigned to one.
+  // Every anchor that actually places a cell has to have been located before any value can
+  // be assigned to a column.
   //
   // A heading the extractor split across items yields no anchor, and an unfound anchor is
   // -Infinity: `quantityBorder` then collapses and every cell on the line looks like it
@@ -517,7 +518,6 @@ function pagesToGrid(pages: TextPage[]): SheetRows {
   // whichever heading is nearest. Both produce a plausible-looking table that is wrong, so
   // the table is handed back unreshaped instead — `readLines` reports the missing headings
   // and no line is invented from a grid nobody could calibrate.
-  // Only the anchors that actually place a cell have to have been found.
   //
   // `part` and `description` are not among them: those two are separated from each other
   // by the border between the COO and HTS columns beneath, so their own headings never

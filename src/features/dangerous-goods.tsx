@@ -160,6 +160,28 @@ export function DangerousGoodsPanel({
     }
   }, [consignment, assessment])
 
+  /**
+   * Writes the retention record, and reports a failed write as what it is.
+   *
+   * Called after the file has been delivered and opened, so a rejection here is not a
+   * failed generation: the artifact exists, and telling someone it could not be generated
+   * would send them to produce a second one. What is missing is the evidence that this one
+   * was produced, which is the two-year obligation and has to be said plainly — beside the
+   * "Saved to …" line, not instead of it.
+   */
+  async function retain(artifact: string) {
+    try {
+      await onPrepared(record())
+    } catch (e) {
+      const because = e instanceof Error ? e.message : 'the record could not be written'
+      setError(
+        `The ${artifact} was saved, but this machine did not record that it was prepared (${because}). ` +
+          'The retention record is the evidence of preparation and has to be kept for two years — note this ' +
+          'consignment somewhere else, and check the browser storage for this site.',
+      )
+    }
+  }
+
   async function generateDeclaration() {
     // Guarded like the checklist below: each run appends a retention record, and a
     // double-click that writes two files is noise while one that writes two audit rows is
@@ -180,7 +202,7 @@ export function DangerousGoodsPanel({
       // Opened straight away, like the SLI: the next thing anyone does with a declaration is
       // read it, print it in colour and sign it by hand.
       await openDelivery(bridge, delivery)
-      await onPrepared(record())
+      await retain('declaration')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'The declaration could not be generated.')
     } finally {
@@ -209,7 +231,7 @@ export function DangerousGoodsPanel({
       await openDelivery(bridge, delivery)
       // Recorded too: for a Section II consignment this checklist is the only artifact, and a
       // consignment that left the tool with no record has no audit trail at all.
-      await onPrepared(record())
+      await retain('checklist')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'The checklist could not be saved.')
     } finally {
