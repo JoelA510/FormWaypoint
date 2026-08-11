@@ -200,10 +200,12 @@ export async function readXlsxSheets(data: Uint8Array, limit = Infinity): Promis
   const ordered = relsXml ? sheetPaths(decoder.decode(workbookXml), decoder.decode(relsXml)) : []
   const sheetParts = ordered.map((path) => parts.get(path)).filter((bytes): bytes is Uint8Array => bytes != null)
   if (!sheetParts.length) {
-    // No resolvable relationships: fall back to the worksheet files by name.
+    // No resolvable relationships: fall back to the worksheet files themselves — sheet
+    // XML only, since xl/worksheets/_rels/*.rels also live under this prefix and sort
+    // before sheet1.xml — with sheet1.xml first, matching what Excel shows first.
     const byName = [...parts.entries()]
-      .filter(([name]) => name.startsWith('xl/worksheets/'))
-      .sort(([a], [b]) => a.localeCompare(b))
+      .filter(([name]) => /^xl\/worksheets\/[^/]+\.xml$/.test(name))
+      .sort(([a], [b]) => (a === 'xl/worksheets/sheet1.xml' ? -1 : b === 'xl/worksheets/sheet1.xml' ? 1 : a.localeCompare(b)))
       .map(([, bytes]) => bytes)
     sheetParts.push(...byName)
   }

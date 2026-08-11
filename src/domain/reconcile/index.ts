@@ -187,7 +187,7 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
           'This file is probably not one of the supported CIPL layouts.',
       passed: headerReadable,
     },
-    ...totalsChecks(header, mergedLines, sliLines, parsed.providesWeights),
+    ...totalsChecks(header, mergedLines, sliLines, parsed.providesWeights, parsed.format !== 'vendor-a'),
     ...partTotalChecks(mergedLines, parsed.partTotals),
     ...lineageChecks(mergedLines, packingLines, sliLines),
     ...partCodeChecks(mergedLines, index, options.itemsByPart),
@@ -280,6 +280,14 @@ function totalsChecks(
   merged: MergedLine[],
   sliLines: SLILine[],
   providesWeights: boolean,
+  /**
+   * True for formats (`vendor-b`, `omron-ci`) whose header quantity total is the sum of
+   * their own parsed lines, so the total-quantity check cannot catch a line that parsed
+   * as zero. For those, a zero-quantity line must block; for a format with a printed
+   * total (`vendor-a`), that total already guards misread quantities and a printed zero
+   * may be legitimate (a backordered row), so it only warns.
+   */
+  quantityTotalIsSelfReferential: boolean,
 ): CheckResult[] {
   const results: CheckResult[] = []
 
@@ -298,14 +306,14 @@ function totalsChecks(
   })
 
   // A line with no readable quantity parses as zero, and for a format whose quantity
-  // total is the sum of its own lines (`vendor-b`, `omron-ci`) the total-quantity check
-  // above then agrees with itself. Zero pieces of a real part is never a correct customs
-  // line — it is an incomplete one, and it must hold the shipment rather than file as
-  // nothing.
+  // total is the sum of its own lines the total-quantity check above then agrees with
+  // itself. Zero pieces of a real part is not a fileable customs line — it is an
+  // incomplete one, and where no printed total can catch it, it must hold the shipment
+  // rather than file as nothing.
   const zeroQuantity = merged.filter((line) => !(line.quantity > 0))
   results.push({
     id: 'line-quantities',
-    severity: 'blocking',
+    severity: quantityTotalIsSelfReferential ? 'blocking' : 'warning',
     title: 'Every invoice line has a quantity',
     detail: zeroQuantity.length
       ? `${zeroQuantity.length} line(s) have no readable quantity: ` +

@@ -107,6 +107,13 @@ describe('the workbook grid', () => {
     expect(header.invoiceDate).toBe('08/10/2026')
   })
 
+  it('truncates a datetime serial to its calendar day instead of rounding past noon', () => {
+    const grid = omronCiGrid(simpleOmronCi())
+    const row = grid.find((r) => r[1] === 'INVOICE #:')!
+    row[7] = '46244.75' // 08/10/2026 6:00 PM, as a cell filled from =NOW() stores it
+    expect(parseOmronCiWorkbook('ci.xlsx', grid).headers.FC.invoiceDate).toBe('08/10/2026')
+  })
+
   it('does not flag a stated EAR99, but flags a stated controlled ECCN', () => {
     const result = reconcile(parseGrid(), null, { ...BLANK_CONTROLS, unitWeightsByPart: UNIT_WEIGHTS })
     const check = result.checks.find((c) => c.id === 'eccn-from-document')
@@ -265,6 +272,21 @@ describe('the printed PDF', () => {
     expect(parsed.lines[0].description).toBe('Robot cable assembly with mounting bracket')
     expect(parsed.lines[0].classification).toBe('8544.42.0000')
     expect(parsed.lines[0].countryOfOrigin).toBe('US')
+  })
+
+  it('does not mistake a wrapped description for a blank compliance row', async () => {
+    const spec = simpleOmronCi()
+    spec.lines[0] = {
+      ...spec.lines[0],
+      descriptionTail: 'with mounting bracket',
+      coo: '', hts: '', eccn: '', license: '', sme: '',
+    }
+    const parsed = await parseCipl('ci.pdf', await buildOmronCiPdf(spec))
+    // The tail is the block's lowest baseline here, but it hangs just under the LN
+    // centre where a real compliance row never sits — it must stay in the description.
+    expect(parsed.lines[0].description).toBe('Robot cable assembly with mounting bracket')
+    expect(parsed.lines[0].classification).toBe('')
+    expect(parsed.lines[0].countryOfOrigin).toBe('')
   })
 
   it('keeps a line whose description mentions NO CHARGE', async () => {

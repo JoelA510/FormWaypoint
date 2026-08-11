@@ -61,6 +61,30 @@ const HEADER_LABELS = new Set([
 const normalizeLabel = (text: string): string => text.replace(/:\s*$/, '').trim().toUpperCase()
 const isLabel = (text: string): boolean => HEADER_LABELS.has(normalizeLabel(text))
 
+/**
+ * The commodity table's columns in printed order: the top row of each two-row block, and
+ * the compliance row beneath it. The single source for the heading text — the detector,
+ * the workbook column lookups, the PDF anchor calibration and the synthesized canonical
+ * heading rows all derive from it, so a renamed column is a one-line change here.
+ */
+const TOP_COLUMNS = {
+  ln: 'LN',
+  part: 'PART #',
+  description: 'DESCRIPTION OF GOODS',
+  qty: 'QTY',
+  uom: 'UOM',
+  unitPrice: 'UNIT PRICE',
+  amount: 'AMOUNT',
+} as const
+const SUB_COLUMNS = {
+  coo: 'COO',
+  hts: 'HTS / SCHEDULE B',
+  eccn: 'ECCN / EAR99',
+  license: 'LICENSE / NLR',
+  sme: 'SME (Y/N)',
+} as const
+const TABLE_HEADINGS = new Set<string>([...Object.values(TOP_COLUMNS), ...Object.values(SUB_COLUMNS)])
+
 // ---------------------------------------------------------------------------
 // Workbook (.xlsx) reader — the primary path
 // ---------------------------------------------------------------------------
@@ -75,8 +99,8 @@ const isLabel = (text: string): boolean => HEADER_LABELS.has(normalizeLabel(text
 export function isOmronCiWorkbook(rows: SheetRows): boolean {
   return (
     rows.some((row) => row.some((cell) => cell.includes(DOC_NUMBER))) &&
-    rows.some((row) => row.includes('PART #')) &&
-    rows.some((row) => row.includes('COO'))
+    rows.some((row) => row.includes(TOP_COLUMNS.part)) &&
+    rows.some((row) => row.includes(SUB_COLUMNS.coo))
   )
 }
 
@@ -186,9 +210,9 @@ function readParties(rows: SheetRows): { shipper: PartyAddress; consignee: Party
  * where an incomplete line gets held, with the person who can fix it looking at it.
  */
 function readLines(rows: SheetRows, purchaseOrder: string, invoiceNumber: string, warnings: string[]): SourceLine[] {
-  const headIndex = rows.findIndex((row) => row.includes('PART #') && row.includes('QTY'))
+  const headIndex = rows.findIndex((row) => row.includes(TOP_COLUMNS.part) && row.includes(TOP_COLUMNS.qty))
   const subIndex = headIndex === -1 ? -1 : headIndex + 1
-  if (headIndex === -1 || !rows[subIndex]?.includes('COO')) {
+  if (headIndex === -1 || !rows[subIndex]?.includes(SUB_COLUMNS.coo)) {
     warnings.push('The commodity table headings were not found; no lines were read.')
     return []
   }
@@ -196,18 +220,12 @@ function readLines(rows: SheetRows, purchaseOrder: string, invoiceNumber: string
   const head = rows[headIndex]
   const sub = rows[subIndex]
   const columns = {
-    ln: head.findIndex((c) => c === 'LN'),
-    part: head.indexOf('PART #'),
-    description: head.indexOf('DESCRIPTION OF GOODS'),
-    qty: head.indexOf('QTY'),
-    uom: head.indexOf('UOM'),
-    unitPrice: head.indexOf('UNIT PRICE'),
-    amount: head.indexOf('AMOUNT'),
-    coo: sub.indexOf('COO'),
-    hts: sub.indexOf('HTS / SCHEDULE B'),
-    eccn: sub.indexOf('ECCN / EAR99'),
-    license: sub.indexOf('LICENSE / NLR'),
-    sme: sub.indexOf('SME (Y/N)'),
+    ...(Object.fromEntries(
+      Object.entries(TOP_COLUMNS).map(([key, heading]) => [key, head.indexOf(heading)]),
+    ) as Record<keyof typeof TOP_COLUMNS, number>),
+    ...(Object.fromEntries(
+      Object.entries(SUB_COLUMNS).map(([key, heading]) => [key, sub.indexOf(heading)]),
+    ) as Record<keyof typeof SUB_COLUMNS, number>),
   }
 
   const isLineNumber = (cell: string): boolean => {
@@ -353,8 +371,10 @@ function dateText(value: string): string {
   const serial = Number(value)
   if (serial < 32874 || serial > 73415) return value
   // Excel's day 1 is 1900-01-01 with the fictitious 1900-02-29 baked in, so the epoch
-  // that makes modern serials come out right is 1899-12-30.
-  const date = new Date(Date.UTC(1899, 11, 30) + Math.round(serial) * 86400_000)
+  // that makes modern serials come out right is 1899-12-30. The fraction is time-of-day
+  // (a cell filled from =NOW() carries one) — truncated, never rounded, or an afternoon
+  // timestamp would convert to the next calendar day.
+  const date = new Date(Date.UTC(1899, 11, 30) + Math.floor(serial) * 86400_000)
   const mm = String(date.getUTCMonth() + 1).padStart(2, '0')
   const dd = String(date.getUTCDate()).padStart(2, '0')
   return `${mm}/${dd}/${date.getUTCFullYear()}`
@@ -423,8 +443,8 @@ function pagesToGrid(pages: TextPage[]): SheetRows {
   // rows, so their baseline can land on either row or on one of their own. Locate the
   // heading band by its fixed members and calibrate each anchor from whichever row in
   // the band carries it.
-  const headIndex = rows.findIndex((row) => hasCell(row, 'PART #'))
-  const subIndex = rows.findIndex((row, i) => i > headIndex && hasCell(row, 'COO'))
+  const headIndex = rows.findIndex((row) => hasCell(row, TOP_COLUMNS.part))
+  const subIndex = rows.findIndex((row, i) => i > headIndex && hasCell(row, SUB_COLUMNS.coo))
 
   if (headIndex === -1 || subIndex === -1) {
     // No table headings — hand everything over as plain text rows; the header labels
@@ -440,20 +460,9 @@ function pagesToGrid(pages: TextPage[]): SheetRows {
     }
     return -Infinity
   }
-  const anchors: Anchors = {
-    ln: bandX('LN'),
-    part: bandX('PART #'),
-    description: bandX('DESCRIPTION OF GOODS'),
-    qty: bandX('QTY'),
-    uom: bandX('UOM'),
-    unitPrice: bandX('UNIT PRICE'),
-    amount: bandX('AMOUNT'),
-    coo: bandX('COO'),
-    hts: bandX('HTS / SCHEDULE B'),
-    eccn: bandX('ECCN / EAR99'),
-    license: bandX('LICENSE / NLR'),
-    sme: bandX('SME (Y/N)'),
-  }
+  const anchors = Object.fromEntries(
+    [...Object.entries(TOP_COLUMNS), ...Object.entries(SUB_COLUMNS)].map(([key, heading]) => [key, bandX(heading)]),
+  ) as Anchors
 
   // Everything between the table headings and the totals band belongs to line blocks.
   // The band is recognised by its own printed cells as *whole* cells, never as substrings
@@ -485,11 +494,7 @@ function pagesToGrid(pages: TextPage[]): SheetRows {
   // The heading rows are synthesized in canonical order rather than passed through,
   // because the print can split them across baselines in ways `readLines` should not
   // have to know about. The blocks are emitted in the same canonical order.
-  const HEADINGS = new Set([
-    'LN', 'PART #', 'DESCRIPTION OF GOODS', 'QTY', 'UOM', 'UNIT PRICE', 'AMOUNT',
-    'COO', 'HTS / SCHEDULE B', 'ECCN / EAR99', 'LICENSE / NLR', 'SME (Y/N)',
-  ])
-  const isHeadingRow = (row: TextRow): boolean => row.items.some((item) => HEADINGS.has(item.str.toUpperCase()))
+  const isHeadingRow = (row: TextRow): boolean => row.items.some((item) => TABLE_HEADINGS.has(item.str.toUpperCase()))
 
   const grid: SheetRows = []
   for (let i = 0; i < subIndex + 1; i++) {
@@ -500,10 +505,7 @@ function pagesToGrid(pages: TextPage[]): SheetRows {
       grid.push(rows[i].items.map((item) => item.str))
     }
   }
-  grid.push(
-    ['LN', 'PART #', 'DESCRIPTION OF GOODS', 'QTY', 'UOM', 'UNIT PRICE', 'AMOUNT'],
-    ['COO', 'HTS / SCHEDULE B', 'ECCN / EAR99', 'LICENSE / NLR', 'SME (Y/N)'],
-  )
+  grid.push([...Object.values(TOP_COLUMNS)], [...Object.values(SUB_COLUMNS)])
   grid.push(...tableRowsToBlocks(rows.slice(subIndex + 1, tableEnd), anchors))
   for (let i = tableEnd; i < rows.length; i++) grid.push(rows[i].items.map((item) => item.str))
   return grid
@@ -636,10 +638,14 @@ function tableRowsToBlocks(rows: TextRow[], anchors: Anchors): SheetRows {
 
   for (const [block, items] of leftItems) {
     // PDF y grows upward, so the compliance row is the smallest baseline — and it must
-    // sit below the LN centre, or the block simply has no compliance row.
+    // sit *well* below the LN centre, roughly half a row down. Both conditions matter: the
+    // lowest-baseline test alone would misread a wrapped description's second line as the
+    // compliance row whenever the compliance row itself is blank, and that tail hangs just
+    // under the centre where a real compliance baseline never sits.
     const lowestY = Math.min(...items.map((item) => item.y))
     for (const item of items) {
-      const isComplianceRow = item.y < block.y && Math.abs(item.y - lowestY) <= pitch / 8
+      const isComplianceRow =
+        block.y - item.y > pitch / 6 && Math.abs(item.y - lowestY) <= pitch / 8
       if (isComplianceRow) {
         const column = nearest(item.x, ['coo', 'hts', 'eccn', 'license', 'sme'])
         if (column) push(block.bottom, column, item)
