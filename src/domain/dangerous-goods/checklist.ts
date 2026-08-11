@@ -187,9 +187,13 @@ export function buildChecklist(
     } else {
       out.push('- [ ] Strong rigid outer packaging.')
     }
+    // Not an either/or: a package may hold loose cells beside equipment with batteries
+    // installed in it — the A181 case the assessment checks — and both lines are then true
+    // of the same box. Printed independently so neither can be lost to the other.
     if (assessed.entries.some((e) => e.classification.innerPackagingRequired)) {
       out.push('- [ ] Inner packaging that completely encloses each cell or battery and prevents short circuits.')
-    } else {
+    }
+    if (assessed.entries.some((e) => e.entry.spec.configuration === 'contained-in-equipment')) {
       out.push('- [ ] Equipment secured against movement and protected against accidental activation.')
     }
     if (assessed.entries.some((e) => e.classification.dropTestRequired)) {

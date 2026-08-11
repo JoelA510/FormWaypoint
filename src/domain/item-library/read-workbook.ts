@@ -248,7 +248,12 @@ export async function readXlsx(data: Uint8Array): Promise<SheetRows> {
 
 function sheetRows(sheetXml: string, shared: string[]): SheetRows {
   const rows: SheetRows = []
-  for (const row of sheetXml.matchAll(/<row\b([^>]*)>([\s\S]*?)<\/row>/g)) {
+  // Both `<row ...>…</row>` and the self-closing `<row .../>` Excel writes for a row that
+  // is styled but empty. Matching only the first form makes a self-closing row swallow the
+  // next real row's cells — and with the row index honoured below, everything after it
+  // lands one row out, which on the Commercial Invoice form moves the commodity table's
+  // headings off their own row and yields an invoice with no lines at all.
+  for (const row of sheetXml.matchAll(/<row\b([^>]*?)(?:\/>|>([\s\S]*?)<\/row>)/g)) {
     // Honour the row's own index. Excel and LibreOffice omit <row> records that hold no
     // cells, and a consumer that reads the grid positionally (the Commercial Invoice
     // form's two-rows-per-line table) must not see later rows shifted up into the gap.
@@ -259,7 +264,8 @@ function sheetRows(sheetXml: string, shared: string[]): SheetRows {
     const cells: string[] = []
     // Matches both `<c ...>...</c>` and the self-closing `<c ... />` Excel writes for a
     // cell that carries only formatting.
-    for (const cell of row[2].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+    // Undefined for a self-closing row, which has no body and therefore no cells.
+    for (const cell of (row[2] ?? '').matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
       const attributes = cell[1]
       const body = cell[2] ?? ''
       const reference = attributes.match(/r="([A-Z]+)\d+"/)?.[1]

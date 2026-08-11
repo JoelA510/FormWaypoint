@@ -124,3 +124,21 @@ describe('combined Section II wording', () => {
     expect(buildChecklist(shipment, assess(shipment), '2026-08-06')).not.toContain('may be combined into one')
   })
 })
+
+describe('a package holding loose cells beside equipment', () => {
+  it('prints both the inner-packaging line and the equipment-securing line', () => {
+    const mixed = consignment([
+      pkg('p1', [
+        entry('e1', { configuration: 'packed-with-equipment', wattHours: 90 }, { netWeightKgPerPackage: 1 }),
+        entry('e2', { configuration: 'contained-in-equipment', wattHours: 90 }, {
+          netWeightKgPerPackage: 1,
+          countPerPackage: 1,
+        }),
+      ]),
+    ])
+    const markdown = buildChecklist(mixed, assess(mixed), '2026-08-06')
+    // Both are true of the same box; an if/else dropped the second.
+    expect(markdown).toContain('- [ ] Inner packaging that completely encloses each cell or battery')
+    expect(markdown).toContain('- [ ] Equipment secured against movement')
+  })
+})

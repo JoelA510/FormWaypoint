@@ -641,6 +641,16 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
     // so the minimum of the two is a number without anything having to claim it is one.
     const limit = Math.min(instructionLimit, pkg.packagingAuthorizationLimitKg ?? Infinity)
     const authorizationBinds = limit < instructionLimit
+    // Whether the A99 note below will actually be raised. Computed here so the remedy text
+    // can point at it only when it exists: A99 relieves the 35 kg cargo aircraft maximum,
+    // so an entry that does not carry that allowance — a Section IB or Section II package,
+    // or anything on a passenger booking — gets no note, and must not be sent looking for
+    // one.
+    const a99Applies =
+      kg(weight) > A99_THRESHOLD_KG &&
+      !authorizationBinds &&
+      !usingPassenger &&
+      classification.limits.cargoKg >= A99_THRESHOLD_KG
     checks.push({
       id: `dg.limit.${pkg.id}.${key}`,
       severity: 'blocking',
@@ -673,8 +683,12 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
                     // a 35 kg allowance would be wrong on a passenger booking too.
                     (kg(weight) > A99_THRESHOLD_KG
                       ? 'Split the batteries across more packages. Section I of the same packing instruction ' +
-                        'allows 35 kg on a cargo aircraft, which this package is over as well; beyond that is ' +
-                        'special provision A99, which is not a paperwork step — see the A99 note below.'
+                        'allows 35 kg on a cargo aircraft, which this package is over as well' +
+                        (a99Applies
+                          ? '; beyond that is special provision A99, which is not a paperwork step — see the A99 ' +
+                            'note below.'
+                          : '. Beyond 35 kg on a cargo aircraft the only route is special provision A99, which ' +
+                            'takes approval from two authorities.')
                       : usingPassenger
                         ? 'Split the batteries across more packages. Section I would not help here: its passenger ' +
                           'aircraft allowance is the same 5 kg. Offering the consignment as cargo aircraft only ' +
@@ -687,8 +701,12 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
                   : classification.limits.cargoKg > limit
                     ? 'Split the batteries across more packages, or offer the consignment as cargo aircraft only.'
                     : kg(weight) > A99_THRESHOLD_KG
-                      ? 'Split the batteries across more packages. The alternative is special provision A99, ' +
-                        'which is not a paperwork step — see the A99 note below.'
+                      ? a99Applies
+                        ? 'Split the batteries across more packages. The alternative is special provision A99, ' +
+                          'which is not a paperwork step — see the A99 note below.'
+                        : 'Split the batteries across more packages. Special provision A99 relieves the 35 kg ' +
+                          'cargo aircraft maximum, not this entry’s own lower ceiling, so it is not an ' +
+                          'alternative here.'
                       : 'Split the batteries across more packages. This is below the 35 kg mark, so special ' +
                         'provision A99 is not an alternative here.')),
       passed: kg(weight) <= limit,
@@ -705,8 +723,7 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
     // aircraft maximum; raising it for a Section II package (5 kg either way) or on a
     // passenger booking would point at an approval that does not apply, when the answer is
     // Section I or a cargo aircraft first.
-    const atCargoMaximum = !usingPassenger && classification.limits.cargoKg >= A99_THRESHOLD_KG
-    if (kg(weight) > A99_THRESHOLD_KG && !authorizationBinds && atCargoMaximum) {
+    if (a99Applies) {
       checks.push({
         id: `dg.a99.${pkg.id}.${key}`,
         severity: 'warning',
