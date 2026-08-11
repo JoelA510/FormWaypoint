@@ -29,6 +29,11 @@ export interface OmronCiLine {
    * model a wrapped description in the PDF. Only the PDF builder draws it.
    */
   descriptionTail?: string
+  /**
+   * Extra description word drawn past the quantity column border on the top baseline, to
+   * model a split description overflowing its cell. Only the PDF builder draws it.
+   */
+  descriptionOverflow?: string
 }
 
 export interface OmronCiSpec {
@@ -312,6 +317,7 @@ function drawLines(page: PDFPage, font: PDFFont, spec: OmronCiSpec): void {
     at(COLUMNS.c.left + 2, topY, line.partNumber)
     at(COLUMNS.d.left + 2, topY, line.description)
     if (line.descriptionTail) at(COLUMNS.d.left + 2, topY - 9, line.descriptionTail)
+    if (line.descriptionOverflow) at(COLUMNS.h.left + 4, topY, line.descriptionOverflow)
     centred(center(COLUMNS.h), middleY, String(line.quantity))
     centred(center(COLUMNS.i), middleY, line.uom)
     centred(center(COLUMNS.j), middleY, line.unitPrice.toFixed(2))

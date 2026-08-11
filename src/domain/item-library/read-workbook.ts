@@ -173,16 +173,8 @@ function sheetPaths(workbookXml: string, relsXml: string): string[] {
   return paths
 }
 
-/**
- * Reads the worksheets of an .xlsx file, in tab order, up to `limit`.
- *
- * Most callers want only the first (an item master is one table), but the Commercial
- * Invoice form can sit behind a cover or revision-history tab in a controlled document,
- * and refusing the workbook because the wrong tab came first would be a wrong answer.
- * The limit exists so `readXlsx` does not row-parse ten tabs of somebody's item master
- * only to throw nine of them away.
- */
-export async function readXlsxSheets(data: Uint8Array, limit = Infinity): Promise<SheetRows[]> {
+/** The workbook's worksheet XML parts in tab order, with the shared-string table. */
+async function loadSheetParts(data: Uint8Array): Promise<{ sheetParts: Uint8Array[]; shared: string[] }> {
   const decoder = new TextDecoder()
   const parts = await unzip(
     data,
@@ -217,7 +209,36 @@ export async function readXlsxSheets(data: Uint8Array, limit = Infinity): Promis
     for (const item of decoder.decode(sharedBytes).matchAll(/<si>([\s\S]*?)<\/si>/g)) shared.push(textRuns(item[1]))
   }
 
+  return { sheetParts, shared }
+}
+
+/**
+ * Reads the worksheets of an .xlsx file, in tab order, up to `limit`. The limit exists so
+ * `readXlsx` does not row-parse ten tabs of somebody's item master only to throw nine of
+ * them away.
+ */
+export async function readXlsxSheets(data: Uint8Array, limit = Infinity): Promise<SheetRows[]> {
+  const decoder = new TextDecoder()
+  const { sheetParts, shared } = await loadSheetParts(data)
   return sheetParts.slice(0, limit).map((bytes) => sheetRows(decoder.decode(bytes), shared))
+}
+
+/**
+ * The first worksheet, in tab order, that satisfies `predicate` — parsed lazily, one
+ * sheet at a time, so finding a form behind a cover tab does not row-parse every other
+ * tab of a large workbook. Returns the sheet count alongside, for error messages.
+ */
+export async function findXlsxSheet(
+  data: Uint8Array,
+  predicate: (rows: SheetRows) => boolean,
+): Promise<{ sheet: SheetRows | null; sheetCount: number }> {
+  const decoder = new TextDecoder()
+  const { sheetParts, shared } = await loadSheetParts(data)
+  for (const bytes of sheetParts) {
+    const rows = sheetRows(decoder.decode(bytes), shared)
+    if (predicate(rows)) return { sheet: rows, sheetCount: sheetParts.length }
+  }
+  return { sheet: null, sheetCount: sheetParts.length }
 }
 
 /** Reads the first worksheet of an .xlsx file. */

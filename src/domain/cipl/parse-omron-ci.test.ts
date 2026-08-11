@@ -295,6 +295,15 @@ describe('the printed PDF', () => {
     expect(parsed.lines[0].countryOfOrigin).toBe('US')
   })
 
+  it('keeps a description word that overflows past the quantity border out of the numeric columns', async () => {
+    const spec = simpleOmronCi()
+    spec.lines[0] = { ...spec.lines[0], descriptionOverflow: 'kit' }
+    const parsed = await parseCipl('ci.pdf', await buildOmronCiPdf(spec))
+    expect(parsed.lines[0].quantity).toBe(4)
+    expect(parsed.lines[0].uom).toBe('EA')
+    expect(parsed.lines[0].description).toBe('Robot cable assembly kit')
+  })
+
   it('reads a header value whole when the extractor splits it into several items', async () => {
     const spec = { ...simpleOmronCi(), splitValues: true }
     const parsed = await parseCipl('ci.pdf', await buildOmronCiPdf(spec))

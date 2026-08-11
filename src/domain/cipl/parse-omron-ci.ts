@@ -502,7 +502,11 @@ function pagesToGrid(pages: TextPage[]): SheetRows {
     if (partyBand !== -1 && i > partyBand && i < partyEnd) {
       grid.push(partyRow(rows[i], rows[partyBand]))
     } else if (i === partyBand) {
-      grid.push(rows[i].items.map((item) => item.str))
+      // Synthesized, not passed through: the extractor can split a printed title into
+      // several items, and `readParties` finds its columns by cell position — a split
+      // title would shift every address into the wrong column. `partyRow` above already
+      // emits exactly three cells, keyed to the same three titles by x.
+      grid.push(['SHIPPER (SHIP FROM)', 'CONSIGNEE (SHIP TO)', 'BILL TO / SOLD TO (IF DIFFERENT)'])
     } else {
       grid.push(coalescedRow(rows[i]))
     }
@@ -654,7 +658,12 @@ function tableRowsToBlocks(rows: TextRow[], anchors: Anchors): SheetRows {
       const block = blockFor(item.y)
       if (!block) continue
 
-      if (item.x >= quantityBorder) {
+      // The quantity/price cells are vertically merged, so their baseline is the block's
+      // centre — the LN baseline. An item right of the border that is *not* on that
+      // baseline is a description overflowing its cell (the extractor can split a long
+      // description into word items that spill past the border), and belongs to the left
+      // region, not to a numeric column it would corrupt.
+      if (item.x >= quantityBorder && Math.abs(item.y - block.y) <= pitch / 8) {
         const column = nearest(item.x, ['qty', 'uom', 'unitPrice', 'amount'])
         if (column) push(block.top, column, item)
         continue
