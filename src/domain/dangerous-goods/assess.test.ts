@@ -281,6 +281,23 @@ describe('a rating that decides nothing', () => {
     expect(result.canGenerate).toBe(false)
   })
 
+  it('blocks a rating of zero rather than treating it as a Section II battery', () => {
+    // Zero passed as a stated rating: Section II, no declaration, the battery mark alone
+    // for hazard communication, and `dg.energy` affirming "0 Wh against a 100 Wh
+    // threshold — small by air".
+    const zeroed = consignment([
+      pkg('p1', [
+        entry('e1', { configuration: 'contained-in-equipment', wattHours: 0 }, {
+          netWeightKgPerPackage: 1,
+          countPerPackage: 1,
+        }),
+      ]),
+    ])
+    const result = assess(zeroed)
+    expect(check(result, 'dg.energy')).toMatchObject({ severity: 'blocking', passed: false })
+    expect(result.canGenerate).toBe(false)
+  })
+
   it('still blocks a standalone lithium ion battery, where every threshold turns on it', () => {
     const unrated = consignment([
       pkg('p1', [entry('e1', { wattHours: null })], { unSpecificationMark: '4G/Y75/S/26/USA/+D02390' }),

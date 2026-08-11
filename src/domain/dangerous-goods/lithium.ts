@@ -119,12 +119,19 @@ export const SOC_ADVISORY_WH = 2.7
  * — the single most consequential mistake this module could make.
  */
 export function energyBand(spec: BatterySpec): EnergyBand {
-  if (spec.chemistry === 'lithium-metal') {
-    if (spec.lithiumContentG == null) return 'unknown'
-    return spec.lithiumContentG <= AIR_THRESHOLDS.lithiumContentG[spec.form] ? 'small' : 'large'
-  }
-  if (spec.wattHours == null) return 'unknown'
-  return spec.wattHours <= AIR_THRESHOLDS.wattHours[spec.form] ? 'small' : 'large'
+  // Zero and below are unknown too, not the smallest possible battery. No cell is rated at
+  // nothing, so the figure is a placeholder or a mistyped field — and read as a rating it
+  // is the most permissive answer there is: Section II, no declaration, adequate
+  // instruction in place of dangerous goods training, and a check that passes affirming
+  // "0 Wh against a 100 Wh threshold". The sibling net-weight check refuses zero for
+  // exactly this reason.
+  const stated = spec.chemistry === 'lithium-metal' ? spec.lithiumContentG : spec.wattHours
+  if (stated == null || stated <= 0) return 'unknown'
+  const threshold =
+    spec.chemistry === 'lithium-metal'
+      ? AIR_THRESHOLDS.lithiumContentG[spec.form]
+      : AIR_THRESHOLDS.wattHours[spec.form]
+  return stated <= threshold ? 'small' : 'large'
 }
 
 /** The threshold that decided the band, for display beside it. */

@@ -54,6 +54,17 @@ describe('energy bands by air', () => {
     expect(energyBand(spec({ chemistry: 'lithium-metal', lithiumContentG: null }))).toBe('unknown')
   })
 
+  it('does not read a zero rating as the smallest possible battery', () => {
+    // No cell is rated at nothing, so the figure is a placeholder or a mistyped field —
+    // and read as a rating it is the most permissive answer there is: Section II, no
+    // declaration, and adequate instruction in place of dangerous goods training.
+    expect(energyBand(spec({ wattHours: 0 }))).toBe('unknown')
+    expect(energyBand(spec({ chemistry: 'lithium-metal', lithiumContentG: 0 }))).toBe('unknown')
+    expect(energyBand(spec({ wattHours: -1 }))).toBe('unknown')
+    // And a real small rating is still small.
+    expect(energyBand(spec({ form: 'cell', wattHours: 0.5 }))).toBe('small')
+  })
+
   it('does not read a watt-hour rating as a lithium content, or the reverse', () => {
     expect(energyBand(spec({ chemistry: 'lithium-metal', wattHours: 5, lithiumContentG: null }))).toBe('unknown')
     expect(energyBand(spec({ chemistry: 'lithium-ion', wattHours: null, lithiumContentG: 1 }))).toBe('unknown')
