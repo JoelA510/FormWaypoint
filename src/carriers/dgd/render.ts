@@ -102,11 +102,7 @@ export async function renderDeclaration(declaration: ShippersDeclaration): Promi
   }
 
   const bytes = await doc.save({ updateFieldAppearances: true })
-  // Deduplicated: the shipper and consignee blocks are drawn on every sheet, so a party
-  // block that overflows its box says so once per page. The reader is being told about one
-  // address, and the panel keys these by their text — the same sentence three times is a
-  // list that looks like three problems and collides as React keys.
-  return { bytes, warnings: [...new Set(warnings)] }
+  return { bytes, warnings }
 }
 
 function drawPage(
@@ -574,17 +570,25 @@ function lines(
    */
   available = Infinity,
 ): void {
+  // These blocks are drawn on every sheet, so each complaint would otherwise be made once
+  // per page about one address. Deduplicated here rather than over the whole list: two
+  // genuinely different truncated table rows can carry the same wording, and collapsing
+  // those would under-report truncation on a regulated form.
+  const warn = (message: string) => {
+    if (!ctx.warnings.includes(message)) ctx.warnings.push(message)
+  }
+
   const fit = fitLines(values.length, available, size)
   values.forEach((value, i) => {
     if (i >= fit.capacity) return
     if (ctx.regular.widthOfTextAtSize(value, fit.size) > maxWidth) {
-      ctx.warnings.push(`${label}: "${value}" is wider than its box and may be clipped when printed.`)
+      warn(`${label}: "${value}" is wider than its box and may be clipped when printed.`)
     }
     text(ctx, value, x, top - i * fit.leading, { size: fit.size })
   })
 
   if (values.length > fit.capacity) {
-    ctx.warnings.push(
+    warn(
       `${label}: ${values.length} lines were supplied and only ${fit.capacity} fit the box, even condensed. ` +
         `Not printed: ${values.slice(fit.capacity).map((v) => `"${v}"`).join(', ')}. ` +
         'Shorten the address, or write the rest on the form by hand before signing.',

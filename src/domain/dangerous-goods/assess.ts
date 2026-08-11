@@ -811,7 +811,16 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
   // batteries: the *total* mass is what the column limits apply to, and the package and the
   // shipping paper are both described as packed with equipment.
   const configurations = new Set(entries.map((e) => e.entry.spec.configuration))
-  if (configurations.has('packed-with-equipment') && configurations.has('contained-in-equipment')) {
+  // Not raised for a package already held for mixing Section II with fully regulated
+  // goods. A181 says how a permissible package of both configurations is described; saying
+  // it about a package the previous check is refusing gives two blocking instructions that
+  // point opposite ways — describe it as packed with equipment, and take it apart.
+  const mixesRegulation = declared.length > 0 && declared.length < classified.length
+  if (
+    !mixesRegulation &&
+    configurations.has('packed-with-equipment') &&
+    configurations.has('contained-in-equipment')
+  ) {
     const lowest = assessment.effectiveLimitKg ?? Infinity
     checks.push({
       id: `dg.a181.${pkg.id}`,

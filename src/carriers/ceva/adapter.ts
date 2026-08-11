@@ -171,11 +171,19 @@ function formatQuantity(quantity: number): string {
   return Number.isInteger(quantity) ? String(quantity) : quantity.toFixed(3)
 }
 
-/** Distinct values, compared case-insensitively; the first spelling seen is kept. */
+/**
+ * Distinct values, compared without regard to case or surrounding space; the first
+ * spelling seen is kept, trimmed.
+ *
+ * Both of these are hand-typed fields, and ` EAR99 ` beside `EAR99` is one classification
+ * written twice — counted as two, it fills a box meant to stay blank and warns about a
+ * mixed shipment that is not mixed.
+ */
 function distinct(values: (string | null | undefined)[]): string[] {
   const seen = new Map<string, string>()
   for (const value of values) {
-    if (value && !seen.has(value.toUpperCase())) seen.set(value.toUpperCase(), value)
+    const trimmed = value?.trim()
+    if (trimmed && !seen.has(trimmed.toUpperCase())) seen.set(trimmed.toUpperCase(), trimmed)
   }
   return [...seen.values()]
 }

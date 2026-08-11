@@ -563,3 +563,29 @@ describe('special provision A181 on the declaration', () => {
     })
   })
 })
+
+describe('A181 across two chemistries in one package', () => {
+  it('relabels each UN number against its own packed-with entry', () => {
+    const shipment = consignment([
+      pkg('p1', [
+        entry('e1', { configuration: 'packed-with-equipment', wattHours: 300 }, { netWeightKgPerPackage: 1 }),
+        entry('e2', { chemistry: 'lithium-metal', configuration: 'packed-with-equipment', lithiumContentG: 5 }, {
+          netWeightKgPerPackage: 1,
+          wattHourMarkedOnCase: false,
+        }),
+        entry('e3', { chemistry: 'lithium-metal', configuration: 'contained-in-equipment', lithiumContentG: 5 }, {
+          netWeightKgPerPackage: 1,
+          countPerPackage: 1,
+          wattHourMarkedOnCase: false,
+        }),
+      ]),
+    ])
+    const declaration = buildDeclaration(shipment, assess(shipment))
+    // Resolving one target for the package left the lithium metal line describing itself
+    // as contained in equipment, which A181 says it is not.
+    expect(declaration.lines.map((l) => l.properShippingName.join(' '))).toEqual([
+      'Lithium ion batteries packed with equipment',
+      'Lithium metal batteries packed with equipment',
+    ])
+  })
+})

@@ -433,7 +433,7 @@ function hazardCommunicationFor(section: PackingSection, aircraft: AircraftLimit
  * does. The rest of column M is reproduced in the Supplemental Appendix and still has to be
  * read for every shipment, which is why the assessment engine says so.
  */
-function specialProvisionsFor(spec: BatterySpec, section: PackingSection): string[] {
+function specialProvisionsFor(spec: BatterySpec, unSpecificationRequired: boolean): string[] {
   const provisions = ['A154 — damaged or defective cells and batteries are forbidden for transport by air']
   if (spec.chemistry === 'lithium-ion' || spec.chemistry === 'sodium-ion') {
     if (spec.configuration === 'standalone') {
@@ -444,7 +444,10 @@ function specialProvisionsFor(spec: BatterySpec, section: PackingSection): strin
   if (spec.configuration === 'standalone') {
     provisions.push('A183 — waste batteries for recycling or disposal are forbidden without competent authority approval')
   }
-  if (section === 'I' || section === 'IA') {
+  // Listed for exactly the entries the packaging check holds to it. Gating this on the
+  // section while the check gated on something wider let a blocking check cite a provision
+  // the entry's own list did not carry.
+  if (unSpecificationRequired) {
     provisions.push('A802 — UN specification packaging meeting Packing Group II performance is required')
   }
   provisions.push('A99 — an exception to the 35 kg limit needs competent authority approval')
@@ -531,7 +534,7 @@ export function classifyForAir(
     indicatedCapacityAlternative: stateOfCharge?.indicatedCapacityAlternative ?? false,
     hazardCommunication: hazardCommunicationFor(section, aircraft, id),
     training: isSectionII ? 'adequate-instruction' : 'dangerous-goods',
-    specialProvisions: specialProvisionsFor(spec, section),
+    specialProvisions: specialProvisionsFor(spec, unSpecificationPackaging),
     basis: section
       ? `PI ${id.packingInstruction} Section ${section} · ${limits.source}`
       : `PI ${id.packingInstruction} · ${limits.source}`,

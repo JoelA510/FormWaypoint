@@ -303,16 +303,23 @@ export function buildDeclaration(consignment: DgConsignment, assessment: DgAsses
  * same mass — it lands on the packed-with line, which is where A181 puts the total.
  */
 function applyA181(entries: EntryAssessment[]): EntryAssessment[] {
-  const packedWith = entries.find((e) => e.entry.spec.configuration === 'packed-with-equipment')
-  if (!packedWith || !entries.some((e) => e.entry.spec.configuration === 'contained-in-equipment')) {
-    return entries
+  // Matched per UN number, not once for the package. A box holding UN3481 packed with
+  // equipment beside UN3091 in both configurations has two provisions to apply, and
+  // resolving a single target relabelled the lithium ion entry and left the lithium metal
+  // one printing the description A181 says does not apply to it.
+  const packedWithByUn = new Map<string, EntryAssessment>()
+  for (const e of entries) {
+    if (e.entry.spec.configuration === 'packed-with-equipment' && !packedWithByUn.has(e.classification.unNumber)) {
+      packedWithByUn.set(e.classification.unNumber, e)
+    }
   }
-  return entries.map((e) =>
-    e.entry.spec.configuration === 'contained-in-equipment' &&
-    e.classification.unNumber === packedWith.classification.unNumber
-      ? { ...e, classification: packedWith.classification }
-      : e,
-  )
+  if (!packedWithByUn.size) return entries
+
+  return entries.map((e) => {
+    if (e.entry.spec.configuration !== 'contained-in-equipment') return e
+    const packedWith = packedWithByUn.get(e.classification.unNumber)
+    return packedWith ? { ...e, classification: packedWith.classification } : e
+  })
 }
 
 /** Box 18. The emergency contact first, because that is what it is read for. */
