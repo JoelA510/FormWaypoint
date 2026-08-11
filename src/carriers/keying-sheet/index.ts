@@ -797,7 +797,16 @@ export function buildKeyingSheet(
  * validates and a courier sorts on; the entry that shipment was actually keyed with reads
  * `498781`. The hyphen is allowed because Brazil writes `01310-100`.
  */
-const POSTCODE = /(\d{4,6}(?:-\d{2,4})?)\s*$/
+const POSTCODE = /(?<![\d-])(\d{4,6}(?:-\d{2,4})?)\s*$/
+
+/**
+ * Lines that end in digits without those digits being a postcode.
+ *
+ * A telephone or reference line printed under the city is the commonest, and it is the one
+ * that reading from the bottom walks into: `Phone 5551234` ends in digits, and taking the
+ * last six of them gave the courier a City of `Phone 5`.
+ */
+const CONTACT_LINE = /\b(?:phone|tel|telephone|fax|mobile|cell|attn|attention|contact|e-?mail)\b/i
 
 /**
  * The line the postcode is on — the *last* one that ends in one, not the first.
@@ -807,9 +816,16 @@ const POSTCODE = /(\d{4,6}(?:-\d{2,4})?)\s*$/
  * split them apart. `Postbus 1234` above `'s-Hertogenbosch NA 5234` gave the right postcode
  * and the city `Postbus` — a PO box label typed into the field a courier sorts on. A street
  * number, a suite number and a building number all end an address line the same way.
+ *
+ * Two guards keep the search from walking past the address the other way. A contact line
+ * printed *below* the city is skipped by name, and a run of digits longer than a postcode no
+ * longer matches its own tail — between them, a `Phone 5551234` under the city line stops
+ * supplying a City of `Phone 5`. Neither is a rule about what a postcode is; both are about
+ * what the lines around it are not.
  */
 function postcodeLineIndex(lines: string[]): number {
   for (let i = lines.length - 1; i >= 0; i--) {
+    if (CONTACT_LINE.test(lines[i])) continue
     if (POSTCODE.test(lines[i])) return i
   }
   return -1

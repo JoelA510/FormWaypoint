@@ -333,6 +333,21 @@ describe('address extraction', () => {
     expect(field(suite, 'City')).toBe('Singapore')
   })
 
+  it('does not read a contact line printed under the city as the postcode line', () => {
+    // Reading from the bottom fixed the PO box above, and walked into the line below: a
+    // telephone number ends in digits too, and its last six gave the courier a City of
+    // `Phone 5`.
+    const phoned = ['Plot 12', 'Springfield IL 62704', 'Phone 5551234']
+    expect(field(phoned, 'Postal code')).toBe('62704')
+    expect(field(phoned, 'City')).toBe('Springfield')
+
+    // Named as a contact line, and also too long to be a postcode — either guard alone
+    // would hold this one, and the pair is what covers the shapes neither does.
+    const tel = ['Plot 12', 'Springfield IL 62704', 'Tel. 555-1234']
+    expect(field(tel, 'Postal code')).toBe('62704')
+    expect(field(tel, 'City')).toBe('Springfield')
+  })
+
   it('keeps a city that is itself written in capitals', () => {
     expect(field(['1 Example Road', 'SINGAPORE 498781'], 'City')).toBe('SINGAPORE')
   })

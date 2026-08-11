@@ -445,7 +445,23 @@ export const BATTERY_MARK_PREFIX = 'Lithium battery mark'
  * left off a package of equipment depends on how many packages are in the consignment, which
  * this function cannot see. `assess.ts` applies them.
  */
-function hazardCommunicationFor(section: PackingSection, aircraft: AircraftLimitation, id: Identity): string[] {
+function hazardCommunicationFor(
+  section: PackingSection,
+  aircraft: AircraftLimitation,
+  id: Identity,
+  /**
+   * Whether the section is null because nothing has decided it yet, as opposed to because
+   * the packing instruction has none.
+   *
+   * The two null sections are not the same answer. PI 976 genuinely has no sections and its
+   * packages are marked as Sections I and IA are; an unrated battery could still turn out to
+   * be Section IB, which carries the lithium battery mark as well as the label. The limit
+   * for that case is already stated conservatively, and the marks list has to agree — the
+   * panel is read while the box is being made up, and a mark that turns out to be needed is
+   * a mark applied after the box was closed.
+   */
+  sectionUndetermined: boolean,
+): string[] {
   const marks = ['Shipper and consignee name and address']
 
   if (section === 'II') {
@@ -458,7 +474,7 @@ function hazardCommunicationFor(section: PackingSection, aircraft: AircraftLimit
   if (aircraft === 'cargo-aircraft-only') marks.push('Cargo Aircraft Only label, on the same surface as the Class 9 label')
   // Section IB alone carries both the Class 9 label and the lithium battery mark (fig. 5-28);
   // Sections I and IA carry the label without the mark (figs. 5-32, 5-33, 5-34).
-  if (section === 'IB') marks.push(`${BATTERY_MARK_PREFIX} bearing ${id.unNumber}`)
+  if (section === 'IB' || sectionUndetermined) marks.push(`${BATTERY_MARK_PREFIX} bearing ${id.unNumber}`)
   marks.push('Net quantity mark, where multiple non-identical packages are offered in the consignment')
   return marks
 }
@@ -575,7 +591,12 @@ export function classifyForAir(
     stackTestRequired: !unSpecificationPackaging && spec.chemistry !== 'sodium-ion',
     stateOfCharge,
     indicatedCapacityAlternative: stateOfCharge?.indicatedCapacityAlternative ?? false,
-    hazardCommunication: hazardCommunicationFor(section, aircraft, id),
+    hazardCommunication: hazardCommunicationFor(
+      section,
+      aircraft,
+      id,
+      section === null && band === 'unknown' && bandDeterminesTreatment(spec),
+    ),
     training: isSectionII ? 'adequate-instruction' : 'dangerous-goods',
     specialProvisions: specialProvisionsFor(spec, unSpecificationPackaging),
     basis: section

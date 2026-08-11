@@ -361,6 +361,23 @@ describe('the printed PDF', () => {
     expect(parsed.lines[0].description).toBe('Robot cable assembly kit')
   })
 
+  it('does not read a numeric country of origin as the start of another line', async () => {
+    // The workbook resync looks for a block whose compliance row was collapsed away by
+    // recognising a line number in that row's first cell. On this path the first cell is
+    // the country of origin, so a numeric country code fired it — throwing away the line's
+    // whole export-control row and filing the compliance row again as goods.
+    const spec = simpleOmronCi()
+    spec.lines[0] = { ...spec.lines[0], coo: '840' }
+    const parsed = await parseCipl('ci.pdf', await buildOmronCiPdf(spec))
+    expect(parsed.lines).toHaveLength(2)
+    expect(parsed.lines[0]).toMatchObject({
+      partNumber: '10000-0001',
+      countryOfOrigin: '840',
+      classification: '8544.42.0000',
+      eccn: 'EAR99',
+    })
+  })
+
   it('reads a header value whole when the extractor splits it into several items', async () => {
     const spec = { ...simpleOmronCi(), splitValues: true }
     const parsed = await parseCipl('ci.pdf', await buildOmronCiPdf(spec))

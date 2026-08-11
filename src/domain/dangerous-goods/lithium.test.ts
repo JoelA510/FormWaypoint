@@ -245,6 +245,19 @@ describe('an unstated rating', () => {
     expect(c.fullyRegulated).toBe(true)
   })
 
+  it('asks for the battery mark, because Section IB is one of the two it could be', () => {
+    // The limit is already stated conservatively for this case; the marks have to agree.
+    // The panel is read while the box is being made up, and a mark that turns out to be
+    // needed is a mark applied after the box was closed.
+    const marks = classifyForAir(spec({ wattHours: null })).hazardCommunication.join(' ')
+    expect(marks).toContain('Lithium battery mark')
+
+    // PI 976's null section is a different answer: it has no sections at all, and its
+    // packages are marked as Sections I and IA are.
+    const sodium = classifyForAir(spec({ chemistry: 'sodium-ion', wattHours: null })).hazardCommunication.join(' ')
+    expect(sodium).not.toContain('Lithium battery mark')
+  })
+
   it('states the lower of the two limits it could be, not the Section IA allowance', () => {
     // A standalone battery has no choice of section: the rating decides between IB and IA,
     // and their ceilings differ by three and a half times. Quoting 35 kg would pass a 20 kg

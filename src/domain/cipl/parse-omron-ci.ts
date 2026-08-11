@@ -132,7 +132,19 @@ function headingAt(row: string[], heading: string): number {
   return row.findIndex((cell) => cell.trim().toUpperCase() === heading)
 }
 
-export function parseOmronCiWorkbook(fileName: string, rows: SheetRows): ParsedCipl {
+export function parseOmronCiWorkbook(
+  fileName: string,
+  rows: SheetRows,
+  /**
+   * Whether a block's compliance row may have been left out of the grid entirely.
+   *
+   * True of a real workbook, where a writer that omits rows with no content collapses an
+   * empty compliance row away and shifts every following block. False of the PDF path,
+   * which synthesizes exactly one compliance row per block from the drawn text — there is
+   * nothing there to collapse, and looking for one misreads that row's own first cell.
+   */
+  collapsedRowsPossible = true,
+): ParsedCipl {
   const warnings: string[] = []
 
   // Header grid: first value found for each label anywhere on the sheet. The instructions
@@ -150,7 +162,7 @@ export function parseOmronCiWorkbook(fileName: string, rows: SheetRows): ParsedC
   const field = (label: string): string => fields.get(label) ?? ''
 
   const parties = readParties(rows)
-  const lines = readLines(rows, field('PURCHASE ORDER #'), field('INVOICE #'), warnings)
+  const lines = readLines(rows, field('PURCHASE ORDER #'), field('INVOICE #'), warnings, collapsedRowsPossible)
 
   const subtotal = amountOnRow(rows, 'SUBTOTAL')
   if (subtotal == null) {
@@ -237,7 +249,13 @@ function readParties(rows: SheetRows): { shipper: PartyAddress; consignee: Party
  * form, not data. A block that is only partly filled is kept — the reconciliation is
  * where an incomplete line gets held, with the person who can fix it looking at it.
  */
-function readLines(rows: SheetRows, purchaseOrder: string, invoiceNumber: string, warnings: string[]): SourceLine[] {
+function readLines(
+  rows: SheetRows,
+  purchaseOrder: string,
+  invoiceNumber: string,
+  warnings: string[],
+  collapsedRowsPossible: boolean,
+): SourceLine[] {
   const headIndex = rows.findIndex(
     (row) => headingAt(row, TOP_COLUMNS.part) >= 0 && headingAt(row, TOP_COLUMNS.qty) >= 0,
   )
@@ -291,7 +309,12 @@ function readLines(rows: SheetRows, purchaseOrder: string, invoiceNumber: string
     // yields blanks either way; that is a coincidence of the present layout and not
     // something to rest a customs classification on. A future revision that put anything
     // in those cells would file it as a country of origin.
-    if (isLineNumber(bottom[columns.ln] ?? '') || isTotalsRow(bottom)) {
+    //
+    // Only where a row can actually be missing. On the PDF path the compliance row's first
+    // cell is the country of origin, not an LN — a numeric country code read as a line
+    // number there, throwing away the line's whole export-control row and filing the
+    // compliance row again as goods of its own.
+    if ((collapsedRowsPossible && isLineNumber(bottom[columns.ln] ?? '')) || isTotalsRow(bottom)) {
       bottom = []
       stride = 1
     }
@@ -474,7 +497,7 @@ export function parseOmronCiPdf(fileName: string, pages: TextPage[]): ParsedCipl
     )
   }
   const grid = pagesToGrid(pages)
-  return parseOmronCiWorkbook(fileName, grid)
+  return parseOmronCiWorkbook(fileName, grid, false)
 }
 
 /**
