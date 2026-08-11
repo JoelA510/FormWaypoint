@@ -3,6 +3,7 @@ import { consignment, entry, pkg } from './test-support'
 import { assess } from './assess'
 import { buildChecklist } from './checklist'
 import { retainUntil } from './dgd'
+import { localDate } from '../../lib/report'
 
 
 describe('the package checklist', () => {
@@ -157,5 +158,19 @@ describe('the checklist states each entry against its own allowance', () => {
     const markdown = buildChecklist(shipment, assess(shipment), '2026-08-06')
     expect(markdown).toContain('UN3480: 8 kg in this package, at or below the 10 kg')
     expect(markdown).toContain('UN3090: 2 kg in this package, at or below the 2.5 kg')
+  })
+})
+
+describe('the prepared date shown beside the retention date', () => {
+  it('is the same calendar basis, so the pair is exactly two years apart', () => {
+    // What the record stores, and what the history table renders from it.
+    const now = new Date(2026, 7, 11, 18, 0) // 6pm local — the next day in UTC west of Greenwich
+    const preparedAt = now.toISOString()
+    const shown = localDate(new Date(preparedAt))
+    const keepUntil = retainUntil(now)
+
+    // Taking the date off the ISO string instead would show a UTC day, and the pair would
+    // read a day short of the two years the table exists to evidence.
+    expect(keepUntil).toBe(`${Number(shown.slice(0, 4)) + 2}${shown.slice(4)}`)
   })
 })

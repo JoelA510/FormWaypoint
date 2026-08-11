@@ -150,22 +150,29 @@ export function App() {
         const nextCarrier = detected ?? carrierId
         setCarrierId(nextCarrier)
 
-        // Reuse what was learned about this consignee last time.
         const base = defaultShipmentSettings(
           getAdapter(isKeyedCarrier(nextCarrier) ? 'nippon-express' : (nextCarrier as CarrierId)),
         )
+        // Reset before the lookup, not after it.
+        //
+        // `defaultShipmentSettings` blanks the export-control triplet deliberately — an
+        // ECCN is a classification the filer makes per shipment, and one carried over from
+        // the last one would be filed against these goods with the export-control check
+        // passing on it. Setting the defaults only on the success path left exactly that
+        // behind whenever the saved-consignee read failed.
+        setSettings(base)
+
+        // Then reuse what was learned about this consignee last time.
         const known = header ? await localStore.getConsignee(header.consignedTo.name) : null
-        setSettings(
-          known
-            ? {
-                ...base,
-                consigneeId: known.consigneeId,
-                consigneeType: known.consigneeType,
-                partiesRelated: known.partiesRelated,
-                destinationCountry: known.destinationCountry ?? '',
-              }
-            : base,
-        )
+        if (known) {
+          setSettings({
+            ...base,
+            consigneeId: known.consigneeId,
+            consigneeType: known.consigneeType,
+            partiesRelated: known.partiesRelated,
+            destinationCountry: known.destinationCountry ?? '',
+          })
+        }
       } catch (e) {
         // The parse already succeeded; only the saved-consignee lookup can land here. The
         // shipment is still workable, so say what was lost rather than wedging the screen.

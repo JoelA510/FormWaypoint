@@ -242,10 +242,16 @@ function readLines(rows: SheetRows, purchaseOrder: string, invoiceNumber: string
 
     let bottom = rows[r + 1] ?? []
     let stride = 2
-    // If the next row starts its own block, this block's compliance row was collapsed away
-    // (a writer that omits rows with no content). Read it as empty and resync, rather than
-    // letting the stride mis-pair every following block's export-control cells.
-    if (isLineNumber(bottom[columns.ln] ?? '')) {
+    // If the next row starts its own block, or is the totals band, this block's compliance
+    // row was collapsed away (a writer that omits rows with no content). Read it as empty
+    // and resync, rather than letting the stride mis-pair every following block's
+    // export-control cells — or, on the last block, reading the totals band as one.
+    //
+    // The totals band currently holds nothing in the compliance columns, so reading it
+    // yields blanks either way; that is a coincidence of the present layout and not
+    // something to rest a customs classification on. A future revision that put anything
+    // in those cells would file it as a country of origin.
+    if (isLineNumber(bottom[columns.ln] ?? '') || isTotalsRow(bottom)) {
       bottom = []
       stride = 1
     }
@@ -299,6 +305,20 @@ function readLines(rows: SheetRows, purchaseOrder: string, invoiceNumber: string
     r += stride
   }
   return lines
+}
+
+/**
+ * A row of the totals band, recognised by its own printed cells.
+ *
+ * Shared by the workbook reader and the PDF reshaper so both agree on where the commodity
+ * table ends. Matched as whole cells, never as substrings of the row — a commodity
+ * described as "Warranty replacement - NO CHARGE" is line data.
+ */
+function isTotalsRow(row: string[]): boolean {
+  return row.some((c) => {
+    const cell = normalizeLabel(c)
+    return cell === 'SUBTOTAL' || cell === 'TOTAL (USD)'
+  })
 }
 
 /** The numeric cell on the row carrying `label` — the rightmost number wins. */
@@ -470,11 +490,7 @@ function pagesToGrid(pages: TextPage[]): SheetRows {
   // data, and truncating the table at it would silently drop every following line.
   let tableEnd = rows.length
   for (let i = subIndex + 1; i < rows.length; i++) {
-    const isTotalsBand = rows[i].items.some((item) => {
-      const cell = normalizeLabel(item.str)
-      return cell === 'SUBTOTAL' || cell === 'TOTAL (USD)'
-    })
-    if (isTotalsBand) {
+    if (isTotalsRow(rows[i].items.map((item) => item.str))) {
       tableEnd = i
       break
     }

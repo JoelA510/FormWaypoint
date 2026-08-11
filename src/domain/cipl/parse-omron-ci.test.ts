@@ -343,3 +343,51 @@ describe('the printed PDF', () => {
     await expect(parseCipl('ci.pdf', (await doc.save()).buffer as ArrayBuffer)).rejects.toThrow(/single page/)
   })
 })
+
+describe('the last block, when its compliance row was collapsed away', () => {
+  const eight = () => ({
+    ...simpleOmronCi(),
+    lines: Array.from({ length: 8 }, (_, i) => ({
+      partNumber: `P-${i + 1}`,
+      description: `Part ${i + 1}`,
+      coo: 'US',
+      hts: '8544.42.0000',
+      eccn: 'EAR99',
+      license: 'NLR',
+      sme: 'N',
+      quantity: 1,
+      uom: 'EA',
+      unitPrice: 10,
+    })),
+  })
+
+  it('does not read the totals band as the last line’s compliance row', () => {
+    const grid = omronCiGrid(eight())
+    const lastTop = grid.findIndex((r) => r[2] === 'P-8')
+    // With every form line used, the row after the last block is the totals band.
+    grid.splice(lastTop + 1, 1)
+    const parsed = parseOmronCiWorkbook('ci.xlsx', grid)
+    expect(parsed.lines).toHaveLength(8)
+    const last = parsed.lines[7]
+    expect(last.partNumber).toBe('P-8')
+    // Blank because the row is genuinely absent — never picked up off the totals band.
+    expect(last.countryOfOrigin).toBe('')
+    expect(last.classification).toBe('')
+    // And the subtotal is still read, so the value check still has something to prove against.
+    expect(parsed.headers.FC.totalValue).toBeCloseTo(80, 2)
+  })
+
+  it('reads a totals band that carries text in the compliance columns as totals, not goods', () => {
+    const grid = omronCiGrid(eight())
+    const lastTop = grid.findIndex((r) => r[2] === 'P-8')
+    grid.splice(lastTop + 1, 1)
+    // A future revision of the form putting anything in those cells must not have it filed
+    // as a country of origin.
+    const totals = grid.findIndex((r) => r.some((c) => c === 'SUBTOTAL'))
+    grid[totals][2] = 'CN'
+    grid[totals][3] = '9999.99.9999'
+    const last = parseOmronCiWorkbook('ci.xlsx', grid).lines[7]
+    expect(last.countryOfOrigin).toBe('')
+    expect(last.classification).toBe('')
+  })
+})

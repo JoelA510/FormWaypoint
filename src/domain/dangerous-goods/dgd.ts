@@ -21,6 +21,7 @@
  *  - **Box 3, page x of y.** Paginated here rather than at draw time, because a declaration
  *    that says "Page 1 of 1" on the first of two sheets is a defective document.
  */
+import { localDate } from '../../lib/report'
 import { groupByClassification, packageCountInConsignment, type DgAssessment } from './assess'
 import type { DgConsignment, Overpack } from './types'
 
@@ -124,9 +125,7 @@ export interface ShippersDeclaration {
  * United States, and this one is read off a shelf label.
  */
 export function retainUntil(preparedAt: Date): string {
-  const due = new Date(preparedAt.getFullYear() + 2, preparedAt.getMonth(), preparedAt.getDate())
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${due.getFullYear()}-${pad(due.getMonth() + 1)}-${pad(due.getDate())}`
+  return localDate(new Date(preparedAt.getFullYear() + 2, preparedAt.getMonth(), preparedAt.getDate()))
 }
 
 /** `7`, `1.5`, `10.25` — a weight without a trailing zero it did not earn. */

@@ -1394,7 +1394,7 @@ export function DgHistoryPanel({ records }: { records: DgConsignmentRecord[] }) 
                     </td>
                     <td className="tabular py-2 pr-4 text-right">{record.packages}</td>
                     <td className="tabular py-2 pr-4 text-right">{formatKg(record.netWeightKg)}</td>
-                    <td className="py-2 pr-4 text-[var(--color-ink-faint)]">{record.preparedAt.slice(0, 10)}</td>
+                    <td className="py-2 pr-4 text-[var(--color-ink-faint)]">{localDate(new Date(record.preparedAt))}</td>
                     <td className="tabular py-2">{record.retainUntil}</td>
                   </tr>
                 ))}

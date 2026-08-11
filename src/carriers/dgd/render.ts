@@ -41,6 +41,15 @@ const HATCH_WIDTH = 16
 const CONTENT = { left: FRAME.left + HATCH_WIDTH + 6, right: FRAME.right - HATCH_WIDTH - 6 }
 
 /**
+ * Address lines the Shipper and Consignee boxes hold.
+ *
+ * Both boxes are 74pt tall, their first baseline sits 22pt below the top and they step
+ * 10pt: the fifth lands 12pt clear of the floor, and a sixth would sit on the border with
+ * the seventh over the caption of the box beneath.
+ */
+const PARTY_LINES = 5
+
+/**
  * Column boundaries of the dangerous goods table, as x positions.
  *
  * The quantity column is the widest of the middle group on purpose. It carries not only
@@ -122,7 +131,9 @@ function drawPage(
   box(ctx, CONTENT.left, y - shipperHeight, midpoint, y)
   box(ctx, midpoint, y - shipperHeight, CONTENT.right, y)
   caption(ctx, 'Shipper', CONTENT.left + 4, y - 10)
-  lines(ctx, declaration.shipper, CONTENT.left + 6, y - 22, midpoint - CONTENT.left - 12, 'Shipper')
+  // Five baselines: the first sits 22pt below the box top and they step 10pt, so the fifth
+  // lands 12pt clear of the 74pt box's floor and the sixth would sit on the border.
+  lines(ctx, declaration.shipper, CONTENT.left + 6, y - 22, midpoint - CONTENT.left - 12, 'Shipper', 8, PARTY_LINES)
 
   caption(ctx, 'Air Waybill No.', midpoint + 4, y - 10)
   if (declaration.airWaybillNumber) {
@@ -144,7 +155,7 @@ function drawPage(
   box(ctx, CONTENT.left, y - consigneeHeight, midpoint, y)
   box(ctx, midpoint, y - consigneeHeight, CONTENT.right, y)
   caption(ctx, 'Consignee', CONTENT.left + 4, y - 10)
-  lines(ctx, declaration.consignee, CONTENT.left + 6, y - 22, midpoint - CONTENT.left - 12, 'Consignee')
+  lines(ctx, declaration.consignee, CONTENT.left + 6, y - 22, midpoint - CONTENT.left - 12, 'Consignee', 8, PARTY_LINES)
   text(ctx, 'For optional use — company logo, name and address', (midpoint + CONTENT.right) / 2, y - 38, {
     size: 7,
     color: GREY,
@@ -548,13 +559,30 @@ function lines(
   maxWidth: number,
   label: string,
   size = 8,
+  /**
+   * How many baselines the box holds. Bounded in both directions, like every other
+   * overflow path on this form: a party block of seven lines drawn into a five-line box
+   * does not stop at the border — it carries on over the caption of the box beneath it,
+   * and the reader is looking at a regulated form with two fields written across each
+   * other. What does not fit is left off and reported.
+   */
+  maxLines = Infinity,
 ): void {
   values.forEach((value, i) => {
+    if (i >= maxLines) return
     if (ctx.regular.widthOfTextAtSize(value, size) > maxWidth) {
       ctx.warnings.push(`${label}: "${value}" is wider than its box and may be clipped when printed.`)
     }
     text(ctx, value, x, top - i * 10, { size })
   })
+
+  if (values.length > maxLines) {
+    ctx.warnings.push(
+      `${label}: ${values.length} lines were supplied but the box holds ${maxLines}. ` +
+        `Not printed: ${values.slice(maxLines).map((v) => `"${v}"`).join(', ')}. ` +
+        'Shorten the address, or write it on the form by hand.',
+    )
+  }
 }
 
 /** Word wrap against the real font metrics, for the few places the model does not pre-wrap. */

@@ -466,3 +466,25 @@ describe('a package too tall for one sheet', () => {
     expect(declaration.pages.flatMap((p) => p.lines)).toEqual(declaration.lines)
   })
 })
+
+describe('an address longer than its box', () => {
+  it('leaves the overflow off the form and says so, rather than drawing over the next caption', async () => {
+    const long = consignment([pkg('p1', [entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 2 })])], {
+      consignee: {
+        name: 'Very Long Consignee Name Ltd.',
+        addressLines: ['Unit 4', 'Riverside Industrial Estate', 'Eastway', 'Some Town', 'Some County', 'ZZ1 2YY', 'United Kingdom'],
+      },
+    })
+    const declaration = buildDeclaration(long, assess(long))
+    const { warnings } = await renderDeclaration(declaration)
+    // Eight lines supplied into a five-line box.
+    expect(warnings.some((w) => w.includes('Consignee') && w.includes('the box holds 5'))).toBe(true)
+    expect(warnings.some((w) => w.includes('United Kingdom'))).toBe(true)
+  })
+
+  it('says nothing when the block fits', async () => {
+    const declaration = buildDeclaration(workbook, assess(workbook))
+    const { warnings } = await renderDeclaration(declaration)
+    expect(warnings.filter((w) => w.includes('the box holds'))).toEqual([])
+  })
+})
