@@ -231,7 +231,37 @@ export interface LocalStore {
 
 type Schema = IDBPDatabase<unknown>
 
-let dbPromise: Promise<Schema> | null = null
+/**
+ * How long a caller waits on an open that another tab is blocking, before being told.
+ *
+ * Bounded rather than terminal. The other tab may close at any moment and the open completes
+ * when it does, so the request is left running and only the wait is cut short — an
+ * unbounded wait is the failure this replaces, and giving up on the database entirely would
+ * be the opposite mistake.
+ */
+const BLOCKED_GRACE_MS = 4000
+
+const SUPERSEDED_MESSAGE =
+  'Another tab has opened a newer version of this application, which needed the local database. This tab is ' +
+  'now working without it — nothing typed here is being saved. Reload the page.'
+
+const BLOCKED_MESSAGE =
+  'Another tab has this application open on an older version and is holding the local database, so it cannot ' +
+  'be upgraded. Close the other tabs and reload this one.'
+
+/** The handle, once one has been obtained; every later call is served straight from it. */
+let handle: Schema | null = null
+/** The in-flight open, and the bounded wait callers get on it. */
+let opening: { database: Promise<Schema>; wait: Promise<Schema> } | null = null
+/**
+ * Set when a newer version in another tab took the database away from this one.
+ *
+ * Terminal, deliberately. This tab is running the old code and can only ever ask for the old
+ * version, which the browser now refuses — reopening would fail with a `VersionError` on
+ * every call for the life of the page, and the writes that swallow their errors would go on
+ * disappearing in silence. Saying so once is the only honest answer.
+ */
+let superseded = false
 
 /**
  * The open database, opened once.
@@ -243,89 +273,95 @@ let dbPromise: Promise<Schema> | null = null
  * in the application, so the panels sit empty and the Generate buttons stay disabled with
  * nothing said — the `finally` that clears `busy` never runs.
  *
- * So both sides are handled. A tab holding the old version closes its connection when it is
- * told it is blocking one, and a tab that finds itself blocked fails with a sentence a
- * person can act on instead of hanging. Either way the memo is cleared, so the next call
- * tries again rather than inheriting the failure for the life of the page.
+ * Both sides of that are handled, and they are not symmetrical. Being blocked is temporary
+ * and self-healing: the wait is bounded, the open is left running, and the first call after
+ * it completes is served normally. Being *superseded* is not: that tab's code is a version
+ * behind and there is nothing it can do but say so.
  */
 function db(): Promise<Schema> {
-  if (!dbPromise) {
-    let settled = false
-    const attempt = new Promise<Schema>((resolve, reject) => {
-      openDB(DB_NAME, DB_VERSION, {
-        blocked() {
-          settled = true
-          reject(
-            new Error(
-              'Another tab has this application open on an older version and is holding the local database. ' +
-                'Close the other tabs and reload this one.',
-            ),
-          )
-        },
-        blocking(_current, _blocked, event) {
-          // This tab is the old one. Letting go is what unblocks the other; holding on
-          // would leave it waiting on a connection nobody is going to use again.
-          ;(event.target as IDBDatabase | null)?.close()
-          dbPromise = null
-        },
-        terminated() {
-          dbPromise = null
-        },
-        upgrade(database, oldVersion) {
-          if (!database.objectStoreNames.contains('profile')) database.createObjectStore('profile')
-          if (!database.objectStoreNames.contains('consignees')) {
-            database.createObjectStore('consignees', { keyPath: 'name' })
-          }
-          if (!database.objectStoreNames.contains('overrides')) {
-            database.createObjectStore('overrides', { keyPath: 'sourceCode' })
-          }
-          // v3 adds per-part weights, needed by formats that print none.
-          if (!database.objectStoreNames.contains('partWeights')) {
-            database.createObjectStore('partWeights', { keyPath: 'partNumber' })
-          }
-          // v4 adds the imported item master.
-          if (!database.objectStoreNames.contains('items')) {
-            database.createObjectStore('items', { keyPath: 'partNumber' })
-          }
-          // v5 adds dangerous goods consignments, which are kept to satisfy the two-year
-          // retention rule rather than for autofill.
-          if (!database.objectStoreNames.contains('dgConsignments')) {
-            const dg = database.createObjectStore('dgConsignments', { keyPath: 'id' })
-            dg.createIndex('preparedAt', 'preparedAt')
-          }
-          // v1 keyed shipments on invoiceNumber, which silently overwrote re-runs. v2 keys
-          // on a per-run id; the old store is dropped rather than migrated because it only
-          // ever held the most recent attempt per invoice.
-          if (!database.objectStoreNames.contains('shipments')) {
-            const shipments = database.createObjectStore('shipments', { keyPath: 'id' })
-            shipments.createIndex('processedAt', 'processedAt')
-            shipments.createIndex('invoiceNumber', 'invoiceNumber')
-          } else if (oldVersion < 2) {
-            // v1 keyed on invoiceNumber, which silently overwrote re-runs. Rebuild on the
-            // per-run id; the old store only ever held the latest attempt per invoice.
-            database.deleteObjectStore('shipments')
-            const shipments = database.createObjectStore('shipments', { keyPath: 'id' })
-            shipments.createIndex('processedAt', 'processedAt')
-            shipments.createIndex('invoiceNumber', 'invoiceNumber')
-          }
-        },
-      }).then(
-        (database) => {
-          // The open can still succeed after `blocked` gave up on it — the other tab closed
-          // in the meantime. Nobody is waiting on this handle, so it is closed rather than
-          // left as a connection that would block the next upgrade in its turn.
-          if (settled) database.close()
-          else resolve(database)
-        },
-        (error) => reject(error),
-      )
+  if (superseded) return Promise.reject(new Error(SUPERSEDED_MESSAGE))
+  // Served from the handle once there is one, so a caller that gave up waiting on a blocked
+  // open does not keep failing after the block clears.
+  if (handle) return Promise.resolve(handle)
+
+  if (!opening) {
+    let giveUp: (reason: Error) => void = () => {}
+    const abandoned = new Promise<never>((_, reject) => {
+      giveUp = reject
     })
-    dbPromise = attempt
-    attempt.catch(() => {
-      if (dbPromise === attempt) dbPromise = null
+    const database = openDB(DB_NAME, DB_VERSION, {
+      blocked() {
+        setTimeout(() => giveUp(new Error(BLOCKED_MESSAGE)), BLOCKED_GRACE_MS)
+      },
+      blocking(_current, _blocked, event) {
+        // This tab is the old one. Letting go is what unblocks the other; holding on would
+        // leave it waiting on a connection nobody is going to use again.
+        superseded = true
+        handle = null
+        opening = null
+        ;(event.target as IDBDatabase | null)?.close()
+      },
+      terminated() {
+        handle = null
+        opening = null
+      },
+      upgrade(database, oldVersion) {
+        if (!database.objectStoreNames.contains('profile')) database.createObjectStore('profile')
+        if (!database.objectStoreNames.contains('consignees')) {
+          database.createObjectStore('consignees', { keyPath: 'name' })
+        }
+        if (!database.objectStoreNames.contains('overrides')) {
+          database.createObjectStore('overrides', { keyPath: 'sourceCode' })
+        }
+        // v3 adds per-part weights, needed by formats that print none.
+        if (!database.objectStoreNames.contains('partWeights')) {
+          database.createObjectStore('partWeights', { keyPath: 'partNumber' })
+        }
+        // v4 adds the imported item master.
+        if (!database.objectStoreNames.contains('items')) {
+          database.createObjectStore('items', { keyPath: 'partNumber' })
+        }
+        // v5 adds dangerous goods consignments, which are kept to satisfy the two-year
+        // retention rule rather than for autofill.
+        if (!database.objectStoreNames.contains('dgConsignments')) {
+          const dg = database.createObjectStore('dgConsignments', { keyPath: 'id' })
+          dg.createIndex('preparedAt', 'preparedAt')
+        }
+        // v1 keyed shipments on invoiceNumber, which silently overwrote re-runs. v2 keys
+        // on a per-run id; the old store is dropped rather than migrated because it only
+        // ever held the most recent attempt per invoice.
+        if (!database.objectStoreNames.contains('shipments')) {
+          const shipments = database.createObjectStore('shipments', { keyPath: 'id' })
+          shipments.createIndex('processedAt', 'processedAt')
+          shipments.createIndex('invoiceNumber', 'invoiceNumber')
+        } else if (oldVersion < 2) {
+          // v1 keyed on invoiceNumber, which silently overwrote re-runs. Rebuild on the
+          // per-run id; the old store only ever held the latest attempt per invoice.
+          database.deleteObjectStore('shipments')
+          const shipments = database.createObjectStore('shipments', { keyPath: 'id' })
+          shipments.createIndex('processedAt', 'processedAt')
+          shipments.createIndex('invoiceNumber', 'invoiceNumber')
+        }
+      },
     })
+    const current = { database, wait: Promise.race([database, abandoned]) }
+    opening = current
+    database.then(
+      (opened) => {
+        // Kept even if `blocking` fired while the open was in flight: that tab is
+        // superseded and must not go on using a connection the newer one is waiting for.
+        if (superseded) opened.close()
+        else handle = opened
+      },
+      () => {
+        if (opening === current) opening = null
+      },
+    )
+    // The bounded wait rejects on its own schedule; nothing else may treat that as an
+    // unhandled failure.
+    current.wait.catch(() => {})
   }
-  return dbPromise
+  return opening.wait
 }
 
 export const indexedDbStore: LocalStore = {

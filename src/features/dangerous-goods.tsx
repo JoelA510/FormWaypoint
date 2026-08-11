@@ -11,7 +11,7 @@
  * Nothing here is uploaded, and nothing here is inferred. Every field the regulations turn on
  * is asked, and an unanswered one blocks rather than defaults.
  */
-import { useCallback, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { useCallback, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
 import {
   Badge,
   Button,
@@ -138,24 +138,24 @@ export function DangerousGoodsPanel({
   }, [setConsignment])
 
   /**
-   * The identity of the last record written, and the consignment it was written for.
+   * Records what was prepared, which is the two-year retention obligation in practice.
    *
    * Downloading the declaration and then the checklist is one preparation of one
-   * consignment, not two. Minting a fresh `preparedAt` for each put two indistinguishable
+   * consignment, not two, and minting a fresh timestamp for each put two indistinguishable
    * rows in the retention list — the `busy` guards only ever stopped a double-click on one
-   * button. So an unchanged consignment reuses its id, and the second write lands on top of
-   * the first. Edit anything and it is a new preparation, with its own row.
+   * button. So a consignment already on file keeps the identity it was filed under, and the
+   * second write lands on the first. Edit anything and it is a new preparation, with its
+   * own row.
+   *
+   * Matched against the records rather than remembered in a ref, because this panel
+   * unmounts every time the other tab is shown: a component-local memory of the last write
+   * forgets across a tab switch, and across a reload, which is exactly when someone comes
+   * back to print the checklist for what they generated earlier.
    */
-  const lastRecord = useRef<{ consignment: string; preparedAt: string } | null>(null)
-
-  /** Records what was prepared, which is the two-year retention obligation in practice. */
   const record = useCallback((): DgConsignmentRecord => {
     const fingerprint = JSON.stringify(consignment)
-    const preparedAt =
-      lastRecord.current?.consignment === fingerprint
-        ? lastRecord.current.preparedAt
-        : new Date().toISOString()
-    lastRecord.current = { consignment: fingerprint, preparedAt }
+    const filed = records.find((r) => JSON.stringify(r.consignment) === fingerprint)
+    const preparedAt = filed?.preparedAt ?? new Date().toISOString()
     return {
       id: `${consignment.airWaybillNumber || consignment.shippersReference || 'consignment'}@${preparedAt}`,
       preparedAt,
@@ -174,7 +174,7 @@ export function DangerousGoodsPanel({
       consignment,
       checks: assessment.checks,
     }
-  }, [consignment, assessment])
+  }, [consignment, assessment, records])
 
   /**
    * Writes the retention record, and reports a failed write as what it is.

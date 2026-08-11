@@ -86,7 +86,17 @@ export function App() {
   const [scheduleB, setScheduleB] = useState<ScheduleBIndex | null>(null)
   const [scheduleBPayload, setScheduleBPayload] = useState<RawPayload | null>(null)
   const [scheduleBError, setScheduleBError] = useState<string | null>(null)
-  const [restoreError, setRestoreError] = useState<string | null>(null)
+  const [storageError, setStorageError] = useState<string | null>(null)
+  /**
+   * Whether the stored profile was actually read.
+   *
+   * The autosave below is guarded on the profile still being `EMPTY_PROFILE`, which held
+   * while a failed read meant a failed write too. It no longer does — a transient failure
+   * can leave this screen empty over a database that opens fine a moment later — so the
+   * first keystroke would have saved a near-blank profile over the real one. Nothing is
+   * written back until something was read.
+   */
+  const [profileLoaded, setProfileLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -128,7 +138,10 @@ export function App() {
           localStore.listShipments(),
           localStore.listDgConsignments(),
         ])
-      if (saved.status === 'fulfilled' && saved.value) setProfile(saved.value)
+      if (saved.status === 'fulfilled') {
+        if (saved.value) setProfile(saved.value)
+        setProfileLoaded(true)
+      }
       if (savedOverrides.status === 'fulfilled') setOverrides(savedOverrides.value)
       if (savedPartOverrides.status === 'fulfilled') setPartOverrides(savedPartOverrides.value)
       if (savedItems.status === 'fulfilled') setItems(savedItems.value)
@@ -145,7 +158,7 @@ export function App() {
       ] as const
       const missing = failed.filter(([result]) => result.status === 'rejected').map(([, label]) => label)
       if (missing.length) {
-        setRestoreError(
+        setStorageError(
           `This machine's stored data could not be read: ${missing.join(', ')}. What is shown is incomplete — ` +
             'do not take an empty panel as evidence that nothing was saved.',
         )
@@ -155,10 +168,17 @@ export function App() {
 
   // Persist the profile as it is edited; it is reference data, not shipment data.
   useEffect(() => {
-    if (profile === EMPTY_PROFILE) return
-    const timer = setTimeout(() => void localStore.saveProfile(profile), 400)
+    if (!profileLoaded || profile === EMPTY_PROFILE) return
+    const timer = setTimeout(() => {
+      // Reported, not swallowed. A tab superseded by a newer version in another window can
+      // no longer write at all, and edits that vanish without a word are worse than edits
+      // that fail loudly.
+      void localStore.saveProfile(profile).catch((e: unknown) => {
+        setStorageError(e instanceof Error ? e.message : 'The exporter profile could not be saved on this machine.')
+      })
+    }, 400)
     return () => clearTimeout(timer)
-  }, [profile])
+  }, [profile, profileLoaded])
 
   const handleParsed = useCallback(
     async (next: ParsedCipl) => {
@@ -463,10 +483,10 @@ export function App() {
       </header>
 
       <main className="mx-auto max-w-6xl space-y-4 px-5 py-6">
-        {/* Above the tabs, because a failed restore empties panels on both of them. */}
-        {restoreError ? (
+        {/* Above the tabs, because local storage backs the panels on both of them. */}
+        {storageError ? (
           <p className="rounded-md border border-[var(--color-block)] bg-[var(--color-block-soft)] px-3 py-2 text-sm">
-            {restoreError}
+            {storageError}
           </p>
         ) : null}
 
