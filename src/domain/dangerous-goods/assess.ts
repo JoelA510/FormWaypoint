@@ -663,13 +663,24 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
                   ? // Section II is a relief with conditions, and its 5 kg ceiling is one of
                     // them; the same goods over it are prepared to Section I of the same
                     // packing instruction. Named as the real alternative it is, with what it
-                    // costs, rather than leaving "split it" as the only way out of a package
-                    // the regulations do allow.
-                    'Either split the batteries across more packages, or prepare this package to Section I of PI ' +
-                    `${classification.packingInstruction}, where the cargo aircraft allowance is 35 kg. Section I ` +
-                    'is not a paperwork switch: it means UN specification packaging, the Class 9 label, a ' +
-                    'Shipper’s Declaration and full dangerous goods training. Record it against the battery entry ' +
-                    'once it is true of the box.'
+                    // costs — but only where it would actually help. Section I relieves
+                    // nothing on a passenger aircraft (5 kg either way), and above 35 kg it
+                    // does not fit either, so in both cases splitting is the only answer and
+                    // offering Section I would send someone to do UN-specification packaging
+                    // work for a package that still will not go.
+                    (usingPassenger
+                      ? 'Split the batteries across more packages. Section I would not help here: its passenger ' +
+                        'aircraft allowance is the same 5 kg. Offering the consignment as cargo aircraft only and ' +
+                        'preparing this package to Section I would raise it to 35 kg.'
+                      : kg(weight) > A99_THRESHOLD_KG
+                        ? 'Split the batteries across more packages. Section I of the same packing instruction ' +
+                          'allows 35 kg on a cargo aircraft, which this package is over as well; beyond that is ' +
+                          'special provision A99, which is not a paperwork step — see the A99 note below.'
+                        : 'Either split the batteries across more packages, or prepare this package to Section I ' +
+                          `of PI ${classification.packingInstruction}, where the cargo aircraft allowance is ` +
+                          '35 kg. Section I is not a paperwork switch: it means UN specification packaging, the ' +
+                          'Class 9 label, a Shipper’s Declaration and full dangerous goods training. Record it ' +
+                          'against the battery entry once it is true of the box.')
                   : classification.limits.cargoKg > limit
                     ? 'Split the batteries across more packages, or offer the consignment as cargo aircraft only.'
                     : kg(weight) > A99_THRESHOLD_KG
@@ -714,8 +725,13 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
   // entry on the declaration would declare goods the declaration does not cover, and
   // omitting it would sign a paper that understates what is in the box. The training
   // materials do not work this case, so this workflow refuses it rather than guessing.
-  const declared = entries.filter((e) => e.classification.declarationRequired)
-  if (declared.length && declared.length < entries.length) {
+  // Judged on entries whose section is actually determined. An entry with no energy rating
+  // is conservatively fully regulated with `section: null`, and counting it here would
+  // report a packing conflict when the real defect is the unentered watt-hour figure —
+  // which `dg.energy` is already blocking on, in the words that fix it.
+  const classified = entries.filter((e) => e.classification.section !== null)
+  const declared = classified.filter((e) => e.classification.declarationRequired)
+  if (declared.length && declared.length < classified.length) {
     checks.push({
       id: `dg.mixed-regulation.${pkg.id}`,
       severity: 'blocking',
@@ -960,7 +976,11 @@ function consignmentChecks(
       requiredAircraft,
       consignment.aircraft,
       declarationRequired,
-      packages.some((p) => !p.declarationRequired),
+      // A package with no entries in it is not an excepted package — it is an empty
+      // description, which `dg.structure` is already holding the consignment on. Saying
+      // "the Section II packages carry no Class 9 label" when there are none names goods
+      // that are not in the consignment.
+      packages.some((p) => p.entries.length > 0 && !p.declarationRequired),
     ),
     passed: true,
   })

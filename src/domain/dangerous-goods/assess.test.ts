@@ -763,3 +763,51 @@ describe('a mixed consignment offered cargo-aircraft-only', () => {
     expect(sectionII.hazardCommunication.join(' ')).not.toContain('Class 9')
   })
 })
+
+describe('edge cases around the mixed-regulation and Section I wording', () => {
+  it('does not report a packing conflict for an entry whose energy rating is simply missing', () => {
+    // An unrated entry is conservatively fully regulated with no section; pairing it with a
+    // Section II entry is a missing figure, not a mixed package.
+    const unrated = consignment([
+      pkg('p1', [
+        entry('e1', { configuration: 'contained-in-equipment', wattHours: 76 }, {
+          netWeightKgPerPackage: 1,
+          countPerPackage: 3,
+          stateOfChargePercent: 20,
+        }),
+        entry('e2', { configuration: 'contained-in-equipment', wattHours: null }, {
+          netWeightKgPerPackage: 1,
+          countPerPackage: 1,
+          stateOfChargePercent: 20,
+        }),
+      ]),
+    ])
+    const result = assess(unrated)
+    expect(check(result, 'dg.mixed-regulation.p1')).toBeUndefined()
+    // The real defect is still blocking, in the words that fix it.
+    expect(check(result, 'dg.energy.p1/e2')).toMatchObject({ severity: 'blocking', passed: false })
+  })
+
+  it('does not offer Section I on a passenger aircraft, where it allows the same 5 kg', () => {
+    const passenger = consignment(
+      [pkg('p1', [entry('e1', { configuration: 'packed-with-equipment', wattHours: 96 }, { netWeightKgPerPackage: 8 })])],
+      { aircraft: 'passenger-and-cargo' },
+    )
+    const detail = check(assess(passenger), 'dg.limit.p1')!.detail
+    expect(detail).toContain('Section I would not help here')
+  })
+
+  it('does not offer Section I for a package that would not fit in it either', () => {
+    const huge = consignment([
+      pkg('p1', [entry('e1', { configuration: 'packed-with-equipment', wattHours: 96 }, { netWeightKgPerPackage: 40 })]),
+    ])
+    const detail = check(assess(huge), 'dg.limit.p1')!.detail
+    expect(detail).toContain('which this package is over as well')
+  })
+
+  it('does not describe Section II packages that are not in the consignment', () => {
+    const regulated = consignment([pkg('p1', [entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 2 })])])
+    const detail = assess(regulated).checks.find((c) => c.id === 'dg.aircraft')!.detail
+    expect(detail).not.toContain('Section II packages')
+  })
+})
