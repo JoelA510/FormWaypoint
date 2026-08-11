@@ -115,9 +115,18 @@ export function createCevaAdapter(): CarrierAdapter {
       // "U.S. dollar, omit cents" — rounded to the nearest dollar.
       setText(ctx, F.value, rows.map((l) => String(Math.round(l.valueUsd))).join('\r'))
 
-      // A single licence applies to the whole shipment on this form; ECCN stays blank
-      // unless a row actually carries one, since the box is "when required".
-      setText(ctx, F.license, firstDistinct(rows.map((l) => l.license)))
+      // The form has one licence box for the whole shipment. Rows can now carry their own
+      // licences (the `omron-ci` form states one per line), so a mixed shipment gets the
+      // same treatment as a mixed ECCN below: every distinct value is written and the
+      // signer is warned, because a single value alone would misstate the other rows.
+      const licenses = distinct(rows.map((l) => l.license))
+      setText(ctx, F.license, licenses.join(' / '))
+      if (licenses.length > 1) {
+        ctx.warnings.push(
+          `Rows on this shipment carry different licence values (${licenses.join(', ')}), but the form has one ` +
+            'box for all of them. All were written; split the shipment or annotate the licence box before signing.',
+        )
+      }
 
       // This form has one ECCN box for the whole shipment, so a mixed shipment cannot be
       // stated accurately in it. Every distinct value goes in — including EAR99 — because
@@ -160,10 +169,11 @@ function formatQuantity(quantity: number): string {
   return Number.isInteger(quantity) ? String(quantity) : quantity.toFixed(3)
 }
 
-function firstDistinct(values: (string | null)[]): string {
-  return distinct(values).join(' / ')
-}
-
+/** Distinct values, compared case-insensitively; the first spelling seen is kept. */
 function distinct(values: (string | null | undefined)[]): string[] {
-  return [...new Set(values.filter((v): v is string => Boolean(v)))]
+  const seen = new Map<string, string>()
+  for (const value of values) {
+    if (value && !seen.has(value.toUpperCase())) seen.set(value.toUpperCase(), value)
+  }
+  return [...seen.values()]
 }

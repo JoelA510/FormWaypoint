@@ -148,28 +148,33 @@ export function columnToIndex(reference: string): number {
 // ---------------------------------------------------------------------------
 
 /**
- * Resolves the path of the first worksheet through the workbook's relationships.
+ * Resolves worksheet paths through the workbook's relationships, in tab order.
  *
  * Sheet order in `workbook.xml` is the order shown in Excel's tab bar, which is not
  * necessarily `sheet1.xml` — a workbook whose first tab was deleted and re-added starts at
  * `sheet2.xml`. Falling back to the lowest-numbered file would silently read the wrong tab.
  */
-function firstSheetPath(workbookXml: string, relsXml: string): string | null {
-  const sheet = workbookXml.match(/<sheet\b[^>]*\/?>/)?.[0]
-  const relationId = sheet?.match(/r:id="([^"]+)"/)?.[1]
-  if (!relationId) return null
-
+function sheetPaths(workbookXml: string, relsXml: string): string[] {
+  const targets = new Map<string, string>()
   for (const relation of relsXml.matchAll(/<Relationship\b[^>]*>/g)) {
-    if (relation[0].match(/Id="([^"]+)"/)?.[1] !== relationId) continue
+    const id = relation[0].match(/Id="([^"]+)"/)?.[1]
     const target = relation[0].match(/Target="([^"]+)"/)?.[1]
-    if (!target) return null
-    return target.startsWith('/') ? target.slice(1) : `xl/${target.replace(/^\.\//, '')}`
+    if (id && target) {
+      targets.set(id, target.startsWith('/') ? target.slice(1) : `xl/${target.replace(/^\.\//, '')}`)
+    }
   }
-  return null
+
+  const paths: string[] = []
+  for (const sheet of workbookXml.matchAll(/<sheet\b[^>]*\/?>/g)) {
+    const relationId = sheet[0].match(/r:id="([^"]+)"/)?.[1]
+    const path = relationId ? targets.get(relationId) : undefined
+    if (path) paths.push(path)
+  }
+  return paths
 }
 
-/** Reads the first worksheet of an .xlsx file. */
-export async function readXlsx(data: Uint8Array): Promise<SheetRows> {
+/** The workbook's worksheet XML parts in tab order, with the shared-string table. */
+async function loadSheetParts(data: Uint8Array): Promise<{ sheetParts: Uint8Array[]; shared: string[] }> {
   const decoder = new TextDecoder()
   const parts = await unzip(
     data,
@@ -184,12 +189,19 @@ export async function readXlsx(data: Uint8Array): Promise<SheetRows> {
   if (!workbookXml) throw new WorkbookError('Not a .xlsx workbook — xl/workbook.xml is missing.')
 
   const relsXml = parts.get('xl/_rels/workbook.xml.rels')
-  const path = relsXml ? firstSheetPath(decoder.decode(workbookXml), decoder.decode(relsXml)) : null
-  const sheetBytes =
-    (path ? parts.get(path) : undefined) ??
-    parts.get('xl/worksheets/sheet1.xml') ??
-    [...parts.entries()].filter(([name]) => name.startsWith('xl/worksheets/')).sort(([a], [b]) => a.localeCompare(b))[0]?.[1]
-  if (!sheetBytes) throw new WorkbookError('This workbook contains no worksheets.')
+  const ordered = relsXml ? sheetPaths(decoder.decode(workbookXml), decoder.decode(relsXml)) : []
+  const sheetParts = ordered.map((path) => parts.get(path)).filter((bytes): bytes is Uint8Array => bytes != null)
+  if (!sheetParts.length) {
+    // No resolvable relationships: fall back to the worksheet files themselves — sheet
+    // XML only, since xl/worksheets/_rels/*.rels also live under this prefix and sort
+    // before sheet1.xml — with sheet1.xml first, matching what Excel shows first.
+    const byName = [...parts.entries()]
+      .filter(([name]) => /^xl\/worksheets\/[^/]+\.xml$/.test(name))
+      .sort(([a], [b]) => (a === 'xl/worksheets/sheet1.xml' ? -1 : b === 'xl/worksheets/sheet1.xml' ? 1 : a.localeCompare(b)))
+      .map(([, bytes]) => bytes)
+    sheetParts.push(...byName)
+  }
+  if (!sheetParts.length) throw new WorkbookError('This workbook contains no worksheets.')
 
   const shared: string[] = []
   const sharedBytes = parts.get('xl/sharedStrings.xml')
@@ -197,12 +209,57 @@ export async function readXlsx(data: Uint8Array): Promise<SheetRows> {
     for (const item of decoder.decode(sharedBytes).matchAll(/<si>([\s\S]*?)<\/si>/g)) shared.push(textRuns(item[1]))
   }
 
+  return { sheetParts, shared }
+}
+
+/**
+ * Reads the worksheets of an .xlsx file, in tab order, up to `limit`. The limit exists so
+ * `readXlsx` does not row-parse ten tabs of somebody's item master only to throw nine of
+ * them away.
+ */
+export async function readXlsxSheets(data: Uint8Array, limit = Infinity): Promise<SheetRows[]> {
+  const decoder = new TextDecoder()
+  const { sheetParts, shared } = await loadSheetParts(data)
+  return sheetParts.slice(0, limit).map((bytes) => sheetRows(decoder.decode(bytes), shared))
+}
+
+/**
+ * The first worksheet, in tab order, that satisfies `predicate` — parsed lazily, one
+ * sheet at a time, so finding a form behind a cover tab does not row-parse every other
+ * tab of a large workbook. Returns the sheet count alongside, for error messages.
+ */
+export async function findXlsxSheet(
+  data: Uint8Array,
+  predicate: (rows: SheetRows) => boolean,
+): Promise<{ sheet: SheetRows | null; sheetCount: number }> {
+  const decoder = new TextDecoder()
+  const { sheetParts, shared } = await loadSheetParts(data)
+  for (const bytes of sheetParts) {
+    const rows = sheetRows(decoder.decode(bytes), shared)
+    if (predicate(rows)) return { sheet: rows, sheetCount: sheetParts.length }
+  }
+  return { sheet: null, sheetCount: sheetParts.length }
+}
+
+/** Reads the first worksheet of an .xlsx file. */
+export async function readXlsx(data: Uint8Array): Promise<SheetRows> {
+  return (await readXlsxSheets(data, 1))[0]
+}
+
+function sheetRows(sheetXml: string, shared: string[]): SheetRows {
   const rows: SheetRows = []
-  for (const row of decoder.decode(sheetBytes).matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
+  for (const row of sheetXml.matchAll(/<row\b([^>]*)>([\s\S]*?)<\/row>/g)) {
+    // Honour the row's own index. Excel and LibreOffice omit <row> records that hold no
+    // cells, and a consumer that reads the grid positionally (the Commercial Invoice
+    // form's two-rows-per-line table) must not see later rows shifted up into the gap.
+    const declaredIndex = Number(row[1].match(/r="(\d+)"/)?.[1])
+    if (Number.isInteger(declaredIndex)) {
+      while (rows.length < declaredIndex - 1) rows.push([])
+    }
     const cells: string[] = []
     // Matches both `<c ...>...</c>` and the self-closing `<c ... />` Excel writes for a
     // cell that carries only formatting.
-    for (const cell of row[1].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+    for (const cell of row[2].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
       const attributes = cell[1]
       const body = cell[2] ?? ''
       const reference = attributes.match(/r="([A-Z]+)\d+"/)?.[1]
@@ -269,6 +326,9 @@ function guessDelimiter(text: string): string {
   return ','
 }
 
+/** The PK magic number every ZIP container — and therefore every .xlsx — starts with. */
+export const isZip = (data: Uint8Array): boolean => data[0] === 0x50 && data[1] === 0x4b
+
 /** Reads whichever of the supported formats `fileName` names. */
 export async function readWorkbook(fileName: string, data: Uint8Array): Promise<SheetRows> {
   if (/\.(csv|tsv|txt)$/i.test(fileName)) return readDelimited(new TextDecoder().decode(data))
@@ -277,6 +337,6 @@ export async function readWorkbook(fileName: string, data: Uint8Array): Promise<
     throw new WorkbookError('The old .xls format is not supported. Open it in Excel and save as .xlsx or .csv.')
   }
   // No recognised extension: sniff the ZIP magic number rather than refusing outright.
-  if (data[0] === 0x50 && data[1] === 0x4b) return readXlsx(data)
+  if (isZip(data)) return readXlsx(data)
   return readDelimited(new TextDecoder().decode(data))
 }

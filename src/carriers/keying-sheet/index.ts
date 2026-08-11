@@ -197,6 +197,10 @@ export interface CodeCorrections {
   overrides?: Record<string, string>
   /** The shipment-wide ECCN, for lines that print none. Only `df-code` reads it. */
   eccn?: string | null
+  /** The shipment-wide licence, for lines that print none. Only `df-code` reads it. */
+  license?: string | null
+  /** The shipment-wide SME flag, for lines that print none. Only `df-code` reads it. */
+  sme?: string | null
 }
 
 /**
@@ -230,16 +234,23 @@ function groupKeyFor(line: MergedLine, mode: GroupingMode, index: number, correc
       return `${index}|${line.id}`
     case 'part-code':
       return [partKey(line.partNumber), code, unit].join('|')
-    // Unit and ECCN join the key because the SLI's own rows carry them: `aggregateLines`
-    // keys on classification, D/F, ECCN, licence, SME *and* canonical unit. Licence and SME
-    // are shipment-wide, so those two are everything that varies per line here.
-    //
-    // The ECCN is resolved the way `aggregateLines` resolves it — a line's printed value, or
-    // the controlled one where it prints none. Treating a blank as its own bucket splits a
+    // Unit and the export-control triplet join the key because the SLI's own rows carry
+    // them: `aggregateLines` keys on classification, D/F, ECCN, licence, SME *and*
+    // canonical unit. Each triplet member is resolved the way `aggregateLines` resolves it
+    // — a line's printed value (the `omron-ci` form states all three per line), or the
+    // controlled blanket where it prints none. Treating a blank as its own bucket splits a
     // row the filed SLI merges as soon as one line happens to print the controlled value
     // outright, which is the opposite of what this mode is for.
     case 'df-code':
-      return [domesticForeign(line.countryOfOrigin), code, unit, line.eccn || corrections.eccn || ''].join('|')
+      // Case-insensitive on the triplet, exactly as `aggregateLines` keys its rows.
+      return [
+        domesticForeign(line.countryOfOrigin),
+        code,
+        unit,
+        (line.eccn || corrections.eccn || '').toUpperCase(),
+        (line.license || corrections.license || '').toUpperCase(),
+        (line.sme || corrections.sme || '').toUpperCase(),
+      ].join('|')
     case 'part-origin-code':
     default:
       return [partKey(line.partNumber), partKey(line.countryOfOrigin), code, unit].join('|')
@@ -543,6 +554,10 @@ export interface KeyingInputs {
   classificationOverrides?: Record<string, string>
   /** The controlled ECCN the SLI rows were built with, so `df-code` partitions as they do. */
   eccn?: string | null
+  /** The blanket licence the SLI rows were built with, for the same reason. */
+  license?: string | null
+  /** The blanket SME flag the SLI rows were built with, for the same reason. */
+  sme?: string | null
 }
 
 export function buildKeyingSheet(
@@ -559,6 +574,8 @@ export function buildKeyingSheet(
     codesByPart: inputs.codesByPart,
     overrides: inputs.classificationOverrides,
     eccn: inputs.eccn,
+    license: inputs.license,
+    sme: inputs.sme,
   })
 
   // Two different weights, because they answer two different questions.

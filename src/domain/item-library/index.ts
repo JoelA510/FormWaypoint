@@ -178,10 +178,15 @@ function detectWeightUnit(header: string | undefined): WeightUnit | null {
  * wins.
  */
 export function inspectWorkbook(rows: string[][]): WorkbookInspection {
-  const limit = Math.min(rows.length, 20)
-  for (let i = 0; i < limit; i++) {
+  // The 20-row budget counts rows with content, not raw indices: the workbook reader
+  // preserves the sheet's own row numbering, so a file whose header sits below a run of
+  // empty rows (which Excel omits from the XML but the grid now represents) must not
+  // have its header pushed out of the search window by the padding.
+  let scanned = 0
+  for (let i = 0; i < rows.length && scanned < 20; i++) {
     const headers = rows[i] ?? []
     if (!headers.some(Boolean)) continue
+    scanned++
     const columns = detectColumns(headers)
     if (columns.partNumber == null) continue
     if (columns.weight == null && columns.exportCode == null) continue

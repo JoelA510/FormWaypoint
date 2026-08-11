@@ -187,14 +187,14 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
           'This file is probably not one of the supported CIPL layouts.',
       passed: headerReadable,
     },
-    ...totalsChecks(header, mergedLines, sliLines, parsed.providesWeights),
+    ...totalsChecks(header, mergedLines, sliLines, parsed.providesWeights, parsed.format !== 'vendor-a'),
     ...partTotalChecks(mergedLines, parsed.partTotals),
     ...lineageChecks(mergedLines, packingLines, sliLines),
     ...partCodeChecks(mergedLines, index, options.itemsByPart),
     ...partCodeOverrideChecks(mergedLines, options.codesByPart),
     ...classificationChecks(sliLines, mergedLines, index),
-    ...exportControlChecks(options),
-    ...sourceEccnChecks(sliLines, mergedLines),
+    ...exportControlChecks(options, mergedLines),
+    ...sourceControlChecks(sliLines, mergedLines, options),
     ...capacityCheck(sliLines, options.maxRows),
   ]
 
@@ -280,6 +280,14 @@ function totalsChecks(
   merged: MergedLine[],
   sliLines: SLILine[],
   providesWeights: boolean,
+  /**
+   * True for formats (`vendor-b`, `omron-ci`) whose header quantity total is the sum of
+   * their own parsed lines, so the total-quantity check cannot catch a line that parsed
+   * as zero. For those, a zero-quantity line must block; for a format with a printed
+   * total (`vendor-a`), that total already guards misread quantities and a printed zero
+   * may be legitimate (a backordered row), so it only warns.
+   */
+  quantityTotalIsSelfReferential: boolean,
 ): CheckResult[] {
   const results: CheckResult[] = []
 
@@ -295,6 +303,25 @@ function totalsChecks(
     passed: quantity === header.totalQuantity,
     expected: String(header.totalQuantity),
     actual: String(quantity),
+  })
+
+  // A line with no readable quantity parses as zero, and for a format whose quantity
+  // total is the sum of its own lines the total-quantity check above then agrees with
+  // itself. Zero pieces of a real part is not a fileable customs line — it is an
+  // incomplete one, and where no printed total can catch it, it must hold the shipment
+  // rather than file as nothing.
+  const zeroQuantity = merged.filter((line) => !(line.quantity > 0))
+  results.push({
+    id: 'line-quantities',
+    severity: quantityTotalIsSelfReferential ? 'blocking' : 'warning',
+    title: 'Every invoice line has a quantity',
+    detail: zeroQuantity.length
+      ? `${zeroQuantity.length} line(s) have no readable quantity: ` +
+        `${zeroQuantity.map((l) => l.partNumber || l.description || l.id).join(', ')}. ` +
+        'A blank quantity must not be filed as zero.'
+      : 'Every line states a positive quantity.',
+    passed: zeroQuantity.length === 0,
+    refs: zeroQuantity.map((l) => l.id),
   })
 
   const value = roundTo(sliLines.reduce((s, l) => s + l.valueUsd, 0), 2)
@@ -316,19 +343,47 @@ function totalsChecks(
   // problem — an unverified weight is not the same as a verified one.
   const weight = roundTo(sliLines.reduce((s, l) => s + l.weightKg, 0), 3)
   if (!providesWeights) {
-    // A format that prints no weights cannot have them proved against it. Say so plainly
-    // rather than reporting a reconciliation that did not happen; the per-line
-    // `weights-present` check below is what actually guards the output here.
-    results.push({
-      id: 'total-weight',
-      severity: 'info',
-      title: 'Weights come from the saved per-part table',
-      detail:
-        'This document states no weights, so there is nothing to reconcile against. Rows total ' +
-        `${weight.toFixed(3)} kg from the per-part figures — confirm them before filing.`,
-      passed: true,
-      actual: weight.toFixed(3),
-    })
+    if (header.totalNetWeightKg != null) {
+      // No per-line weights, but the header carries a net total (the `omron-ci` form
+      // prints one, typed by the preparer). Both sides are supplied figures rather than
+      // document-proved ones, so this is a cross-check between the per-part table and the
+      // form — a warning that catches a stale or mistyped unit weight, not proof.
+      //
+      // The tolerance is far looser than the printed-total branch below: the form's box
+      // is typically typed to one decimal while the per-part sum carries three, so the
+      // two can legitimately disagree by rounding. Holding them to a gram would fail
+      // routinely-correct shipments and train the reader to skip the one warning meant
+      // to catch a genuinely stale figure.
+      const suppliedTolerance = Math.max(0.05, header.totalNetWeightKg * 0.005)
+      const weightOk = Math.abs(weight - header.totalNetWeightKg) <= suppliedTolerance
+      results.push({
+        id: 'total-weight',
+        severity: 'warning',
+        title: 'Supplied weights agree with the form’s net total',
+        detail: weightOk
+          ? `Rows total ${weight.toFixed(3)} kg net from the per-part figures, matching the total entered on the form.`
+          : `Rows total ${weight.toFixed(3)} kg from the per-part figures but the form states ` +
+            `${header.totalNetWeightKg.toFixed(3)} kg. One of the two is wrong — check the per-part weights ` +
+            'and the form before filing.',
+        passed: weightOk,
+        expected: header.totalNetWeightKg.toFixed(3),
+        actual: weight.toFixed(3),
+      })
+    } else {
+      // A format that prints no weights cannot have them proved against it. Say so plainly
+      // rather than reporting a reconciliation that did not happen; the per-line
+      // `weights-present` check below is what actually guards the output here.
+      results.push({
+        id: 'total-weight',
+        severity: 'info',
+        title: 'Weights come from the saved per-part table',
+        detail:
+          'This document states no weights, so there is nothing to reconcile against. Rows total ' +
+          `${weight.toFixed(3)} kg from the per-part figures — confirm them before filing.`,
+        passed: true,
+        actual: weight.toFixed(3),
+      })
+    }
   } else if (header.totalNetWeightKg == null) {
     results.push({
       id: 'total-weight',
@@ -693,20 +748,29 @@ function classificationChecks(
 }
 
 /**
- * The export-control triplet is a decision, not an extraction.
+ * The export-control triplet is a decision, not an extraction — with one exception.
  *
- * A CIPL never carries an ECCN. Treating its absence as EAR99, or EAR99 as automatically
- * meaning NLR, is precisely the inference an export-compliance tool must not make, so these
- * are surfaced as an unanswered question rather than filled in.
+ * The vendor CIPLs never carry it (beyond `vendor-b`'s occasional ECCN). Treating absence
+ * as EAR99, or EAR99 as automatically meaning NLR, is precisely the inference an
+ * export-compliance tool must not make, so an unanswered blanket value is surfaced as an
+ * unanswered question rather than filled in.
+ *
+ * The `omron-ci` form is the exception: it states ECCN, license and SME per line, and a
+ * stated value is a classification the exporter already made. A component of the triplet
+ * is therefore only "missing" when the blanket value is unset *and* some line does not
+ * state its own.
  */
-function exportControlChecks(options: ReconcileOptions): CheckResult[] {
+function exportControlChecks(options: ReconcileOptions, merged: MergedLine[]): CheckResult[] {
+  const statedEverywhere = (value: (line: MergedLine) => string | undefined): boolean =>
+    merged.length > 0 && merged.every((line) => value(line))
+
   const missing = [
-    ['ECCN / EAR99 / USML category', options.eccn],
-    ['SME', options.sme],
-    ['Licence, exception or NLR', options.license],
+    ['ECCN / EAR99 / USML category', options.eccn, (line: MergedLine) => line.eccn],
+    ['SME', options.sme, (line: MergedLine) => line.sme],
+    ['Licence, exception or NLR', options.license, (line: MergedLine) => line.license],
   ]
-    .filter(([, value]) => !value)
-    .map(([label]) => label)
+    .filter(([, blanket, stated]) => !blanket && !statedEverywhere(stated as (line: MergedLine) => string | undefined))
+    .map(([label]) => label as string)
 
   return [
     {
@@ -716,43 +780,66 @@ function exportControlChecks(options: ReconcileOptions): CheckResult[] {
       detail: missing.length
         ? `Not yet set: ${missing.join(', ')}. These are not on the CIPL and are never inferred — ` +
           'an absent ECCN does not establish EAR99, and EAR99 does not by itself establish NLR.'
-        : `Every row will be filed as ${options.eccn} / SME ${options.sme} / ${options.license}, as entered.`,
+        : 'Every row carries a full export-control triplet, from the document line where stated and the ' +
+          'entered blanket value otherwise.',
       passed: missing.length === 0,
     },
   ]
 }
 
 /**
- * Rows whose ECCN came from the CIPL rather than from the blanket value.
+ * Rows whose stated export-control values change what would otherwise be filed.
  *
- * Surfaced because the substitution runs the other way in the historical data: shipment
+ * Surfaced because the substitution runs both ways in the historical data: shipment
  * vendorB1 states `ECCN: 5A992.C` against its T20 pendant kit, and the SLI filed for it says
- * EAR99. A stated ECCN is a classification the exporter already made, so it wins — but the
- * reviewer is told, because it changes what is being declared.
+ * EAR99. A stated value is a classification the exporter already made, so it wins — but the
+ * reviewer is told, because it changes what is being declared. The same rule covers the
+ * licence and SME the `omron-ci` form states per line: a stated NLR under an entered
+ * licence number is a downgrade of a person's entry and must not pass silently.
+ *
+ * "Changes" is judged against the blanket value; with no blanket entered, the unremarkable
+ * norms (EAR99 / NLR / N) are not reported, because the `omron-ci` form states them on
+ * every line and flagging each one would train the reader to skip the warning.
  */
-function sourceEccnChecks(sliLines: SLILine[], merged: MergedLine[]): CheckResult[] {
+function sourceControlChecks(sliLines: SLILine[], merged: MergedLine[], options: ReconcileOptions): CheckResult[] {
   const byId = new Map(merged.map((l) => [l.id, l]))
-  const stated = sliLines.flatMap((line, i) => {
-    const sourceEccn = line.sourceLineIds.map((id) => byId.get(id)?.eccn).find(Boolean)
-    return sourceEccn ? [{ row: i + 1, scheduleB: line.scheduleB, eccn: sourceEccn }] : []
-  })
-
-  if (!stated.length) return []
-
-  return [
-    {
-      id: 'eccn-from-document',
-      severity: 'warning',
-      title: 'The CIPL states an ECCN for some rows',
-      detail:
-        stated
-          .map((s) => `Row ${s.row} (${s.scheduleB}) will be filed as ${s.eccn}, as printed on the CIPL`)
-          .join('; ') +
-        '. A stated ECCN is not EAR99 — confirm it before signing.',
-      passed: false,
-      refs: stated.map((s) => `row-${s.row}`),
-    },
+  const members = [
+    { id: 'eccn-from-document', label: 'ECCN', blanket: options.eccn, norm: 'EAR99', value: (l: MergedLine) => l.eccn },
+    { id: 'license-from-document', label: 'licence', blanket: options.license, norm: 'NLR', value: (l: MergedLine) => l.license },
+    { id: 'sme-from-document', label: 'SME', blanket: options.sme, norm: 'N', value: (l: MergedLine) => l.sme },
   ]
+
+  return members.flatMap(({ id, label, blanket, norm, value }) => {
+    const unremarkable = (blanket ?? '').trim().toUpperCase() || norm
+    const stated = sliLines.flatMap((line, i) => {
+      const sourceValue = line.sourceLineIds
+        .map((lineId) => {
+          const source = byId.get(lineId)
+          return source ? value(source) : undefined
+        })
+        .find(Boolean)
+      return sourceValue && sourceValue.trim().toUpperCase() !== unremarkable
+        ? [{ row: i + 1, scheduleB: line.scheduleB, value: sourceValue }]
+        : []
+    })
+
+    if (!stated.length) return []
+
+    return [
+      {
+        id,
+        severity: 'warning' as const,
+        title: `The document states a ${label} that changes what is declared`,
+        detail:
+          stated
+            .map((s) => `Row ${s.row} (${s.scheduleB}) will be filed as ${s.value}, as printed on the document`)
+            .join('; ') +
+          '. A stated value beats the blanket value — confirm it before signing.',
+        passed: false,
+        refs: stated.map((s) => `row-${s.row}`),
+      },
+    ]
+  })
 }
 
 function capacityCheck(sliLines: SLILine[], maxRows?: number): CheckResult[] {

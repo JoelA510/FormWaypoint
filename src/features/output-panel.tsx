@@ -36,6 +36,8 @@ export function OutputPanel({
   codesByPart = {},
   classificationOverrides = {},
   eccn = null,
+  license = null,
+  sme = null,
 }: {
   adapter: CarrierAdapter
   reconciliation: Reconciliation
@@ -55,6 +57,9 @@ export function OutputPanel({
   classificationOverrides?: Record<string, string>
   /** The controlled ECCN, so the `df-code` grouping partitions as the SLI's rows do. */
   eccn?: string | null
+  /** The blanket licence and SME flag, for the same partitioning. */
+  license?: string | null
+  sme?: string | null
   /** Gated on the document checks *and* the draft checks — see App. */
   canGenerate: boolean
   onGenerated: () => void
@@ -183,6 +188,8 @@ export function OutputPanel({
         codesByPart,
         classificationOverrides,
         eccn,
+        license,
+        sme,
       })
       const delivery = await deliver(
         bridge,
