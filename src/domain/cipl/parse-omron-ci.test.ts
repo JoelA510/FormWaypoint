@@ -337,6 +337,21 @@ describe('the printed PDF', () => {
     expect(parsed.lines[0].countryOfOrigin).toBe('US')
   })
 
+  it('reads a wrapped description down the page, not across it', async () => {
+    // Both behaviours at once — wrapped to a second printed line *and* split into word
+    // items. Reassembled by x alone the two lines interleave, and the scrambled string is
+    // what gets filed as the commodity description.
+    const spec = simpleOmronCi()
+    spec.lines[0] = {
+      ...spec.lines[0],
+      description: 'Robot cable assembly,',
+      descriptionTail: '5 m shielded',
+      splitDescription: true,
+    }
+    const parsed = await parseCipl('ci.pdf', await buildOmronCiPdf(spec))
+    expect(parsed.lines[0].description).toBe('Robot cable assembly, 5 m shielded')
+  })
+
   it('keeps a description word that overflows past the quantity border out of the numeric columns', async () => {
     const spec = simpleOmronCi()
     spec.lines[0] = { ...spec.lines[0], descriptionOverflow: 'kit' }

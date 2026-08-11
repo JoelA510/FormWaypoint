@@ -374,18 +374,35 @@ export function App() {
       checks,
       settings,
     }
-    await localStore.saveShipment(record)
-    if (header.consignedTo.name) {
-      await localStore.saveConsignee({
-        name: header.consignedTo.name,
-        consigneeId: settings.consigneeId,
-        consigneeType: settings.consigneeType,
-        partiesRelated: settings.partiesRelated,
-        destinationCountry: draft?.destinationCountry ?? '',
-        lastUsed: new Date().toISOString(),
-      })
+    // Reported, not swallowed. This is the audit record for a form that has already been
+    // written and opened, and `db()` rejects rather than hanging now — so a tab superseded
+    // by a newer version in another window would lose the record while the panel went on
+    // saying "Saved to …". The consignee is convenience data and the list on screen is a
+    // view; the record is the only one of the three that has to be said out loud.
+    try {
+      await localStore.saveShipment(record)
+    } catch (e: unknown) {
+      const because = e instanceof Error ? e.message : 'this machine’s stored data could not be reached'
+      setStorageError(
+        `The form was generated, but this machine did not record the shipment (${because}). The history entry ` +
+          'is the audit trail for what was filed — note the invoice number somewhere else.',
+      )
     }
-    setShipments(await localStore.listShipments())
+    try {
+      if (header.consignedTo.name) {
+        await localStore.saveConsignee({
+          name: header.consignedTo.name,
+          consigneeId: settings.consigneeId,
+          consigneeType: settings.consigneeType,
+          partiesRelated: settings.partiesRelated,
+          destinationCountry: draft?.destinationCountry ?? '',
+          lastUsed: new Date().toISOString(),
+        })
+      }
+      setShipments(await localStore.listShipments())
+    } catch {
+      // Consignee autofill and the history list both re-read on the next load.
+    }
   }, [reconciliation, parsed, adapter, settings, draft, checks])
 
   const handleDgPrepared = useCallback(async (record: DgConsignmentRecord) => {

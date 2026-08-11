@@ -777,9 +777,21 @@ function tableRowsToBlocks(rows: TextRow[], anchors: Anchors): SheetRows {
     }
   }
 
+  // Reading order is down the page and then across it, not across alone. A description
+  // that both wraps to a second printed line and is split into word items — the two
+  // behaviours this whole function is written around — was reassembled by x, which
+  // interleaves the lines: "Robot assembly cable, 5 m shielded" out of two rows that read
+  // "Robot cable assembly," and "5 m shielded". That scrambled string is what gets filed as
+  // the commodity description.
+  //
+  // Baselines are compared with a tolerance, because a line of text is not drawn at exactly
+  // one y: an item nudged a fraction by the renderer is on the same line and must still
+  // sort by x. A quarter of a row's pitch is well inside the gap between real lines.
+  const sameLine = pitch / 4
   const text = (map: Map<string, TextItem[]>, key: string): string =>
     (map.get(key) ?? [])
-      .sort((a, b) => a.x - b.x)
+      .slice()
+      .sort((a, b) => (Math.abs(a.y - b.y) > sameLine ? b.y - a.y : a.x - b.x))
       .map((item) => item.str)
       .join(' ')
       .trim()

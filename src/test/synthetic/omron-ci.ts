@@ -34,6 +34,12 @@ export interface OmronCiLine {
    * model a split description overflowing its cell. Only the PDF builder draws it.
    */
   descriptionOverflow?: string
+  /**
+   * Draw the description and its wrapped tail one item per word, as pdfjs often reports
+   * text. Combined with `descriptionTail` this is the shape that exposes reading order:
+   * sorted across the column alone, the two printed lines interleave.
+   */
+  splitDescription?: boolean
 }
 
 export interface OmronCiSpec {
@@ -337,8 +343,19 @@ function drawLines(page: PDFPage, font: PDFFont, spec: OmronCiSpec): void {
     // block's centre, exactly where a spreadsheet print puts them.
     centred(center(COLUMNS.ln), middleY, String(i + 1))
     at(COLUMNS.c.left + 2, topY, line.partNumber)
-    at(COLUMNS.d.left + 2, topY, line.description)
-    if (line.descriptionTail) at(COLUMNS.d.left + 2, topY - 9, line.descriptionTail)
+    const words = (x: number, y: number, text: string) => {
+      if (!line.splitDescription) {
+        at(x, y, text)
+        return
+      }
+      let cursor = x
+      for (const word of text.split(' ')) {
+        at(cursor, y, word)
+        cursor += font.widthOfTextAtSize(word + ' ', size)
+      }
+    }
+    words(COLUMNS.d.left + 2, topY, line.description)
+    if (line.descriptionTail) words(COLUMNS.d.left + 2, topY - 9, line.descriptionTail)
     if (line.descriptionOverflow) at(COLUMNS.h.left + 4, topY, line.descriptionOverflow)
     centred(center(COLUMNS.h), middleY, String(line.quantity))
     centred(center(COLUMNS.i), middleY, line.uom)
