@@ -151,6 +151,18 @@ describe('the workbook grid', () => {
     expect(parsed.lines[1]).toMatchObject({ partNumber: '20000-0002', countryOfOrigin: 'JP' })
   })
 
+  it('says so when the LN column is missing rather than reading no lines in silence', () => {
+    // The table is walked by its LN column, so a revision that renames or drops that
+    // heading ends the table before its first block. Zero lines and no warning is
+    // indistinguishable from a blank form.
+    const grid = omronCiGrid(simpleOmronCi())
+    const head = grid.find((row) => row.includes('LN'))!
+    head[head.indexOf('LN')] = 'LINE'
+    const parsed = parseOmronCiWorkbook('ci.xlsx', grid)
+    expect(parsed.lines).toHaveLength(0)
+    expect(parsed.warnings.some((w) => w.includes('LN'))).toBe(true)
+  })
+
   it('blocks a line whose quantity could not be read instead of filing zero', () => {
     const spec = simpleOmronCi()
     const grid = omronCiGrid(spec)

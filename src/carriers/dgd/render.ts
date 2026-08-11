@@ -375,23 +375,21 @@ function drawEntry(
   // Rows at or below this y would leave the table box. `top` is the first row's baseline.
   const rowFits = (i: number) => top - i * ROW_HEIGHT > tableBottom + 2
   const totalRows = rows + line.annotations.length
+  // Counted over rows, not over the cells drawn in them. The name and the quantity are two
+  // columns of one row: incrementing in both callbacks reported a two-row entry as having
+  // lost four rows, which reads as a different, larger problem than the one on the sheet.
   let clipped = 0
+  for (let i = 0; i < totalRows; i++) if (!rowFits(i)) clipped++
 
   text(ctx, line.unNumber, COLUMNS.unNumber + 3, top, { size })
   line.properShippingName.forEach((part, i) => {
-    if (!rowFits(i)) {
-      clipped++
-      return
-    }
+    if (!rowFits(i)) return
     text(ctx, part, COLUMNS.properShippingName + 4, top - i * ROW_HEIGHT, { size })
   })
   text(ctx, line.classOrDivision, COLUMNS.classOrDivision + 18, top, { size })
   text(ctx, line.packingGroup, COLUMNS.packingGroup + 16, top, { size })
   line.quantityAndType.forEach((part, i) => {
-    if (!rowFits(i)) {
-      clipped++
-      return
-    }
+    if (!rowFits(i)) return
     text(ctx, part, COLUMNS.quantity + 4, top - i * ROW_HEIGHT, { size: QUANTITY_FONT_SIZE })
   })
   text(ctx, line.packingInstruction, COLUMNS.packingInstruction + 5, top, { size })
@@ -415,10 +413,7 @@ function drawEntry(
 
   let y = top - rows * ROW_HEIGHT
   line.annotations.forEach((annotation, i) => {
-    if (!rowFits(rows + i)) {
-      clipped++
-      return
-    }
+    if (!rowFits(rows + i)) return
     text(ctx, annotation, COLUMNS.quantity + 4, y - i * ROW_HEIGHT, { size: QUANTITY_FONT_SIZE })
   })
   y -= line.annotations.length * ROW_HEIGHT

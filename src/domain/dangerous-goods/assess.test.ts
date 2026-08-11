@@ -196,6 +196,29 @@ describe('the battery mark exemption for equipment', () => {
     expect(check(result, 'dg.test-summary')).toMatchObject({ passed: true })
   })
 
+  it('does not add the two allowances together for a package holding cells and batteries', () => {
+    // "No more than four cells or two batteries" is one allowance or the other. A box with
+    // four cells *and* two batteries in it is outside both readings of the exception, and
+    // was being told the mark was not required.
+    const both = consignment([
+      pkg('p1', [
+        entry('e1', { configuration: 'contained-in-equipment', form: 'cell', wattHours: 15 }, {
+          netWeightKgPerPackage: 0.4,
+          countPerPackage: 4,
+          stateOfChargePercent: 20,
+        }),
+        entry('e2', { configuration: 'contained-in-equipment', wattHours: 86 }, {
+          netWeightKgPerPackage: 1,
+          countPerPackage: 2,
+          stateOfChargePercent: 20,
+        }),
+      ]),
+    ])
+    const result = assess(both)
+    expect(result.packages[0].batteryMarkExemption).toBeNull()
+    expect(result.packages[0].hazardCommunication).toContain('Lithium battery mark bearing UN3481')
+  })
+
   it('does not exempt a package the consignment size disqualifies even at two batteries', () => {
     // Three separate package descriptions, two batteries each: five packages in total.
     const mixed = consignment([

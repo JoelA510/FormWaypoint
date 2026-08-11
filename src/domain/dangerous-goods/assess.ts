@@ -1406,10 +1406,20 @@ function batteryMarkExemption(entries: EntryAssessment[], totalPackagesInConsign
     .filter((e) => e.entry.spec.form === 'battery')
     .reduce((sum, e) => sum + (e.entry.countPerPackage ?? 0), 0)
 
-  if (cells <= 4 && batteries <= 2 && totalPackagesInConsignment <= 2) {
+  // The exception is written "no more than four cells **or** two batteries" — one allowance
+  // or the other, for a package holding one form or the other. It says nothing about a
+  // package holding both, and reading the two allowances as additive would exempt four
+  // cells *and* two batteries in one box on the strength of a permission that was never
+  // given. The asymmetry decides it: an unnecessary battery mark costs a label, a missing
+  // one is an undeclared package, so a mixed package is not offered the exception.
+  const withinAllowance = batteries === 0 ? cells <= 4 : cells === 0 && batteries <= 2
+  if (withinAllowance && totalPackagesInConsignment <= 2) {
+    const contents =
+      batteries === 0
+        ? `${cells} cell${cells === 1 ? '' : 's'}`
+        : `${batteries} batter${batteries === 1 ? 'y' : 'ies'}`
     return (
-      `${batteries} batter${batteries === 1 ? 'y' : 'ies'} and ${cells} cell${cells === 1 ? '' : 's'} contained ` +
-      `in equipment, in a consignment of ${totalPackagesInConsignment} package` +
+      `${contents} contained in equipment, in a consignment of ${totalPackagesInConsignment} package` +
       `${totalPackagesInConsignment === 1 ? '' : 's'} — no more than four cells or two batteries per package, and ` +
       'no more than two packages, so the battery mark is not required. Add a third package to the consignment ' +
       'and every package needs marking, including these.'

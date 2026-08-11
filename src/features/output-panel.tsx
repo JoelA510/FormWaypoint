@@ -178,6 +178,10 @@ export function OutputPanel({
     if (busy) return
     setBusy(true)
     setError(null)
+    // Cleared like the SLI's. The warnings belong to the artifact that raised them, and a
+    // form-fill warning left standing beside a keying sheet describes a box on a form this
+    // download does not produce.
+    setWarnings([])
     try {
       const sheet = buildKeyingSheet(target, reconciliation, draft, {
         descriptionsByPart,

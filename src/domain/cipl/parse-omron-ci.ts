@@ -228,6 +228,15 @@ function readLines(rows: SheetRows, purchaseOrder: string, invoiceNumber: string
     ) as Record<keyof typeof SUB_COLUMNS, number>),
   }
 
+  // The loop below walks the table by its LN column, so without it every row reads as "not
+  // a line number" and the table ends before its first block. Said out loud rather than
+  // returned as an empty list: no lines and no warning is indistinguishable from a blank
+  // form, and this one is a form whose heading row moved.
+  if (columns.ln < 0) {
+    warnings.push(`The commodity table has no "${TOP_COLUMNS.ln}" column, so no lines could be read.`)
+    return []
+  }
+
   const isLineNumber = (cell: string): boolean => {
     const value = parseNumber(cell)
     return value != null && Number.isInteger(value) && value >= 1
