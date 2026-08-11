@@ -414,6 +414,25 @@ describe('the drawn table, measured in points rather than characters', () => {
     // And the prescribed phrases are not broken across rows.
     expect(line0Annotations(declaration)).toContain('Total quantity per Overpack 540 kg')
   })
+
+  it('cuts a wide row to the column and says so, since the model counts characters', () => {
+    // 34 characters of capitals is far wider than 34 of the fixture's lowercase, so the
+    // model's wrap can hand the renderer a row the column cannot hold. It used to be drawn
+    // in full, across the Packing Inst. box, in silence.
+    const shouty = consignment(
+      [
+        pkg('p1', [entry('e1', { configuration: 'packed-with-equipment', wattHours: 150 }, {
+          netWeightKgPerPackage: 4.5,
+        })], { count: 200, packagingType: 'WOODEN CRATE WITH FOAM LINER', overpackId: 'o1' }),
+      ],
+      { overpacks: [overpack('o1', { marks: 'WWWWW MMMMM OOOOO', count: 3 })] },
+    )
+    return renderDeclaration(buildDeclaration(shouty, assess(shouty))).then(({ warnings }) => {
+      const clipped = warnings.filter((w) => w.includes('wider than its box'))
+      expect(clipped.length).toBeGreaterThan(0)
+      expect(clipped.every((w) => /Printed as "[^"]*…"/.test(w))).toBe(true)
+    })
+  })
 })
 
 function line0Annotations(declaration: ReturnType<typeof buildDeclaration>): string[] {

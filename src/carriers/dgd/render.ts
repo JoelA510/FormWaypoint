@@ -76,6 +76,12 @@ export const COLUMNS = {
 
 export const ROW_HEIGHT = 11
 
+/**
+ * Drawable width of the quantity column, in points: its own width less the 4pt inset the
+ * text starts at and a 4pt gap before the box beside it.
+ */
+export const QUANTITY_COLUMN_WIDTH = COLUMNS.packingInstruction - COLUMNS.quantity - 8
+
 /** Font size the quantity column and the overpack wording under it are drawn at. */
 export const QUANTITY_FONT_SIZE = 7
 
@@ -432,9 +438,17 @@ function drawEntry(
   })
   text(ctx, line.classOrDivision, COLUMNS.classOrDivision + 18, top, { size })
   text(ctx, line.packingGroup, COLUMNS.packingGroup + 16, top, { size })
+  // Bounded like every other free-text value on this form. The model wraps this column by
+  // character count, which is a proxy for width and not a measurement of it: a packaging
+  // type or an overpack mark typed in capitals fits 34 characters and still overruns the
+  // column, printing across the Packing Inst. box beside it.
   line.quantityAndType.forEach((part, i) => {
     if (!rowFits(i)) return
-    text(ctx, part, COLUMNS.quantity + 4, top - i * ROW_HEIGHT, { size: QUANTITY_FONT_SIZE })
+    text(ctx, part, COLUMNS.quantity + 4, top - i * ROW_HEIGHT, {
+      size: QUANTITY_FONT_SIZE,
+      maxWidth: QUANTITY_COLUMN_WIDTH,
+      label: `The ${line.unNumber} entry’s quantity and type of packing`,
+    })
   })
   text(ctx, line.packingInstruction, COLUMNS.packingInstruction + 5, top, { size })
 
@@ -458,7 +472,11 @@ function drawEntry(
   let y = top - rows * ROW_HEIGHT
   line.annotations.forEach((annotation, i) => {
     if (!rowFits(rows + i)) return
-    text(ctx, annotation, COLUMNS.quantity + 4, y - i * ROW_HEIGHT, { size: QUANTITY_FONT_SIZE })
+    text(ctx, annotation, COLUMNS.quantity + 4, y - i * ROW_HEIGHT, {
+      size: QUANTITY_FONT_SIZE,
+      maxWidth: QUANTITY_COLUMN_WIDTH,
+      label: `The ${line.unNumber} entry’s overpack wording`,
+    })
   })
   y -= line.annotations.length * ROW_HEIGHT
 
