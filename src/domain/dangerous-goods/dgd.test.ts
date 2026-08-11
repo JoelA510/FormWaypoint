@@ -223,6 +223,19 @@ describe('rendering', () => {
     expect(wide[0]).toMatch(/Printed as "[^"]*…"/)
   })
 
+  it('measures an airport name it cannot print, instead of failing to render', async () => {
+    // The departure airport is wrapped before it is drawn, and the wrap measured the raw
+    // string: `widthOfTextAtSize` throws outside WinAnsi exactly as `drawText` does, so an
+    // airport named in Japanese took the whole declaration down before `text()` had a
+    // chance to substitute.
+    const narita = consignment([pkg('p1', [entry('e1', { wattHours: 95 })])], {
+      airportOfDeparture: '成田国際空港 (NRT)',
+    })
+    const { bytes, warnings } = await renderDeclaration(buildDeclaration(narita, assess(narita)))
+    expect(new TextDecoder().decode(bytes.slice(0, 5))).toBe('%PDF-')
+    expect(warnings.some((w) => w.startsWith('Airport of departure:') && w.includes('cannot print'))).toBe(true)
+  })
+
   it('reports an address line too wide for its box rather than clipping it silently', async () => {
     const wide = consignment([pkg('p1', [entry('e1', { wattHours: 95 })])], {
       consignee: {

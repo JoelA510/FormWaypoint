@@ -804,8 +804,13 @@ export function buildKeyingSheet(
  * stopped the search before the real postcode line above it. The two bounds only work
  * together: the length alone let a longer number in, and the anchor alone shut out the
  * seven-digit postcodes that widening the length is for.
+ *
+ * The hyphenated form takes three leading digits where the plain form needs four, because
+ * Japan writes `150-0001`. It cannot be relaxed for the plain form too — `Suite 200` ends
+ * an address line the same way — and the anchor is on the digits alone rather than on a
+ * preceding hyphen, which shut out every Japanese postcode there is.
  */
-const POSTCODE = /(?<![\d-])(\d{4,8}(?:-\d{2,4})?)\s*$/
+const POSTCODE = /(?<!\d)((?:\d{3,8}-\d{2,4})|\d{4,8})\s*$/
 
 /**
  * A line whose trailing digits are a telephone number, not a postcode.

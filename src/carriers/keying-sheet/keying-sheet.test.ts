@@ -372,6 +372,15 @@ describe('address extraction', () => {
     expect(field(registered, 'City')).toBe('Springfield')
   })
 
+  it('reads a Japanese postcode, whose leading group is three digits', () => {
+    // Anchoring the search on a preceding hyphen as well as a digit shut every one of these
+    // out, and the city came from the building number on the line above — the exact failure
+    // reading from the bottom exists to prevent.
+    const tokyo = ['Building 1234', 'Tokyo 150-0001']
+    expect(field(tokyo, 'Postal code')).toBe('150-0001')
+    expect(field(tokyo, 'City')).toBe('Tokyo')
+  })
+
   it('reads a seven-digit postcode, which several countries write', () => {
     // Israel writes 3109601 and Japan writes 1500001 unhyphenated; bounding the digits to
     // six lost the postcode and, because both fields read one line, the city with it.

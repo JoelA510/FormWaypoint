@@ -768,7 +768,12 @@ function wrapToWidth(ctx: Ctx, value: string, maxWidth: number, size: number): s
   let current = ''
   for (const word of words) {
     const candidate = current ? `${current} ${word}` : word
-    if (ctx.regular.widthOfTextAtSize(candidate, size) <= maxWidth || !current) current = candidate
+    // Measured through `printable`, drawn as it came. `widthOfTextAtSize` throws on anything
+    // outside WinAnsi exactly as `drawText` does, so measuring the raw string took the whole
+    // declaration down for an airport named in Japanese — the one path into the font that
+    // reached it before `text()` had a chance to substitute. The lines are returned
+    // unchanged, so `text()` still does the substituting and still says it did.
+    if (ctx.regular.widthOfTextAtSize(printable(candidate), size) <= maxWidth || !current) current = candidate
     else {
       out.push(current)
       current = word
