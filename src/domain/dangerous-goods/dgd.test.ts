@@ -477,15 +477,28 @@ describe('an address longer than its box', () => {
     })
     const declaration = buildDeclaration(long, assess(long))
     const { warnings } = await renderDeclaration(declaration)
-    // Eight lines supplied into a five-line box.
-    expect(warnings.some((w) => w.includes('Consignee') && w.includes('the box holds 5'))).toBe(true)
+    // Eight lines, which is past what even the condensed tier holds.
+    expect(warnings.some((w) => w.includes('Consignee') && w.includes('even condensed'))).toBe(true)
     expect(warnings.some((w) => w.includes('United Kingdom'))).toBe(true)
+  })
+
+  it('condenses a block that would not fit at full size rather than dropping its country line', async () => {
+    const seven = consignment([pkg('p1', [entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 2 })])], {
+      consignee: {
+        name: 'Consignee GmbH',
+        addressLines: ['Unit 4', 'Riverside Estate', 'Eastway', 'Some Town', 'ZZ1 2YY', 'Germany'],
+      },
+    })
+    const { warnings } = await renderDeclaration(buildDeclaration(seven, assess(seven)))
+    // Seven lines: past the five that fit at full size, inside what condensing holds. The
+    // country line is required to be on the form, so it goes on the form.
+    expect(warnings.filter((w) => w.includes('even condensed'))).toEqual([])
   })
 
   it('says nothing when the block fits', async () => {
     const declaration = buildDeclaration(workbook, assess(workbook))
     const { warnings } = await renderDeclaration(declaration)
-    expect(warnings.filter((w) => w.includes('the box holds'))).toEqual([])
+    expect(warnings.filter((w) => w.includes('even condensed'))).toEqual([])
   })
 })
 
@@ -505,7 +518,7 @@ describe('warnings across a multi-sheet declaration', () => {
     const declaration = buildDeclaration(many, assess(many))
     expect(declaration.pages.length).toBeGreaterThan(1)
     const { warnings } = await renderDeclaration(declaration)
-    const overflow = warnings.filter((w) => w.includes('the box holds 5'))
+    const overflow = warnings.filter((w) => w.includes('even condensed'))
     expect(overflow).toHaveLength(1)
     // And the list is a set, so it can be keyed by its text.
     expect(new Set(warnings).size).toBe(warnings.length)

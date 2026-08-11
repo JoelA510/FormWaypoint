@@ -492,7 +492,15 @@ function pagesToGrid(pages: TextPage[]): SheetRows {
   // whichever heading is nearest. Both produce a plausible-looking table that is wrong, so
   // the table is handed back unreshaped instead — `readLines` reports the missing headings
   // and no line is invented from a grid nobody could calibrate.
-  const tableCalibrated = (Object.values(anchors) as number[]).every((x) => Number.isFinite(x))
+  // Only the anchors that actually place a cell have to have been found.
+  //
+  // `part` and `description` are not among them: those two are separated from each other
+  // by the border between the COO and HTS columns beneath, so their own headings never
+  // position anything. Demanding them refused a table that parses perfectly well with a
+  // split DESCRIPTION OF GOODS heading — the same pdfjs behaviour this guard exists for,
+  // turned against a document it should have read.
+  const PLACING_ANCHORS = ['ln', 'qty', 'uom', 'unitPrice', 'amount', 'coo', 'hts', 'eccn', 'license', 'sme'] as const
+  const tableCalibrated = PLACING_ANCHORS.every((key) => Number.isFinite(anchors[key]))
 
   // Everything between the table headings and the totals band belongs to line blocks.
   // The band is recognised by its own printed cells as *whole* cells, never as substrings

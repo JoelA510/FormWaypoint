@@ -41,13 +41,15 @@ const HATCH_WIDTH = 16
 const CONTENT = { left: FRAME.left + HATCH_WIDTH + 6, right: FRAME.right - HATCH_WIDTH - 6 }
 
 /**
- * Address lines the Shipper and Consignee boxes hold.
+ * Vertical room for address lines in the Shipper and Consignee boxes, in points.
  *
- * Both boxes are 74pt tall, their first baseline sits 22pt below the top and they step
- * 10pt: the fifth lands 12pt clear of the floor, and a sixth would sit on the border with
- * the seventh over the caption of the box beneath.
+ * Both boxes are 74pt tall and their first baseline sits 22pt below the top, leaving 48pt
+ * with 4pt held back off the floor. At the ordinary 10pt leading that is five lines; the
+ * condensed tier fits seven, which covers an international address with a unit and a
+ * region line. Without the bound the sixth line sat on the border and the seventh printed
+ * over the caption of the box beneath.
  */
-const PARTY_LINES = 5
+const PARTY_HEIGHT = 48
 
 /**
  * Column boundaries of the dangerous goods table, as x positions.
@@ -135,9 +137,7 @@ function drawPage(
   box(ctx, CONTENT.left, y - shipperHeight, midpoint, y)
   box(ctx, midpoint, y - shipperHeight, CONTENT.right, y)
   caption(ctx, 'Shipper', CONTENT.left + 4, y - 10)
-  // Five baselines: the first sits 22pt below the box top and they step 10pt, so the fifth
-  // lands 12pt clear of the 74pt box's floor and the sixth would sit on the border.
-  lines(ctx, declaration.shipper, CONTENT.left + 6, y - 22, midpoint - CONTENT.left - 12, 'Shipper', 8, PARTY_LINES)
+  lines(ctx, declaration.shipper, CONTENT.left + 6, y - 22, midpoint - CONTENT.left - 12, 'Shipper', 8, PARTY_HEIGHT)
 
   caption(ctx, 'Air Waybill No.', midpoint + 4, y - 10)
   if (declaration.airWaybillNumber) {
@@ -159,7 +159,7 @@ function drawPage(
   box(ctx, CONTENT.left, y - consigneeHeight, midpoint, y)
   box(ctx, midpoint, y - consigneeHeight, CONTENT.right, y)
   caption(ctx, 'Consignee', CONTENT.left + 4, y - 10)
-  lines(ctx, declaration.consignee, CONTENT.left + 6, y - 22, midpoint - CONTENT.left - 12, 'Consignee', 8, PARTY_LINES)
+  lines(ctx, declaration.consignee, CONTENT.left + 6, y - 22, midpoint - CONTENT.left - 12, 'Consignee', 8, PARTY_HEIGHT)
   text(ctx, 'For optional use — company logo, name and address', (midpoint + CONTENT.right) / 2, y - 38, {
     size: 7,
     color: GREY,
@@ -564,29 +564,57 @@ function lines(
   label: string,
   size = 8,
   /**
-   * How many baselines the box holds. Bounded in both directions, like every other
-   * overflow path on this form: a party block of seven lines drawn into a five-line box
-   * does not stop at the border — it carries on over the caption of the box beneath it,
-   * and the reader is looking at a regulated form with two fields written across each
-   * other. What does not fit is left off and reported.
+   * Vertical room below `top`, in points, or `Infinity` where the box is not the
+   * constraint.
+   *
+   * A block that does not fit is condensed rather than truncated. Address lines are not
+   * decoration — box 1 and box 2 are required to be complete, and an address delivered
+   * without its country line is a defective declaration whether the reader is told or
+   * not. Only past what condensing can hold is anything left off, and then loudly.
    */
-  maxLines = Infinity,
+  available = Infinity,
 ): void {
+  const fit = fitLines(values.length, available, size)
   values.forEach((value, i) => {
-    if (i >= maxLines) return
-    if (ctx.regular.widthOfTextAtSize(value, size) > maxWidth) {
+    if (i >= fit.capacity) return
+    if (ctx.regular.widthOfTextAtSize(value, fit.size) > maxWidth) {
       ctx.warnings.push(`${label}: "${value}" is wider than its box and may be clipped when printed.`)
     }
-    text(ctx, value, x, top - i * 10, { size })
+    text(ctx, value, x, top - i * fit.leading, { size: fit.size })
   })
 
-  if (values.length > maxLines) {
+  if (values.length > fit.capacity) {
     ctx.warnings.push(
-      `${label}: ${values.length} lines were supplied but the box holds ${maxLines}. ` +
-        `Not printed: ${values.slice(maxLines).map((v) => `"${v}"`).join(', ')}. ` +
-        'Shorten the address, or write it on the form by hand.',
+      `${label}: ${values.length} lines were supplied and only ${fit.capacity} fit the box, even condensed. ` +
+        `Not printed: ${values.slice(fit.capacity).map((v) => `"${v}"`).join(', ')}. ` +
+        'Shorten the address, or write the rest on the form by hand before signing.',
     )
   }
+}
+
+/**
+ * The type size and leading that put `count` lines inside `available` points.
+ *
+ * Two tiers and then a stop. The printed form's own boxes are generous for four lines and
+ * tight for six, so the second tier buys the two lines that separate an ordinary
+ * international address from one that overflows, without shrinking every declaration to
+ * fit the worst one.
+ */
+function fitLines(
+  count: number,
+  available: number,
+  size: number,
+): { size: number; leading: number; capacity: number } {
+  const tiers = [
+    { size, leading: 10 },
+    { size: size - 1, leading: 8 },
+  ]
+  for (const tier of tiers) {
+    const capacity = Number.isFinite(available) ? Math.floor(available / tier.leading) + 1 : Infinity
+    if (count <= capacity) return { ...tier, capacity }
+  }
+  const last = tiers[tiers.length - 1]
+  return { ...last, capacity: Math.floor(available / last.leading) + 1 }
 }
 
 /** Word wrap against the real font metrics, for the few places the model does not pre-wrap. */

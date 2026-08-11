@@ -419,4 +419,18 @@ describe('a printed table whose headings could not all be located', () => {
     expect(header.consignedTo).toMatchObject({ name: 'Example Consignee Pte. Ltd.', lines: [] })
     expect(header.soldTo.name).toBe('Buyer GmbH')
   })
+
+  it('still reads the table when only the description heading was split', async () => {
+    // That heading positions nothing — part and description are separated by the border
+    // between the COO and HTS columns — so refusing the table would be a false negative.
+    const parsed = await parseCipl('ci.pdf', await buildOmronCiPdf({ ...simpleOmronCi(), splitDescriptionHeading: true }))
+    expect(parsed.lines).toHaveLength(2)
+    expect(parsed.lines[0]).toMatchObject({
+      partNumber: '10000-0001',
+      description: 'Robot cable assembly',
+      countryOfOrigin: 'US',
+      sme: 'N',
+      quantity: 4,
+    })
+  })
 })

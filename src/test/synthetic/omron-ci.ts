@@ -64,6 +64,12 @@ export interface OmronCiSpec {
    * rather than a value — which leaves that column with no anchor to calibrate against.
    */
   splitHeadings?: boolean
+  /**
+   * Draw the `DESCRIPTION OF GOODS` heading as two items. That column's heading positions
+   * nothing — part and description are separated by the border between COO and HTS — so
+   * the table must still parse.
+   */
+  splitDescriptionHeading?: boolean
 }
 
 export function simpleOmronCi(): OmronCiSpec {
@@ -268,7 +274,12 @@ export async function buildOmronCiPdf(spec: OmronCiSpec): Promise<ArrayBuffer> {
   // so they land on their own baseline below PART # and DESCRIPTION. The real
   // LibreOffice print of the Rev C template does exactly this.
   centred(center(COLUMNS.c), 552, 'PART #')
-  centred(DESCRIPTION_CENTER, 552, 'DESCRIPTION OF GOODS')
+  if (spec.splitDescriptionHeading) {
+    at(DESCRIPTION_CENTER - 40, 552, 'DESCRIPTION')
+    at(DESCRIPTION_CENTER + 20, 552, 'OF GOODS')
+  } else {
+    centred(DESCRIPTION_CENTER, 552, 'DESCRIPTION OF GOODS')
+  }
   centred(center(COLUMNS.ln), 546, 'LN')
   centred(center(COLUMNS.h), 546, 'QTY')
   centred(center(COLUMNS.i), 546, 'UOM')
