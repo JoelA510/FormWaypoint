@@ -319,14 +319,28 @@ function paginate(lines: DgdLine[]): DgdPage[] {
   let current: DgdLine[] = []
   let used = 0
 
-  for (const line of lines) {
-    const height = Math.max(line.properShippingName.length, line.quantityAndType.length) + line.annotations.length
+  const heightOf = (line: DgdLine) =>
+    Math.max(line.properShippingName.length, line.quantityAndType.length) + line.annotations.length
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    // A line that continues a package must not be separated from the line that states the
+    // packaging: its own quantity column reads "1 kg" alone, and stranded at the top of a
+    // sheet it describes a number of packages the reader cannot see. So the whole run of
+    // lines sharing one package is measured, and moved, together.
+    if (line.sharesPackagingWithPreviousLine) continue
+    let run = [line]
+    while (i + 1 < lines.length && lines[i + 1].sharesPackagingWithPreviousLine) {
+      run = [...run, lines[++i]]
+    }
+
+    const height = run.reduce((sum, l) => sum + heightOf(l), 0)
     if (used && used + height > ROWS_PER_PAGE) {
       pages.push(current)
       current = []
       used = 0
     }
-    current.push(line)
+    current.push(...run)
     used += height
   }
   if (current.length) pages.push(current)

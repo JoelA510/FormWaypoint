@@ -725,11 +725,16 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
   // entry on the declaration would declare goods the declaration does not cover, and
   // omitting it would sign a paper that understates what is in the box. The training
   // materials do not work this case, so this workflow refuses it rather than guessing.
-  // Judged on entries whose section is actually determined. An entry with no energy rating
-  // is conservatively fully regulated with `section: null`, and counting it here would
-  // report a packing conflict when the real defect is the unentered watt-hour figure —
-  // which `dg.energy` is already blocking on, in the words that fix it.
-  const classified = entries.filter((e) => e.classification.section !== null)
+  // Judged on entries whose energy band is known. An entry with no rating is
+  // conservatively fully regulated, and counting it here would report a packing conflict
+  // when the real defect is the unentered watt-hour figure — which `dg.energy` is already
+  // blocking on, in the words that fix it.
+  //
+  // Keyed on the band rather than on `section`, because a null section does not mean
+  // "undetermined": PI 976 has no sections at all, and every standalone sodium ion battery
+  // under it is fully regulated. Excluding those would let one share a package with
+  // Section II goods and produce a declaration that omits half the box.
+  const classified = entries.filter((e) => e.classification.band !== 'unknown')
   const declared = classified.filter((e) => e.classification.declarationRequired)
   if (declared.length && declared.length < classified.length) {
     checks.push({

@@ -811,3 +811,23 @@ describe('edge cases around the mixed-regulation and Section I wording', () => {
     expect(detail).not.toContain('Section II packages')
   })
 })
+
+describe('a standalone sodium ion battery is fully regulated even though PI 976 has no sections', () => {
+  it('refuses to share a package with Section II goods', () => {
+    const mixed = consignment([
+      pkg('p1', [
+        entry('e1', { chemistry: 'sodium-ion', wattHours: 80 }, { netWeightKgPerPackage: 2 }),
+        entry('e2', { configuration: 'contained-in-equipment', wattHours: 76 }, {
+          netWeightKgPerPackage: 1,
+          countPerPackage: 3,
+          stateOfChargePercent: 20,
+        }),
+      ]),
+    ])
+    const result = assess(mixed)
+    // A null section is "this instruction has none", not "undetermined" — the declaration
+    // would otherwise list only the UN3551 line and omit the rest of the box.
+    expect(check(result, 'dg.mixed-regulation.p1')).toMatchObject({ severity: 'blocking', passed: false })
+    expect(result.canGenerate).toBe(false)
+  })
+})

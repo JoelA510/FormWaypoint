@@ -408,3 +408,30 @@ describe('a consignment mixing fully regulated and Section II packages', () => {
     expect(annotations).toContain('Total quantity per Overpack 2 kg')
   })
 })
+
+describe('pagination keeps a package together', () => {
+  it('never strands a shared-packaging continuation line at the top of a sheet', () => {
+    // Five packages of three entries each: the third line of a package carries only its net
+    // quantity, and separated from the line stating "1 Fibreboard box x ..." it describes a
+    // package count the reader cannot see.
+    const many = consignment(
+      Array.from({ length: 5 }, (_, p) =>
+        pkg(`p${p}`, [
+          entry(`p${p}a`, { wattHours: 95 }, { netWeightKgPerPackage: 1 }),
+          entry(`p${p}b`, { chemistry: 'lithium-metal', lithiumContentG: 1 }, {
+            netWeightKgPerPackage: 1,
+            wattHourMarkedOnCase: false,
+          }),
+          entry(`p${p}c`, { chemistry: 'sodium-ion', wattHours: 50 }, { netWeightKgPerPackage: 1 }),
+        ]),
+      ),
+    )
+    const declaration = buildDeclaration(many, assess(many))
+    expect(declaration.pages.length).toBeGreaterThan(1)
+    for (const page of declaration.pages) {
+      expect(page.lines[0].sharesPackagingWithPreviousLine).toBe(false)
+    }
+    // And nothing was dropped or duplicated in the regrouping.
+    expect(declaration.pages.flatMap((p) => p.lines)).toEqual(declaration.lines)
+  })
+})
