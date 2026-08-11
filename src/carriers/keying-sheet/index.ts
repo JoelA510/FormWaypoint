@@ -242,13 +242,14 @@ function groupKeyFor(line: MergedLine, mode: GroupingMode, index: number, correc
     // row the filed SLI merges as soon as one line happens to print the controlled value
     // outright, which is the opposite of what this mode is for.
     case 'df-code':
+      // Case-insensitive on the triplet, exactly as `aggregateLines` keys its rows.
       return [
         domesticForeign(line.countryOfOrigin),
         code,
         unit,
-        line.eccn || corrections.eccn || '',
-        line.license || corrections.license || '',
-        line.sme || corrections.sme || '',
+        (line.eccn || corrections.eccn || '').toUpperCase(),
+        (line.license || corrections.license || '').toUpperCase(),
+        (line.sme || corrections.sme || '').toUpperCase(),
       ].join('|')
     case 'part-origin-code':
     default:

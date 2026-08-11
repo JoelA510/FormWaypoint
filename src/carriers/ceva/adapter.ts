@@ -169,6 +169,11 @@ function formatQuantity(quantity: number): string {
   return Number.isInteger(quantity) ? String(quantity) : quantity.toFixed(3)
 }
 
+/** Distinct values, compared case-insensitively; the first spelling seen is kept. */
 function distinct(values: (string | null | undefined)[]): string[] {
-  return [...new Set(values.filter((v): v is string => Boolean(v)))]
+  const seen = new Map<string, string>()
+  for (const value of values) {
+    if (value && !seen.has(value.toUpperCase())) seen.set(value.toUpperCase(), value)
+  }
+  return [...seen.values()]
 }

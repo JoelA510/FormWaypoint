@@ -203,12 +203,15 @@ export function aggregateLines(lines: MergedLine[], options: AggregationOptions)
     const license = line.license || options.license
     const sme = line.sme || options.sme
 
+    // The triplet is keyed case-insensitively: a hand-filled form can spell one
+    // classification two ways ('5A992.C' beside '5A992.c'), and those are one commodity
+    // row, not two. The row keeps the first spelling seen.
     const key = [
       normalizeScheduleB(code),
       df,
-      eccn ?? '',
-      license ?? '',
-      sme ?? '',
+      (eccn ?? '').toUpperCase(),
+      (license ?? '').toUpperCase(),
+      (sme ?? '').toUpperCase(),
       canonicalUnit(line.uom) ?? '',
     ].join('|')
 

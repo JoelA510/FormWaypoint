@@ -194,7 +194,7 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
     ...partCodeOverrideChecks(mergedLines, options.codesByPart),
     ...classificationChecks(sliLines, mergedLines, index),
     ...exportControlChecks(options, mergedLines),
-    ...sourceEccnChecks(sliLines, mergedLines, options.eccn),
+    ...sourceControlChecks(sliLines, mergedLines, options),
     ...capacityCheck(sliLines, options.maxRows),
   ]
 
@@ -788,45 +788,58 @@ function exportControlChecks(options: ReconcileOptions, merged: MergedLine[]): C
 }
 
 /**
- * Rows whose stated ECCN changes what would otherwise be filed.
+ * Rows whose stated export-control values change what would otherwise be filed.
  *
  * Surfaced because the substitution runs both ways in the historical data: shipment
  * vendorB1 states `ECCN: 5A992.C` against its T20 pendant kit, and the SLI filed for it says
- * EAR99. A stated ECCN is a classification the exporter already made, so it wins — but the
- * reviewer is told, because it changes what is being declared.
+ * EAR99. A stated value is a classification the exporter already made, so it wins — but the
+ * reviewer is told, because it changes what is being declared. The same rule covers the
+ * licence and SME the `omron-ci` form states per line: a stated NLR under an entered
+ * licence number is a downgrade of a person's entry and must not pass silently.
  *
- * "Changes" is judged against the blanket value: with no blanket entered, EAR99 is the
- * unremarkable case (the `omron-ci` form states an ECCN on every line and EAR99 is the
- * norm, so flagging each one would train the reader to skip the warning) — but a stated
- * EAR99 *under a controlled blanket* is a downgrade of a classification a person entered,
- * which is exactly what must not pass silently.
+ * "Changes" is judged against the blanket value; with no blanket entered, the unremarkable
+ * norms (EAR99 / NLR / N) are not reported, because the `omron-ci` form states them on
+ * every line and flagging each one would train the reader to skip the warning.
  */
-function sourceEccnChecks(sliLines: SLILine[], merged: MergedLine[], blanketEccn: string | null): CheckResult[] {
-  const unremarkable = (blanketEccn ?? '').trim().toUpperCase() || 'EAR99'
+function sourceControlChecks(sliLines: SLILine[], merged: MergedLine[], options: ReconcileOptions): CheckResult[] {
   const byId = new Map(merged.map((l) => [l.id, l]))
-  const stated = sliLines.flatMap((line, i) => {
-    const sourceEccn = line.sourceLineIds.map((id) => byId.get(id)?.eccn).find(Boolean)
-    return sourceEccn && sourceEccn.trim().toUpperCase() !== unremarkable
-      ? [{ row: i + 1, scheduleB: line.scheduleB, eccn: sourceEccn }]
-      : []
-  })
-
-  if (!stated.length) return []
-
-  return [
-    {
-      id: 'eccn-from-document',
-      severity: 'warning',
-      title: 'The document states an ECCN that changes what is declared',
-      detail:
-        stated
-          .map((s) => `Row ${s.row} (${s.scheduleB}) will be filed as ${s.eccn}, as printed on the document`)
-          .join('; ') +
-        '. A stated classification beats the blanket value — confirm it before signing.',
-      passed: false,
-      refs: stated.map((s) => `row-${s.row}`),
-    },
+  const members = [
+    { id: 'eccn-from-document', label: 'ECCN', blanket: options.eccn, norm: 'EAR99', value: (l: MergedLine) => l.eccn },
+    { id: 'license-from-document', label: 'licence', blanket: options.license, norm: 'NLR', value: (l: MergedLine) => l.license },
+    { id: 'sme-from-document', label: 'SME', blanket: options.sme, norm: 'N', value: (l: MergedLine) => l.sme },
   ]
+
+  return members.flatMap(({ id, label, blanket, norm, value }) => {
+    const unremarkable = (blanket ?? '').trim().toUpperCase() || norm
+    const stated = sliLines.flatMap((line, i) => {
+      const sourceValue = line.sourceLineIds
+        .map((lineId) => {
+          const source = byId.get(lineId)
+          return source ? value(source) : undefined
+        })
+        .find(Boolean)
+      return sourceValue && sourceValue.trim().toUpperCase() !== unremarkable
+        ? [{ row: i + 1, scheduleB: line.scheduleB, value: sourceValue }]
+        : []
+    })
+
+    if (!stated.length) return []
+
+    return [
+      {
+        id,
+        severity: 'warning' as const,
+        title: `The document states a ${label} that changes what is declared`,
+        detail:
+          stated
+            .map((s) => `Row ${s.row} (${s.scheduleB}) will be filed as ${s.value}, as printed on the document`)
+            .join('; ') +
+          '. A stated value beats the blanket value — confirm it before signing.',
+        passed: false,
+        refs: stated.map((s) => `row-${s.row}`),
+      },
+    ]
+  })
 }
 
 function capacityCheck(sliLines: SLILine[], maxRows?: number): CheckResult[] {

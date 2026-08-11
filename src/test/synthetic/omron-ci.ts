@@ -49,6 +49,11 @@ export interface OmronCiSpec {
   lines: OmronCiLine[]
   /** Omit the SUBTOTAL figure, to model a workbook saved without cached formula results. */
   omitSubtotal?: boolean
+  /**
+   * Draw each header value as one text item per word, to model pdfjs splitting a cell's
+   * text into several items. Only the PDF builder honours it.
+   */
+  splitValues?: boolean
 }
 
 export function simpleOmronCi(): OmronCiSpec {
@@ -228,12 +233,24 @@ export async function buildOmronCiPdf(spec: OmronCiSpec): Promise<ArrayBuffer> {
     ['CONSIGNEE EORI / USCI / VAT:', '', 'SHIPPER EIN / TAX ID:', ''],
     ['INCOTERMS:', spec.incoterms ?? '', 'PAGE:', '1 of 1'],
   ]
+  // With splitValues, a value is drawn one item per word, as pdfjs often reports it.
+  const value = (x: number, y: number, text: string) => {
+    if (!spec.splitValues) {
+      at(x, y, text)
+      return
+    }
+    let cursor = x
+    for (const word of text.split(' ')) {
+      at(cursor, y, word)
+      cursor += font.widthOfTextAtSize(word + ' ', size)
+    }
+  }
   pairs.forEach(([label1, value1, label2, value2], i) => {
     const y = 640 - i * 12
     at(COLUMNS.ln.left, y, label1)
-    at(COLUMNS.d.left, y, value1)
+    value(COLUMNS.d.left, y, value1)
     at(COLUMNS.f.left, y, label2)
-    at(COLUMNS.h.left, y, value2)
+    value(COLUMNS.h.left, y, value2)
   })
 
   // Table headings, centred like the printed form — including its awkwardest habit: the

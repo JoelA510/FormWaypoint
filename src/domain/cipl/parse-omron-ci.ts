@@ -501,14 +501,43 @@ function pagesToGrid(pages: TextPage[]): SheetRows {
     if (isHeadingRow(rows[i])) continue
     if (partyBand !== -1 && i > partyBand && i < partyEnd) {
       grid.push(partyRow(rows[i], rows[partyBand]))
-    } else {
+    } else if (i === partyBand) {
       grid.push(rows[i].items.map((item) => item.str))
+    } else {
+      grid.push(coalescedRow(rows[i]))
     }
   }
   grid.push([...Object.values(TOP_COLUMNS)], [...Object.values(SUB_COLUMNS)])
   grid.push(...tableRowsToBlocks(rows.slice(subIndex + 1, tableEnd), anchors))
-  for (let i = tableEnd; i < rows.length; i++) grid.push(rows[i].items.map((item) => item.str))
+  for (let i = tableEnd; i < rows.length; i++) grid.push(coalescedRow(rows[i]))
   return grid
+}
+
+/** Cells that delimit values on the totals band, matched the way the header labels are. */
+const TOTALS_CELLS = new Set(['SUBTOTAL', 'TOTAL (USD)', 'TAX', 'FREIGHT'])
+
+/**
+ * A label/value row with pdfjs's item splits healed: consecutive non-label items join
+ * into one cell, so a value the extractor emitted as two items ('DAP' + 'Singapore')
+ * reads back whole instead of `valueAfter` truncating it at the first item.
+ */
+function coalescedRow(row: TextRow): string[] {
+  const cells: string[] = []
+  let pending: string[] = []
+  const flush = () => {
+    if (pending.length) cells.push(pending.join(' '))
+    pending = []
+  }
+  for (const item of row.items) {
+    if (isLabel(item.str) || TOTALS_CELLS.has(normalizeLabel(item.str))) {
+      flush()
+      cells.push(item.str)
+    } else {
+      pending.push(item.str)
+    }
+  }
+  flush()
+  return cells
 }
 
 /**
@@ -637,15 +666,13 @@ function tableRowsToBlocks(rows: TextRow[], anchors: Anchors): SheetRows {
   }
 
   for (const [block, items] of leftItems) {
-    // PDF y grows upward, so the compliance row is the smallest baseline — and it must
-    // sit *well* below the LN centre, roughly half a row down. Both conditions matter: the
-    // lowest-baseline test alone would misread a wrapped description's second line as the
-    // compliance row whenever the compliance row itself is blank, and that tail hangs just
-    // under the centre where a real compliance baseline never sits.
-    const lowestY = Math.min(...items.map((item) => item.y))
+    // The compliance row's baseline sits half a row below the LN centre (PDF y grows
+    // upward), so it is recognised by *position*, not by being the block's lowest text:
+    // a wrapped description's overflow lines hang just under the centre — or, wrapped
+    // further, below the compliance baseline — and either way they belong to the
+    // description, even when the compliance row itself is blank.
     for (const item of items) {
-      const isComplianceRow =
-        block.y - item.y > pitch / 6 && Math.abs(item.y - lowestY) <= pitch / 8
+      const isComplianceRow = Math.abs(block.y - item.y - pitch / 4) <= pitch / 8
       if (isComplianceRow) {
         const column = nearest(item.x, ['coo', 'hts', 'eccn', 'license', 'sme'])
         if (column) push(block.bottom, column, item)

@@ -176,6 +176,27 @@ describe('the workbook grid', () => {
     expect(stale.canGenerate).toBe(true)
   })
 
+  it('warns when a stated licence downgrades an entered licence number', () => {
+    const result = reconcile(parseGrid(), null, {
+      eccn: null,
+      sme: null,
+      license: 'D123456',
+      unitWeightsByPart: UNIT_WEIGHTS,
+    })
+    const check = result.checks.find((c) => c.id === 'license-from-document')
+    expect(check).toMatchObject({ passed: false, severity: 'warning' })
+    expect(check!.detail).toContain('NLR')
+  })
+
+  it('groups case variants of one classification into one row', () => {
+    const spec = simpleOmronCi()
+    // Same goods, same codes — one line's ECCN typed lowercase.
+    spec.lines[1] = { ...spec.lines[0], eccn: 'ear99' }
+    const result = reconcile(parseGrid(spec), null, { ...BLANK_CONTROLS, unitWeightsByPart: UNIT_WEIGHTS })
+    expect(result.sliLines).toHaveLength(1)
+    expect(result.sliLines[0].quantity).toBe(8)
+  })
+
   it('keeps lines with different export control in separate rows', () => {
     const result = reconcile(parseGrid(), null, { ...BLANK_CONTROLS, unitWeightsByPart: UNIT_WEIGHTS })
     expect(result.sliLines).toHaveLength(2)
@@ -272,6 +293,14 @@ describe('the printed PDF', () => {
     expect(parsed.lines[0].description).toBe('Robot cable assembly with mounting bracket')
     expect(parsed.lines[0].classification).toBe('8544.42.0000')
     expect(parsed.lines[0].countryOfOrigin).toBe('US')
+  })
+
+  it('reads a header value whole when the extractor splits it into several items', async () => {
+    const spec = { ...simpleOmronCi(), splitValues: true }
+    const parsed = await parseCipl('ci.pdf', await buildOmronCiPdf(spec))
+    expect(parsed.headers.FC.incoterm).toBe('DAP Singapore')
+    expect(parsed.headers.FC.vesselAgent).toBe('Nippon Express')
+    expect(parsed.headers.FC.invoiceNumber).toBe('CI-2026-0001')
   })
 
   it('does not mistake a wrapped description for a blank compliance row', async () => {
