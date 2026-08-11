@@ -831,3 +831,63 @@ describe('a standalone sodium ion battery is fully regulated even though PI 976 
     expect(result.canGenerate).toBe(false)
   })
 })
+
+describe('remedies that would not actually help are not offered', () => {
+  it('does not offer A99 for a Section II package, whose answer is Section I first', () => {
+    const heavy = consignment([
+      pkg('p1', [entry('e1', { configuration: 'packed-with-equipment', wattHours: 96 }, { netWeightKgPerPackage: 40 })]),
+    ])
+    expect(check(assess(heavy), 'dg.a99.p1')).toBeUndefined()
+  })
+
+  it('does not offer A99 on a passenger booking, where it is not a relief that applies', () => {
+    const heavy = consignment(
+      [pkg('p1', [entry('e1', { configuration: 'packed-with-equipment', wattHours: 300 }, { netWeightKgPerPackage: 40 })])],
+      { aircraft: 'passenger-and-cargo' },
+    )
+    expect(check(assess(heavy), 'dg.a99.p1')).toBeUndefined()
+  })
+
+  it('still offers A99 where it belongs — over 35 kg at the full cargo allowance', () => {
+    const heavy = consignment([
+      pkg('p1', [entry('e1', { configuration: 'packed-with-equipment', wattHours: 300 }, { netWeightKgPerPackage: 40 })]),
+    ])
+    expect(check(assess(heavy), 'dg.a99.p1')).toMatchObject({ severity: 'warning', passed: false })
+  })
+
+  it('does not name a 35 kg allowance for a 40 kg Section II package on a passenger booking', () => {
+    const heavy = consignment(
+      [pkg('p1', [entry('e1', { configuration: 'packed-with-equipment', wattHours: 96 }, { netWeightKgPerPackage: 40 })])],
+      { aircraft: 'passenger-and-cargo' },
+    )
+    const detail = check(assess(heavy), 'dg.limit.p1')!.detail
+    expect(detail).toContain('over as well')
+    expect(detail).not.toContain('would raise it to 35 kg')
+  })
+})
+
+describe('an overpack holding only excepted packages', () => {
+  const excepted = consignment(
+    [
+      pkg('p1', [
+        entry('e1', { configuration: 'contained-in-equipment', wattHours: 76 }, {
+          netWeightKgPerPackage: 1,
+          countPerPackage: 3,
+          stateOfChargePercent: 20,
+        }),
+      ], { overpackId: 'o1' }),
+    ],
+    { overpacks: [overpack('o1')] },
+  )
+
+  it('does not ask for an identifier on a declaration that does not exist', () => {
+    const detail = assess(excepted).checks.find((c) => c.id === 'dg.overpack-identifier')!.detail
+    expect(detail).toContain('no declaration entry to match it against')
+  })
+
+  it('still requires the mark on the box itself', () => {
+    const marks = assess(excepted).packages[0].hazardCommunication.join(' ')
+    expect(marks).toContain('OVERPACK')
+    expect(marks).toContain('#A001')
+  })
+})

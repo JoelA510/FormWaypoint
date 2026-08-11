@@ -435,3 +435,34 @@ describe('pagination keeps a package together', () => {
     expect(declaration.pages.flatMap((p) => p.lines)).toEqual(declaration.lines)
   })
 })
+
+describe('a package too tall for one sheet', () => {
+  it('breaks it across sheets rather than letting the renderer clip the overflow', () => {
+    // Eight entries in one package, plus overpack annotation rows: taller than the 14 rows
+    // a sheet holds, so keeping the package together would push its last rows off the page.
+    const tall = consignment(
+      [
+        pkg(
+          'p1',
+          Array.from({ length: 8 }, (_, i) =>
+            entry(`e${i}`, i % 2 ? { wattHours: 95 } : { chemistry: 'sodium-ion', wattHours: 95 }, {
+              netWeightKgPerPackage: 1 + i,
+            }),
+          ),
+          { overpackId: 'o1' },
+        ),
+      ],
+      { overpacks: [overpack('o1', { marks: '#A001, #A002, #A003, #A004, #A005', count: 5 })] },
+    )
+    const declaration = buildDeclaration(tall, assess(tall))
+    for (const page of declaration.pages) {
+      const rows = page.lines.reduce(
+        (sum, l) => sum + Math.max(l.properShippingName.length, l.quantityAndType.length) + l.annotations.length,
+        0,
+      )
+      expect(rows).toBeLessThanOrEqual(14)
+    }
+    // And nothing was dropped in the process.
+    expect(declaration.pages.flatMap((p) => p.lines)).toEqual(declaration.lines)
+  })
+})

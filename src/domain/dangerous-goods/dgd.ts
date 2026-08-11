@@ -340,6 +340,24 @@ function paginate(lines: DgdLine[]): DgdPage[] {
       current = []
       used = 0
     }
+
+    // A package taller than a whole sheet cannot be kept together, and keeping it together
+    // anyway would push its last rows off the page the renderer draws — losing them
+    // silently, which is worse than the split this is avoiding. So it breaks, line by line.
+    if (height > ROWS_PER_PAGE) {
+      for (const line of run) {
+        const lineHeight = heightOf(line)
+        if (used && used + lineHeight > ROWS_PER_PAGE) {
+          pages.push(current)
+          current = []
+          used = 0
+        }
+        current.push(line)
+        used += lineHeight
+      }
+      continue
+    }
+
     current.push(...run)
     used += height
   }

@@ -668,14 +668,17 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
                     // does not fit either, so in both cases splitting is the only answer and
                     // offering Section I would send someone to do UN-specification packaging
                     // work for a package that still will not go.
-                    (usingPassenger
-                      ? 'Split the batteries across more packages. Section I would not help here: its passenger ' +
-                        'aircraft allowance is the same 5 kg. Offering the consignment as cargo aircraft only and ' +
-                        'preparing this package to Section I would raise it to 35 kg.'
-                      : kg(weight) > A99_THRESHOLD_KG
-                        ? 'Split the batteries across more packages. Section I of the same packing instruction ' +
-                          'allows 35 kg on a cargo aircraft, which this package is over as well; beyond that is ' +
-                          'special provision A99, which is not a paperwork step — see the A99 note below.'
+                    // Over 35 kg is decided first: no route this branch could offer — not
+                    // Section I, not a change of aircraft — reaches it, so a remedy naming
+                    // a 35 kg allowance would be wrong on a passenger booking too.
+                    (kg(weight) > A99_THRESHOLD_KG
+                      ? 'Split the batteries across more packages. Section I of the same packing instruction ' +
+                        'allows 35 kg on a cargo aircraft, which this package is over as well; beyond that is ' +
+                        'special provision A99, which is not a paperwork step — see the A99 note below.'
+                      : usingPassenger
+                        ? 'Split the batteries across more packages. Section I would not help here: its passenger ' +
+                          'aircraft allowance is the same 5 kg. Offering the consignment as cargo aircraft only ' +
+                          'and preparing this package to Section I would raise it to 35 kg.'
                         : 'Either split the batteries across more packages, or prepare this package to Section I ' +
                           `of PI ${classification.packingInstruction}, where the cargo aircraft allowance is ` +
                           '35 kg. Section I is not a paperwork switch: it means UN specification packaging, the ' +
@@ -697,8 +700,13 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
     // A99 is reachable by any sufficiently heavy battery, qualified or not, and it is the
     // step people underestimate: two approvals, only one of which the shipper can obtain,
     // and carriers that refuse approved shipments outright. It is gated on the 35 kg the
-    // provision actually names, not on merely being over the section's own ceiling.
-    if (kg(weight) > A99_THRESHOLD_KG && !authorizationBinds && classification.limits.cargoKg <= limit) {
+    // provision actually names, not on merely being over the section's own ceiling — and
+    // on the entry already carrying the full 35 kg cargo allowance. A99 relieves the cargo
+    // aircraft maximum; raising it for a Section II package (5 kg either way) or on a
+    // passenger booking would point at an approval that does not apply, when the answer is
+    // Section I or a cargo aircraft first.
+    const atCargoMaximum = !usingPassenger && classification.limits.cargoKg >= A99_THRESHOLD_KG
+    if (kg(weight) > A99_THRESHOLD_KG && !authorizationBinds && atCargoMaximum) {
       checks.push({
         id: `dg.a99.${pkg.id}.${key}`,
         severity: 'warning',
@@ -1100,7 +1108,7 @@ function consignmentChecks(
   }
 
   // --- Overpacks ---------------------------------------------------------
-  checks.push(...overpackChecks(consignment))
+  checks.push(...overpackChecks(consignment, packages))
 
   return checks
 }
@@ -1157,24 +1165,38 @@ function cargoOnlyLabelWording(
  * packages inside have to be visible or reproduced, and the word OVERPACK has to be on the
  * outside. None of them is a formatting concern.
  */
-function overpackChecks(consignment: DgConsignment): CheckResult[] {
+function overpackChecks(consignment: DgConsignment, packages: PackageAssessment[]): CheckResult[] {
   const used = consignment.overpacks.filter((o) => consignment.packages.some((p) => p.overpackId === o.id))
   if (!used.length) return []
 
   const checks: CheckResult[] = []
   const unmarked = used.filter((o) => !o.marks.trim())
+  // An overpack holding nothing but excepted Section II packages has no entry on the
+  // declaration — there is no declaration line for goods the declaration does not cover —
+  // so the identifier cannot be repeated there and it would be wrong to ask for it. The
+  // mark still goes on the physical overpack, which the marks list already calls for.
+  const declaredIds = new Set(
+    packages.filter((p) => p.declarationRequired).map((p) => p.pkg.overpackId).filter(Boolean),
+  )
+  const onDeclaration = used.filter((o) => declaredIds.has(o.id))
 
   checks.push({
     id: 'dg.overpack-identifier',
     severity: 'blocking',
     title: 'Every overpack carries an identification mark',
     detail: unmarked.length
-      ? 'Each overpack needs its own identifier — #A001, #A002 — marked on the physical overpack and repeated ' +
-        'identically in the declaration entry, with the battery net quantity assigned to that identifier. ' +
-        'Identifiers that do not match between the box and the paper is the single most frequent cause of a ' +
-        'correction cycle on these shipments.'
-      : `${used.length} overpack description${used.length === 1 ? '' : 's'}, each identified. The identifier on ` +
-        'the box and the identifier on the declaration must read the same.',
+      ? 'Each overpack needs its own identifier — #A001, #A002 — marked on the physical overpack' +
+        (onDeclaration.length
+          ? ' and repeated identically in the declaration entry, with the battery net quantity assigned to that ' +
+            'identifier. Identifiers that do not match between the box and the paper is the single most frequent ' +
+            'cause of a correction cycle on these shipments.'
+          : '. These overpacks hold only excepted Section II packages, so no declaration entry states them; the ' +
+            'mark on the box is the whole of it.')
+      : `${used.length} overpack description${used.length === 1 ? '' : 's'}, each identified. ` +
+        (onDeclaration.length
+          ? 'The identifier on the box and the identifier on the declaration must read the same.'
+          : 'These hold only excepted Section II packages, so the identifier appears on the box alone — there is ' +
+            'no declaration entry to match it against.'),
     passed: unmarked.length === 0,
   })
 
