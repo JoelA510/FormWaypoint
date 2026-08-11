@@ -213,7 +213,26 @@ export function buildDeclaration(consignment: DgConsignment, assessment: DgAsses
 
   // Entries are emitted package by package so that the overpack wording lands immediately
   // after the entries it belongs to, which is where the regulation puts it.
-  for (const packageAssessment of assessment.packages) {
+  //
+  // Packages sharing an overpack are emitted together, at the position of the first of
+  // them, because the wording is written once after the last entry belonging to it. Left
+  // in input order, an overpack whose packages are separated by a package of some other
+  // overpack put its identification after entries that are not in it, and left the first
+  // of its own entries carrying none at all — the box-against-paper mismatch that
+  // `dg.overpack-identifier` exists to prevent. Everything else keeps its order: the sort
+  // key is the index of the first package of the group, so a consignment with no overpacks,
+  // or one whose overpacks are already contiguous, is emitted exactly as it was entered.
+  const groupPosition = new Map<string, number>()
+  assessment.packages.forEach((p, index) => {
+    const key = p.pkg.overpackId || `pkg:${index}`
+    if (!groupPosition.has(key)) groupPosition.set(key, index)
+  })
+  const ordered = assessment.packages
+    .map((p, index) => ({ p, index, at: groupPosition.get(p.pkg.overpackId || `pkg:${index}`) ?? index }))
+    .sort((a, b) => a.at - b.at || a.index - b.index)
+    .map((o) => o.p)
+
+  for (const packageAssessment of ordered) {
     const { pkg } = packageAssessment
     const totalPackages = packageCountInConsignment(pkg, consignment)
 

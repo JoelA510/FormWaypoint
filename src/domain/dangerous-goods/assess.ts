@@ -1343,6 +1343,24 @@ function overpackChecks(consignment: DgConsignment, packages: PackageAssessment[
     passed: unmarked.length === 0,
   })
 
+  // Held to the same rule as a package description's own count, and for the same reason:
+  // the consignment total is the product of the two, so a fractional or zero overpack count
+  // reaches the declaration as "1.5 Fibreboard box" and "Overpack used x 1.5", and reaches
+  // the two-package battery mark exemption as a fractional number of packages.
+  const miscounted = used.filter((o) => !Number.isInteger(o.count) || o.count < 1)
+  checks.push({
+    id: 'dg.overpack-count',
+    severity: 'blocking',
+    title: 'Every overpack description covers at least one whole overpack',
+    detail: miscounted.length
+      ? `${miscounted.map((o) => o.marks.trim() || 'an overpack').join(', ')} — the number of packages on the ` +
+        'declaration is the package count multiplied by the overpack count, so a count that is not a whole ' +
+        'number of overpacks misstates every quantity that follows from it. Say how many there are.'
+      : `${used.length} overpack description${used.length === 1 ? '' : 's'}, each covering a whole number of ` +
+        'overpacks.',
+    passed: miscounted.length === 0,
+  })
+
   const notVisible = used.filter((o) => !o.innerMarksVisible)
   checks.push({
     id: 'dg.overpack-marks',

@@ -807,6 +807,19 @@ describe('a package description covering no packages', () => {
     expect(check(result, 'dg.package-count')).toMatchObject({ severity: 'blocking', passed: false })
     expect(result.canGenerate).toBe(false)
   })
+
+  it('holds the overpack count to the same rule, because the totals multiply', () => {
+    // The number of packages on the paper is the package count times the overpack count, so
+    // half an overpack misstates every quantity that follows from it — and reached the
+    // two-package battery mark exemption as a fractional number of packages.
+    const result = assess(
+      consignment([pkg('p1', [entry('e1', { wattHours: 95 })], { count: 1, overpackId: 'o1' })], {
+        overpacks: [overpack('o1', { count: 1.5 })],
+      }),
+    )
+    expect(check(result, 'dg.overpack-count')).toMatchObject({ severity: 'blocking', passed: false })
+    expect(result.canGenerate).toBe(false)
+  })
 })
 
 describe('a package mixing Section II with fully regulated batteries', () => {

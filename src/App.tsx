@@ -440,7 +440,7 @@ export function App() {
             records={dgConsignments}
             consignment={dgConsignment}
             onConsignmentChange={setDgConsignment}
-            onPrepared={(record) => void handleDgPrepared(record)}
+            onPrepared={handleDgPrepared}
           />
         ) : (
           <>

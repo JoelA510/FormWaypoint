@@ -268,6 +268,42 @@ describe('an overpack holding more than one package description', () => {
   })
 })
 
+describe('two overpacks whose packages are entered interleaved', () => {
+  // A → #A001, B → #A002, C → #A001. In entry order, #A001's wording would land after C
+  // with #A002's between it and A, so A's entry carried no overpack identification at all
+  // and #A002's mark sat among entries that are not in it.
+  const shipment = consignment(
+    [
+      pkg('a', [entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 7 })], { count: 1, overpackId: 'o1' }),
+      pkg('b', [entry('e2', { wattHours: 96 }, { netWeightKgPerPackage: 3 })], { count: 1, overpackId: 'o2' }),
+      pkg('c', [entry('e3', { chemistry: 'lithium-metal', lithiumContentG: 1 }, {
+        netWeightKgPerPackage: 2,
+        wattHourMarkedOnCase: false,
+      })], { count: 1, overpackId: 'o1' }),
+    ],
+    {
+      overpacks: [
+        overpack('o1', { marks: '#A001, #A003', count: 2 }),
+        overpack('o2', { marks: '#A002, #A004', count: 2 }),
+      ],
+    },
+  )
+  const declaration = buildDeclaration(shipment, assess(shipment))
+
+  it('emits each overpack’s packages together, so its wording follows its own entries', () => {
+    // A, C, then B — the two #A001 packages contiguous, at the position of the first.
+    expect(declaration.lines.map((l) => l.unNumber)).toEqual(['UN3480', 'UN3090', 'UN3480'])
+    expect(declaration.lines[0].annotations).toEqual([])
+    expect(declaration.lines[1].annotations).toContain('Overpack marks: #A001, #A003')
+    expect(declaration.lines[2].annotations).toContain('Overpack marks: #A002, #A004')
+  })
+
+  it('totals each overpack over its own packages', () => {
+    expect(declaration.lines[1].annotations).toContain('Total quantity per Overpack 9 kg')
+    expect(declaration.lines[2].annotations).toContain('Total quantity per Overpack 3 kg')
+  })
+})
+
 describe('annotations that are wider than their column', () => {
   it('wraps the overpack identification marks rather than running them across the next column', () => {
     const shipment = consignment(

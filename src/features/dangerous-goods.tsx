@@ -94,7 +94,12 @@ export function DangerousGoodsPanel({
   /** Held above this component so switching tabs does not discard it. */
   consignment: DgConsignment
   onConsignmentChange: Dispatch<SetStateAction<DgConsignment>>
-  onPrepared: (record: DgConsignmentRecord) => void
+  /**
+   * Awaited, and its failure carried into the caller's `catch`. The retention record is
+   * the evidence that this declaration was produced; writing the PDF and reporting "Saved
+   * to …" over a rejected write would leave the file on disk with nothing behind it.
+   */
+  onPrepared: (record: DgConsignmentRecord) => void | Promise<void>
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -175,7 +180,7 @@ export function DangerousGoodsPanel({
       // Opened straight away, like the SLI: the next thing anyone does with a declaration is
       // read it, print it in colour and sign it by hand.
       await openDelivery(bridge, delivery)
-      onPrepared(record())
+      await onPrepared(record())
     } catch (e) {
       setError(e instanceof Error ? e.message : 'The declaration could not be generated.')
     } finally {
@@ -189,6 +194,9 @@ export function DangerousGoodsPanel({
     if (busy) return
     setBusy(true)
     setError(null)
+    // And cleared like it. The warnings come from drawing the declaration; left standing
+    // beside a checklist download they describe a form this button does not produce.
+    setWarnings([])
     try {
       const markdown = buildChecklist(consignment, assessment, localDate())
       const delivery = await deliver(
@@ -201,7 +209,7 @@ export function DangerousGoodsPanel({
       await openDelivery(bridge, delivery)
       // Recorded too: for a Section II consignment this checklist is the only artifact, and a
       // consignment that left the tool with no record has no audit trail at all.
-      onPrepared(record())
+      await onPrepared(record())
     } catch (e) {
       setError(e instanceof Error ? e.message : 'The checklist could not be saved.')
     } finally {
