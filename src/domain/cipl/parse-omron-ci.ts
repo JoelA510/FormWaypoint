@@ -492,12 +492,7 @@ function pagesToGrid(pages: TextPage[]): SheetRows {
   // whichever heading is nearest. Both produce a plausible-looking table that is wrong, so
   // the table is handed back unreshaped instead — `readLines` reports the missing headings
   // and no line is invented from a grid nobody could calibrate.
-  const missing = (Object.entries(anchors) as [keyof Anchors, number][])
-    .filter(([, x]) => !Number.isFinite(x))
-    .map(([key]) => ({ ...TOP_COLUMNS, ...SUB_COLUMNS }[key])) as string[]
-  if (missing.length) {
-    return rows.map((row) => row.items.map((item) => item.str))
-  }
+  const tableCalibrated = (Object.values(anchors) as number[]).every((x) => Number.isFinite(x))
 
   // Everything between the table headings and the totals band belongs to line blocks.
   // The band is recognised by its own printed cells as *whole* cells, never as substrings
@@ -542,6 +537,18 @@ function pagesToGrid(pages: TextPage[]): SheetRows {
       grid.push(coalescedRow(rows[i]))
     }
   }
+  // The headings and the blocks are emitted only when every column was located.
+  //
+  // Withholding just these two — rather than bailing out of the whole reshaping — keeps
+  // the header fields, the party band and the totals band readable, while leaving
+  // `readLines` with no headings to find, so it reports a commodity table it could not
+  // read. Emitting them anyway would hand it a grid calibrated against a column that was
+  // never found, and it would fill that column from whatever sat nearest.
+  if (!tableCalibrated) {
+    for (let i = subIndex + 1; i < rows.length; i++) grid.push(coalescedRow(rows[i]))
+    return grid
+  }
+
   grid.push([...Object.values(TOP_COLUMNS)], [...Object.values(SUB_COLUMNS)])
   grid.push(...tableRowsToBlocks(rows.slice(subIndex + 1, tableEnd), anchors))
   for (let i = tableEnd; i < rows.length; i++) grid.push(coalescedRow(rows[i]))

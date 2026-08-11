@@ -401,4 +401,22 @@ describe('a printed table whose headings could not all be located', () => {
     expect(parsed.lines).toHaveLength(0)
     expect(parsed.warnings.some((w) => w.includes('commodity table headings'))).toBe(true)
   })
+
+  it('withholds only the table — the header, parties and totals still read', async () => {
+    const spec = {
+      ...simpleOmronCi(),
+      splitHeadings: true,
+      consigneeName: 'Example Consignee Pte. Ltd.',
+      consigneeLines: [] as string[],
+      billToName: 'Buyer GmbH',
+      billToLines: ['9 Payer Street'],
+    }
+    const header = (await parseCipl('ci.pdf', await buildOmronCiPdf(spec))).headers.FC
+    expect(header.invoiceNumber).toBe('CI-2026-0001')
+    expect(header.totalValue).toBeCloseTo(190, 2)
+    // The party band is still mapped by column, so a blank consignee address does not
+    // absorb the bill-to's street.
+    expect(header.consignedTo).toMatchObject({ name: 'Example Consignee Pte. Ltd.', lines: [] })
+    expect(header.soldTo.name).toBe('Buyer GmbH')
+  })
 })

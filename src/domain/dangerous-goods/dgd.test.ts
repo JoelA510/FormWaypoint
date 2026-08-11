@@ -488,3 +488,26 @@ describe('an address longer than its box', () => {
     expect(warnings.filter((w) => w.includes('the box holds'))).toEqual([])
   })
 })
+
+describe('warnings across a multi-sheet declaration', () => {
+  it('reports an over-long address once, not once per sheet', async () => {
+    const many = consignment(
+      Array.from({ length: 20 }, (_, i) =>
+        pkg(`p${i}`, [entry(`e${i}`, { wattHours: 95 }, { netWeightKgPerPackage: 1 + i })]),
+      ),
+      {
+        consignee: {
+          name: 'Very Long Consignee Name Ltd.',
+          addressLines: ['Unit 4', 'Riverside Estate', 'Eastway', 'Some Town', 'Some County', 'ZZ1 2YY', 'United Kingdom'],
+        },
+      },
+    )
+    const declaration = buildDeclaration(many, assess(many))
+    expect(declaration.pages.length).toBeGreaterThan(1)
+    const { warnings } = await renderDeclaration(declaration)
+    const overflow = warnings.filter((w) => w.includes('the box holds 5'))
+    expect(overflow).toHaveLength(1)
+    // And the list is a set, so it can be keyed by its text.
+    expect(new Set(warnings).size).toBe(warnings.length)
+  })
+})

@@ -100,7 +100,11 @@ export async function renderDeclaration(declaration: ShippersDeclaration): Promi
   }
 
   const bytes = await doc.save({ updateFieldAppearances: true })
-  return { bytes, warnings }
+  // Deduplicated: the shipper and consignee blocks are drawn on every sheet, so a party
+  // block that overflows its box says so once per page. The reader is being told about one
+  // address, and the panel keys these by their text — the same sentence three times is a
+  // list that looks like three problems and collides as React keys.
+  return { bytes, warnings: [...new Set(warnings)] }
 }
 
 function drawPage(
