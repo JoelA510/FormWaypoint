@@ -114,7 +114,8 @@ describe('batteries with equipment', () => {
     expect(c.declarationRequired).toBe(false)
     expect(c.fullyRegulated).toBe(false)
     expect(c.training).toBe('adequate-instruction')
-    expect(c.limits).toMatchObject({ passengerKg: 5, cargoKg: 35 })
+    // 5 kg on either aircraft: Section II has no cargo relief — 35 kg is Section I CAO.
+    expect(c.limits).toMatchObject({ passengerKg: 5, cargoKg: 5 })
     expect(c.aircraft).toBe('passenger-and-cargo')
   })
 

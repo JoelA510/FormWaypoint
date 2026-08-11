@@ -297,14 +297,22 @@ function limitsFor(pi: number, section: PackingSection): QuantityLimits {
   if (pi === 976) {
     return { passengerKg: null, cargoKg: 35, source: 'Student Guide fig. 5-3 (UN3551, columns I–L)' }
   }
-  // Packed with / contained in, every chemistry: 5 kg passenger, 35 kg cargo.
+  // Packed with / contained in, Section II: 5 kg net per package on *either* aircraft
+  // type. The Section II tables state a single 5 kg ceiling with no cargo relief (figs.
+  // 5-26 and 5-27) — the 35 kg figure belongs to Section I on a cargo aircraft, and a
+  // shipper who needs more than 5 kg in one package prepares to Section I.
+  if (section === 'II') {
+    return {
+      passengerKg: 5,
+      cargoKg: 5,
+      source: 'Student Guide figs. 5-26 and 5-27 (Section II — 5 kg net per package on either aircraft)',
+    }
+  }
+  // Packed with / contained in, Section I: 5 kg passenger, 35 kg cargo.
   return {
     passengerKg: 5,
     cargoKg: 35,
-    source:
-      section === 'II'
-        ? 'Student Guide figs. 5-26 and 5-27 (Section II)'
-        : 'Student Guide figs. 5-1 to 5-3, columns I–L',
+    source: 'Student Guide figs. 5-1 to 5-3, columns I–L (Section I)',
   }
 }
 
@@ -514,14 +522,25 @@ export function classifyForAir(spec: BatterySpec): AirClassification {
  * operator that requires a particular form of words is the only thing that narrows it, and no
  * variation data ships with this application.
  */
-export function airWaybillStatement(classification: AirClassification): string {
+export function airWaybillStatement(
+  classification: AirClassification,
+  /**
+   * The aircraft type the *consignment* is offered on, where known. The CAO annotation
+   * follows the declaration, and a fully regulated consignment offered cargo-aircraft-only
+   * by choice strikes the passenger box on its declaration — so the AWB statement carries
+   * the annotation whether the restriction is inherent to the goods or chosen. Section II
+   * statements never carry it: excepted packages are not restricted to cargo aircraft.
+   */
+  consignmentAircraft?: AircraftLimitation,
+): string {
   const { section, packingInstruction, spec, aircraft } = classification
   if (section === 'II') {
     const chemistry =
       spec.chemistry === 'lithium-ion' ? 'Lithium ion' : spec.chemistry === 'lithium-metal' ? 'Lithium metal' : 'Sodium ion'
     return `${chemistry} batteries in compliance with Section II of PI${packingInstruction}`
   }
-  return aircraft === 'cargo-aircraft-only'
+  const cargoOnly = aircraft === 'cargo-aircraft-only' || consignmentAircraft === 'cargo-aircraft-only'
+  return cargoOnly
     ? 'Dangerous goods as per associated Shipper’s Declaration — Cargo Aircraft Only'
     : 'Dangerous goods as per associated Shipper’s Declaration'
 }
@@ -536,7 +555,7 @@ export function airWaybillStatement(classification: AirClassification): string {
  * to match each instruction to its chemistry.
  */
 export function combinedSectionIIStatement(classifications: AirClassification[]): string {
-  const statements = [...new Set(classifications.filter((c) => c.section === 'II').map(airWaybillStatement))]
+  const statements = [...new Set(classifications.filter((c) => c.section === 'II').map((c) => airWaybillStatement(c)))]
   return statements.join('. ')
 }
 

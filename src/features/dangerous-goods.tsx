@@ -156,6 +156,10 @@ export function DangerousGoodsPanel({
   }, [consignment, assessment])
 
   async function generateDeclaration() {
+    // Guarded like the checklist below: each run appends a retention record, and a
+    // double-click that writes two files is noise while one that writes two audit rows is
+    // misinformation.
+    if (busy) return
     setBusy(true)
     setError(null)
     setWarnings([])

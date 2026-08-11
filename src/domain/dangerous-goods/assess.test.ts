@@ -101,6 +101,53 @@ describe('the workbook power drills', () => {
     const result = assess(drills)
     expect(check(result, 'dg.limit.p1')).toMatchObject({ passed: true, actual: '1.5 kg' })
   })
+
+  it('holds Section II to 5 kg on a cargo aircraft — the 35 kg relief belongs to Section I', () => {
+    const heavy = consignment([
+      pkg('p1', [
+        entry('e1', { configuration: 'contained-in-equipment', wattHours: 76 }, {
+          netWeightKgPerPackage: 12,
+          countPerPackage: 24,
+          stateOfChargePercent: 20,
+        }),
+      ]),
+    ])
+    // The default consignment is cargo aircraft only, and 12 kg would have passed against
+    // the mis-transcribed 35 kg figure while being 2.4x over the real Section II ceiling.
+    const result = assess(heavy)
+    expect(check(result, 'dg.limit.p1')).toMatchObject({ passed: false, expected: '≤ 5 kg', actual: '12 kg' })
+    expect(result.canGenerate).toBe(false)
+  })
+
+  it('does not require the CAO label on Section II packages offered cargo-only by choice', () => {
+    const result = assess(drills)
+    expect(check(result, 'dg.aircraft')!.detail).toContain('label is not applied')
+    for (const p of result.packages) {
+      expect(p.hazardCommunication.join(' ')).not.toContain('Cargo Aircraft Only')
+    }
+  })
+})
+
+describe('the air waybill statement follows the declaration, not just the goods', () => {
+  const regulated = (aircraft: 'passenger-and-cargo' | 'cargo-aircraft-only') =>
+    consignment(
+      [pkg('p1', [entry('e1', { configuration: 'packed-with-equipment', wattHours: 150 }, { netWeightKgPerPackage: 3 })])],
+      { aircraft },
+    )
+
+  it('carries the CAO annotation when a passenger-permitted consignment is offered cargo-only', () => {
+    // The declaration strikes the passenger box and the packages carry the CAO label, so
+    // an AWB statement without the annotation would contradict the paper it points at.
+    expect(assess(regulated('cargo-aircraft-only')).airWaybillStatements).toEqual([
+      'Dangerous goods as per associated Shipper’s Declaration — Cargo Aircraft Only',
+    ])
+  })
+
+  it('omits the annotation when the same goods are offered on passenger aircraft', () => {
+    expect(assess(regulated('passenger-and-cargo')).airWaybillStatements).toEqual([
+      'Dangerous goods as per associated Shipper’s Declaration',
+    ])
+  })
 })
 
 describe('the battery mark exemption for equipment', () => {
@@ -284,15 +331,27 @@ describe('packages holding more than one entry', () => {
   it('gives each UN number its own allowance, and applies A181 to the total', () => {
     const combined = consignment([
       pkg('p1', [
+        entry('e1', { configuration: 'packed-with-equipment', wattHours: 90 }, { netWeightKgPerPackage: 2 }),
+        entry('e2', { configuration: 'contained-in-equipment', wattHours: 90 }, { netWeightKgPerPackage: 2.5, countPerPackage: 1 }),
+      ]),
+    ])
+    const result = assess(combined)
+    // 2 and 2.5 kg, each inside its own 5 kg Section II allowance...
+    expect(result.checks.filter((c) => c.id.startsWith('dg.limit.p1')).every((c) => c.passed)).toBe(true)
+    // ...and 4.5 kg in total, inside it too.
+    expect(check(result, 'dg.a181')).toMatchObject({ passed: true, actual: '4.5 kg' })
+  })
+
+  it('holds the A181 total to the 5 kg Section II ceiling, which has no cargo relief', () => {
+    const combined = consignment([
+      pkg('p1', [
         entry('e1', { configuration: 'packed-with-equipment', wattHours: 90 }, { netWeightKgPerPackage: 3 }),
         entry('e2', { configuration: 'contained-in-equipment', wattHours: 90 }, { netWeightKgPerPackage: 3, countPerPackage: 1 }),
       ]),
     ])
-    const result = assess(combined)
-    // 3 kg each, both inside their own 35 kg cargo allowance...
-    expect(result.checks.filter((c) => c.id.startsWith('dg.limit.p1')).every((c) => c.passed)).toBe(true)
-    // ...and 6 kg in total, inside it too.
-    expect(check(result, 'dg.a181')).toMatchObject({ passed: true, actual: '6 kg' })
+    // Each entry is inside its own 5 kg allowance, but under A181 the 6 kg total is what
+    // the limit applies to — and on a cargo aircraft the Section II ceiling is still 5 kg.
+    expect(check(assess(combined), 'dg.a181')).toMatchObject({ passed: false, actual: '6 kg', expected: '≤ 5 kg' })
   })
 
   it('blocks a combined package whose total mass exceeds the lowest limit', () => {

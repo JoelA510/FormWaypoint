@@ -307,7 +307,9 @@ describe('the drawn table, measured in points rather than characters', () => {
   it('keeps every quantity and overpack row inside the column it is drawn in', async () => {
     const shipment = consignment(
       [
-        pkg('p1', [entry('e1', { configuration: 'packed-with-equipment', wattHours: 95 }, {
+        // 150 Wh: Section I, fully regulated — a Section II battery would (correctly) not
+        // appear on the declaration at all.
+        pkg('p1', [entry('e1', { configuration: 'packed-with-equipment', wattHours: 150 }, {
           netWeightKgPerPackage: 4.5,
         })], { count: 120, overpackId: 'o1' }),
       ],
@@ -359,5 +361,50 @@ describe('the table headings', () => {
       // And it never shrinks so far that the heading stops being readable.
       expect(size).toBeGreaterThanOrEqual(4.6)
     }
+  })
+})
+
+describe('a consignment mixing fully regulated and Section II packages', () => {
+  // A Section IB box that forces the declaration, beside a Section II box that is excepted.
+  const mixed = consignment([
+    pkg('p1', [entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 2 })]),
+    pkg('p2', [
+      entry('e2', { configuration: 'contained-in-equipment', wattHours: 76 }, {
+        netWeightKgPerPackage: 1.5,
+        countPerPackage: 3,
+        stateOfChargePercent: 20,
+      }),
+    ]),
+  ])
+
+  it('lists only the fully regulated entries — Section II is excepted and is not declared', () => {
+    const declaration = buildDeclaration(mixed, assess(mixed))
+    expect(declaration.lines.map((l) => l.packingInstruction)).toEqual(['965 IB'])
+  })
+
+  it('tells the signer the Section II packages travel beside the declaration, unlisted', () => {
+    const declaration = buildDeclaration(mixed, assess(mixed))
+    expect(declaration.notes.join(' ')).toContain('not listed on the declaration')
+  })
+
+  it('sums an overpack total from the declared entries only', () => {
+    const shared = consignment(
+      [
+        pkg('p1', [entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 2 })], { overpackId: 'o1' }),
+        pkg('p2', [
+          entry('e2', { configuration: 'contained-in-equipment', wattHours: 76 }, {
+            netWeightKgPerPackage: 1.5,
+            countPerPackage: 3,
+            stateOfChargePercent: 20,
+          }),
+        ], { overpackId: 'o1' }),
+      ],
+      { overpacks: [overpack('o1', { marks: '#A001, #A002', count: 2 })] },
+    )
+    const declaration = buildDeclaration(shared, assess(shared))
+    const annotations = declaration.lines.flatMap((l) => l.annotations).join(' ')
+    // 2 kg declared; the 1.5 kg of Section II batteries sharing the overpack is not a
+    // declared quantity and must not inflate the total the declaration states.
+    expect(annotations).toContain('Total quantity per Overpack 2 kg')
   })
 })

@@ -108,6 +108,26 @@ export function classificationKey(classification: AirClassification): string {
 }
 
 /**
+ * A package's entries partitioned into regulatory entries, with the net battery weight of
+ * each. This is the partition the per-entry quantity limits are measured against *and* the
+ * partition the declaration prints one line per — one function, so the line the checks
+ * validated is always the line that prints.
+ */
+export function groupByClassification(
+  entries: EntryAssessment[],
+): Map<string, { classification: AirClassification; weightKg: number }> {
+  const groups = new Map<string, { classification: AirClassification; weightKg: number }>()
+  for (const { entry, classification } of entries) {
+    const key = classificationKey(classification)
+    const group = groups.get(key)
+    const weight = entry.netWeightKgPerPackage ?? 0
+    if (group) group.weightKg += weight
+    else groups.set(key, { classification, weightKg: weight })
+  }
+  return groups
+}
+
+/**
  * How many physical packages of this description the consignment holds.
  *
  * `count` is per overpack for a package that sits in one, so the consignment total — which is
@@ -183,7 +203,7 @@ export function assess(consignment: DgConsignment): DgAssessment {
     classifications,
     requiredAircraft,
     declarationRequired,
-    airWaybillStatements: [...new Set(classifications.map(airWaybillStatement))],
+    airWaybillStatements: [...new Set(classifications.map((c) => airWaybillStatement(c, consignment.aircraft)))],
     checks,
     canGenerate: checks.length > 0 && checks.every((c) => c.severity !== 'blocking' || c.passed),
     totals: {
@@ -600,16 +620,9 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
   // --- Net quantity per package ------------------------------------------
   // Grouped by regulatory entry, because that is what the limit is written against: two
   // different UN numbers in one box each get their own allowance.
-  const groups = new Map<string, { classification: AirClassification; weight: number }>()
-  for (const { entry, classification } of entries) {
-    const key = classificationKey(classification)
-    const group = groups.get(key)
-    const weight = entry.netWeightKgPerPackage ?? 0
-    if (group) group.weight += weight
-    else groups.set(key, { classification, weight })
-  }
+  const groups = groupByClassification(entries)
 
-  for (const [key, { classification, weight }] of groups) {
+  for (const [key, { classification, weightKg: weight }] of groups) {
     const instructionLimit = usingPassenger ? classification.limits.passengerKg : classification.limits.cargoKg
     // A forbidden aircraft type is reported by the check above; repeating it as a quantity
     // failure would say the same thing twice in different words.
@@ -895,7 +908,17 @@ function consignmentChecks(
           'the same surface as the Class 9 label, and the passenger aircraft box on the declaration is struck out.'
         : consignment.aircraft === 'cargo-aircraft-only'
           ? 'The contents would permit a passenger aircraft, and the consignment is being offered as cargo ' +
-            'aircraft only. The lower passenger limits do not apply, and the Cargo Aircraft Only label is required.'
+            'aircraft only. ' +
+            // The CAO label marks goods that may not travel on a passenger aircraft. A fully
+            // regulated consignment offered CAO strikes the passenger box on its declaration,
+            // and the label follows the declaration; a Section II consignment has no
+            // declaration and its packages remain permitted on passenger aircraft, so putting
+            // the label on them would misstate what is in the box.
+            (declarationRequired
+              ? 'The declaration’s passenger aircraft box is struck out, and the Cargo Aircraft Only label goes ' +
+                'on the same surface as the Class 9 label.'
+              : 'These excepted Section II packages remain permitted on passenger aircraft, so the Cargo ' +
+                'Aircraft Only label is not applied — the routing is a booking choice, not a property of the goods.')
           : 'The contents permit carriage on passenger and cargo aircraft, within the 5 kg per package limit.',
     passed: true,
   })
@@ -970,7 +993,7 @@ function consignmentChecks(
   }
 
   // --- Air waybill -------------------------------------------------------
-  const statements = [...new Set(classifications.map(airWaybillStatement))]
+  const statements = [...new Set(classifications.map((c) => airWaybillStatement(c, consignment.aircraft)))]
   if (statements.length) {
     checks.push({
       id: 'dg.awb-statement',
