@@ -51,6 +51,9 @@ const CONTENT = { left: FRAME.left + HATCH_WIDTH + 6, right: FRAME.right - HATCH
  */
 const PARTY_HEIGHT = 48
 
+/** Held back between the last departure-airport line and the caption below it, in points. */
+const AIRPORT_CLEARANCE = 4
+
 /**
  * Column boundaries of the dangerous goods table, as x positions.
  *
@@ -137,7 +140,11 @@ function drawPage(
 
   caption(ctx, 'Air Waybill No.', midpoint + 4, y - 10)
   if (declaration.airWaybillNumber) {
-    text(ctx, declaration.airWaybillNumber, midpoint + 76, y - 10, { size: 8 })
+    text(ctx, declaration.airWaybillNumber, midpoint + 76, y - 10, {
+      size: 8,
+      maxWidth: CONTENT.right - (midpoint + 76) - 4,
+      label: 'Air waybill number',
+    })
   } else {
     fillable(ctx, doc, `awb_${pageModel.pageNumber}`, midpoint + 74, y - 13, 130, 12)
   }
@@ -207,6 +214,8 @@ function drawPage(
 
   const airportLeft = CONTENT.left + 160
   const airportWidth = midpoint - airportLeft - 10
+  // Computed before the departure block is drawn, because it is what bounds it.
+  const destinationCaptionY = y - transportHeight + 10
   caption(ctx, 'Airport of Departure:', airportLeft, transportTop - 12)
   if (declaration.airportOfDeparture) {
     lines(
@@ -217,12 +226,17 @@ function drawPage(
       airportWidth,
       'Airport of departure',
       7.5,
+      // Bounded like the party blocks. The caption for the Airport of Destination sits
+      // directly beneath, and an airport named at length wrapped straight over it — the
+      // one value in this box that can run to several lines, and the only block still
+      // being told its box had no floor.
+      transportTop - 26 - destinationCaptionY - AIRPORT_CLEARANCE,
     )
   } else {
     fillable(ctx, doc, `departure_${pageModel.pageNumber}`, airportLeft, transportTop - 30, airportWidth, 12)
   }
 
-  const destinationY = y - transportHeight + 10
+  const destinationY = destinationCaptionY
   caption(ctx, 'Airport of Destination:', CONTENT.left + 7, destinationY)
   if (declaration.airportOfDestination) {
     text(ctx, declaration.airportOfDestination, CONTENT.left + 96, destinationY, {

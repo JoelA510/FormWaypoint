@@ -86,7 +86,18 @@ export function App() {
   const [scheduleB, setScheduleB] = useState<ScheduleBIndex | null>(null)
   const [scheduleBPayload, setScheduleBPayload] = useState<RawPayload | null>(null)
   const [scheduleBError, setScheduleBError] = useState<string | null>(null)
-  const [storageError, setStorageError] = useState<string | null>(null)
+  /**
+   * What could not be *read* when the page loaded. Set once and left alone.
+   *
+   * Kept apart from the write report below because they answer different questions and
+   * clear at different times: a later write succeeding says nothing about the reads that
+   * failed, and the panels those reads would have filled are still empty. Folding the two
+   * together erased this within the first second of every affected session, since the
+   * profile autosave fires 400 ms after load.
+   */
+  const [restoreError, setRestoreError] = useState<string | null>(null)
+  /** The most recent write failure, withdrawn when a write succeeds. */
+  const [writeError, setWriteError] = useState<string | null>(null)
   /**
    * Whether the stored profile was actually read.
    *
@@ -129,15 +140,27 @@ export function App() {
    * weight correction disappears without a word. And a message about a failure that has
    * since cleared is its own kind of wrong, so a success takes it back down.
    */
-  const write = useCallback(async (what: string, run: () => Promise<void>): Promise<void> => {
-    try {
-      await run()
-      setStorageError(null)
-    } catch (e: unknown) {
-      const because = e instanceof Error ? e.message : 'the local database could not be reached'
-      setStorageError(`${what} could not be saved on this machine: ${because}`)
-    }
-  }, [])
+  const write = useCallback(
+    async (what: string, run: () => Promise<void>, refresh?: () => Promise<void>): Promise<void> => {
+      try {
+        await run()
+        setWriteError(null)
+      } catch (e: unknown) {
+        const because = e instanceof Error ? e.message : 'the local database could not be reached'
+        setWriteError(`${what} could not be saved on this machine: ${because}`)
+        return
+      }
+      // Refreshing the list on screen is not the obligation the write satisfied. Inside the
+      // same try, a committed write whose read-back failed was reported as "could not be
+      // saved" — the misreport already fixed for the retention record and for `clearAll`.
+      try {
+        await refresh?.()
+      } catch {
+        // The list re-reads on the next load; what was written is written.
+      }
+    },
+    [],
+  )
 
   // Load the Schedule B dataset and anything saved locally.
   useEffect(() => {
@@ -189,7 +212,7 @@ export function App() {
       ] as const
       const missing = failed.filter(([result]) => result.status === 'rejected').map(([, label]) => label)
       if (missing.length) {
-        setStorageError(
+        setRestoreError(
           `This machine's stored data could not be read: ${missing.join(', ')}. What is shown is incomplete — ` +
             'do not take an empty panel as evidence that nothing was saved.',
         )
@@ -318,20 +341,22 @@ export function App() {
 
   const saveOverride = useCallback(
     async (record: OverrideRecord) => {
-      await write('The classification override', async () => {
-        await localStore.saveOverride(record)
-        setOverrides(await localStore.listOverrides())
-      })
+      await write(
+        'The classification override',
+        () => localStore.saveOverride(record),
+        async () => setOverrides(await localStore.listOverrides()),
+      )
     },
     [write],
   )
 
   const removeOverride = useCallback(
     async (sourceCode: string) => {
-      await write('The removal of the classification override', async () => {
-        await localStore.deleteOverride(sourceCode)
-        setOverrides(await localStore.listOverrides())
-      })
+      await write(
+        'The removal of the classification override',
+        () => localStore.deleteOverride(sourceCode),
+        async () => setOverrides(await localStore.listOverrides()),
+      )
     },
     [write],
   )
@@ -346,10 +371,11 @@ export function App() {
    */
   const savePartOverride = useCallback(
     async (partNumber: string, description: string, patch: PartOverridePatch) => {
-      await write(`The saved values for part ${partNumber}`, async () => {
-        await localStore.savePartOverride(partNumber, description, patch)
-        setPartOverrides(await localStore.listPartOverrides())
-      })
+      await write(
+        `The saved values for part ${partNumber}`,
+        () => localStore.savePartOverride(partNumber, description, patch),
+        async () => setPartOverrides(await localStore.listPartOverrides()),
+      )
     },
     [write],
   )
@@ -420,14 +446,16 @@ export function App() {
     // view; the record is the only one of the three that has to be said out loud.
     try {
       await localStore.saveShipment(record)
-      setStorageError(null)
+      setWriteError(null)
     } catch (e: unknown) {
       const because = e instanceof Error ? e.message : 'this machine’s stored data could not be reached'
-      setStorageError(
+      setWriteError(
         `The form was generated, but this machine did not record the shipment (${because}). The history entry ` +
           'is the audit trail for what was filed — note the invoice number somewhere else.',
       )
     }
+    // Two independent things, in their own attempts. Sharing one, a failed consignee write
+    // skipped the history refresh after a shipment record that had gone in.
     try {
       if (header.consignedTo.name) {
         await localStore.saveConsignee({
@@ -439,9 +467,13 @@ export function App() {
           lastUsed: new Date().toISOString(),
         })
       }
+    } catch {
+      // Consignee autofill is convenience data; it is re-offered from the next document.
+    }
+    try {
       setShipments(await localStore.listShipments())
     } catch {
-      // Consignee autofill and the history list both re-read on the next load.
+      // The history list re-reads on the next load.
     }
   }, [reconciliation, parsed, adapter, settings, draft, checks])
 
@@ -460,21 +492,25 @@ export function App() {
 
   const importItemLibrary = useCallback(
     async (entries: ItemLibraryEntry[], mode: ImportMode) => {
-      await write('The imported item library', async () => {
-        if (mode === 'merge') await localStore.mergeItems(entries)
-        else await localStore.replaceItems(entries)
-        setItems(await localStore.listItems())
-      })
+      await write(
+        'The imported item library',
+        async () => {
+          if (mode === 'merge') await localStore.mergeItems(entries)
+          else await localStore.replaceItems(entries)
+        },
+        async () => setItems(await localStore.listItems()),
+      )
     },
     [write],
   )
 
   const clearItemLibrary = useCallback(async () => {
     if (!window.confirm('Remove the imported item library from this machine?')) return
-    await write('The removal of the item library', async () => {
-      await localStore.clearItems()
-      setItems([])
-    })
+    await write(
+      'The removal of the item library',
+      () => localStore.clearItems(),
+      () => Promise.resolve(setItems([])),
+    )
   }, [write])
 
   const clearAll = useCallback(async () => {
@@ -491,9 +527,9 @@ export function App() {
     // and a confirmation dialog that had just promised the data was gone.
     try {
       await localStore.clearAll()
-      setStorageError(null)
+      setWriteError(null)
     } catch (e: unknown) {
-      setStorageError(
+      setWriteError(
         e instanceof Error
           ? `Nothing was deleted: ${e.message}`
           : 'Nothing was deleted — this machine’s stored data could not be reached.',
@@ -567,9 +603,15 @@ export function App() {
 
       <main className="mx-auto max-w-6xl space-y-4 px-5 py-6">
         {/* Above the tabs, because local storage backs the panels on both of them. */}
-        {storageError ? (
+        {restoreError ? (
           <p className="rounded-md border border-[var(--color-block)] bg-[var(--color-block-soft)] px-3 py-2 text-sm">
-            {storageError}
+            {restoreError}
+          </p>
+        ) : null}
+
+        {writeError ? (
+          <p className="rounded-md border border-[var(--color-block)] bg-[var(--color-block-soft)] px-3 py-2 text-sm">
+            {writeError}
           </p>
         ) : null}
 
