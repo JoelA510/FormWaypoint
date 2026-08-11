@@ -682,6 +682,15 @@ const isLnCell = (item: TextItem, anchors: Anchors): boolean =>
  *  - Top row vs compliance row is decided by baseline: the block's first (highest) left
  *    baseline is the part/description row. PDF y grows upward.
  */
+/**
+ * How far two baselines may differ and still be one printed line, in PDF units.
+ *
+ * Absorbs the fraction of a point a renderer puts between items of one line, and nothing
+ * more: the next wrapped line sits a whole font size below, which for this form is several
+ * times this figure.
+ */
+const SAME_BASELINE_TOLERANCE = 2
+
 function tableRowsToBlocks(rows: TextRow[], anchors: Anchors): SheetRows {
   interface Block {
     ln: string
@@ -784,17 +793,31 @@ function tableRowsToBlocks(rows: TextRow[], anchors: Anchors): SheetRows {
   // "Robot cable assembly," and "5 m shielded". That scrambled string is what gets filed as
   // the commodity description.
   //
-  // Baselines are compared with a tolerance, because a line of text is not drawn at exactly
-  // one y: an item nudged a fraction by the renderer is on the same line and must still
-  // sort by x. A quarter of a row's pitch is well inside the gap between real lines.
-  const sameLine = pitch / 4
-  const text = (map: Map<string, TextItem[]>, key: string): string =>
-    (map.get(key) ?? [])
-      .slice()
-      .sort((a, b) => (Math.abs(a.y - b.y) > sameLine ? b.y - a.y : a.x - b.x))
-      .map((item) => item.str)
+  // Grouped into lines and then read across each, rather than sorted by a comparator that
+  // mixes the two axes. A tolerance inside a comparator is not an ordering — a can tie with
+  // b and b with c while a and c differ — and the tolerance itself has to be small: half a
+  // text row, which is what a quarter of the block pitch comes to, would swallow a tightly
+  // wrapped description and put its two lines back into one. Items are collected against
+  // the highest baseline of the line they join, so a run of small nudges cannot walk a line
+  // into the next one.
+  const text = (map: Map<string, TextItem[]>, key: string): string => {
+    const descending = (map.get(key) ?? []).slice().sort((a, b) => b.y - a.y)
+    const rows: TextItem[][] = []
+    for (const item of descending) {
+      const current = rows[rows.length - 1]
+      if (current && current[0].y - item.y <= SAME_BASELINE_TOLERANCE) current.push(item)
+      else rows.push([item])
+    }
+    return rows
+      .map((row) =>
+        row
+          .sort((a, b) => a.x - b.x)
+          .map((item) => item.str)
+          .join(' '),
+      )
       .join(' ')
       .trim()
+  }
 
   return blocks.flatMap((block) => [
     [block.ln, text(block.top, 'part'), text(block.top, 'description'), text(block.top, 'qty'),

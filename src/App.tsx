@@ -97,6 +97,15 @@ export function App() {
    * written back until something was read.
    */
   const [profileLoaded, setProfileLoaded] = useState(false)
+  /**
+   * Set when the profile read failed, which is a different thing from a write failing.
+   *
+   * Sticky, and reported separately, because nothing will write the profile back for the
+   * rest of the page's life: autosaving over a form that was never filled from storage
+   * would replace the saved profile with whatever is on screen. A successful write to some
+   * other store clears the transient banner and must not clear this.
+   */
+  const [profileUnavailable, setProfileUnavailable] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -109,6 +118,26 @@ export function App() {
   )
   // Null in the browser build; the whole desktop surface keys off this.
   const bridge = useMemo(() => desktopBridge(), [])
+
+  /**
+   * Runs a store write, saying so when it fails and withdrawing a stale complaint when it
+   * does not.
+   *
+   * Every one of these used to be a bare `await` inside a `void`-ed callback, which was
+   * survivable while a store that could be read could also be written. A tab superseded by
+   * a newer version in another window breaks that: every write rejects, and an import or a
+   * weight correction disappears without a word. And a message about a failure that has
+   * since cleared is its own kind of wrong, so a success takes it back down.
+   */
+  const write = useCallback(async (what: string, run: () => Promise<void>): Promise<void> => {
+    try {
+      await run()
+      setStorageError(null)
+    } catch (e: unknown) {
+      const because = e instanceof Error ? e.message : 'the local database could not be reached'
+      setStorageError(`${what} could not be saved on this machine: ${because}`)
+    }
+  }, [])
 
   // Load the Schedule B dataset and anything saved locally.
   useEffect(() => {
@@ -141,6 +170,8 @@ export function App() {
       if (saved.status === 'fulfilled') {
         if (saved.value) setProfile(saved.value)
         setProfileLoaded(true)
+      } else {
+        setProfileUnavailable(true)
       }
       if (savedOverrides.status === 'fulfilled') setOverrides(savedOverrides.value)
       if (savedPartOverrides.status === 'fulfilled') setPartOverrides(savedPartOverrides.value)
@@ -169,16 +200,12 @@ export function App() {
   // Persist the profile as it is edited; it is reference data, not shipment data.
   useEffect(() => {
     if (!profileLoaded || profile === EMPTY_PROFILE) return
-    const timer = setTimeout(() => {
-      // Reported, not swallowed. A tab superseded by a newer version in another window can
-      // no longer write at all, and edits that vanish without a word are worse than edits
-      // that fail loudly.
-      void localStore.saveProfile(profile).catch((e: unknown) => {
-        setStorageError(e instanceof Error ? e.message : 'The exporter profile could not be saved on this machine.')
-      })
-    }, 400)
+    // Reported, not swallowed. A tab superseded by a newer version in another window can no
+    // longer write at all, and edits that vanish without a word are worse than edits that
+    // fail loudly.
+    const timer = setTimeout(() => void write('The exporter profile', () => localStore.saveProfile(profile)), 400)
     return () => clearTimeout(timer)
-  }, [profile, profileLoaded])
+  }, [profile, profileLoaded, write])
 
   const handleParsed = useCallback(
     async (next: ParsedCipl) => {
@@ -289,15 +316,25 @@ export function App() {
     [checks],
   )
 
-  const saveOverride = useCallback(async (record: OverrideRecord) => {
-    await localStore.saveOverride(record)
-    setOverrides(await localStore.listOverrides())
-  }, [])
+  const saveOverride = useCallback(
+    async (record: OverrideRecord) => {
+      await write('The classification override', async () => {
+        await localStore.saveOverride(record)
+        setOverrides(await localStore.listOverrides())
+      })
+    },
+    [write],
+  )
 
-  const removeOverride = useCallback(async (sourceCode: string) => {
-    await localStore.deleteOverride(sourceCode)
-    setOverrides(await localStore.listOverrides())
-  }, [])
+  const removeOverride = useCallback(
+    async (sourceCode: string) => {
+      await write('The removal of the classification override', async () => {
+        await localStore.deleteOverride(sourceCode)
+        setOverrides(await localStore.listOverrides())
+      })
+    },
+    [write],
+  )
 
   /**
    * Saves one field of a part's manual values.
@@ -309,10 +346,12 @@ export function App() {
    */
   const savePartOverride = useCallback(
     async (partNumber: string, description: string, patch: PartOverridePatch) => {
-      await localStore.savePartOverride(partNumber, description, patch)
-      setPartOverrides(await localStore.listPartOverrides())
+      await write(`The saved values for part ${partNumber}`, async () => {
+        await localStore.savePartOverride(partNumber, description, patch)
+        setPartOverrides(await localStore.listPartOverrides())
+      })
     },
-    [],
+    [write],
   )
 
   const savePartWeight = useCallback(
@@ -381,6 +420,7 @@ export function App() {
     // view; the record is the only one of the three that has to be said out loud.
     try {
       await localStore.saveShipment(record)
+      setStorageError(null)
     } catch (e: unknown) {
       const because = e instanceof Error ? e.message : 'this machine’s stored data could not be reached'
       setStorageError(
@@ -418,17 +458,24 @@ export function App() {
     }
   }, [])
 
-  const importItemLibrary = useCallback(async (entries: ItemLibraryEntry[], mode: ImportMode) => {
-    if (mode === 'merge') await localStore.mergeItems(entries)
-    else await localStore.replaceItems(entries)
-    setItems(await localStore.listItems())
-  }, [])
+  const importItemLibrary = useCallback(
+    async (entries: ItemLibraryEntry[], mode: ImportMode) => {
+      await write('The imported item library', async () => {
+        if (mode === 'merge') await localStore.mergeItems(entries)
+        else await localStore.replaceItems(entries)
+        setItems(await localStore.listItems())
+      })
+    },
+    [write],
+  )
 
   const clearItemLibrary = useCallback(async () => {
     if (!window.confirm('Remove the imported item library from this machine?')) return
-    await localStore.clearItems()
-    setItems([])
-  }, [])
+    await write('The removal of the item library', async () => {
+      await localStore.clearItems()
+      setItems([])
+    })
+  }, [write])
 
   const clearAll = useCallback(async () => {
     if (
@@ -444,6 +491,7 @@ export function App() {
     // and a confirmation dialog that had just promised the data was gone.
     try {
       await localStore.clearAll()
+      setStorageError(null)
     } catch (e: unknown) {
       setStorageError(
         e instanceof Error
@@ -522,6 +570,14 @@ export function App() {
         {storageError ? (
           <p className="rounded-md border border-[var(--color-block)] bg-[var(--color-block-soft)] px-3 py-2 text-sm">
             {storageError}
+          </p>
+        ) : null}
+
+        {profileUnavailable ? (
+          <p className="rounded-md border border-[var(--color-block)] bg-[var(--color-block-soft)] px-3 py-2 text-sm">
+            The saved exporter profile could not be read, so nothing typed into it is being written back —
+            saving over a form that was never filled from storage would replace the profile that is there.
+            Reload the page.
           </p>
         ) : null}
 

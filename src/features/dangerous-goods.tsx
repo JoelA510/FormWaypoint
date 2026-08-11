@@ -74,6 +74,16 @@ const ARTICLE_LEVEL_LABELS: Record<ArticleLevel, string> = {
   equipment: 'Equipment containing cells or batteries',
 }
 
+/**
+ * How long after filing a consignment a second download counts as the same preparation.
+ *
+ * Generating the declaration and then printing the bench checklist is one preparation and
+ * belongs in one retention row; coming back to the same shipment next quarter is not, and
+ * must not inherit the first one's date. Half an hour is long enough for the first and far
+ * short of the second.
+ */
+const SAME_PREPARATION_MS = 30 * 60 * 1000
+
 const SOC_BASIS_LABELS: Record<StateOfChargeBasis, string> = {
   'rated-capacity': 'Rated capacity',
   'rated-design-capacity': 'Rated design capacity',
@@ -151,11 +161,22 @@ export function DangerousGoodsPanel({
    * unmounts every time the other tab is shown: a component-local memory of the last write
    * forgets across a tab switch, and across a reload, which is exactly when someone comes
    * back to print the checklist for what they generated earlier.
+   *
+   * And bounded in time, because that match is on content alone. Preparing the same
+   * consignment again months later is a *new* preparation with its own two-year window;
+   * inheriting the old row's date would back-date it, overwrite the earlier evidence, and
+   * shorten the period both are kept for. Only a record from the last little while is the
+   * same preparation as this one.
    */
   const record = useCallback((): DgConsignmentRecord => {
+    const now = Date.now()
     const fingerprint = JSON.stringify(consignment)
-    const filed = records.find((r) => JSON.stringify(r.consignment) === fingerprint)
-    const preparedAt = filed?.preparedAt ?? new Date().toISOString()
+    const filed = records.find(
+      (r) =>
+        JSON.stringify(r.consignment) === fingerprint &&
+        now - new Date(r.preparedAt).getTime() < SAME_PREPARATION_MS,
+    )
+    const preparedAt = filed?.preparedAt ?? new Date(now).toISOString()
     return {
       id: `${consignment.airWaybillNumber || consignment.shippersReference || 'consignment'}@${preparedAt}`,
       preparedAt,
