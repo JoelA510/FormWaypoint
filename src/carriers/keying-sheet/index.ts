@@ -798,8 +798,14 @@ export function buildKeyingSheet(
  * `498781`. The hyphen is allowed because Brazil writes `01310-100`, and the digits run to
  * eight because Israel writes `3109601` and Japan `1500001` unhyphenated — bounded at six,
  * a seven-digit postcode was read as its own last six.
+ *
+ * And it has to be the whole run, not the tail of a longer one. `VAT GB123456789` printed
+ * under the city otherwise yielded a postcode of `23456789` and a city of `VAT GB1`, and
+ * stopped the search before the real postcode line above it. The two bounds only work
+ * together: the length alone let a longer number in, and the anchor alone shut out the
+ * seven-digit postcodes that widening the length is for.
  */
-const POSTCODE = /(\d{4,8}(?:-\d{2,4})?)\s*$/
+const POSTCODE = /(?<![\d-])(\d{4,8}(?:-\d{2,4})?)\s*$/
 
 /**
  * A line whose trailing digits are a telephone number, not a postcode.
@@ -809,8 +815,14 @@ const POSTCODE = /(\d{4,8}(?:-\d{2,4})?)\s*$/
  * this skipped `Tel Aviv 61000`, `Mobile, AL 36602` and `Fax Islands 12345`, which are
  * cities, and threw away the postcode and the city with them. Labelling is the whole of
  * what distinguishes `Phone 5551234` from a place that happens to be spelled that way.
+ *
+ * It must also *begin* a word, which is what keeps `PURCELL 73080` and `Chatel 74390` out
+ * of it. And the list holds only words that are not themselves places: `mobile` and `cell`
+ * were in it until `MOBILE 36602` — Mobile, Alabama — lost its postcode and its city to
+ * them. A bare keyword in front of bare digits is all the signal there is here, so a word
+ * that can be a city cannot be on the list at all.
  */
-const CONTACT_LINE = /(?:phone|tel|telephone|fax|mobile|cell|attn|attention|contact|e-?mail)\.?\s*:?\s*[+(]?\d[\d\s()+.-]*$/i
+const CONTACT_LINE = /\b(?:phone|telephone|tel|fax|attn|attention|contact|e-?mail)\.?\s*:?\s*[+(]?\d[\d\s()+.-]*$/i
 
 /**
  * The line the postcode is on — the *last* one that ends in one, not the first.

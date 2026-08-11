@@ -355,6 +355,23 @@ describe('address extraction', () => {
     expect(field(['1 Harbour Way', 'Fax Islands 12345'], 'City')).toBe('Fax Islands')
   })
 
+  it('does not read a city whose name ends in one of those words as a phone line', () => {
+    // The keyword has to begin a word as well as label the number.
+    expect(field(['1 Dauphin St', 'MOBILE 36602'], 'Postal code')).toBe('36602')
+    expect(field(['1 Dauphin St', 'MOBILE 36602'], 'City')).toBe('MOBILE')
+    expect(field(['1 Main St', 'PURCELL 73080'], 'City')).toBe('PURCELL')
+    expect(field(['1 Rue Centrale', 'Chatel 74390'], 'City')).toBe('Chatel')
+  })
+
+  it('does not take a postcode out of the tail of a longer number', () => {
+    // A registration number printed under the city ends in digits too, and reading its last
+    // eight gave a postcode of `23456789` and a city of `VAT GB1` — while stopping the
+    // search before the real postcode line above it.
+    const registered = ['Plot 12', 'Springfield IL 62704', 'VAT GB123456789']
+    expect(field(registered, 'Postal code')).toBe('62704')
+    expect(field(registered, 'City')).toBe('Springfield')
+  })
+
   it('reads a seven-digit postcode, which several countries write', () => {
     // Israel writes 3109601 and Japan writes 1500001 unhyphenated; bounding the digits to
     // six lost the postcode and, because both fields read one line, the city with it.

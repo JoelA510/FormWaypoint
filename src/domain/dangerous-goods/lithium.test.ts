@@ -175,6 +175,15 @@ describe('state of charge', () => {
     expect(rule).toMatchObject({ limitPercent: 30, strength: 'must' })
   })
 
+  it('does not read a rating of zero as being under the 2.7 Wh advisory threshold', () => {
+    // Read literally, zero put the mandatory 30% state of charge below the threshold and
+    // downgraded it to advice, under a line reading "Rated at 0 Wh, at or below the 2.7 Wh
+    // threshold" — for a battery whose rating nobody had entered.
+    const rule = classifyForAir(spec({ configuration: 'packed-with-equipment', wattHours: 0 })).stateOfCharge
+    expect(rule).toMatchObject({ strength: 'must' })
+    expect(rule!.detail).not.toContain('Rated at 0 Wh')
+  })
+
   it('is a requirement for batteries packed with equipment above 2.7 Wh, and advice at or below', () => {
     expect(classifyForAir(spec({ configuration: 'packed-with-equipment', wattHours: 20 })).stateOfCharge)
       .toMatchObject({ strength: 'must' })
