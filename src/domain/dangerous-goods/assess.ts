@@ -902,7 +902,12 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
   // point opposite ways — describe it as packed with equipment, and take it apart.
   const mixesRegulation = declared.length > 0 && declared.length < classified.length
   if (!mixesRegulation) {
-    for (const [unNumber, combined] of a181Groups(classified)) {
+    // Over every entry, not just the classified ones, because `applyA181` merges every
+    // entry: an unrated contained-in line is folded into its packed-with neighbour on the
+    // declaration, the checklist and the shared-packaging count, and filtering it out here
+    // left that merged mass measured against nothing. `dg.energy` blocks the shipment
+    // either way, but the preview and the check list must not describe different packages.
+    for (const [unNumber, combined] of a181Groups(entries)) {
       const total = kg(combined.reduce((sum, e) => sum + (e.entry.netWeightKgPerPackage ?? 0), 0))
       // The instruction limit of the entries A181 gathers, and only those. The packaging's
       // own authorization is not folded in here: it is measured against the whole package,

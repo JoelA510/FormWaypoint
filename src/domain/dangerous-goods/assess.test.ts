@@ -416,6 +416,25 @@ describe('packages holding more than one entry', () => {
     expect(check(result, 'dg.a181')).toMatchObject({ severity: 'blocking', passed: false, expected: '≤ 5 kg' })
   })
 
+  it('measures the total A181 merges even when one entry has no rating', () => {
+    // `applyA181` folds an unrated contained-in line into its packed-with neighbour on the
+    // declaration and the checklist. Filtering unrated entries out of the check left that
+    // merged mass measured against nothing, so the preview and the checks described two
+    // different packages.
+    const result = assess(
+      consignment([
+        pkg('p1', [
+          entry('e1', { configuration: 'packed-with-equipment', wattHours: 90 }, { netWeightKgPerPackage: 3 }),
+          entry('e2', { configuration: 'contained-in-equipment', wattHours: null }, {
+            netWeightKgPerPackage: 2.5,
+            countPerPackage: 1,
+          }),
+        ]),
+      ]),
+    )
+    expect(check(result, 'dg.a181')).toMatchObject({ passed: false, actual: '5.5 kg', expected: '≤ 5 kg' })
+  })
+
   it('does not gather two different UN numbers into one A181 total', () => {
     // Special provision A181 is written per entry: lithium ion packed with equipment and
     // lithium metal contained in equipment are two entries, each inside its own allowance,

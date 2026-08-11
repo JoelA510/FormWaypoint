@@ -306,15 +306,18 @@ function drawPage(
   const handlingWidth = CONTENT.right - CONTENT.left - 12
   declaration.additionalHandlingInformation.forEach((line, i) => {
     if (i > 3) return
-    // Measured like every other free-text block on this form. Box 18 takes whatever the
-    // shipper typed, and an emergency contact line long enough to leave the box was drawn
-    // straight over the red hatched margin and off the edge of the sheet, saying nothing.
-    if (firstSheet && ctx.regular.widthOfTextAtSize(line, 7.5) > handlingWidth) {
+    // Cut to the box, like the party blocks are. Box 18 takes whatever the shipper typed,
+    // and an emergency contact line long enough to leave the box was drawn straight over
+    // the red hatched margin and off the edge of the sheet — a warning alone would have
+    // described a clipping that the renderer was not in fact doing.
+    const printed = clipToWidth(ctx, line, handlingWidth, 7.5)
+    if (firstSheet && printed !== line) {
       ctx.warnings.push(
-        `Additional handling information: "${line}" is wider than its box and may be clipped when printed.`,
+        `Additional handling information: "${line}" is wider than its box. Printed as "${printed}". ` +
+          'Shorten it, or carry the rest on a separate sheet.',
       )
     }
-    text(ctx, line, CONTENT.left + 6, handlingTop - 22 - i * 9, { size: 7.5 })
+    text(ctx, printed, CONTENT.left + 6, handlingTop - 22 - i * 9, { size: 7.5 })
   })
   if (declaration.additionalHandlingInformation.length > 4 && firstSheet) {
     ctx.warnings.push(
@@ -556,6 +559,21 @@ function text(
   const width = font.widthOfTextAtSize(value, size)
   const left = options.align === 'right' ? x - width : options.align === 'center' ? x - width / 2 : x
   ctx.page.drawText(value, { x: left, y, size, font, color: options.color ?? BLACK })
+}
+
+/**
+ * The longest prefix of `value` that fits `maxWidth`, marked with an ellipsis where one was
+ * taken. Returns `value` unchanged when the whole of it fits.
+ *
+ * A shortened line is visibly shortened. Cut silently at the box edge it would read as a
+ * complete instruction that happens to end oddly, which on a shipping paper is worse than
+ * an obviously truncated one — the ellipsis is what sends a reader back to the screen.
+ */
+function clipToWidth(ctx: Ctx, value: string, maxWidth: number, size: number): string {
+  if (ctx.regular.widthOfTextAtSize(value, size) <= maxWidth) return value
+  let cut = value.length
+  while (cut > 0 && ctx.regular.widthOfTextAtSize(`${value.slice(0, cut)}…`, size) > maxWidth) cut--
+  return `${value.slice(0, cut)}…`
 }
 
 /** A block of address lines, reporting anything too wide for its box rather than clipping it. */

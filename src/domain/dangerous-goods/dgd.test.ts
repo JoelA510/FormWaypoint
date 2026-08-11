@@ -219,7 +219,8 @@ describe('rendering', () => {
     const { warnings } = await renderDeclaration(declaration)
     const wide = warnings.filter((w) => w.includes('Additional handling information'))
     expect(wide).toHaveLength(1)
-    expect(wide[0]).toContain('wider than its box')
+    // And it says what was actually printed, because the line really is cut to the box.
+    expect(wide[0]).toMatch(/Printed as "[^"]*…"/)
   })
 
   it('reports an address line too wide for its box rather than clipping it silently', async () => {
