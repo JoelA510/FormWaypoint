@@ -303,7 +303,10 @@ function drawPage(
     if (i > 3) return
     text(ctx, line, CONTENT.left + 6, handlingTop - 22 - i * 9, { size: 7.5 })
   })
-  if (declaration.additionalHandlingInformation.length > 4) {
+  // Raised once for the declaration, not once per sheet. The box is drawn on every page and
+  // holds the same four lines on each, so a two-page consignment reported the same overflow
+  // twice — which reads as two separate things to shorten.
+  if (declaration.additionalHandlingInformation.length > 4 && pageModel.pageNumber === 1) {
     ctx.warnings.push(
       'The additional handling information runs to more lines than the box holds; only the first four were ' +
         'printed. Shorten it, or carry the rest on a separate sheet.',

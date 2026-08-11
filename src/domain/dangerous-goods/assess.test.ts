@@ -578,6 +578,59 @@ describe('state of charge as evidence', () => {
     expect(check(result, 'dg.soc-basis')).toBeUndefined()
   })
 
+  it('holds an indicated reading to the alternative’s own 25%, not the 30% figure', () => {
+    // Contained in equipment is 30% of rated capacity *or* an indicated capacity of 25%.
+    // A 28% indicated reading was checked against the number belonging to the other basis.
+    const result = assess(
+      consignment([
+        pkg('p1', [
+          entry('e1', { configuration: 'contained-in-equipment', wattHours: 90 }, {
+            countPerPackage: 1,
+            stateOfChargeBasis: 'indicated-capacity',
+            stateOfChargePercent: 28,
+          }),
+        ]),
+      ]),
+    )
+    expect(check(result, 'dg.soc')).toMatchObject({ passed: false, expected: '≤ 25%', actual: '28%' })
+    // And the same reading at 22% is inside it.
+    const lower = assess(
+      consignment([
+        pkg('p1', [
+          entry('e1', { configuration: 'contained-in-equipment', wattHours: 90 }, {
+            countPerPackage: 1,
+            stateOfChargeBasis: 'indicated-capacity',
+            stateOfChargePercent: 22,
+          }),
+        ]),
+      ]),
+    )
+    expect(check(lower, 'dg.soc')).toMatchObject({ passed: true, expected: '≤ 25%' })
+  })
+
+  it('rejects a rated design capacity, which is not the basis any of these rules names', () => {
+    // It belongs to the vehicle entries. Checking only for indicated capacity let it pass
+    // in silence, under a check that says one of the three bases satisfies the entry.
+    const result = assess(
+      consignment([
+        pkg('p1', [entry('e1', { wattHours: 90 }, { stateOfChargeBasis: 'rated-design-capacity' })]),
+      ]),
+    )
+    expect(check(result, 'dg.soc-basis')).toMatchObject({
+      severity: 'blocking',
+      passed: false,
+      actual: 'rated design capacity',
+    })
+  })
+
+  it('still asks for a basis nobody recorded', () => {
+    const result = assess(
+      consignment([pkg('p1', [entry('e1', { wattHours: 90 }, { stateOfChargeBasis: null })])]),
+    )
+    expect(check(result, 'dg.soc-basis')).toMatchObject({ passed: false })
+    expect(check(result, 'dg.soc-basis')!.detail).toContain('does not say what it is a percentage of')
+  })
+
   it('blocks a mandatory figure that nobody can say how they measured', () => {
     const result = assess(
       consignment([

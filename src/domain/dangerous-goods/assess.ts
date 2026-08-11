@@ -32,6 +32,7 @@ import {
   classifyForAir,
   CHEMISTRY_LABELS,
   energyThreshold,
+  INDICATED_CAPACITY_LIMIT,
   type AircraftLimitation,
   type AirClassification,
 } from './lithium'
@@ -41,7 +42,15 @@ import {
   type BatteryEntry,
   type DgConsignment,
   type DgPackage,
+  type StateOfChargeBasis,
 } from './types'
+
+/** The three bases named as they are on screen, so a failing check quotes what was picked. */
+const SOC_BASIS_NAMES: Record<StateOfChargeBasis, string> = {
+  'rated-capacity': 'rated capacity',
+  'rated-design-capacity': 'rated design capacity',
+  'indicated-capacity': 'indicated capacity',
+}
 
 export interface EntryAssessment {
   entry: BatteryEntry
@@ -565,6 +574,17 @@ function stateOfChargeChecks(
   const severity = mandatory ? 'blocking' : 'warning'
   const checks: CheckResult[] = []
 
+  // The indicated-capacity alternative belongs to batteries contained in equipment, and to
+  // the vehicle entries. Applying it to a standalone or packed-with battery reads a 25% rule
+  // onto a 30%-of-rated-capacity limit, which is the error this check exists to catch.
+  const indicatedAllowed = classification.indicatedCapacityAlternative
+  const onIndicated = entry.stateOfChargeBasis === 'indicated-capacity'
+  // Measured against the alternative, checked against the alternative. It is a different
+  // number as well as a different basis — 30% of rated capacity *or* an indicated capacity
+  // of 25% — and holding an indicated reading to the 30% figure passed cells at 28% that
+  // the basis they were measured on caps five points lower.
+  const limitPercent = onIndicated && indicatedAllowed ? INDICATED_CAPACITY_LIMIT : rule.limitPercent
+
   const value = entry.stateOfChargePercent
   if (value == null) {
     checks.push({
@@ -573,7 +593,7 @@ function stateOfChargeChecks(
       title: `${name}: state of charge established`,
       detail:
         `${rule.detail} It has not been stated for these cells, so it cannot be shown to be inside the ` +
-        `${rule.limitPercent}% limit. Measure it — never infer it from voltage, storage time, display bars, or ` +
+        `${limitPercent}% limit. Measure it — never infer it from voltage, storage time, display bars, or ` +
         'the fact that a battery is new.',
       passed: false,
       refs: [ref],
@@ -581,38 +601,23 @@ function stateOfChargeChecks(
     return checks
   }
 
-  const within = value <= rule.limitPercent
+  const within = value <= limitPercent
   checks.push({
     id: `dg.soc.${ref}`,
     severity,
-    title: `${name}: state of charge within ${rule.limitPercent}%`,
+    title: `${name}: state of charge within ${limitPercent}%`,
     detail: within ? rule.detail : `${rule.detail} These cells are stated at ${value}%.`,
     passed: within,
-    expected: `≤ ${rule.limitPercent}%`,
+    expected: `≤ ${limitPercent}%`,
     actual: `${value}%`,
     refs: [ref],
   })
 
-  // The indicated-capacity alternative belongs to batteries contained in equipment, and to
-  // the vehicle entries. Applying it to a standalone or packed-with battery reads a 25% rule
-  // onto a 30%-of-rated-capacity limit, which is the error this check exists to catch.
-  const indicatedAllowed = classification.indicatedCapacityAlternative
-  if (entry.stateOfChargeBasis === 'indicated-capacity' && !indicatedAllowed) {
-    checks.push({
-      id: `dg.soc-basis.${ref}`,
-      severity: 'blocking',
-      title: `${name}: state of charge measured against rated capacity`,
-      detail:
-        'The limit for this entry is 30% of *rated capacity*, and the alternative of an indicated battery ' +
-        'capacity not exceeding 25% does not apply to it — that alternative belongs to batteries contained in ' +
-        'equipment and to the vehicle entries. An indicated-capacity reading cannot demonstrate this limit; ' +
-        'measure against rated capacity.',
-      passed: false,
-      expected: 'rated capacity',
-      actual: 'indicated capacity',
-      refs: [ref],
-    })
-  } else if (entry.stateOfChargeBasis == null) {
+  // Rated *design* capacity is not the basis any of these rules is written against either:
+  // it belongs to the vehicle entries. Checking only for the indicated-capacity case let it
+  // through in silence, under a check whose own text says one basis satisfies the entry.
+  const basisAccepted = entry.stateOfChargeBasis === 'rated-capacity' || (onIndicated && indicatedAllowed)
+  if (entry.stateOfChargeBasis == null) {
     checks.push({
       id: `dg.soc-basis.${ref}`,
       severity,
@@ -622,6 +627,26 @@ function stateOfChargeChecks(
         'against rated capacity, rated design capacity, or an indicated battery capacity — the three are not ' +
         'interchangeable and only one of them satisfies this entry.',
       passed: false,
+      refs: [ref],
+    })
+  } else if (!basisAccepted) {
+    checks.push({
+      id: `dg.soc-basis.${ref}`,
+      severity: 'blocking',
+      title: `${name}: state of charge measured against rated capacity`,
+      detail:
+        `The limit for this entry is ${rule.limitPercent}% of *rated capacity*` +
+        (indicatedAllowed
+          ? `, or an indicated battery capacity not exceeding ${INDICATED_CAPACITY_LIMIT}%. A rated *design* ` +
+            'capacity is neither of them — that basis belongs to the vehicle entries.'
+          : ', and the alternative of an indicated battery capacity not exceeding ' +
+            `${INDICATED_CAPACITY_LIMIT}% does not apply to it — that alternative belongs to batteries ` +
+            'contained in equipment and to the vehicle entries. Neither an indicated-capacity nor a rated ' +
+            'design capacity reading can demonstrate this limit.') +
+        ' Measure against rated capacity.',
+      passed: false,
+      expected: indicatedAllowed ? 'rated capacity, or indicated capacity' : 'rated capacity',
+      actual: SOC_BASIS_NAMES[entry.stateOfChargeBasis],
       refs: [ref],
     })
   }

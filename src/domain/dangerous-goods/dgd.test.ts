@@ -195,6 +195,21 @@ describe('rendering', () => {
     expect(reopened.getForm().getFields().length).toBeGreaterThanOrEqual(declaration.pages.length * 3)
   })
 
+  it('reports overflowing handling information once, not once per sheet', async () => {
+    // The box is drawn on every page and holds the same four lines on each, so the warning
+    // came back twice for a two-page consignment — which reads as two things to shorten.
+    const many = consignment(
+      Array.from({ length: 20 }, (_, i) =>
+        pkg(`p${i}`, [entry(`e${i}`, { wattHours: 95 }, { netWeightKgPerPackage: 1 + i })]),
+      ),
+      { additionalHandlingInformation: 'One\nTwo\nThree\nFour\nFive' },
+    )
+    const declaration = buildDeclaration(many, assess(many))
+    expect(declaration.pages.length).toBeGreaterThan(1)
+    const { warnings } = await renderDeclaration(declaration)
+    expect(warnings.filter((w) => w.includes('additional handling information'))).toHaveLength(1)
+  })
+
   it('reports an address line too wide for its box rather than clipping it silently', async () => {
     const wide = consignment([pkg('p1', [entry('e1', { wattHours: 95 })])], {
       consignee: {

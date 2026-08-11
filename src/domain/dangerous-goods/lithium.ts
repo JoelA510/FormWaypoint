@@ -96,6 +96,15 @@ export const AIR_THRESHOLDS = {
 export const STATE_OF_CHARGE_LIMIT = 30
 
 /**
+ * The ceiling of the indicated-capacity alternative, where the entry has one at all.
+ *
+ * A different figure as well as a different basis: batteries contained in equipment are
+ * offered at 30% of rated capacity *or* an indicated battery capacity of 25%, and a reading
+ * taken against the alternative has to be measured against the alternative's own number.
+ */
+export const INDICATED_CAPACITY_LIMIT = 25
+
+/**
  * The watt-hour rating below which the 30% state of charge is advisory rather than mandatory
  * for cells packed with equipment (Student Guide fig. 5-26 note, effective 1 January 2026).
  */
