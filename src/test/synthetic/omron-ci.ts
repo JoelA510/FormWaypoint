@@ -24,6 +24,11 @@ export interface OmronCiLine {
   unitPrice: number
   /** Overrides the computed amount, to model a workbook whose cached result disagrees. */
   amount?: number
+  /**
+   * Extra description text printed on a second baseline between the block's two rows, to
+   * model a wrapped description in the PDF. Only the PDF builder draws it.
+   */
+  descriptionTail?: string
 }
 
 export interface OmronCiSpec {
@@ -289,6 +294,7 @@ function drawLines(page: PDFPage, font: PDFFont, spec: OmronCiSpec): void {
     centred(center(COLUMNS.ln), middleY, String(i + 1))
     at(COLUMNS.c.left + 2, topY, line.partNumber)
     at(COLUMNS.d.left + 2, topY, line.description)
+    if (line.descriptionTail) at(COLUMNS.d.left + 2, topY - 9, line.descriptionTail)
     centred(center(COLUMNS.h), middleY, String(line.quantity))
     centred(center(COLUMNS.i), middleY, line.uom)
     centred(center(COLUMNS.j), middleY, line.unitPrice.toFixed(2))

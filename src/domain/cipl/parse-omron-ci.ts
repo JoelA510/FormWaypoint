@@ -65,9 +65,19 @@ const isLabel = (text: string): boolean => HEADER_LABELS.has(normalizeLabel(text
 // Workbook (.xlsx) reader — the primary path
 // ---------------------------------------------------------------------------
 
-/** True when this sheet is the 00004-00202 Commercial Invoice grid. */
+/**
+ * True when this sheet is the 00004-00202 Commercial Invoice grid itself.
+ *
+ * The doc number alone is not enough: a controlled workbook's cover or revision-history
+ * tab cites the same number, and matching it would shadow the real form sheet behind it.
+ * The commodity-table headings are what only the form carries.
+ */
 export function isOmronCiWorkbook(rows: SheetRows): boolean {
-  return rows.some((row) => row.some((cell) => cell.includes(DOC_NUMBER)))
+  return (
+    rows.some((row) => row.some((cell) => cell.includes(DOC_NUMBER))) &&
+    rows.some((row) => row.includes('PART #')) &&
+    rows.some((row) => row.includes('COO'))
+  )
 }
 
 export function parseOmronCiWorkbook(fileName: string, rows: SheetRows): ParsedCipl {
@@ -452,7 +462,7 @@ function pagesToGrid(pages: TextPage[]): SheetRows {
   let tableEnd = rows.length
   for (let i = subIndex + 1; i < rows.length; i++) {
     const isTotalsBand = rows[i].items.some((item) => {
-      const cell = item.str.toUpperCase()
+      const cell = normalizeLabel(item.str)
       return cell === 'SUBTOTAL' || cell === 'TOTAL (USD)'
     })
     if (isTotalsBand) {
@@ -602,6 +612,11 @@ function tableRowsToBlocks(rows: TextRow[], anchors: Anchors): SheetRows {
   const partDescriptionBorder = (anchors.coo + anchors.hts) / 2
   const quantityBorder = (anchors.sme + anchors.qty) / 2
 
+  // Collect each block's left-region items before classifying them: the compliance row is
+  // the block's *lowest* baseline, and that is only knowable once the whole block is in
+  // hand. Judging by "below the LN centre" alone would also sweep a wrapped description's
+  // second line into the compliance columns and file its tail as an HTS code.
+  const leftItems = new Map<Block, TextItem[]>()
   for (const row of rows) {
     for (const item of row.items) {
       if (isLnCell(item, anchors)) continue
@@ -613,17 +628,23 @@ function tableRowsToBlocks(rows: TextRow[], anchors: Anchors): SheetRows {
         if (column) push(block.top, column, item)
         continue
       }
+      const bucket = leftItems.get(block)
+      if (bucket) bucket.push(item)
+      else leftItems.set(block, [item])
+    }
+  }
 
-      // The LN cell is vertically centred in the block, so its baseline divides the
-      // part/description row (above it — PDF y grows upward) from the compliance row
-      // (below it). Judged against the block's own geometry rather than first-item-seen,
-      // so a block whose part and description are blank still routes its compliance
-      // values to the compliance columns.
-      if (item.y > block.y) {
-        push(block.top, item.x < partDescriptionBorder ? 'part' : 'description', item)
-      } else {
+  for (const [block, items] of leftItems) {
+    // PDF y grows upward, so the compliance row is the smallest baseline — and it must
+    // sit below the LN centre, or the block simply has no compliance row.
+    const lowestY = Math.min(...items.map((item) => item.y))
+    for (const item of items) {
+      const isComplianceRow = item.y < block.y && Math.abs(item.y - lowestY) <= pitch / 8
+      if (isComplianceRow) {
         const column = nearest(item.x, ['coo', 'hts', 'eccn', 'license', 'sme'])
         if (column) push(block.bottom, column, item)
+      } else {
+        push(block.top, item.x < partDescriptionBorder ? 'part' : 'description', item)
       }
     }
   }

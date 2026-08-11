@@ -195,9 +195,9 @@ describe('the .xlsx round trip', () => {
     await expect(parseCiplFile('other.xlsx', bytes)).rejects.toThrow(/Commercial Invoice/)
   })
 
-  it('finds the form behind a cover sheet', async () => {
+  it('finds the form behind a cover sheet, even one that cites the doc number', async () => {
     const bytes = buildXlsx([
-      { name: 'Cover', rows: [['Revision History'], ['Rev C — proposal']] },
+      { name: 'Cover', rows: [['Revision History'], ['00004-00202 Rev C — proposal']] },
       { name: 'INV', rows: omronCiGrid(simpleOmronCi()) },
     ])
     const parsed = await parseCiplFile('ci.xlsx', bytes)
@@ -256,6 +256,15 @@ describe('the printed PDF', () => {
     expect(line!.partNumber).toBe('')
     expect(line!.countryOfOrigin).toBe('US')
     expect(line!.eccn).toBe('EAR99')
+  })
+
+  it('keeps a wrapped description out of the compliance columns', async () => {
+    const spec = simpleOmronCi()
+    spec.lines[0] = { ...spec.lines[0], descriptionTail: 'with mounting bracket' }
+    const parsed = await parseCipl('ci.pdf', await buildOmronCiPdf(spec))
+    expect(parsed.lines[0].description).toBe('Robot cable assembly with mounting bracket')
+    expect(parsed.lines[0].classification).toBe('8544.42.0000')
+    expect(parsed.lines[0].countryOfOrigin).toBe('US')
   })
 
   it('keeps a line whose description mentions NO CHARGE', async () => {

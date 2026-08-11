@@ -174,13 +174,15 @@ function sheetPaths(workbookXml: string, relsXml: string): string[] {
 }
 
 /**
- * Reads every worksheet of an .xlsx file, in tab order.
+ * Reads the worksheets of an .xlsx file, in tab order, up to `limit`.
  *
  * Most callers want only the first (an item master is one table), but the Commercial
  * Invoice form can sit behind a cover or revision-history tab in a controlled document,
  * and refusing the workbook because the wrong tab came first would be a wrong answer.
+ * The limit exists so `readXlsx` does not row-parse ten tabs of somebody's item master
+ * only to throw nine of them away.
  */
-export async function readXlsxSheets(data: Uint8Array): Promise<SheetRows[]> {
+export async function readXlsxSheets(data: Uint8Array, limit = Infinity): Promise<SheetRows[]> {
   const decoder = new TextDecoder()
   const parts = await unzip(
     data,
@@ -213,12 +215,12 @@ export async function readXlsxSheets(data: Uint8Array): Promise<SheetRows[]> {
     for (const item of decoder.decode(sharedBytes).matchAll(/<si>([\s\S]*?)<\/si>/g)) shared.push(textRuns(item[1]))
   }
 
-  return sheetParts.map((bytes) => sheetRows(decoder.decode(bytes), shared))
+  return sheetParts.slice(0, limit).map((bytes) => sheetRows(decoder.decode(bytes), shared))
 }
 
 /** Reads the first worksheet of an .xlsx file. */
 export async function readXlsx(data: Uint8Array): Promise<SheetRows> {
-  return (await readXlsxSheets(data))[0]
+  return (await readXlsxSheets(data, 1))[0]
 }
 
 function sheetRows(sheetXml: string, shared: string[]): SheetRows {
