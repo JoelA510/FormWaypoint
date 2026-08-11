@@ -341,11 +341,25 @@ describe('address extraction', () => {
     expect(field(phoned, 'Postal code')).toBe('62704')
     expect(field(phoned, 'City')).toBe('Springfield')
 
-    // Named as a contact line, and also too long to be a postcode — either guard alone
-    // would hold this one, and the pair is what covers the shapes neither does.
     const tel = ['Plot 12', 'Springfield IL 62704', 'Tel. 555-1234']
     expect(field(tel, 'Postal code')).toBe('62704')
     expect(field(tel, 'City')).toBe('Springfield')
+  })
+
+  it('does not mistake a city that reads like a contact label for one', () => {
+    // The keyword has to label the number, not merely appear on the line. These are all
+    // cities, and skipping them threw away the postcode and the city together.
+    expect(field(['Acme Israel Ltd', '12 Rothschild Blvd', 'Tel Aviv 61000'], 'Postal code')).toBe('61000')
+    expect(field(['Acme Israel Ltd', '12 Rothschild Blvd', 'Tel Aviv 61000'], 'City')).toBe('Tel Aviv')
+    expect(field(['1 Dauphin St', 'Mobile, AL 36602'], 'City')).toBe('Mobile')
+    expect(field(['1 Harbour Way', 'Fax Islands 12345'], 'City')).toBe('Fax Islands')
+  })
+
+  it('reads a seven-digit postcode, which several countries write', () => {
+    // Israel writes 3109601 and Japan writes 1500001 unhyphenated; bounding the digits to
+    // six lost the postcode and, because both fields read one line, the city with it.
+    expect(field(['12 Sderot', 'Haifa 3109601'], 'Postal code')).toBe('3109601')
+    expect(field(['12 Sderot', 'Haifa 3109601'], 'City')).toBe('Haifa')
   })
 
   it('keeps a city that is itself written in capitals', () => {

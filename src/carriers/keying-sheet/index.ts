@@ -795,18 +795,22 @@ export function buildKeyingSheet(
  * the CIPL prints rather than a real one — `Singapore EX 498781`, `'s-Hertogenbosch NA
  * 5234`. Taking the letters with the digits puts `EX 498781` into a field that Ship Manager
  * validates and a courier sorts on; the entry that shipment was actually keyed with reads
- * `498781`. The hyphen is allowed because Brazil writes `01310-100`.
+ * `498781`. The hyphen is allowed because Brazil writes `01310-100`, and the digits run to
+ * eight because Israel writes `3109601` and Japan `1500001` unhyphenated — bounded at six,
+ * a seven-digit postcode was read as its own last six.
  */
-const POSTCODE = /(?<![\d-])(\d{4,6}(?:-\d{2,4})?)\s*$/
+const POSTCODE = /(\d{4,8}(?:-\d{2,4})?)\s*$/
 
 /**
- * Lines that end in digits without those digits being a postcode.
+ * A line whose trailing digits are a telephone number, not a postcode.
  *
- * A telephone or reference line printed under the city is the commonest, and it is the one
- * that reading from the bottom walks into: `Phone 5551234` ends in digits, and taking the
- * last six of them gave the courier a City of `Phone 5`.
+ * The keyword has to *label* the number — stand immediately in front of it, with only
+ * punctuation between — rather than merely appear on the line. Matched as a word anywhere,
+ * this skipped `Tel Aviv 61000`, `Mobile, AL 36602` and `Fax Islands 12345`, which are
+ * cities, and threw away the postcode and the city with them. Labelling is the whole of
+ * what distinguishes `Phone 5551234` from a place that happens to be spelled that way.
  */
-const CONTACT_LINE = /\b(?:phone|tel|telephone|fax|mobile|cell|attn|attention|contact|e-?mail)\b/i
+const CONTACT_LINE = /(?:phone|tel|telephone|fax|mobile|cell|attn|attention|contact|e-?mail)\.?\s*:?\s*[+(]?\d[\d\s()+.-]*$/i
 
 /**
  * The line the postcode is on — the *last* one that ends in one, not the first.
@@ -817,11 +821,12 @@ const CONTACT_LINE = /\b(?:phone|tel|telephone|fax|mobile|cell|attn|attention|co
  * and the city `Postbus` — a PO box label typed into the field a courier sorts on. A street
  * number, a suite number and a building number all end an address line the same way.
  *
- * Two guards keep the search from walking past the address the other way. A contact line
- * printed *below* the city is skipped by name, and a run of digits longer than a postcode no
- * longer matches its own tail — between them, a `Phone 5551234` under the city line stops
- * supplying a City of `Phone 5`. Neither is a rule about what a postcode is; both are about
- * what the lines around it are not.
+ * One guard keeps the search from walking past the address the other way: a line whose
+ * trailing digits are labelled as a telephone number is skipped, so a `Phone 5551234`
+ * printed under the city stops supplying a City of `Phone 5`. It is not a rule about what a
+ * postcode is — it is about what a line that is plainly a phone number is not. Nothing
+ * bounds the *length* of the digits, because a seven-digit postcode is a real postcode:
+ * Israel writes `3109601` and Japan writes `1500001` unhyphenated.
  */
 function postcodeLineIndex(lines: string[]): number {
   for (let i = lines.length - 1; i >= 0; i--) {
