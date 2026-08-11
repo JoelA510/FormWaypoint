@@ -689,3 +689,77 @@ describe('a package description covering no packages', () => {
     expect(result.canGenerate).toBe(false)
   })
 })
+
+describe('a package mixing Section II with fully regulated batteries', () => {
+  const mixed = consignment([
+    pkg('p1', [
+      entry('e1', { configuration: 'packed-with-equipment', wattHours: 90 }, { netWeightKgPerPackage: 1 }),
+      entry('e2', { configuration: 'contained-in-equipment', wattHours: 300 }, {
+        netWeightKgPerPackage: 3,
+        countPerPackage: 1,
+      }),
+    ]),
+  ])
+
+  it('is refused: no declaration this workflow can produce describes it truthfully', () => {
+    const result = assess(mixed)
+    expect(check(result, 'dg.mixed-regulation.p1')).toMatchObject({ severity: 'blocking', passed: false })
+    expect(result.canGenerate).toBe(false)
+  })
+
+  it('counts only the declared entries when warning about shared packaging', () => {
+    // One declared entry means one line on the declaration, so there is nothing to warn
+    // about — the warning used to fire and claim two lines the paper never had.
+    expect(check(assess(mixed), 'dg.shared-packaging.p1')).toBeUndefined()
+  })
+})
+
+describe('the Section I route out of the 5 kg Section II ceiling', () => {
+  const heavy = (prepareToSectionI: boolean) =>
+    consignment([
+      pkg('p1', [
+        entry('e1', { configuration: 'packed-with-equipment', wattHours: 96 }, {
+          netWeightKgPerPackage: 12,
+          prepareToSectionI,
+        }),
+      ], { unSpecificationMark: '4G/Y30/S/26' }),
+    ])
+
+  it('names Section I as the alternative rather than leaving "split it" as the only way out', () => {
+    const detail = check(assess(heavy(false)), 'dg.limit.p1')!.detail
+    expect(detail).toContain('Section I of PI 966')
+    expect(detail).toContain('35 kg')
+  })
+
+  it('accepts the same package once the shipper records that it was prepared to Section I', () => {
+    const result = assess(heavy(true))
+    expect(check(result, 'dg.limit.p1')).toMatchObject({ passed: true, expected: '≤ 35 kg' })
+    // And it is fully regulated now: a declaration, and the CAO consignment labels it.
+    expect(result.declarationRequired).toBe(true)
+    expect(result.packages[0].hazardCommunication.join(' ')).toContain('Class 9')
+  })
+})
+
+describe('a mixed consignment offered cargo-aircraft-only', () => {
+  const mixed = consignment([
+    pkg('p1', [entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 2 })]),
+    pkg('p2', [
+      entry('e2', { configuration: 'contained-in-equipment', wattHours: 76 }, {
+        netWeightKgPerPackage: 1.5,
+        countPerPackage: 3,
+        stateOfChargePercent: 20,
+      }),
+    ]),
+  ])
+
+  it('scopes the CAO label to the fully regulated packages', () => {
+    const result = assess(mixed)
+    // Exactly the consignment-level check, not the per-package `dg.aircraft.p1`.
+    const detail = result.checks.find((c) => c.id === 'dg.aircraft')!.detail
+    expect(detail).toContain('fully regulated packages only')
+    // And the marks agree: the Section II box carries neither label.
+    const sectionII = result.packages.find((p) => !p.declarationRequired)!
+    expect(sectionII.hazardCommunication.join(' ')).not.toContain('Cargo Aircraft Only')
+    expect(sectionII.hazardCommunication.join(' ')).not.toContain('Class 9')
+  })
+})

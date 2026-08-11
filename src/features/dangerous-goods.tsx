@@ -1142,6 +1142,14 @@ function EntryEditor({
           onChange={(next) => onChange({ buttonCellsInEquipment: next })}
           hint="Including circuit boards."
         />
+        {entry.spec.configuration !== 'standalone' ? (
+          <Toggle
+            label="Prepared to Section I"
+            checked={entry.prepareToSectionI}
+            onChange={(next) => onChange({ prepareToSectionI: next })}
+            hint="For a package over the 5 kg Section II limit. UN specification packaging, Class 9 label, declaration and full dangerous goods training."
+          />
+        ) : null}
       </div>
     </div>
   )

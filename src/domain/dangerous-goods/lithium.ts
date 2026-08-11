@@ -260,12 +260,21 @@ export interface StateOfChargeRule {
  * a lower package limit. That asymmetry is the single most misunderstood part of these rules
  * and the reason a "small" battery can still need a Shipper's Declaration.
  */
-function sectionFor(configuration: Configuration, band: EnergyBand, chemistry: Chemistry): PackingSection {
+function sectionFor(
+  configuration: Configuration,
+  band: EnergyBand,
+  chemistry: Chemistry,
+  prepareToSectionI: boolean,
+): PackingSection {
   // PI 976 has no sections: every standalone sodium ion cell and battery is fully regulated.
   if (chemistry === 'sodium-ion' && configuration === 'standalone') return null
   if (band === 'unknown') return null
   if (configuration === 'standalone') return band === 'small' ? 'IB' : 'IA'
-  return band === 'small' ? 'II' : 'I'
+  // Section II is a relief with conditions. A shipper who does not meet them — most often
+  // the 5 kg net per package ceiling — prepares the same goods to Section I of the same
+  // packing instruction instead. Only ever an escalation: it never relieves anything.
+  if (band === 'small') return prepareToSectionI ? 'I' : 'II'
+  return 'I'
 }
 
 /**
@@ -277,7 +286,7 @@ function sectionFor(configuration: Configuration, band: EnergyBand, chemistry: C
  * only from fig. 5-29, because the List of Dangerous Goods defers to the packing instruction
  * for UN3480 and UN3090 ("See 965", "See 968").
  */
-function limitsFor(pi: number, section: PackingSection): QuantityLimits {
+function limitsFor(pi: number, section: PackingSection, chemistry: Chemistry): QuantityLimits {
   // Standalone lithium: forbidden on passenger aircraft in every section.
   if (pi === 965 || pi === 968) {
     if (section === 'IB') {
@@ -305,7 +314,14 @@ function limitsFor(pi: number, section: PackingSection): QuantityLimits {
     return {
       passengerKg: 5,
       cargoKg: 5,
-      source: 'Student Guide figs. 5-26 and 5-27 (Section II — 5 kg net per package on either aircraft)',
+      // The lithium tables and the sodium tables are different figures in the materials,
+      // and this string is printed beside the limit for someone re-checking it against the
+      // DGR — pointing a sodium shipper at the lithium table would send them to the wrong
+      // page of their own course notes.
+      source:
+        chemistry === 'sodium-ion'
+          ? 'Student Guide figs. 5-30 and 5-31 (PI 977 / PI 978 Section II — 5 kg net per package on either aircraft)'
+          : 'Student Guide figs. 5-26 and 5-27 (Section II — 5 kg net per package on either aircraft)',
     }
   }
   // Packed with / contained in, Section I: 5 kg passenger, 35 kg cargo.
@@ -448,12 +464,22 @@ function specialProvisionsFor(spec: BatterySpec, section: PackingSection): strin
  * conservative reading, with the assessment engine raising a blocking check that says the
  * rating has to be supplied before anything can be generated.
  */
-export function classifyForAir(spec: BatterySpec): AirClassification {
+export function classifyForAir(
+  spec: BatterySpec,
+  options: {
+    /**
+     * Prepare small packed-with or contained-in batteries to Section I rather than
+     * Section II — the route for a package over the Section II 5 kg ceiling. Recorded by
+     * the shipper, never inferred: see `BatteryEntry.prepareToSectionI`.
+     */
+    prepareToSectionI?: boolean
+  } = {},
+): AirClassification {
   const id = IDENTITIES[spec.chemistry][spec.configuration]
   const stateOfCharge = stateOfChargeFor(spec)
   const band = energyBand(spec)
-  const section = sectionFor(spec.configuration, band, spec.chemistry)
-  const limits = limitsFor(id.packingInstruction, section)
+  const section = sectionFor(spec.configuration, band, spec.chemistry, options.prepareToSectionI ?? false)
+  const limits = limitsFor(id.packingInstruction, section, spec.chemistry)
 
   // Standalone cells and batteries of every chemistry are cargo aircraft only. Everything
   // else may go on a passenger aircraft up to 5 kg.

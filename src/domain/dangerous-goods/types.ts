@@ -116,6 +116,18 @@ export interface BatteryEntry {
    * equipment must carry the battery mark.
    */
   buttonCellsInEquipment: boolean
+  /**
+   * Prepared to Section I although the batteries are small enough for Section II.
+   *
+   * Section II is a relief with conditions, and the 5 kg net per package ceiling is one of
+   * them; a consignment that does not meet them is prepared to Section I of the same
+   * packing instruction, where the cargo aircraft allowance is 35 kg. That is the route for
+   * a heavy package of small batteries — and it is a decision, not an inference. Section I
+   * means UN specification packaging, the Class 9 label, a Shipper's Declaration and full
+   * dangerous goods training, none of which this application can observe. So it is recorded
+   * here by the person who packed the box, and left false until they say otherwise.
+   */
+  prepareToSectionI: boolean
 
   // --- UN 38.3 qualification -------------------------------------------
   /**
@@ -365,6 +377,7 @@ export function emptyEntry(id: string): BatteryEntry {
     netWeightKgPerPackage: null,
     countPerPackage: null,
     buttonCellsInEquipment: false,
+    prepareToSectionI: false,
     testSummaryScope: null,
     testSummaryReference: '',
     stateOfChargePercent: null,
