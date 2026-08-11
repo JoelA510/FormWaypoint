@@ -210,6 +210,18 @@ describe('rendering', () => {
     expect(warnings.filter((w) => w.includes('additional handling information'))).toHaveLength(1)
   })
 
+  it('reports a handling information line too wide for box 18, once', async () => {
+    const wordy = consignment([pkg('p1', [entry('e1', { wattHours: 95 })])], {
+      additionalHandlingInformation:
+        'Consignment released under standing agreement number ' + 'X'.repeat(200),
+    })
+    const declaration = buildDeclaration(wordy, assess(wordy))
+    const { warnings } = await renderDeclaration(declaration)
+    const wide = warnings.filter((w) => w.includes('Additional handling information'))
+    expect(wide).toHaveLength(1)
+    expect(wide[0]).toContain('wider than its box')
+  })
+
   it('reports an address line too wide for its box rather than clipping it silently', async () => {
     const wide = consignment([pkg('p1', [entry('e1', { wattHours: 95 })])], {
       consignee: {

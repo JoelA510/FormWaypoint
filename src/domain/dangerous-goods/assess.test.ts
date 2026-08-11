@@ -608,6 +608,28 @@ describe('state of charge as evidence', () => {
     expect(check(lower, 'dg.soc')).toMatchObject({ passed: true, expected: '≤ 25%' })
   })
 
+  it('does not make a recorded wrong basis harder to clear than no basis at all', () => {
+    // Contained in equipment is a "should" rule, so both branches warn. Hardcoding the
+    // wrong-basis branch blocking meant picking the wrong dropdown item stopped generation
+    // while clearing it back to "not recorded" — strictly less information — did not.
+    const entryAt = (basis: 'rated-design-capacity' | null) =>
+      consignment([
+        pkg('p1', [
+          entry('e1', { configuration: 'contained-in-equipment', wattHours: 90 }, {
+            countPerPackage: 1,
+            stateOfChargeBasis: basis,
+            stateOfChargePercent: 20,
+          }),
+        ]),
+      ])
+    expect(check(assess(entryAt('rated-design-capacity')), 'dg.soc-basis')).toMatchObject({
+      severity: 'warning',
+      passed: false,
+    })
+    expect(assess(entryAt('rated-design-capacity')).canGenerate).toBe(true)
+    expect(check(assess(entryAt(null)), 'dg.soc-basis')).toMatchObject({ severity: 'warning' })
+  })
+
   it('rejects a rated design capacity, which is not the basis any of these rules names', () => {
     // It belongs to the vehicle entries. Checking only for indicated capacity let it pass
     // in silence, under a check that says one of the three bases satisfies the entry.
@@ -845,6 +867,23 @@ describe('special provision A99 is about 35 kg, not about being over the limit',
       ]),
     )
     expect(check(result, 'dg.a99')).toBeDefined()
+  })
+})
+
+describe('the count a check title states', () => {
+  it('is the consignment total, the same number the declaration prints', () => {
+    // 2 boxes per overpack across 3 overpacks is 6 packages. A title reading "2 ×
+    // Fibreboard box" beside a declaration line reading "6 Fibreboard box" — both
+    // reproduced in the same checklist — reads as two packages, not one described twice.
+    const shipment = consignment(
+      [pkg('p1', [entry('e1', { wattHours: 95 })], { count: 2, overpackId: 'o1' })],
+      { overpacks: [overpack('o1', { marks: '#A001', count: 3 })] },
+    )
+    const titles = assess(shipment)
+      .checks.filter((c) => /\.p1($|\.)/.test(c.id))
+      .map((c) => c.title)
+    expect(titles.length).toBeGreaterThan(0)
+    expect(titles.every((t) => t.startsWith('6 × Fibreboard box'))).toBe(true)
   })
 })
 

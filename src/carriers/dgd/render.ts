@@ -299,14 +299,24 @@ function drawPage(
   // --- Additional handling information -----------------------------------
   box(ctx, CONTENT.left, signatureTop, CONTENT.right, handlingTop)
   caption(ctx, 'Additional Handling Information', CONTENT.left + 4, handlingTop - 10)
+  // Warned about once for the declaration, not once per sheet. The box is drawn on every
+  // page and holds the same four lines on each, so a two-page consignment reported the same
+  // overflow twice — which reads as two separate things to shorten.
+  const firstSheet = pageModel.pageNumber === 1
+  const handlingWidth = CONTENT.right - CONTENT.left - 12
   declaration.additionalHandlingInformation.forEach((line, i) => {
     if (i > 3) return
+    // Measured like every other free-text block on this form. Box 18 takes whatever the
+    // shipper typed, and an emergency contact line long enough to leave the box was drawn
+    // straight over the red hatched margin and off the edge of the sheet, saying nothing.
+    if (firstSheet && ctx.regular.widthOfTextAtSize(line, 7.5) > handlingWidth) {
+      ctx.warnings.push(
+        `Additional handling information: "${line}" is wider than its box and may be clipped when printed.`,
+      )
+    }
     text(ctx, line, CONTENT.left + 6, handlingTop - 22 - i * 9, { size: 7.5 })
   })
-  // Raised once for the declaration, not once per sheet. The box is drawn on every page and
-  // holds the same four lines on each, so a two-page consignment reported the same overflow
-  // twice — which reads as two separate things to shorten.
-  if (declaration.additionalHandlingInformation.length > 4 && pageModel.pageNumber === 1) {
+  if (declaration.additionalHandlingInformation.length > 4 && firstSheet) {
     ctx.warnings.push(
       'The additional handling information runs to more lines than the box holds; only the first four were ' +
         'printed. Shorten it, or carry the rest on a separate sheet.',

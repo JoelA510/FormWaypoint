@@ -209,6 +209,19 @@ export function packageCountInConsignment(pkg: DgPackage, consignment: DgConsign
   return Math.max(0, pkg.count) * Math.max(1, overpack?.count ?? 1)
 }
 
+/**
+ * How a package description is named in a check title.
+ *
+ * The consignment total, not the per-overpack count. The declaration line, the checklist
+ * heading and the consignment totals all state the product of the package count and its
+ * overpack count; a check title reading "2 × Fibreboard box" beside a declaration reading
+ * "6 Fibreboard box" — both reproduced in the same checklist — reads as two different
+ * packages rather than one described twice.
+ */
+function packageLabel(pkg: DgPackage, consignment: DgConsignment): string {
+  return `${packageCountInConsignment(pkg, consignment)} × ${pkg.packagingType || 'package'}`
+}
+
 export function assess(consignment: DgConsignment): DgAssessment {
   const checks: CheckResult[] = []
   const packages: PackageAssessment[] = []
@@ -632,7 +645,11 @@ function stateOfChargeChecks(
   } else if (!basisAccepted) {
     checks.push({
       id: `dg.soc-basis.${ref}`,
-      severity: 'blocking',
+      // The rule's own strength, like the missing-basis branch beside it. Hardcoding this
+      // blocking made a recorded-but-wrong basis harder to clear than no basis at all:
+      // picking the wrong item from the dropdown stopped an advisory entry generating,
+      // while clearing it back to "not recorded" — strictly less information — did not.
+      severity,
       title: `${name}: state of charge measured against rated capacity`,
       detail:
         `The limit for this entry is ${rule.limitPercent}% of *rated capacity*` +
@@ -680,7 +697,7 @@ function stateOfChargeChecks(
 function packageChecks(assessment: PackageAssessment, consignment: DgConsignment): CheckResult[] {
   const checks: CheckResult[] = []
   const { pkg, entries } = assessment
-  const label = `${pkg.count} × ${pkg.packagingType || 'package'}`
+  const label = packageLabel(pkg, consignment)
   const usingPassenger = consignment.aircraft === 'passenger-and-cargo'
 
   // --- Aircraft type -----------------------------------------------------
@@ -919,7 +936,7 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
   }
 
   // --- Weights -----------------------------------------------------------
-  checks.push(weightChecks(assessment))
+  checks.push(weightChecks(assessment, consignment))
 
   // --- Co-packing --------------------------------------------------------
   checks.push({
@@ -1032,9 +1049,9 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
  * weighed. The only arithmetic done here is the sanity check that the parts are not heavier
  * than the whole.
  */
-function weightChecks(assessment: PackageAssessment): CheckResult {
+function weightChecks(assessment: PackageAssessment, consignment: DgConsignment): CheckResult {
   const { pkg, netWeightKg } = assessment
-  const label = `${pkg.count} × ${pkg.packagingType || 'package'}`
+  const label = packageLabel(pkg, consignment)
   const gross = pkg.grossWeightKg
   const equipment = pkg.equipmentNetWeightKg ?? 0
 
