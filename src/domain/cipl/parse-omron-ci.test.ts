@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { parseCipl, parseCiplFile } from '.'
-import { isOmronCiWorkbook, parseOmronCiWorkbook } from './parse-omron-ci'
+import { isOmronCiWorkbook, isPartyTitle, parseOmronCiWorkbook } from './parse-omron-ci'
 import { reconcile } from '../reconcile'
 import { buildXlsx } from '../../lib/xlsx'
 import { buildOmronCiPdf, omronCiGrid, simpleOmronCi, subtotalOf } from '../../test/synthetic/omron-ci'
@@ -149,6 +149,18 @@ describe('the workbook grid', () => {
     const parsed = parseOmronCiWorkbook('ci.xlsx', grid)
     expect(parsed.lines).toHaveLength(2)
     expect(parsed.lines[1]).toMatchObject({ partNumber: '20000-0002', countryOfOrigin: 'JP' })
+  })
+
+  it('does not mistake the header grid’s SHIPPER and CONSIGNEE labels for the address band', () => {
+    // `SHIPPER EIN / TAX ID:` and `CONSIGNEE EORI / USCI / VAT:` share a row of the header
+    // grid, and between them they satisfy the band's own test. The band is located first
+    // only because it is printed first; the two are told apart by the label list, not by
+    // the order of the rows.
+    expect(isPartyTitle('SHIPPER (SHIP FROM / EXPORTER)', 'SHIPPER')).toBe(true)
+    expect(isPartyTitle('CONSIGNEE (SHIP TO)', 'CONSIGNEE')).toBe(true)
+    expect(isPartyTitle('BILL TO / SOLD TO (IF DIFFERENT)', 'BILL TO')).toBe(true)
+    expect(isPartyTitle('SHIPPER EIN / TAX ID:', 'SHIPPER')).toBe(false)
+    expect(isPartyTitle('CONSIGNEE EORI / USCI / VAT:', 'CONSIGNEE')).toBe(false)
   })
 
   it('says so when the LN column is missing rather than reading no lines in silence', () => {

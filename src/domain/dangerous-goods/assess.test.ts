@@ -196,6 +196,23 @@ describe('the battery mark exemption for equipment', () => {
     expect(check(result, 'dg.test-summary')).toMatchObject({ passed: true })
   })
 
+  it('does not read a count of zero as an allowance satisfied', () => {
+    // Zero is a number nobody typed, not two batteries fewer than two. The package holds a
+    // kilogram of batteries and needs the mark.
+    const uncounted = consignment([
+      pkg('p1', [
+        entry('e1', { configuration: 'contained-in-equipment', wattHours: 86 }, {
+          netWeightKgPerPackage: 1,
+          countPerPackage: 0,
+          stateOfChargePercent: 20,
+        }),
+      ]),
+    ])
+    const result = assess(uncounted)
+    expect(result.packages[0].batteryMarkExemption).toBeNull()
+    expect(result.packages[0].hazardCommunication).toContain('Lithium battery mark bearing UN3481')
+  })
+
   it('does not add the two allowances together for a package holding cells and batteries', () => {
     // "No more than four cells or two batteries" is one allowance or the other. A box with
     // four cells *and* two batteries in it is outside both readings of the exception, and
@@ -319,6 +336,14 @@ describe('what the shipper has to establish', () => {
   it('blocks a missing net battery weight', () => {
     const result = assess(consignment([pkg('p1', [entry('e1', { wattHours: 90 }, { netWeightKgPerPackage: null })])]))
     expect(check(result, 'dg.net-weight')).toMatchObject({ severity: 'blocking', passed: false })
+  })
+
+  it('blocks a net battery weight of zero, which is not a lighter package', () => {
+    // Zero passed as a stated weight, and every limit in the assessment was then measured
+    // against it — the declaration filing "1 Fibreboard box x 0 kg" in box 15.
+    const result = assess(consignment([pkg('p1', [entry('e1', { wattHours: 90 }, { netWeightKgPerPackage: 0 })])]))
+    expect(check(result, 'dg.net-weight')).toMatchObject({ severity: 'blocking', passed: false })
+    expect(result.canGenerate).toBe(false)
   })
 
   it('blocks UN specification packaging that has not been identified', () => {
@@ -773,6 +798,12 @@ describe('special provision A99 is about 35 kg, not about being over the limit',
 describe('a package description covering no packages', () => {
   it('blocks, rather than putting "0 Fibreboard box" on the declaration', () => {
     const result = assess(consignment([pkg('p1', [entry('e1', { wattHours: 95 })], { count: 0 })]))
+    expect(check(result, 'dg.package-count')).toMatchObject({ severity: 'blocking', passed: false })
+    expect(result.canGenerate).toBe(false)
+  })
+
+  it('blocks a fractional count, which is not a number of packages either', () => {
+    const result = assess(consignment([pkg('p1', [entry('e1', { wattHours: 95 })], { count: 1.5 })]))
     expect(check(result, 'dg.package-count')).toMatchObject({ severity: 'blocking', passed: false })
     expect(result.canGenerate).toBe(false)
   })

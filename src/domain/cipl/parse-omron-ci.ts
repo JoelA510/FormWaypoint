@@ -62,6 +62,22 @@ const normalizeLabel = (text: string): string => text.replace(/:\s*$/, '').trim(
 const isLabel = (text: string): boolean => HEADER_LABELS.has(normalizeLabel(text))
 
 /**
+ * Whether a cell titles one of the three address blocks, as opposed to a header-grid label
+ * that merely begins with the same word.
+ *
+ * `SHIPPER EIN / TAX ID:` and `CONSIGNEE EORI / USCI / VAT:` sit on one row of the header
+ * grid, and between them they satisfy "a cell starting SHIPPER and a cell starting
+ * CONSIGNEE" exactly as the address band does. Finding the band first is a property of the
+ * present layout, not of the search — put the grid above the addresses and all three
+ * blocks would parse empty, with no warning to say why.
+ *
+ * Exported so that separation can be asserted against the form's real label list rather
+ * than left resting on the order the rows happen to be printed in.
+ */
+export const isPartyTitle = (text: string, block: 'SHIPPER' | 'CONSIGNEE' | 'BILL TO'): boolean =>
+  !isLabel(text) && text.trim().toUpperCase().startsWith(block)
+
+/**
  * The commodity table's columns in printed order: the top row of each two-row block, and
  * the compliance row beneath it. The single source for the heading text — the detector,
  * the workbook column lookups, the PDF anchor calibration and the synthesized canonical
@@ -173,15 +189,15 @@ function valueAfter(row: string[], index: number): string {
 function readParties(rows: SheetRows): { shipper: PartyAddress; consignee: PartyAddress; billTo: PartyAddress } {
   const empty = (): PartyAddress => ({ name: '', lines: [], country: null })
   const bandIndex = rows.findIndex(
-    (row) => row.some((c) => c.toUpperCase().startsWith('SHIPPER')) && row.some((c) => c.toUpperCase().startsWith('CONSIGNEE')),
+    (row) => row.some((c) => isPartyTitle(c, 'SHIPPER')) && row.some((c) => isPartyTitle(c, 'CONSIGNEE')),
   )
   if (bandIndex === -1) return { shipper: empty(), consignee: empty(), billTo: empty() }
 
   const band = rows[bandIndex]
   const columns = {
-    shipper: band.findIndex((c) => c.toUpperCase().startsWith('SHIPPER')),
-    consignee: band.findIndex((c) => c.toUpperCase().startsWith('CONSIGNEE')),
-    billTo: band.findIndex((c) => c.toUpperCase().startsWith('BILL TO')),
+    shipper: band.findIndex((c) => isPartyTitle(c, 'SHIPPER')),
+    consignee: band.findIndex((c) => isPartyTitle(c, 'CONSIGNEE')),
+    billTo: band.findIndex((c) => isPartyTitle(c, 'BILL TO')),
   }
 
   const collected: Record<'shipper' | 'consignee' | 'billTo', string[]> = { shipper: [], consignee: [], billTo: [] }
@@ -525,8 +541,8 @@ function pagesToGrid(pages: TextPage[]): SheetRows {
 
   const partyBand = rows.findIndex(
     (row) =>
-      row.items.some((i) => i.str.toUpperCase().startsWith('SHIPPER')) &&
-      row.items.some((i) => i.str.toUpperCase().startsWith('CONSIGNEE')),
+      row.items.some((i) => isPartyTitle(i.str, 'SHIPPER')) &&
+      row.items.some((i) => isPartyTitle(i.str, 'CONSIGNEE')),
   )
   let partyEnd = partyBand
   if (partyBand !== -1) {

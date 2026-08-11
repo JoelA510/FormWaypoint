@@ -289,11 +289,24 @@ function sectionFor(
 function limitsFor(pi: number, section: PackingSection, chemistry: Chemistry): QuantityLimits {
   // Standalone lithium: forbidden on passenger aircraft in every section.
   if (pi === 965 || pi === 968) {
-    if (section === 'IB') {
+    // A null section here means the energy band is unknown, and the two sections it could
+    // be carry very different ceilings — 10 kg or 2.5 kg under Section IB against 35 kg
+    // under Section IA. Standalone batteries have no choice between them: the rating
+    // decides it. So the lower figure is stated, the same conservative reading the
+    // packaging section takes, rather than an allowance three times too generous that
+    // turns out not to be this battery's. `dg.rating` blocks until the rating is entered,
+    // and the figure becomes the section's own when it is.
+    if (section === 'IB' || section === null) {
+      const base = 'Student Guide fig. 5-29 (PI 965 / PI 968 Section IB)'
       return {
         passengerKg: null,
         cargoKg: pi === 965 ? 10 : 2.5,
-        source: 'Student Guide fig. 5-29 (PI 965 / PI 968 Section IB)',
+        source:
+          section === 'IB'
+            ? base
+            : `${base} — the lower of the two sections this could be, pending the ` +
+              (pi === 965 ? 'watt-hour' : 'lithium content') +
+              ' rating',
       }
     }
     return {

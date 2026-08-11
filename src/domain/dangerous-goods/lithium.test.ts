@@ -244,6 +244,19 @@ describe('an unstated rating', () => {
     expect(c.declarationRequired).toBe(true)
     expect(c.fullyRegulated).toBe(true)
   })
+
+  it('states the lower of the two limits it could be, not the Section IA allowance', () => {
+    // A standalone battery has no choice of section: the rating decides between IB and IA,
+    // and their ceilings differ by three and a half times. Quoting 35 kg would pass a 20 kg
+    // package against an allowance that turns out not to be its own, citing a section
+    // nothing had established.
+    const ion = classifyForAir(spec({ wattHours: null }))
+    expect(ion.limits.cargoKg).toBe(10)
+    expect(ion.limits.source).toContain('pending')
+
+    const metal = classifyForAir(spec({ chemistry: 'lithium-metal', lithiumContentG: null }))
+    expect(metal.limits.cargoKg).toBe(2.5)
+  })
 })
 
 describe('standalone sodium ion', () => {

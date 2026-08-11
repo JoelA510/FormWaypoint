@@ -311,7 +311,9 @@ function effectiveLimit(instructionLimitKg: number, authorizationLimitKg: number
 /** The consignment has to describe something before any of it can be checked. */
 function structureChecks(consignment: DgConsignment): CheckResult[] {
   const entryCount = consignment.packages.reduce((sum, p) => sum + p.entries.length, 0)
-  const empty = consignment.packages.filter((p) => p.count < 1)
+  // Whole packages only. The number input has no step, and "1.5 Fibreboard box x 1 kg" is
+  // not a consignment anyone can present at a counter.
+  const empty = consignment.packages.filter((p) => !Number.isInteger(p.count) || p.count < 1)
   return [
     {
       id: 'dg.structure',
@@ -328,9 +330,10 @@ function structureChecks(consignment: DgConsignment): CheckResult[] {
       severity: 'blocking',
       title: 'Every package description covers at least one package',
       detail: empty.length
-        ? `${empty.map((p) => p.packagingType || 'a package').join(', ')} — a count of zero would put “0 ` +
-          'Fibreboard box x 7 kg” on the declaration and leave the batteries it describes out of the ' +
-          'consignment total. Remove the description, or say how many there are.'
+        ? `${empty.map((p) => p.packagingType || 'a package').join(', ')} — a count that is not a whole number ` +
+          'of packages would put “0 Fibreboard box x 7 kg”, or half a box, on the declaration and put the ' +
+          'batteries it describes wrongly into the consignment total. Remove the description, or say how many ' +
+          'there are.'
         : 'Each package description states how many identical packages it covers.',
       passed: empty.length === 0,
     },
@@ -433,12 +436,15 @@ function entryChecks(assessment: PackageAssessment): CheckResult[] {
       severity: 'blocking',
       title: `${name}: net battery weight per package stated`,
       detail:
-        entry.netWeightKgPerPackage == null
+        // Zero is refused alongside blank. It is not a lighter package: it is the net
+        // quantity box of the declaration reading "1 Fibreboard box x 0 kg", and every
+        // limit in the assessment measured against a weight that describes no batteries.
+        entry.netWeightKgPerPackage == null || entry.netWeightKgPerPackage <= 0
           ? 'Enter the net weight of the cells or batteries of this type in one package. This is the weight of ' +
             'the batteries themselves — not the equipment they are packed with or installed in, and not the ' +
             'gross weight of the package, which is what the packing instruction limits are measured against.'
           : `${entry.netWeightKgPerPackage} kg of batteries per package.`,
-      passed: entry.netWeightKgPerPackage != null,
+      passed: entry.netWeightKgPerPackage != null && entry.netWeightKgPerPackage > 0,
       refs: [ref],
     })
   }
@@ -1397,7 +1403,10 @@ function batteryMarkExemption(entries: EntryAssessment[], totalPackagesInConsign
 
   // Button cells installed in equipment do not count towards the four-cell/two-battery limit.
   const counted = relevant.filter((e) => !e.entry.buttonCellsInEquipment)
-  if (counted.some((e) => e.entry.countPerPackage == null)) return null
+  // A count of zero is unstated data, not a satisfied allowance. A package holding a
+  // kilogram of batteries whose count nobody typed would otherwise be handed the exception
+  // on the strength of a number that describes nothing.
+  if (counted.some((e) => e.entry.countPerPackage == null || e.entry.countPerPackage < 1)) return null
 
   const cells = counted
     .filter((e) => e.entry.spec.form === 'cell')
