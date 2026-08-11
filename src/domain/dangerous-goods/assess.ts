@@ -31,6 +31,7 @@ import {
   BATTERY_MARK_PREFIX,
   classifyForAir,
   CHEMISTRY_LABELS,
+  bandDeterminesTreatment,
   energyThreshold,
   INDICATED_CAPACITY_LIMIT,
   type AircraftLimitation,
@@ -377,23 +378,33 @@ function entryChecks(assessment: PackageAssessment): CheckResult[] {
     // --- Energy content --------------------------------------------------
     const threshold = energyThreshold(entry.spec)
     const stated = entry.spec.chemistry === 'lithium-metal' ? entry.spec.lithiumContentG : entry.spec.wattHours
+    // Blocking only where the figure decides something. A standalone sodium ion battery is
+    // classified identically with and without a rating — PI 976 has no sections and one
+    // limit — so refusing to generate for want of it stopped a consignment on a field that
+    // could not change the answer, under a message citing reliefs PI 976 does not have.
+    const bandMatters = bandDeterminesTreatment(entry.spec)
+    const unrated = classification.band === 'unknown'
     checks.push({
       id: `dg.energy.${ref}`,
-      severity: 'blocking',
+      severity: bandMatters ? 'blocking' : 'info',
       title: `${name}: energy content stated`,
-      detail:
-        classification.band === 'unknown'
+      detail: !unrated
+        ? `${stated} ${threshold.unit} per ${entry.spec.form}, against a ${threshold.limit} ${threshold.unit} ` +
+          `threshold — ${classification.band === 'small' ? 'small' : 'large'} by air, ` +
+          (classification.section
+            ? `PI ${classification.packingInstructionLabel}.`
+            : `PI ${classification.packingInstruction}.`)
+        : bandMatters
           ? `Every threshold in the packing instructions turns on this figure. Enter the ` +
             `${threshold.unit === 'Wh' ? 'watt-hour rating' : 'lithium content'} per ` +
             `${entry.spec.form}; a battery whose rating is unknown cannot be shown to be inside the ` +
             'Section II or Section IB relief, and nothing is assumed on its behalf. Take it from the datasheet ' +
             'or the test summary, not from a previous air waybill.'
-          : `${stated} ${threshold.unit} per ${entry.spec.form}, against a ${threshold.limit} ${threshold.unit} ` +
-            `threshold — ${classification.band === 'small' ? 'small' : 'large'} by air, ` +
-            (classification.section
-              ? `PI ${classification.packingInstructionLabel}.`
-              : `PI ${classification.packingInstruction}.`),
-      passed: classification.band !== 'unknown',
+          : `PI ${classification.packingInstruction} has no sections and one quantity limit, so these cells are ` +
+            'fully regulated at the same limit whatever their rating and nothing here waits on the figure. ' +
+            'Record it anyway: the datasheet value belongs in the file, and an operator or a state variation ' +
+            'may ask for it.',
+      passed: !unrated || !bandMatters,
       refs: [ref],
     })
 

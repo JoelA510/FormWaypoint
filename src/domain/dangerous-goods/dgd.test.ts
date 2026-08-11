@@ -231,7 +231,25 @@ describe('rendering', () => {
       },
     })
     const { warnings } = await renderDeclaration(buildDeclaration(wide, assess(wide)))
-    expect(warnings.some((w) => w.startsWith('Consignee:'))).toBe(true)
+    const consignee = warnings.filter((w) => w.startsWith('Consignee:'))
+    expect(consignee).toHaveLength(1)
+    // Cut, not merely reported: the line used to be drawn in full over the air waybill
+    // column beside it, under a warning saying it "may be clipped".
+    expect(consignee[0]).toMatch(/Printed as "[^"]*…"/)
+  })
+
+  it('substitutes characters the form cannot print instead of failing to render at all', async () => {
+    // pdf-lib's standard fonts are WinAnsi, and drawing outside it throws. Every value on
+    // this form is typed by a person, so a consignee in Yokohama took the whole declaration
+    // down with an opaque message about an encoding.
+    const japanese = consignment([pkg('p1', [entry('e1', { wattHours: 95 })])], {
+      consignee: { name: '株式会社オムロン', addressLines: ['Kyoto, Japan'] },
+      signerName: 'Ю. Иванов',
+    })
+    const { bytes, warnings } = await renderDeclaration(buildDeclaration(japanese, assess(japanese)))
+    expect(new TextDecoder().decode(bytes.slice(0, 5))).toBe('%PDF-')
+    expect(warnings.some((w) => w.startsWith('Consignee:') && w.includes('cannot print'))).toBe(true)
+    expect(warnings.some((w) => w.startsWith('Name of signatory:') && w.includes('cannot print'))).toBe(true)
   })
 
   it('clips an entry taller than the table and says so, rather than drawing over the boxes beneath', async () => {

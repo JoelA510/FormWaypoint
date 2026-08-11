@@ -146,7 +146,11 @@ function drawPage(
 
   caption(ctx, 'Shipper’s Reference Number', midpoint + 4, y - 46)
   text(ctx, '(optional)', midpoint + 4, y - 55, { size: 6, font: ctx.italic, color: GREY })
-  text(ctx, declaration.shippersReference, midpoint + 130, y - 46, { size: 8 })
+  text(ctx, declaration.shippersReference, midpoint + 130, y - 46, {
+    size: 8,
+    maxWidth: CONTENT.right - (midpoint + 130) - 4,
+    label: 'Shipper’s reference number',
+  })
   y -= shipperHeight
   void shipperTop
 
@@ -221,7 +225,11 @@ function drawPage(
   const destinationY = y - transportHeight + 10
   caption(ctx, 'Airport of Destination:', CONTENT.left + 7, destinationY)
   if (declaration.airportOfDestination) {
-    text(ctx, declaration.airportOfDestination, CONTENT.left + 96, destinationY, { size: 7.5 })
+    text(ctx, declaration.airportOfDestination, CONTENT.left + 96, destinationY, {
+      size: 7.5,
+      maxWidth: midpoint - (CONTENT.left + 96) - 6,
+      label: 'Airport of destination',
+    })
   } else {
     fillable(ctx, doc, `destination_${pageModel.pageNumber}`, CONTENT.left + 94, destinationY - 3, 140, 12)
   }
@@ -306,18 +314,14 @@ function drawPage(
   const handlingWidth = CONTENT.right - CONTENT.left - 12
   declaration.additionalHandlingInformation.forEach((line, i) => {
     if (i > 3) return
-    // Cut to the box, like the party blocks are. Box 18 takes whatever the shipper typed,
-    // and an emergency contact line long enough to leave the box was drawn straight over
-    // the red hatched margin and off the edge of the sheet — a warning alone would have
-    // described a clipping that the renderer was not in fact doing.
-    const printed = clipToWidth(ctx, line, handlingWidth, 7.5)
-    if (firstSheet && printed !== line) {
-      ctx.warnings.push(
-        `Additional handling information: "${line}" is wider than its box. Printed as "${printed}". ` +
-          'Shorten it, or carry the rest on a separate sheet.',
-      )
-    }
-    text(ctx, printed, CONTENT.left + 6, handlingTop - 22 - i * 9, { size: 7.5 })
+    // Cut to the box, like every other free-text value on the form. Box 18 takes whatever
+    // the shipper typed, and an emergency contact line long enough to leave the box was
+    // drawn straight over the red hatched margin and off the edge of the sheet.
+    text(ctx, line, CONTENT.left + 6, handlingTop - 22 - i * 9, {
+      size: 7.5,
+      maxWidth: handlingWidth,
+      label: 'Additional handling information',
+    })
   })
   if (declaration.additionalHandlingInformation.length > 4 && firstSheet) {
     ctx.warnings.push(
@@ -343,9 +347,19 @@ function drawPage(
   )
 
   caption(ctx, 'Name', signatureSplit + 6, signatureTop - 12)
-  text(ctx, declaration.signerName, signatureSplit + 6, signatureTop - 23, { size: 8 })
+  const signerWidth = CONTENT.right - signatureSplit - 12
+  text(ctx, declaration.signerName, signatureSplit + 6, signatureTop - 23, {
+    size: 8,
+    maxWidth: signerWidth,
+    label: 'Name of signatory',
+  })
   if (declaration.signerTitle) {
-    text(ctx, declaration.signerTitle, signatureSplit + 6, signatureTop - 33, { size: 7, color: GREY })
+    text(ctx, declaration.signerTitle, signatureSplit + 6, signatureTop - 33, {
+      size: 7,
+      color: GREY,
+      maxWidth: signerWidth,
+      label: 'Title of signatory',
+    })
   }
   caption(ctx, 'Place and Date', signatureSplit + 6, signatureTop - 47)
   text(
@@ -353,7 +367,7 @@ function drawPage(
     [declaration.signerPlace, formatDate(declaration.signerDate)].filter(Boolean).join(', '),
     signatureSplit + 6,
     signatureTop - 58,
-    { size: 8 },
+    { size: 8, maxWidth: signerWidth, label: 'Place and date' },
   )
   // The caption sits at the top of the space, so the space beneath it is the space to sign in.
   caption(ctx, 'Signature', signatureSplit + 6, signatureTop - 72)
@@ -546,19 +560,89 @@ function caption(ctx: Ctx, label: string, x: number, y: number): void {
   text(ctx, label, x, y, { size: 7 })
 }
 
+/**
+ * The characters the standard fonts can put on the page.
+ *
+ * pdf-lib's standard fonts are WinAnsi-encoded, and `drawText` *throws* on anything outside
+ * it. Every value on this form comes from a person typing into a box — a consignee in
+ * Yokohama, a signer with a Cyrillic name — so an unencodable character has to be a
+ * substitution and a warning, not an exception that takes the whole declaration down with an
+ * opaque message about an encoding.
+ *
+ * Embedding a Unicode font instead would be the real answer and is a larger change: it means
+ * shipping a font file with a licence that permits it, and the regulation's own requirement
+ * is the Latin alphabet — "the information may be in a language other than English, provided
+ * an English translation is added" is about words, not glyphs.
+ */
+const WINANSI_EXTRAS = new Set('€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ')
+
+function encodable(char: string): boolean {
+  const code = char.codePointAt(0) ?? 0
+  return (code >= 0x20 && code <= 0x7e) || (code >= 0xa0 && code <= 0xff) || WINANSI_EXTRAS.has(char)
+}
+
+/** `value` with everything the font cannot draw replaced, or `value` where all of it can be. */
+function printable(value: string): string {
+  let out = ''
+  for (const char of value) out += encodable(char) ? char : '?'
+  return out
+}
+
 function text(
   ctx: Ctx,
   value: string,
   x: number,
   y: number,
-  options: { size?: number; font?: PDFFont; color?: ReturnType<typeof rgb>; align?: 'left' | 'right' | 'center' } = {},
+  options: {
+    size?: number
+    font?: PDFFont
+    color?: ReturnType<typeof rgb>
+    align?: 'left' | 'right' | 'center'
+    /**
+     * Cut the value to this width, with an ellipsis, rather than drawing past it.
+     *
+     * Every box on this form has a right-hand edge and something printed beyond it — the
+     * air waybill column, the WARNING box, the hatched margin. A value drawn over its
+     * neighbour is worse than a visibly shortened one, because the reader cannot tell which
+     * box the overrun belongs to.
+     */
+    maxWidth?: number
+    /** What to call the value in a warning about it. Omit to shorten silently. */
+    label?: string
+  } = {},
 ): void {
   if (!value) return
   const font = options.font ?? ctx.regular
   const size = options.size ?? 8
-  const width = font.widthOfTextAtSize(value, size)
+  const safe = printable(value)
+  if (safe !== value && options.label) {
+    warnOnce(
+      ctx,
+      `${options.label}: "${value}" contains characters this form cannot print; they were replaced with "?". ` +
+        'Write the value in the Latin alphabet, or add it to the printed form by hand before signing.',
+    )
+  }
+  const drawn = options.maxWidth == null ? safe : clipToWidth(font, safe, options.maxWidth, size)
+  if (drawn !== safe && options.label) {
+    warnOnce(
+      ctx,
+      `${options.label}: "${safe}" is wider than its box. Printed as "${drawn}". Shorten it, or write the ` +
+        'rest on the form by hand before signing.',
+    )
+  }
+  const width = font.widthOfTextAtSize(drawn, size)
   const left = options.align === 'right' ? x - width : options.align === 'center' ? x - width / 2 : x
-  ctx.page.drawText(value, { x: left, y, size, font, color: options.color ?? BLACK })
+  ctx.page.drawText(drawn, { x: left, y, size, font, color: options.color ?? BLACK })
+}
+
+/**
+ * A warning raised at most once per declaration.
+ *
+ * Every box is drawn on every sheet, so a complaint about one value would otherwise be made
+ * once per page. Deduplicated by the whole message, which carries the value it is about.
+ */
+function warnOnce(ctx: Ctx, message: string): void {
+  if (!ctx.warnings.includes(message)) ctx.warnings.push(message)
 }
 
 /**
@@ -569,14 +653,14 @@ function text(
  * complete instruction that happens to end oddly, which on a shipping paper is worse than
  * an obviously truncated one — the ellipsis is what sends a reader back to the screen.
  */
-function clipToWidth(ctx: Ctx, value: string, maxWidth: number, size: number): string {
-  if (ctx.regular.widthOfTextAtSize(value, size) <= maxWidth) return value
+function clipToWidth(font: PDFFont, value: string, maxWidth: number, size: number): string {
+  if (font.widthOfTextAtSize(value, size) <= maxWidth) return value
   let cut = value.length
-  while (cut > 0 && ctx.regular.widthOfTextAtSize(`${value.slice(0, cut)}…`, size) > maxWidth) cut--
+  while (cut > 0 && font.widthOfTextAtSize(`${value.slice(0, cut)}…`, size) > maxWidth) cut--
   return `${value.slice(0, cut)}…`
 }
 
-/** A block of address lines, reporting anything too wide for its box rather than clipping it. */
+/** A block of address lines, each cut to its box and reported where cutting was needed. */
 function lines(
   ctx: Ctx,
   values: string[],
@@ -597,20 +681,18 @@ function lines(
   available = Infinity,
 ): void {
   // These blocks are drawn on every sheet, so each complaint would otherwise be made once
-  // per page about one address. Deduplicated here rather than over the whole list: two
-  // genuinely different truncated table rows can carry the same wording, and collapsing
-  // those would under-report truncation on a regulated form.
-  const warn = (message: string) => {
-    if (!ctx.warnings.includes(message)) ctx.warnings.push(message)
-  }
+  // per page about one address. Deduplicated rather than emitted per page: two genuinely
+  // different truncated table rows can carry the same wording, and `warnOnce` compares the
+  // whole message, which names the value it is about.
+  const warn = (message: string) => warnOnce(ctx, message)
 
   const fit = fitLines(values.length, available, size)
   values.forEach((value, i) => {
     if (i >= fit.capacity) return
-    if (ctx.regular.widthOfTextAtSize(value, fit.size) > maxWidth) {
-      warn(`${label}: "${value}" is wider than its box and may be clipped when printed.`)
-    }
-    text(ctx, value, x, top - i * fit.leading, { size: fit.size })
+    // Cut, not merely reported. `fitLines` condenses on line *count*; a single line wider
+    // than the box was drawn in full over the air waybill column beside it, under a warning
+    // that said it "may be clipped" while nothing clipped it.
+    text(ctx, value, x, top - i * fit.leading, { size: fit.size, maxWidth, label })
   })
 
   if (values.length > fit.capacity) {

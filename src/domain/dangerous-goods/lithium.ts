@@ -287,6 +287,21 @@ function sectionFor(
 }
 
 /**
+ * Whether the energy rating changes how this entry is treated at all.
+ *
+ * Almost always yes: every section boundary and every quantity limit turns on it. The
+ * exception is a standalone sodium ion battery, which travels under PI 976 — one packing
+ * instruction with no sections and a single 35 kg cargo limit, fully regulated whatever the
+ * rating. `sectionFor` short-circuits on that pair before it reads the band, so the
+ * classification comes out identical with a rating and without one, and blocking a
+ * consignment for want of a figure that changes nothing is a check that cannot be satisfied
+ * by doing anything useful.
+ */
+export function bandDeterminesTreatment(spec: BatterySpec): boolean {
+  return !(spec.chemistry === 'sodium-ion' && spec.configuration === 'standalone')
+}
+
+/**
  * Package net-quantity limits, by packing instruction and section.
  *
  * Sourced twice over where the materials allow it: the Section I and Section II figures are

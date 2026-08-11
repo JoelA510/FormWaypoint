@@ -247,6 +247,31 @@ describe('the battery mark exemption for equipment', () => {
   })
 })
 
+describe('a rating that decides nothing', () => {
+  it('does not block a standalone sodium ion consignment on a figure PI 976 ignores', () => {
+    // PI 976 has no sections and one 35 kg limit: the classification is identical with a
+    // rating and without one, so refusing to generate for want of it asked for a field that
+    // could not change the answer — under a message citing reliefs PI 976 does not have.
+    const unrated = consignment([
+      pkg('p1', [entry('e1', { chemistry: 'sodium-ion', wattHours: null })], {
+        unSpecificationMark: '4G/Y75/S/26/USA/+D02390',
+      }),
+    ])
+    const energy = check(assess(unrated), 'dg.energy')
+    expect(energy).toMatchObject({ severity: 'info', passed: true })
+    expect(energy!.detail).not.toContain('Section IB')
+    expect(assess(unrated).canGenerate).toBe(true)
+  })
+
+  it('still blocks a standalone lithium ion battery, where every threshold turns on it', () => {
+    const unrated = consignment([
+      pkg('p1', [entry('e1', { wattHours: null })], { unSpecificationMark: '4G/Y75/S/26/USA/+D02390' }),
+    ])
+    expect(check(assess(unrated), 'dg.energy')).toMatchObject({ severity: 'blocking', passed: false })
+    expect(assess(unrated).canGenerate).toBe(false)
+  })
+})
+
 describe('goods that may not fly at all', () => {
   it('blocks damaged or defective batteries, citing A154', () => {
     const result = assess(
