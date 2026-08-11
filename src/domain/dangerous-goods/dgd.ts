@@ -22,7 +22,7 @@
  *    that says "Page 1 of 1" on the first of two sheets is a defective document.
  */
 import { localDate } from '../../lib/report'
-import { groupByClassification, packageCountInConsignment, type DgAssessment, type EntryAssessment } from './assess'
+import { applyA181, groupByClassification, packageCountInConsignment, type DgAssessment } from './assess'
 import type { DgConsignment, Overpack } from './types'
 
 /**
@@ -288,38 +288,6 @@ export function buildDeclaration(consignment: DgConsignment, assessment: DgAsses
     lines,
     notes: declarationNotes(consignment, assessment),
   }
-}
-
-/**
- * Special provision A181, applied to the entries a package puts on the declaration.
- *
- * A package holding batteries both packed with equipment and contained in equipment *is*
- * described as packed with equipment — the package and the shipping paper alike, which is
- * what the `dg.a181` check tells the shipper. Printing the contained-in entry as its own
- * line contradicted that in the one place it is read: two entries on the paper, one of
- * them naming a description the provision says does not apply to this package.
- *
- * Only the description changes. The batteries are the same batteries and their mass is the
- * same mass — it lands on the packed-with line, which is where A181 puts the total.
- */
-function applyA181(entries: EntryAssessment[]): EntryAssessment[] {
-  // Matched per UN number, not once for the package. A box holding UN3481 packed with
-  // equipment beside UN3091 in both configurations has two provisions to apply, and
-  // resolving a single target relabelled the lithium ion entry and left the lithium metal
-  // one printing the description A181 says does not apply to it.
-  const packedWithByUn = new Map<string, EntryAssessment>()
-  for (const e of entries) {
-    if (e.entry.spec.configuration === 'packed-with-equipment' && !packedWithByUn.has(e.classification.unNumber)) {
-      packedWithByUn.set(e.classification.unNumber, e)
-    }
-  }
-  if (!packedWithByUn.size) return entries
-
-  return entries.map((e) => {
-    if (e.entry.spec.configuration !== 'contained-in-equipment') return e
-    const packedWith = packedWithByUn.get(e.classification.unNumber)
-    return packedWith ? { ...e, classification: packedWith.classification } : e
-  })
 }
 
 /** Box 18. The emergency contact first, because that is what it is read for. */

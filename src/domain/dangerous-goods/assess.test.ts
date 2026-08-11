@@ -368,6 +368,71 @@ describe('packages holding more than one entry', () => {
     expect(check(result, 'dg.a181')).toMatchObject({ severity: 'blocking', passed: false, expected: '≤ 5 kg' })
   })
 
+  it('does not gather two different UN numbers into one A181 total', () => {
+    // Special provision A181 is written per entry: lithium ion packed with equipment and
+    // lithium metal contained in equipment are two entries, each inside its own allowance,
+    // and neither is held both ways. Summing the package regardless of UN number blocked
+    // this at "6 kg against 5 kg" and nothing could be generated.
+    const result = assess(
+      consignment([
+        pkg('p1', [
+          entry('e1', { configuration: 'packed-with-equipment', wattHours: 90 }, { netWeightKgPerPackage: 3 }),
+          entry(
+            'e2',
+            { chemistry: 'lithium-metal', configuration: 'contained-in-equipment', lithiumContentG: 1 },
+            { netWeightKgPerPackage: 3, countPerPackage: 1, wattHourMarkedOnCase: false },
+          ),
+        ]),
+      ]),
+    )
+    expect(check(result, 'dg.a181')).toBeUndefined()
+    expect(result.checks.filter((c) => c.id.startsWith('dg.limit.p1')).every((c) => c.passed)).toBe(true)
+  })
+
+  it('leaves an unrelated entry out of the A181 total', () => {
+    // UN3481 is held both ways, so A181 gathers those two. The lithium metal line beside
+    // them is packed with equipment only — no A181 total of its own, and no part of the
+    // lithium ion one.
+    const result = assess(
+      consignment([
+        pkg('p1', [
+          entry('e1', { configuration: 'packed-with-equipment', wattHours: 90 }, { netWeightKgPerPackage: 2 }),
+          entry('e2', { configuration: 'contained-in-equipment', wattHours: 90 }, { netWeightKgPerPackage: 2, countPerPackage: 1 }),
+          entry(
+            'e3',
+            { chemistry: 'lithium-metal', configuration: 'packed-with-equipment', lithiumContentG: 1 },
+            { netWeightKgPerPackage: 3, wattHourMarkedOnCase: false },
+          ),
+        ]),
+      ]),
+    )
+    const a181 = result.checks.filter((c) => c.id.startsWith('dg.a181'))
+    expect(a181).toHaveLength(1)
+    expect(a181[0]).toMatchObject({ passed: true, actual: '4 kg' })
+  })
+
+  it('counts the lines A181 merges as the one line the declaration prints', () => {
+    // Prepared to Section I, so both entries are declared. A181 puts them on one line —
+    // the warning used to fire and describe a second line the paper does not have.
+    const result = assess(
+      consignment([
+        pkg('p1', [
+          entry(
+            'e1',
+            { configuration: 'packed-with-equipment', wattHours: 90 },
+            { netWeightKgPerPackage: 2, prepareToSectionI: true },
+          ),
+          entry(
+            'e2',
+            { configuration: 'contained-in-equipment', wattHours: 90 },
+            { netWeightKgPerPackage: 2, countPerPackage: 1, prepareToSectionI: true },
+          ),
+        ]),
+      ]),
+    )
+    expect(check(result, 'dg.shared-packaging')).toBeUndefined()
+  })
+
   it('warns that the packaging description belongs against the first entry only', () => {
     const result = assess(
       consignment([

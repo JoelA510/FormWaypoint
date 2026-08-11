@@ -128,6 +128,68 @@ export function groupByClassification(
 }
 
 /**
+ * Special provision A181, applied to the entries a package puts on the declaration.
+ *
+ * A package holding batteries both packed with equipment and contained in equipment *is*
+ * described as packed with equipment — the package and the shipping paper alike, which is
+ * what the `dg.a181` check tells the shipper. Printing the contained-in entry as its own
+ * line contradicted that in the one place it is read: two entries on the paper, one of
+ * them naming a description the provision says does not apply to this package.
+ *
+ * Only the description changes. The batteries are the same batteries and their mass is the
+ * same mass — it lands on the packed-with line, which is where A181 puts the total.
+ *
+ * It lives beside the checks rather than beside the renderer because both need it and they
+ * must not disagree: the shared-packaging warning counts the lines the declaration prints,
+ * and counting them before this ran claimed a second line the paper does not have.
+ */
+export function applyA181(entries: EntryAssessment[]): EntryAssessment[] {
+  // Matched per UN number, not once for the package. A box holding UN3481 packed with
+  // equipment beside UN3091 in both configurations has two provisions to apply, and
+  // resolving a single target relabelled the lithium ion entry and left the lithium metal
+  // one printing the description A181 says does not apply to it.
+  const packedWithByUn = new Map<string, EntryAssessment>()
+  for (const e of entries) {
+    if (e.entry.spec.configuration === 'packed-with-equipment' && !packedWithByUn.has(e.classification.unNumber)) {
+      packedWithByUn.set(e.classification.unNumber, e)
+    }
+  }
+  if (!packedWithByUn.size) return entries
+
+  return entries.map((e) => {
+    if (e.entry.spec.configuration !== 'contained-in-equipment') return e
+    const packedWith = packedWithByUn.get(e.classification.unNumber)
+    return packedWith ? { ...e, classification: packedWith.classification } : e
+  })
+}
+
+/**
+ * The UN numbers in a package that A181 speaks about, with the entries it gathers under
+ * each: the ones held both packed with and contained in equipment.
+ *
+ * Per UN number, because that is the scope of the provision. A box holding UN3481 in both
+ * configurations beside a standalone UN3480 line has one A181 total, and the standalone
+ * line is no part of it — summing the whole package failed consignments that comply.
+ */
+function a181Groups(entries: EntryAssessment[]): Map<string, EntryAssessment[]> {
+  const byUn = new Map<string, EntryAssessment[]>()
+  for (const e of entries) {
+    const configuration = e.entry.spec.configuration
+    if (configuration !== 'packed-with-equipment' && configuration !== 'contained-in-equipment') continue
+    const group = byUn.get(e.classification.unNumber)
+    if (group) group.push(e)
+    else byUn.set(e.classification.unNumber, [e])
+  }
+  for (const [un, group] of byUn) {
+    const both =
+      group.some((e) => e.entry.spec.configuration === 'packed-with-equipment') &&
+      group.some((e) => e.entry.spec.configuration === 'contained-in-equipment')
+    if (!both) byUn.delete(un)
+  }
+  return byUn
+}
+
+/**
  * How many physical packages of this description the consignment holds.
  *
  * `count` is per overpack for a package that sits in one, so the consignment total — which is
@@ -810,35 +872,43 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
   // Special provision A181 governs a package holding both packed-with and contained-in
   // batteries: the *total* mass is what the column limits apply to, and the package and the
   // shipping paper are both described as packed with equipment.
-  const configurations = new Set(entries.map((e) => e.entry.spec.configuration))
   // Not raised for a package already held for mixing Section II with fully regulated
   // goods. A181 says how a permissible package of both configurations is described; saying
   // it about a package the previous check is refusing gives two blocking instructions that
   // point opposite ways — describe it as packed with equipment, and take it apart.
   const mixesRegulation = declared.length > 0 && declared.length < classified.length
-  if (
-    !mixesRegulation &&
-    configurations.has('packed-with-equipment') &&
-    configurations.has('contained-in-equipment')
-  ) {
-    const lowest = assessment.effectiveLimitKg ?? Infinity
-    checks.push({
-      id: `dg.a181.${pkg.id}`,
-      severity: 'blocking',
-      title: `${label}: total mass under special provision A181`,
-      detail:
-        assessment.netWeightKg <= lowest
-          ? `This package holds batteries both packed with and contained in equipment. Under special provision ` +
-            `A181 the total mass of ${assessment.netWeightKg} kg is what the column limits apply to, and it is ` +
-            `within ${lowest} kg. The package and the shipping paper must both describe it as *packed with ` +
-            `equipment*, and both rule sets apply — not the more permissive one.`
-          : `This package holds batteries both packed with and contained in equipment. Under special provision ` +
-            `A181 the limits apply to the total mass, which is ${assessment.netWeightKg} kg against ${lowest} kg.`,
-      passed: assessment.netWeightKg <= lowest,
-      expected: `≤ ${lowest} kg`,
-      actual: `${assessment.netWeightKg} kg`,
-      refs: [pkg.id],
-    })
+  if (!mixesRegulation) {
+    for (const [unNumber, combined] of a181Groups(classified)) {
+      const total = kg(combined.reduce((sum, e) => sum + (e.entry.netWeightKgPerPackage ?? 0), 0))
+      // The instruction limit of the entries A181 gathers, and only those. The packaging's
+      // own authorization is not folded in here: it is measured against the whole package,
+      // batteries of every UN number in it, by `dg.package-authorization` above. Capping
+      // this total with it as well would report one failure as two, and would state a
+      // ceiling for these batteries that is not theirs.
+      const lowest = Math.min(
+        ...combined.map((e) =>
+          usingPassenger ? (e.classification.limits.passengerKg ?? Infinity) : e.classification.limits.cargoKg,
+        ),
+      )
+      checks.push({
+        id: `dg.a181.${pkg.id}.${unNumber}`,
+        severity: 'blocking',
+        title: `${label}: ${unNumber} total mass under special provision A181`,
+        detail:
+          total <= lowest
+            ? `This package holds ${unNumber} batteries both packed with and contained in equipment. Under ` +
+              `special provision A181 their total mass of ${total} kg is what the column limits apply to, and ` +
+              `it is within ${lowest} kg. The package and the shipping paper must both describe them as ` +
+              `*packed with equipment*, and both rule sets apply — not the more permissive one.`
+            : `This package holds ${unNumber} batteries both packed with and contained in equipment. Under ` +
+              `special provision A181 the limits apply to their total mass, which is ${total} kg against ` +
+              `${lowest} kg.`,
+        passed: total <= lowest,
+        expected: `≤ ${lowest} kg`,
+        actual: `${total} kg`,
+        refs: [pkg.id],
+      })
+    }
   }
 
   // --- Weights -----------------------------------------------------------
@@ -903,9 +973,13 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
   }
 
   // --- Shared packaging on the declaration -------------------------------
-  // Counted over the entries the declaration actually prints: Section II entries are
-  // excluded from it, so counting them here would claim lines the paper does not have.
-  const declaredGroups = [...groups.values()].filter((g) => g.classification.declarationRequired).length
+  // Counted the way the declaration builds its lines, by the same two functions in the same
+  // order: Section II entries are excluded from it, and A181 folds a contained-in entry
+  // into the packed-with line of its UN number. Counting the raw groups instead claimed a
+  // second line for a package that prints exactly one.
+  const declaredGroups = groupByClassification(
+    applyA181(entries.filter((e) => e.classification.declarationRequired)),
+  ).size
   if (declaredGroups > 1) {
     checks.push({
       id: `dg.shared-packaging.${pkg.id}`,
