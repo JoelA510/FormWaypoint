@@ -52,6 +52,14 @@ figure — is also in the source, as *"Packaging may dictate lower limits."*
 Table 965-IB and Student Guide fig. 5-29. This resolves the specification's unverified item on
 *"the standalone Section IB limits which differ from the packed-with and contained-in figures."*
 
+**The Section II limit is 5 kg per package on either aircraft type.** The Section II tables
+(Student Guide figs. 5-26 and 5-27) state a single 5 kg maximum net quantity of cells or
+batteries per package, with no cargo-aircraft relief; the 35 kg figure in column L of the List
+of Dangerous Goods belongs to the Section I entries. An earlier revision of the classification
+table transcribed 35 kg into Section II's cargo column — a package could pass at 2.4× the real
+ceiling — and has been corrected, with the README's own table ("Section II — excepted, 5 kg")
+as it always read. A shipper who needs more than 5 kg in one package prepares to Section I.
+
 **Section IB is excepted from UN specification packaging and from nothing else.** Special
 provision A802 says so expressly: *"This does not apply … for lithium batteries prepared in
 accordance with Section IB of Packing Instructions 965 or 968."*

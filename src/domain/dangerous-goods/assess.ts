@@ -108,6 +108,26 @@ export function classificationKey(classification: AirClassification): string {
 }
 
 /**
+ * A package's entries partitioned into regulatory entries, with the net battery weight of
+ * each. This is the partition the per-entry quantity limits are measured against *and* the
+ * partition the declaration prints one line per — one function, so the line the checks
+ * validated is always the line that prints.
+ */
+export function groupByClassification(
+  entries: EntryAssessment[],
+): Map<string, { classification: AirClassification; weightKg: number }> {
+  const groups = new Map<string, { classification: AirClassification; weightKg: number }>()
+  for (const { entry, classification } of entries) {
+    const key = classificationKey(classification)
+    const group = groups.get(key)
+    const weight = entry.netWeightKgPerPackage ?? 0
+    if (group) group.weightKg += weight
+    else groups.set(key, { classification, weightKg: weight })
+  }
+  return groups
+}
+
+/**
  * How many physical packages of this description the consignment holds.
  *
  * `count` is per overpack for a package that sits in one, so the consignment total — which is
@@ -135,7 +155,7 @@ export function assess(consignment: DgConsignment): DgAssessment {
     const entries: EntryAssessment[] = pkg.entries.map((entry) => ({
       entry,
       packageId: pkg.id,
-      classification: classifyForAir(entry.spec),
+      classification: classifyForAir(entry.spec, { prepareToSectionI: entry.prepareToSectionI }),
     }))
     for (const { classification } of entries) {
       const key = classificationKey(classification)
@@ -169,12 +189,22 @@ export function assess(consignment: DgConsignment): DgAssessment {
     ? 'cargo-aircraft-only'
     : 'passenger-and-cargo'
 
+  // Computed once and passed down: the checks tell the shipper what the air waybill must
+  // carry, and the declaration notes and the bench checklist print the same strings. Two
+  // copies of the expression is two things to keep in step, and the disagreement would be
+  // silent.
+  const airWaybillStatements = [
+    ...new Set(classifications.map((c) => airWaybillStatement(c, consignment.aircraft))),
+  ]
+
   checks.push(...structureChecks(consignment))
   for (const assessment of packages) {
     checks.push(...entryChecks(assessment))
     checks.push(...packageChecks(assessment, consignment))
   }
-  checks.push(...consignmentChecks(consignment, packages, classifications, requiredAircraft, declarationRequired))
+  checks.push(
+    ...consignmentChecks(consignment, packages, airWaybillStatements, requiredAircraft, declarationRequired),
+  )
 
   const grossStated = packages.every((p) => p.pkg.grossWeightKg != null)
 
@@ -183,7 +213,7 @@ export function assess(consignment: DgConsignment): DgAssessment {
     classifications,
     requiredAircraft,
     declarationRequired,
-    airWaybillStatements: [...new Set(classifications.map(airWaybillStatement))],
+    airWaybillStatements,
     checks,
     canGenerate: checks.length > 0 && checks.every((c) => c.severity !== 'blocking' || c.passed),
     totals: {
@@ -600,16 +630,9 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
   // --- Net quantity per package ------------------------------------------
   // Grouped by regulatory entry, because that is what the limit is written against: two
   // different UN numbers in one box each get their own allowance.
-  const groups = new Map<string, { classification: AirClassification; weight: number }>()
-  for (const { entry, classification } of entries) {
-    const key = classificationKey(classification)
-    const group = groups.get(key)
-    const weight = entry.netWeightKgPerPackage ?? 0
-    if (group) group.weight += weight
-    else groups.set(key, { classification, weight })
-  }
+  const groups = groupByClassification(entries)
 
-  for (const [key, { classification, weight }] of groups) {
+  for (const [key, { classification, weightKg: weight }] of groups) {
     const instructionLimit = usingPassenger ? classification.limits.passengerKg : classification.limits.cargoKg
     // A forbidden aircraft type is reported by the check above; repeating it as a quantity
     // failure would say the same thing twice in different words.
@@ -618,6 +641,16 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
     // so the minimum of the two is a number without anything having to claim it is one.
     const limit = Math.min(instructionLimit, pkg.packagingAuthorizationLimitKg ?? Infinity)
     const authorizationBinds = limit < instructionLimit
+    // Whether the A99 note below will actually be raised. Computed here so the remedy text
+    // can point at it only when it exists: A99 relieves the 35 kg cargo aircraft maximum,
+    // so an entry that does not carry that allowance — a Section IB or Section II package,
+    // or anything on a passenger booking — gets no note, and must not be sent looking for
+    // one.
+    const a99Applies =
+      kg(weight) > A99_THRESHOLD_KG &&
+      !authorizationBinds &&
+      !usingPassenger &&
+      classification.limits.cargoKg >= A99_THRESHOLD_KG
     checks.push({
       id: `dg.limit.${pkg.id}.${key}`,
       severity: 'blocking',
@@ -636,13 +669,46 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
               ? " imposed by this packaging's own authorization. A larger outer packaging is not the remedy — " +
                 'split the batteries across more packages, or use a design type tested for the weight.'
               : ` for PI ${classification.packingInstructionLabel}. ` +
-                (classification.limits.cargoKg > limit
-                  ? 'Split the batteries across more packages, or offer the consignment as cargo aircraft only.'
-                  : kg(weight) > A99_THRESHOLD_KG
-                    ? 'Split the batteries across more packages. The alternative is special provision A99, ' +
-                      'which is not a paperwork step — see the A99 note below.'
-                    : 'Split the batteries across more packages. This is below the 35 kg mark, so special ' +
-                      'provision A99 is not an alternative here.')),
+                (classification.section === 'II'
+                  ? // Section II is a relief with conditions, and its 5 kg ceiling is one of
+                    // them; the same goods over it are prepared to Section I of the same
+                    // packing instruction. Named as the real alternative it is, with what it
+                    // costs — but only where it would actually help. Section I relieves
+                    // nothing on a passenger aircraft (5 kg either way), and above 35 kg it
+                    // does not fit either, so in both cases splitting is the only answer and
+                    // offering Section I would send someone to do UN-specification packaging
+                    // work for a package that still will not go.
+                    // Over 35 kg is decided first: no route this branch could offer — not
+                    // Section I, not a change of aircraft — reaches it, so a remedy naming
+                    // a 35 kg allowance would be wrong on a passenger booking too.
+                    (kg(weight) > A99_THRESHOLD_KG
+                      ? 'Split the batteries across more packages. Section I of the same packing instruction ' +
+                        'allows 35 kg on a cargo aircraft, which this package is over as well' +
+                        (a99Applies
+                          ? '; beyond that is special provision A99, which is not a paperwork step — see the A99 ' +
+                            'note below.'
+                          : '. Beyond 35 kg on a cargo aircraft the only route is special provision A99, which ' +
+                            'takes approval from two authorities.')
+                      : usingPassenger
+                        ? 'Split the batteries across more packages. Section I would not help here: its passenger ' +
+                          'aircraft allowance is the same 5 kg. Offering the consignment as cargo aircraft only ' +
+                          'and preparing this package to Section I would raise it to 35 kg.'
+                        : 'Either split the batteries across more packages, or prepare this package to Section I ' +
+                          `of PI ${classification.packingInstruction}, where the cargo aircraft allowance is ` +
+                          '35 kg. Section I is not a paperwork switch: it means UN specification packaging, the ' +
+                          'Class 9 label, a Shipper’s Declaration and full dangerous goods training. Record it ' +
+                          'against the battery entry once it is true of the box.')
+                  : classification.limits.cargoKg > limit
+                    ? 'Split the batteries across more packages, or offer the consignment as cargo aircraft only.'
+                    : kg(weight) > A99_THRESHOLD_KG
+                      ? a99Applies
+                        ? 'Split the batteries across more packages. The alternative is special provision A99, ' +
+                          'which is not a paperwork step — see the A99 note below.'
+                        : 'Split the batteries across more packages. Special provision A99 relieves the 35 kg ' +
+                          'cargo aircraft maximum, not this entry’s own lower ceiling, so it is not an ' +
+                          'alternative here.'
+                      : 'Split the batteries across more packages. This is below the 35 kg mark, so special ' +
+                        'provision A99 is not an alternative here.')),
       passed: kg(weight) <= limit,
       expected: `≤ ${limit} kg`,
       actual: `${kg(weight)} kg`,
@@ -652,8 +718,12 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
     // A99 is reachable by any sufficiently heavy battery, qualified or not, and it is the
     // step people underestimate: two approvals, only one of which the shipper can obtain,
     // and carriers that refuse approved shipments outright. It is gated on the 35 kg the
-    // provision actually names, not on merely being over the section's own ceiling.
-    if (kg(weight) > A99_THRESHOLD_KG && !authorizationBinds && classification.limits.cargoKg <= limit) {
+    // provision actually names, not on merely being over the section's own ceiling — and
+    // on the entry already carrying the full 35 kg cargo allowance. A99 relieves the cargo
+    // aircraft maximum; raising it for a Section II package (5 kg either way) or on a
+    // passenger booking would point at an approval that does not apply, when the answer is
+    // Section I or a cargo aircraft first.
+    if (a99Applies) {
       checks.push({
         id: `dg.a99.${pkg.id}.${key}`,
         severity: 'warning',
@@ -671,6 +741,64 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
         refs: [pkg.id],
       })
     }
+  }
+
+  // --- Mixed regulation in one box ---------------------------------------
+  // A package holding Section II batteries beside fully regulated ones has no honest
+  // declaration: the Section II relief is a property of the *package*, and it does not
+  // survive in one that must be prepared fully regulated — while listing a Section II
+  // entry on the declaration would declare goods the declaration does not cover, and
+  // omitting it would sign a paper that understates what is in the box. The training
+  // materials do not work this case, so this workflow refuses it rather than guessing.
+  // Judged on entries whose energy band is known. An entry with no rating is
+  // conservatively fully regulated, and counting it here would report a packing conflict
+  // when the real defect is the unentered watt-hour figure — which `dg.energy` is already
+  // blocking on, in the words that fix it.
+  //
+  // Keyed on the band rather than on `section`, because a null section does not mean
+  // "undetermined": PI 976 has no sections at all, and every standalone sodium ion battery
+  // under it is fully regulated. Excluding those would let one share a package with
+  // Section II goods and produce a declaration that omits half the box.
+  const classified = entries.filter((e) => e.classification.band !== 'unknown')
+  const declared = classified.filter((e) => e.classification.declarationRequired)
+  if (declared.length && declared.length < classified.length) {
+    checks.push({
+      id: `dg.mixed-regulation.${pkg.id}`,
+      severity: 'blocking',
+      title: `${label}: Section II and fully regulated batteries in one package`,
+      detail:
+        'This package mixes fully regulated entries with Section II ones, and no declaration this workflow can ' +
+        'produce describes it truthfully — the Section II relief does not survive in a fully regulated package, ' +
+        'and a Section II entry does not belong on a Shipper’s Declaration. Split the Section II batteries into ' +
+        'their own package.',
+      passed: false,
+      refs: [pkg.id],
+    })
+  }
+
+  // --- The packaging's own ceiling ---------------------------------------
+  // The instruction limits above are per regulatory entry — two UN numbers in one box each
+  // get their own allowance — but a tested design type holds what it was proved to hold,
+  // whatever is inside it. Applied per entry only, a box authorized for 6 kg passes twice
+  // at 5 kg apiece and travels with 10 kg in it.
+  const authorization = pkg.packagingAuthorizationLimitKg
+  if (authorization != null && entries.length) {
+    const within = assessment.netWeightKg <= authorization
+    checks.push({
+      id: `dg.package-authorization.${pkg.id}`,
+      severity: 'blocking',
+      title: `${label}: total net weight within the packaging’s authorization`,
+      detail: within
+        ? `${assessment.netWeightKg} kg of batteries in a package authorized for ${authorization} kg. The ` +
+          'per-entry allowances above are regulatory maxima; this is what this design type was tested to hold.'
+        : `${assessment.netWeightKg} kg of batteries in a package authorized for ${authorization} kg. Each entry ` +
+          'may be inside its own allowance and the package still over its tested weight — the design type ' +
+          'holds what it was proved to hold, whatever the mix inside it.',
+      passed: within,
+      expected: `≤ ${authorization} kg`,
+      actual: `${assessment.netWeightKg} kg`,
+      refs: [pkg.id],
+    })
   }
 
   // --- Combined contents -------------------------------------------------
@@ -754,13 +882,16 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
   }
 
   // --- Shared packaging on the declaration -------------------------------
-  if (groups.size > 1 && assessment.declarationRequired) {
+  // Counted over the entries the declaration actually prints: Section II entries are
+  // excluded from it, so counting them here would claim lines the paper does not have.
+  const declaredGroups = [...groups.values()].filter((g) => g.classification.declarationRequired).length
+  if (declaredGroups > 1) {
     checks.push({
       id: `dg.shared-packaging.${pkg.id}`,
       severity: 'warning',
       title: `${label}: more than one entry in one package`,
       detail:
-        `This package holds ${groups.size} separate dangerous goods entries, so it produces ${groups.size} lines ` +
+        `This package holds ${declaredGroups} separate dangerous goods entries, so it produces ${declaredGroups} lines ` +
         'on the declaration. The number and type of packaging is stated against the first of them and the ' +
         'others carry the net quantity alone, which is what the generated declaration does. Confirm the ' +
         'wording against the packing instructions before it is signed — the training materials work only the ' +
@@ -839,7 +970,8 @@ function weightChecks(assessment: PackageAssessment): CheckResult {
 function consignmentChecks(
   consignment: DgConsignment,
   packages: PackageAssessment[],
-  classifications: AirClassification[],
+  /** The statements `assess` computed, so the check and the assessment cannot disagree. */
+  statements: string[],
   requiredAircraft: AircraftLimitation,
   declarationRequired: boolean,
 ): CheckResult[] {
@@ -889,14 +1021,22 @@ function consignmentChecks(
     id: 'dg.aircraft',
     severity: 'info',
     title: 'Aircraft limitation',
-    detail:
-      requiredAircraft === 'cargo-aircraft-only'
-        ? 'The contents restrict this consignment to cargo aircraft only. The Cargo Aircraft Only label goes on ' +
-          'the same surface as the Class 9 label, and the passenger aircraft box on the declaration is struck out.'
-        : consignment.aircraft === 'cargo-aircraft-only'
-          ? 'The contents would permit a passenger aircraft, and the consignment is being offered as cargo ' +
-            'aircraft only. The lower passenger limits do not apply, and the Cargo Aircraft Only label is required.'
-          : 'The contents permit carriage on passenger and cargo aircraft, within the 5 kg per package limit.',
+    // The Cargo Aircraft Only label marks goods that may not travel on a passenger
+    // aircraft. It follows the declaration: a fully regulated package offered CAO has its
+    // passenger box struck out and carries the label, while a Section II package has no
+    // declaration and stays permitted on passenger aircraft, so labelling it would
+    // misstate what is in the box. Both CAO branches therefore have to say *which*
+    // packages — unqualified, "the CAO label goes on" labels the excepted ones too.
+    detail: cargoOnlyLabelWording(
+      requiredAircraft,
+      consignment.aircraft,
+      declarationRequired,
+      // A package with no entries in it is not an excepted package — it is an empty
+      // description, which `dg.structure` is already holding the consignment on. Saying
+      // "the Section II packages carry no Class 9 label" when there are none names goods
+      // that are not in the consignment.
+      packages.some((p) => p.entries.length > 0 && !p.declarationRequired),
+    ),
     passed: true,
   })
 
@@ -970,7 +1110,6 @@ function consignmentChecks(
   }
 
   // --- Air waybill -------------------------------------------------------
-  const statements = [...new Set(classifications.map(airWaybillStatement))]
   if (statements.length) {
     checks.push({
       id: 'dg.awb-statement',
@@ -1011,9 +1150,53 @@ function consignmentChecks(
   }
 
   // --- Overpacks ---------------------------------------------------------
-  checks.push(...overpackChecks(consignment))
+  checks.push(...overpackChecks(consignment, packages))
 
   return checks
+}
+
+/**
+ * What the aircraft-limitation check says about the Cargo Aircraft Only label.
+ *
+ * Split out because the wording turns on three independent facts — whether the goods force
+ * cargo aircraft or the shipper chose it, whether anything needs a declaration, and whether
+ * excepted packages are travelling alongside — and a nested conditional over all three,
+ * inline in the check literal, was where the label's scope got lost.
+ */
+function cargoOnlyLabelWording(
+  requiredAircraft: AircraftLimitation,
+  offeredAircraft: AircraftLimitation,
+  declarationRequired: boolean,
+  hasExceptedPackages: boolean,
+): string {
+  if (requiredAircraft !== 'cargo-aircraft-only' && offeredAircraft !== 'cargo-aircraft-only') {
+    return 'The contents permit carriage on passenger and cargo aircraft, within the 5 kg per package limit.'
+  }
+
+  const opening =
+    requiredAircraft === 'cargo-aircraft-only'
+      ? 'The contents restrict this consignment to cargo aircraft only. '
+      : 'The contents would permit a passenger aircraft, and the consignment is being offered as cargo ' +
+        'aircraft only. '
+
+  if (!declarationRequired) {
+    return (
+      opening +
+      'These excepted Section II packages remain permitted on passenger aircraft, so the Cargo Aircraft Only ' +
+      'label is not applied — the routing is a booking choice, not a property of the goods.'
+    )
+  }
+
+  return (
+    opening +
+    'The passenger aircraft box on the declaration is struck out, and the Cargo Aircraft Only label goes on the ' +
+    'same surface as the Class 9 label' +
+    (hasExceptedPackages
+      ? ' — on the fully regulated packages only. The Section II packages in this consignment carry no Class 9 ' +
+        'label and no Cargo Aircraft Only label; they remain permitted on passenger aircraft whatever routing ' +
+        'the consignment takes.'
+      : '.')
+  )
 }
 
 /**
@@ -1024,24 +1207,38 @@ function consignmentChecks(
  * packages inside have to be visible or reproduced, and the word OVERPACK has to be on the
  * outside. None of them is a formatting concern.
  */
-function overpackChecks(consignment: DgConsignment): CheckResult[] {
+function overpackChecks(consignment: DgConsignment, packages: PackageAssessment[]): CheckResult[] {
   const used = consignment.overpacks.filter((o) => consignment.packages.some((p) => p.overpackId === o.id))
   if (!used.length) return []
 
   const checks: CheckResult[] = []
   const unmarked = used.filter((o) => !o.marks.trim())
+  // An overpack holding nothing but excepted Section II packages has no entry on the
+  // declaration — there is no declaration line for goods the declaration does not cover —
+  // so the identifier cannot be repeated there and it would be wrong to ask for it. The
+  // mark still goes on the physical overpack, which the marks list already calls for.
+  const declaredIds = new Set(
+    packages.filter((p) => p.declarationRequired).map((p) => p.pkg.overpackId).filter(Boolean),
+  )
+  const onDeclaration = used.filter((o) => declaredIds.has(o.id))
 
   checks.push({
     id: 'dg.overpack-identifier',
     severity: 'blocking',
     title: 'Every overpack carries an identification mark',
     detail: unmarked.length
-      ? 'Each overpack needs its own identifier — #A001, #A002 — marked on the physical overpack and repeated ' +
-        'identically in the declaration entry, with the battery net quantity assigned to that identifier. ' +
-        'Identifiers that do not match between the box and the paper is the single most frequent cause of a ' +
-        'correction cycle on these shipments.'
-      : `${used.length} overpack description${used.length === 1 ? '' : 's'}, each identified. The identifier on ` +
-        'the box and the identifier on the declaration must read the same.',
+      ? 'Each overpack needs its own identifier — #A001, #A002 — marked on the physical overpack' +
+        (onDeclaration.length
+          ? ' and repeated identically in the declaration entry, with the battery net quantity assigned to that ' +
+            'identifier. Identifiers that do not match between the box and the paper is the single most frequent ' +
+            'cause of a correction cycle on these shipments.'
+          : '. These overpacks hold only excepted Section II packages, so no declaration entry states them; the ' +
+            'mark on the box is the whole of it.')
+      : `${used.length} overpack description${used.length === 1 ? '' : 's'}, each identified. ` +
+        (onDeclaration.length
+          ? 'The identifier on the box and the identifier on the declaration must read the same.'
+          : 'These hold only excepted Section II packages, so the identifier appears on the box alone — there is ' +
+            'no declaration entry to match it against.'),
     passed: unmarked.length === 0,
   })
 

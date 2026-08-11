@@ -156,6 +156,10 @@ export function DangerousGoodsPanel({
   }, [consignment, assessment])
 
   async function generateDeclaration() {
+    // Guarded like the checklist below: each run appends a retention record, and a
+    // double-click that writes two files is noise while one that writes two audit rows is
+    // misinformation.
+    if (busy) return
     setBusy(true)
     setError(null)
     setWarnings([])
@@ -1138,6 +1142,14 @@ function EntryEditor({
           onChange={(next) => onChange({ buttonCellsInEquipment: next })}
           hint="Including circuit boards."
         />
+        {entry.spec.configuration !== 'standalone' ? (
+          <Toggle
+            label="Prepared to Section I"
+            checked={entry.prepareToSectionI}
+            onChange={(next) => onChange({ prepareToSectionI: next })}
+            hint="For a package over the 5 kg Section II limit. UN specification packaging, Class 9 label, declaration and full dangerous goods training."
+          />
+        ) : null}
       </div>
     </div>
   )

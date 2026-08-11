@@ -124,3 +124,38 @@ describe('combined Section II wording', () => {
     expect(buildChecklist(shipment, assess(shipment), '2026-08-06')).not.toContain('may be combined into one')
   })
 })
+
+describe('a package holding loose cells beside equipment', () => {
+  it('prints both the inner-packaging line and the equipment-securing line', () => {
+    const mixed = consignment([
+      pkg('p1', [
+        entry('e1', { configuration: 'packed-with-equipment', wattHours: 90 }, { netWeightKgPerPackage: 1 }),
+        entry('e2', { configuration: 'contained-in-equipment', wattHours: 90 }, {
+          netWeightKgPerPackage: 1,
+          countPerPackage: 1,
+        }),
+      ]),
+    ])
+    const markdown = buildChecklist(mixed, assess(mixed), '2026-08-06')
+    // Both are true of the same box; an if/else dropped the second.
+    expect(markdown).toContain('- [ ] Inner packaging that completely encloses each cell or battery')
+    expect(markdown).toContain('- [ ] Equipment secured against movement')
+  })
+})
+
+describe('the checklist states each entry against its own allowance', () => {
+  it('does not hold a 10 kg UN3480 line to the 2.5 kg its UN3090 neighbour is allowed', () => {
+    const shipment = consignment([
+      pkg('p1', [
+        entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 8 }),
+        entry('e2', { chemistry: 'lithium-metal', lithiumContentG: 1 }, {
+          netWeightKgPerPackage: 2,
+          wattHourMarkedOnCase: false,
+        }),
+      ]),
+    ])
+    const markdown = buildChecklist(shipment, assess(shipment), '2026-08-06')
+    expect(markdown).toContain('UN3480: 8 kg in this package, at or below the 10 kg')
+    expect(markdown).toContain('UN3090: 2 kg in this package, at or below the 2.5 kg')
+  })
+})

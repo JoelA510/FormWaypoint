@@ -114,7 +114,8 @@ describe('batteries with equipment', () => {
     expect(c.declarationRequired).toBe(false)
     expect(c.fullyRegulated).toBe(false)
     expect(c.training).toBe('adequate-instruction')
-    expect(c.limits).toMatchObject({ passengerKg: 5, cargoKg: 35 })
+    // 5 kg on either aircraft: Section II has no cargo relief — 35 kg is Section I CAO.
+    expect(c.limits).toMatchObject({ passengerKg: 5, cargoKg: 5 })
     expect(c.aircraft).toBe('passenger-and-cargo')
   })
 
@@ -259,5 +260,39 @@ describe('standalone sodium ion', () => {
       classifyForAir(spec({ chemistry: 'sodium-ion', configuration: 'packed-with-equipment', wattHours: 60 }))
         .stateOfCharge,
     ).toBeNull()
+  })
+})
+
+describe('the Section I route for a heavy package of small batteries', () => {
+  it('escalates Section II to Section I when the shipper records it, restoring the 35 kg cargo allowance', () => {
+    const small = spec({ configuration: 'packed-with-equipment', wattHours: 96 })
+    expect(classifyForAir(small).packingInstructionLabel).toBe('966 II')
+
+    const escalated = classifyForAir(small, { prepareToSectionI: true })
+    expect(escalated.packingInstructionLabel).toBe('966 I')
+    expect(escalated.limits).toMatchObject({ passengerKg: 5, cargoKg: 35 })
+    // Section I is fully regulated: a declaration, the Class 9 label and DG training.
+    expect(escalated.declarationRequired).toBe(true)
+    expect(escalated.fullyRegulated).toBe(true)
+    expect(escalated.training).toBe('dangerous-goods')
+    expect(escalated.unSpecificationPackagingRequired).toBe(true)
+  })
+
+  it('never relieves anything — a large battery stays Section I, a standalone stays IB', () => {
+    const large = classifyForAir(spec({ configuration: 'packed-with-equipment', wattHours: 300 }), {
+      prepareToSectionI: true,
+    })
+    expect(large.packingInstructionLabel).toBe('966 I')
+    // Standalone has no Section II to escalate from; the flag leaves it where it was.
+    const standalone = classifyForAir(spec({ wattHours: 95 }), { prepareToSectionI: true })
+    expect(standalone.packingInstructionLabel).toBe('965 IB')
+    expect(standalone.limits.cargoKg).toBe(10)
+  })
+
+  it('cites the sodium tables for a sodium ion Section II entry, not the lithium ones', () => {
+    const sodium = classifyForAir(spec({ chemistry: 'sodium-ion', configuration: 'contained-in-equipment', wattHours: 50 }))
+    expect(sodium.packingInstructionLabel).toBe('978 II')
+    expect(sodium.limits.source).toContain('5-30')
+    expect(sodium.limits.source).not.toContain('5-26')
   })
 })

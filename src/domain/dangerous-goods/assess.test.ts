@@ -101,6 +101,53 @@ describe('the workbook power drills', () => {
     const result = assess(drills)
     expect(check(result, 'dg.limit.p1')).toMatchObject({ passed: true, actual: '1.5 kg' })
   })
+
+  it('holds Section II to 5 kg on a cargo aircraft — the 35 kg relief belongs to Section I', () => {
+    const heavy = consignment([
+      pkg('p1', [
+        entry('e1', { configuration: 'contained-in-equipment', wattHours: 76 }, {
+          netWeightKgPerPackage: 12,
+          countPerPackage: 24,
+          stateOfChargePercent: 20,
+        }),
+      ]),
+    ])
+    // The default consignment is cargo aircraft only, and 12 kg would have passed against
+    // the mis-transcribed 35 kg figure while being 2.4x over the real Section II ceiling.
+    const result = assess(heavy)
+    expect(check(result, 'dg.limit.p1')).toMatchObject({ passed: false, expected: '≤ 5 kg', actual: '12 kg' })
+    expect(result.canGenerate).toBe(false)
+  })
+
+  it('does not require the CAO label on Section II packages offered cargo-only by choice', () => {
+    const result = assess(drills)
+    expect(check(result, 'dg.aircraft')!.detail).toContain('label is not applied')
+    for (const p of result.packages) {
+      expect(p.hazardCommunication.join(' ')).not.toContain('Cargo Aircraft Only')
+    }
+  })
+})
+
+describe('the air waybill statement follows the declaration, not just the goods', () => {
+  const regulated = (aircraft: 'passenger-and-cargo' | 'cargo-aircraft-only') =>
+    consignment(
+      [pkg('p1', [entry('e1', { configuration: 'packed-with-equipment', wattHours: 150 }, { netWeightKgPerPackage: 3 })])],
+      { aircraft },
+    )
+
+  it('carries the CAO annotation when a passenger-permitted consignment is offered cargo-only', () => {
+    // The declaration strikes the passenger box and the packages carry the CAO label, so
+    // an AWB statement without the annotation would contradict the paper it points at.
+    expect(assess(regulated('cargo-aircraft-only')).airWaybillStatements).toEqual([
+      'Dangerous goods as per associated Shipper’s Declaration — Cargo Aircraft Only',
+    ])
+  })
+
+  it('omits the annotation when the same goods are offered on passenger aircraft', () => {
+    expect(assess(regulated('passenger-and-cargo')).airWaybillStatements).toEqual([
+      'Dangerous goods as per associated Shipper’s Declaration',
+    ])
+  })
 })
 
 describe('the battery mark exemption for equipment', () => {
@@ -284,15 +331,27 @@ describe('packages holding more than one entry', () => {
   it('gives each UN number its own allowance, and applies A181 to the total', () => {
     const combined = consignment([
       pkg('p1', [
+        entry('e1', { configuration: 'packed-with-equipment', wattHours: 90 }, { netWeightKgPerPackage: 2 }),
+        entry('e2', { configuration: 'contained-in-equipment', wattHours: 90 }, { netWeightKgPerPackage: 2.5, countPerPackage: 1 }),
+      ]),
+    ])
+    const result = assess(combined)
+    // 2 and 2.5 kg, each inside its own 5 kg Section II allowance...
+    expect(result.checks.filter((c) => c.id.startsWith('dg.limit.p1')).every((c) => c.passed)).toBe(true)
+    // ...and 4.5 kg in total, inside it too.
+    expect(check(result, 'dg.a181')).toMatchObject({ passed: true, actual: '4.5 kg' })
+  })
+
+  it('holds the A181 total to the 5 kg Section II ceiling, which has no cargo relief', () => {
+    const combined = consignment([
+      pkg('p1', [
         entry('e1', { configuration: 'packed-with-equipment', wattHours: 90 }, { netWeightKgPerPackage: 3 }),
         entry('e2', { configuration: 'contained-in-equipment', wattHours: 90 }, { netWeightKgPerPackage: 3, countPerPackage: 1 }),
       ]),
     ])
-    const result = assess(combined)
-    // 3 kg each, both inside their own 35 kg cargo allowance...
-    expect(result.checks.filter((c) => c.id.startsWith('dg.limit.p1')).every((c) => c.passed)).toBe(true)
-    // ...and 6 kg in total, inside it too.
-    expect(check(result, 'dg.a181')).toMatchObject({ passed: true, actual: '6 kg' })
+    // Each entry is inside its own 5 kg allowance, but under A181 the 6 kg total is what
+    // the limit applies to — and on a cargo aircraft the Section II ceiling is still 5 kg.
+    expect(check(assess(combined), 'dg.a181')).toMatchObject({ passed: false, actual: '6 kg', expected: '≤ 5 kg' })
   })
 
   it('blocks a combined package whose total mass exceeds the lowest limit', () => {
@@ -628,5 +687,241 @@ describe('a package description covering no packages', () => {
     const result = assess(consignment([pkg('p1', [entry('e1', { wattHours: 95 })], { count: 0 })]))
     expect(check(result, 'dg.package-count')).toMatchObject({ severity: 'blocking', passed: false })
     expect(result.canGenerate).toBe(false)
+  })
+})
+
+describe('a package mixing Section II with fully regulated batteries', () => {
+  const mixed = consignment([
+    pkg('p1', [
+      entry('e1', { configuration: 'packed-with-equipment', wattHours: 90 }, { netWeightKgPerPackage: 1 }),
+      entry('e2', { configuration: 'contained-in-equipment', wattHours: 300 }, {
+        netWeightKgPerPackage: 3,
+        countPerPackage: 1,
+      }),
+    ]),
+  ])
+
+  it('is refused: no declaration this workflow can produce describes it truthfully', () => {
+    const result = assess(mixed)
+    expect(check(result, 'dg.mixed-regulation.p1')).toMatchObject({ severity: 'blocking', passed: false })
+    expect(result.canGenerate).toBe(false)
+  })
+
+  it('counts only the declared entries when warning about shared packaging', () => {
+    // One declared entry means one line on the declaration, so there is nothing to warn
+    // about — the warning used to fire and claim two lines the paper never had.
+    expect(check(assess(mixed), 'dg.shared-packaging.p1')).toBeUndefined()
+  })
+})
+
+describe('the Section I route out of the 5 kg Section II ceiling', () => {
+  const heavy = (prepareToSectionI: boolean) =>
+    consignment([
+      pkg('p1', [
+        entry('e1', { configuration: 'packed-with-equipment', wattHours: 96 }, {
+          netWeightKgPerPackage: 12,
+          prepareToSectionI,
+        }),
+      ], { unSpecificationMark: '4G/Y30/S/26' }),
+    ])
+
+  it('names Section I as the alternative rather than leaving "split it" as the only way out', () => {
+    const detail = check(assess(heavy(false)), 'dg.limit.p1')!.detail
+    expect(detail).toContain('Section I of PI 966')
+    expect(detail).toContain('35 kg')
+  })
+
+  it('accepts the same package once the shipper records that it was prepared to Section I', () => {
+    const result = assess(heavy(true))
+    expect(check(result, 'dg.limit.p1')).toMatchObject({ passed: true, expected: '≤ 35 kg' })
+    // And it is fully regulated now: a declaration, and the CAO consignment labels it.
+    expect(result.declarationRequired).toBe(true)
+    expect(result.packages[0].hazardCommunication.join(' ')).toContain('Class 9')
+  })
+})
+
+describe('a mixed consignment offered cargo-aircraft-only', () => {
+  const mixed = consignment([
+    pkg('p1', [entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 2 })]),
+    pkg('p2', [
+      entry('e2', { configuration: 'contained-in-equipment', wattHours: 76 }, {
+        netWeightKgPerPackage: 1.5,
+        countPerPackage: 3,
+        stateOfChargePercent: 20,
+      }),
+    ]),
+  ])
+
+  it('scopes the CAO label to the fully regulated packages', () => {
+    const result = assess(mixed)
+    // Exactly the consignment-level check, not the per-package `dg.aircraft.p1`.
+    const detail = result.checks.find((c) => c.id === 'dg.aircraft')!.detail
+    expect(detail).toContain('fully regulated packages only')
+    // And the marks agree: the Section II box carries neither label.
+    const sectionII = result.packages.find((p) => !p.declarationRequired)!
+    expect(sectionII.hazardCommunication.join(' ')).not.toContain('Cargo Aircraft Only')
+    expect(sectionII.hazardCommunication.join(' ')).not.toContain('Class 9')
+  })
+})
+
+describe('edge cases around the mixed-regulation and Section I wording', () => {
+  it('does not report a packing conflict for an entry whose energy rating is simply missing', () => {
+    // An unrated entry is conservatively fully regulated with no section; pairing it with a
+    // Section II entry is a missing figure, not a mixed package.
+    const unrated = consignment([
+      pkg('p1', [
+        entry('e1', { configuration: 'contained-in-equipment', wattHours: 76 }, {
+          netWeightKgPerPackage: 1,
+          countPerPackage: 3,
+          stateOfChargePercent: 20,
+        }),
+        entry('e2', { configuration: 'contained-in-equipment', wattHours: null }, {
+          netWeightKgPerPackage: 1,
+          countPerPackage: 1,
+          stateOfChargePercent: 20,
+        }),
+      ]),
+    ])
+    const result = assess(unrated)
+    expect(check(result, 'dg.mixed-regulation.p1')).toBeUndefined()
+    // The real defect is still blocking, in the words that fix it.
+    expect(check(result, 'dg.energy.p1/e2')).toMatchObject({ severity: 'blocking', passed: false })
+  })
+
+  it('does not offer Section I on a passenger aircraft, where it allows the same 5 kg', () => {
+    const passenger = consignment(
+      [pkg('p1', [entry('e1', { configuration: 'packed-with-equipment', wattHours: 96 }, { netWeightKgPerPackage: 8 })])],
+      { aircraft: 'passenger-and-cargo' },
+    )
+    const detail = check(assess(passenger), 'dg.limit.p1')!.detail
+    expect(detail).toContain('Section I would not help here')
+  })
+
+  it('does not offer Section I for a package that would not fit in it either', () => {
+    const huge = consignment([
+      pkg('p1', [entry('e1', { configuration: 'packed-with-equipment', wattHours: 96 }, { netWeightKgPerPackage: 40 })]),
+    ])
+    const detail = check(assess(huge), 'dg.limit.p1')!.detail
+    expect(detail).toContain('which this package is over as well')
+  })
+
+  it('does not describe Section II packages that are not in the consignment', () => {
+    const regulated = consignment([pkg('p1', [entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 2 })])])
+    const detail = assess(regulated).checks.find((c) => c.id === 'dg.aircraft')!.detail
+    expect(detail).not.toContain('Section II packages')
+  })
+})
+
+describe('a standalone sodium ion battery is fully regulated even though PI 976 has no sections', () => {
+  it('refuses to share a package with Section II goods', () => {
+    const mixed = consignment([
+      pkg('p1', [
+        entry('e1', { chemistry: 'sodium-ion', wattHours: 80 }, { netWeightKgPerPackage: 2 }),
+        entry('e2', { configuration: 'contained-in-equipment', wattHours: 76 }, {
+          netWeightKgPerPackage: 1,
+          countPerPackage: 3,
+          stateOfChargePercent: 20,
+        }),
+      ]),
+    ])
+    const result = assess(mixed)
+    // A null section is "this instruction has none", not "undetermined" — the declaration
+    // would otherwise list only the UN3551 line and omit the rest of the box.
+    expect(check(result, 'dg.mixed-regulation.p1')).toMatchObject({ severity: 'blocking', passed: false })
+    expect(result.canGenerate).toBe(false)
+  })
+})
+
+describe('remedies that would not actually help are not offered', () => {
+  it('does not offer A99 for a Section II package, whose answer is Section I first', () => {
+    const heavy = consignment([
+      pkg('p1', [entry('e1', { configuration: 'packed-with-equipment', wattHours: 96 }, { netWeightKgPerPackage: 40 })]),
+    ])
+    expect(check(assess(heavy), 'dg.a99.p1')).toBeUndefined()
+  })
+
+  it('does not offer A99 on a passenger booking, where it is not a relief that applies', () => {
+    const heavy = consignment(
+      [pkg('p1', [entry('e1', { configuration: 'packed-with-equipment', wattHours: 300 }, { netWeightKgPerPackage: 40 })])],
+      { aircraft: 'passenger-and-cargo' },
+    )
+    expect(check(assess(heavy), 'dg.a99.p1')).toBeUndefined()
+  })
+
+  it('still offers A99 where it belongs — over 35 kg at the full cargo allowance', () => {
+    const heavy = consignment([
+      pkg('p1', [entry('e1', { configuration: 'packed-with-equipment', wattHours: 300 }, { netWeightKgPerPackage: 40 })]),
+    ])
+    expect(check(assess(heavy), 'dg.a99.p1')).toMatchObject({ severity: 'warning', passed: false })
+  })
+
+  it('does not name a 35 kg allowance for a 40 kg Section II package on a passenger booking', () => {
+    const heavy = consignment(
+      [pkg('p1', [entry('e1', { configuration: 'packed-with-equipment', wattHours: 96 }, { netWeightKgPerPackage: 40 })])],
+      { aircraft: 'passenger-and-cargo' },
+    )
+    const detail = check(assess(heavy), 'dg.limit.p1')!.detail
+    expect(detail).toContain('over as well')
+    expect(detail).not.toContain('would raise it to 35 kg')
+  })
+})
+
+describe('an overpack holding only excepted packages', () => {
+  const excepted = consignment(
+    [
+      pkg('p1', [
+        entry('e1', { configuration: 'contained-in-equipment', wattHours: 76 }, {
+          netWeightKgPerPackage: 1,
+          countPerPackage: 3,
+          stateOfChargePercent: 20,
+        }),
+      ], { overpackId: 'o1' }),
+    ],
+    { overpacks: [overpack('o1')] },
+  )
+
+  it('does not ask for an identifier on a declaration that does not exist', () => {
+    const detail = assess(excepted).checks.find((c) => c.id === 'dg.overpack-identifier')!.detail
+    expect(detail).toContain('no declaration entry to match it against')
+  })
+
+  it('still requires the mark on the box itself', () => {
+    const marks = assess(excepted).packages[0].hazardCommunication.join(' ')
+    expect(marks).toContain('OVERPACK')
+    expect(marks).toContain('#A001')
+  })
+})
+
+describe('the packaging authorization binds the package, not each entry in it', () => {
+  it('blocks a box tested for 6 kg holding 5 kg of each of two UN numbers', () => {
+    const overfilled = consignment([
+      pkg('p1', [
+        entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 5 }),
+        entry('e2', { chemistry: 'lithium-metal', lithiumContentG: 1 }, {
+          netWeightKgPerPackage: 2,
+          wattHourMarkedOnCase: false,
+        }),
+      ], { packagingAuthorizationLimitKg: 6 }),
+    ])
+    const result = assess(overfilled)
+    // Each entry is inside its own allowance — 5 of 10 kg, 2 of 2.5 kg — and the box still
+    // holds 7 kg it was never tested for.
+    expect(result.checks.filter((c) => c.id.startsWith('dg.limit.p1')).every((c) => c.passed)).toBe(true)
+    expect(check(result, 'dg.package-authorization.p1')).toMatchObject({
+      severity: 'blocking',
+      passed: false,
+      expected: '≤ 6 kg',
+      actual: '7 kg',
+    })
+    expect(result.canGenerate).toBe(false)
+  })
+
+  it('passes when the total is inside the tested weight', () => {
+    const fine = consignment([
+      pkg('p1', [entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 5 })], {
+        packagingAuthorizationLimitKg: 6,
+      }),
+    ])
+    expect(check(assess(fine), 'dg.package-authorization.p1')).toMatchObject({ passed: true })
   })
 })

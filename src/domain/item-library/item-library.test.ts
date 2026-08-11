@@ -169,6 +169,23 @@ describe('workbook reading', () => {
     ])
   })
 
+  it('does not let a self-closing empty row swallow the row after it', async () => {
+    // Excel writes `<row r="2" s="1"/>` for a row that is styled but holds no cells. Read
+    // as an opening tag, it consumes the next row's cells and every row below it shifts.
+    const sheet =
+      '<?xml version="1.0"?><worksheet><sheetData>' +
+      '<row r="1"><c r="A1" t="inlineStr"><is><t>heading</t></is></c></row>' +
+      '<row r="2" s="1"/>' +
+      '<row r="3"><c r="A3" t="inlineStr"><is><t>data</t></is></c></row>' +
+      '</sheetData></worksheet>'
+    const bytes = await zip({
+      'xl/workbook.xml': WORKBOOK_XML,
+      'xl/_rels/workbook.xml.rels': RELS_XML,
+      'xl/worksheets/sheet4.xml': sheet,
+    })
+    expect(await readXlsx(bytes)).toEqual([['heading'], [], ['data']])
+  })
+
   it('keeps cells in their lettered columns when earlier ones are absent', async () => {
     // Excel omits a cell entirely when it has never been touched, so `C` can follow `A`.
     const sheet =

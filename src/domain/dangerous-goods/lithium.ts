@@ -260,12 +260,21 @@ export interface StateOfChargeRule {
  * a lower package limit. That asymmetry is the single most misunderstood part of these rules
  * and the reason a "small" battery can still need a Shipper's Declaration.
  */
-function sectionFor(configuration: Configuration, band: EnergyBand, chemistry: Chemistry): PackingSection {
+function sectionFor(
+  configuration: Configuration,
+  band: EnergyBand,
+  chemistry: Chemistry,
+  prepareToSectionI: boolean,
+): PackingSection {
   // PI 976 has no sections: every standalone sodium ion cell and battery is fully regulated.
   if (chemistry === 'sodium-ion' && configuration === 'standalone') return null
   if (band === 'unknown') return null
   if (configuration === 'standalone') return band === 'small' ? 'IB' : 'IA'
-  return band === 'small' ? 'II' : 'I'
+  // Section II is a relief with conditions. A shipper who does not meet them — most often
+  // the 5 kg net per package ceiling — prepares the same goods to Section I of the same
+  // packing instruction instead. Only ever an escalation: it never relieves anything.
+  if (band === 'small') return prepareToSectionI ? 'I' : 'II'
+  return 'I'
 }
 
 /**
@@ -277,7 +286,7 @@ function sectionFor(configuration: Configuration, band: EnergyBand, chemistry: C
  * only from fig. 5-29, because the List of Dangerous Goods defers to the packing instruction
  * for UN3480 and UN3090 ("See 965", "See 968").
  */
-function limitsFor(pi: number, section: PackingSection): QuantityLimits {
+function limitsFor(pi: number, section: PackingSection, chemistry: Chemistry): QuantityLimits {
   // Standalone lithium: forbidden on passenger aircraft in every section.
   if (pi === 965 || pi === 968) {
     if (section === 'IB') {
@@ -297,14 +306,29 @@ function limitsFor(pi: number, section: PackingSection): QuantityLimits {
   if (pi === 976) {
     return { passengerKg: null, cargoKg: 35, source: 'Student Guide fig. 5-3 (UN3551, columns I–L)' }
   }
-  // Packed with / contained in, every chemistry: 5 kg passenger, 35 kg cargo.
+  // Packed with / contained in, Section II: 5 kg net per package on *either* aircraft
+  // type. The Section II tables state a single 5 kg ceiling with no cargo relief (figs.
+  // 5-26 and 5-27) — the 35 kg figure belongs to Section I on a cargo aircraft, and a
+  // shipper who needs more than 5 kg in one package prepares to Section I.
+  if (section === 'II') {
+    return {
+      passengerKg: 5,
+      cargoKg: 5,
+      // The lithium tables and the sodium tables are different figures in the materials,
+      // and this string is printed beside the limit for someone re-checking it against the
+      // DGR — pointing a sodium shipper at the lithium table would send them to the wrong
+      // page of their own course notes.
+      source:
+        chemistry === 'sodium-ion'
+          ? 'Student Guide figs. 5-30 and 5-31 (PI 977 / PI 978 Section II — 5 kg net per package on either aircraft)'
+          : 'Student Guide figs. 5-26 and 5-27 (Section II — 5 kg net per package on either aircraft)',
+    }
+  }
+  // Packed with / contained in, Section I: 5 kg passenger, 35 kg cargo.
   return {
     passengerKg: 5,
     cargoKg: 35,
-    source:
-      section === 'II'
-        ? 'Student Guide figs. 5-26 and 5-27 (Section II)'
-        : 'Student Guide figs. 5-1 to 5-3, columns I–L',
+    source: 'Student Guide figs. 5-1 to 5-3, columns I–L (Section I)',
   }
 }
 
@@ -440,12 +464,22 @@ function specialProvisionsFor(spec: BatterySpec, section: PackingSection): strin
  * conservative reading, with the assessment engine raising a blocking check that says the
  * rating has to be supplied before anything can be generated.
  */
-export function classifyForAir(spec: BatterySpec): AirClassification {
+export function classifyForAir(
+  spec: BatterySpec,
+  options: {
+    /**
+     * Prepare small packed-with or contained-in batteries to Section I rather than
+     * Section II — the route for a package over the Section II 5 kg ceiling. Recorded by
+     * the shipper, never inferred: see `BatteryEntry.prepareToSectionI`.
+     */
+    prepareToSectionI?: boolean
+  } = {},
+): AirClassification {
   const id = IDENTITIES[spec.chemistry][spec.configuration]
   const stateOfCharge = stateOfChargeFor(spec)
   const band = energyBand(spec)
-  const section = sectionFor(spec.configuration, band, spec.chemistry)
-  const limits = limitsFor(id.packingInstruction, section)
+  const section = sectionFor(spec.configuration, band, spec.chemistry, options.prepareToSectionI ?? false)
+  const limits = limitsFor(id.packingInstruction, section, spec.chemistry)
 
   // Standalone cells and batteries of every chemistry are cargo aircraft only. Everything
   // else may go on a passenger aircraft up to 5 kg.
@@ -514,14 +548,25 @@ export function classifyForAir(spec: BatterySpec): AirClassification {
  * operator that requires a particular form of words is the only thing that narrows it, and no
  * variation data ships with this application.
  */
-export function airWaybillStatement(classification: AirClassification): string {
+export function airWaybillStatement(
+  classification: AirClassification,
+  /**
+   * The aircraft type the *consignment* is offered on, where known. The CAO annotation
+   * follows the declaration, and a fully regulated consignment offered cargo-aircraft-only
+   * by choice strikes the passenger box on its declaration — so the AWB statement carries
+   * the annotation whether the restriction is inherent to the goods or chosen. Section II
+   * statements never carry it: excepted packages are not restricted to cargo aircraft.
+   */
+  consignmentAircraft?: AircraftLimitation,
+): string {
   const { section, packingInstruction, spec, aircraft } = classification
   if (section === 'II') {
     const chemistry =
       spec.chemistry === 'lithium-ion' ? 'Lithium ion' : spec.chemistry === 'lithium-metal' ? 'Lithium metal' : 'Sodium ion'
     return `${chemistry} batteries in compliance with Section II of PI${packingInstruction}`
   }
-  return aircraft === 'cargo-aircraft-only'
+  const cargoOnly = aircraft === 'cargo-aircraft-only' || consignmentAircraft === 'cargo-aircraft-only'
+  return cargoOnly
     ? 'Dangerous goods as per associated Shipper’s Declaration — Cargo Aircraft Only'
     : 'Dangerous goods as per associated Shipper’s Declaration'
 }
@@ -536,7 +581,7 @@ export function airWaybillStatement(classification: AirClassification): string {
  * to match each instruction to its chemistry.
  */
 export function combinedSectionIIStatement(classifications: AirClassification[]): string {
-  const statements = [...new Set(classifications.filter((c) => c.section === 'II').map(airWaybillStatement))]
+  const statements = [...new Set(classifications.filter((c) => c.section === 'II').map((c) => airWaybillStatement(c)))]
   return statements.join('. ')
 }
 

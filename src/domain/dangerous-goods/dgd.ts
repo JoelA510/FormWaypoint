@@ -21,8 +21,7 @@
  *  - **Box 3, page x of y.** Paginated here rather than at draw time, because a declaration
  *    that says "Page 1 of 1" on the first of two sheets is a defective document.
  */
-import { packageCountInConsignment, classificationKey, type DgAssessment } from './assess'
-import type { AirClassification } from './lithium'
+import { groupByClassification, packageCountInConsignment, type DgAssessment } from './assess'
 import type { DgConsignment, Overpack } from './types'
 
 /**
@@ -219,15 +218,17 @@ export function buildDeclaration(consignment: DgConsignment, assessment: DgAsses
     const { pkg } = packageAssessment
     const totalPackages = packageCountInConsignment(pkg, consignment)
 
-    // One line per regulatory entry in the package, in the order the entries were added.
-    const groups = new Map<string, { classification: AirClassification; weightKg: number }>()
-    for (const { entry, classification } of packageAssessment.entries) {
-      const key = classificationKey(classification)
-      const held = groups.get(key)
-      const weight = entry.netWeightKgPerPackage ?? 0
-      if (held) held.weightKg += weight
-      else groups.set(key, { classification, weightKg: weight })
-    }
+    // One line per regulatory entry in the package, in the order the entries were added —
+    // the same partition `packageChecks` measures the per-entry limits against.
+    //
+    // Section II entries are excluded: they are excepted Class 9, whose whole hazard
+    // communication is the battery mark and the air waybill statement, and listing them on
+    // the Shipper's Declaration would declare goods the declaration does not cover. A
+    // mixed consignment therefore prints only its fully regulated entries, and the notes
+    // say the Section II packages travel beside them.
+    const groups = groupByClassification(
+      packageAssessment.entries.filter((e) => e.classification.declarationRequired),
+    )
 
     const overpack = pkg.overpackId ? consignment.overpacks.find((o) => o.id === pkg.overpackId) : null
     const groupList = [...groups.values()]
@@ -254,8 +255,11 @@ export function buildDeclaration(consignment: DgConsignment, assessment: DgAsses
       if (overpack && index === groupList.length - 1) {
         const held = overpackTotals.get(overpack.id)
         // Per overpack, so the package's own count — which is per overpack — not the
-        // consignment total across every overpack.
-        const contribution = packageAssessment.netWeightKg * Math.max(0, pkg.count)
+        // consignment total across every overpack. Declared entries only: the overpack
+        // total on the declaration must sum the quantities the declaration states, and a
+        // Section II entry sharing the overpack is not one of them.
+        const declaredKg = groupList.reduce((sum, group) => sum + group.weightKg, 0)
+        const contribution = declaredKg * Math.max(0, pkg.count)
         overpackTotals.set(overpack.id, {
           lastLineIndex: lines.length - 1,
           totalPerOverpackKg: (held?.totalPerOverpackKg ?? 0) + contribution,
@@ -315,14 +319,46 @@ function paginate(lines: DgdLine[]): DgdPage[] {
   let current: DgdLine[] = []
   let used = 0
 
-  for (const line of lines) {
-    const height = Math.max(line.properShippingName.length, line.quantityAndType.length) + line.annotations.length
+  const heightOf = (line: DgdLine) =>
+    Math.max(line.properShippingName.length, line.quantityAndType.length) + line.annotations.length
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    // A line that continues a package must not be separated from the line that states the
+    // packaging: its own quantity column reads "1 kg" alone, and stranded at the top of a
+    // sheet it describes a number of packages the reader cannot see. So the whole run of
+    // lines sharing one package is measured, and moved, together.
+    if (line.sharesPackagingWithPreviousLine) continue
+    let run = [line]
+    while (i + 1 < lines.length && lines[i + 1].sharesPackagingWithPreviousLine) {
+      run = [...run, lines[++i]]
+    }
+
+    const height = run.reduce((sum, l) => sum + heightOf(l), 0)
     if (used && used + height > ROWS_PER_PAGE) {
       pages.push(current)
       current = []
       used = 0
     }
-    current.push(line)
+
+    // A package taller than a whole sheet cannot be kept together, and keeping it together
+    // anyway would push its last rows off the page the renderer draws — losing them
+    // silently, which is worse than the split this is avoiding. So it breaks, line by line.
+    if (height > ROWS_PER_PAGE) {
+      for (const line of run) {
+        const lineHeight = heightOf(line)
+        if (used && used + lineHeight > ROWS_PER_PAGE) {
+          pages.push(current)
+          current = []
+          used = 0
+        }
+        current.push(line)
+        used += lineHeight
+      }
+      continue
+    }
+
+    current.push(...run)
     used += height
   }
   if (current.length) pages.push(current)
@@ -359,6 +395,14 @@ function declarationNotes(consignment: DgConsignment, assessment: DgAssessment):
   }
   if (!consignment.airWaybillNumber.trim()) {
     notes.push('The air waybill number is left blank for the forwarder; some carriers require the shipper to enter it.')
+  }
+  const hasSectionII = assessment.packages.some((p) => p.entries.some((e) => e.classification.section === 'II'))
+  if (hasSectionII && assessment.declarationRequired) {
+    notes.push(
+      'The Section II packages in this consignment are not listed on the declaration: excepted Class 9 travels ' +
+        'under its battery mark and air waybill statement alone, and declaring it would misstate what the ' +
+        'declaration covers.',
+    )
   }
   return notes
 }

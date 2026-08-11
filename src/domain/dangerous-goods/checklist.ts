@@ -13,7 +13,7 @@
  * rather than a summary of findings.
  */
 import { cell } from '../../lib/report'
-import { packageCountInConsignment, type DgAssessment } from './assess'
+import { groupByClassification, packageCountInConsignment, type DgAssessment } from './assess'
 import { formatKg } from './dgd'
 import {
   CHEMISTRY_LABELS,
@@ -187,9 +187,13 @@ export function buildChecklist(
     } else {
       out.push('- [ ] Strong rigid outer packaging.')
     }
+    // Not an either/or: a package may hold loose cells beside equipment with batteries
+    // installed in it — the A181 case the assessment checks — and both lines are then true
+    // of the same box. Printed independently so neither can be lost to the other.
     if (assessed.entries.some((e) => e.classification.innerPackagingRequired)) {
       out.push('- [ ] Inner packaging that completely encloses each cell or battery and prevents short circuits.')
-    } else {
+    }
+    if (assessed.entries.some((e) => e.entry.spec.configuration === 'contained-in-equipment')) {
       out.push('- [ ] Equipment secured against movement and protected against accidental activation.')
     }
     if (assessed.entries.some((e) => e.classification.dropTestRequired)) {
@@ -203,8 +207,26 @@ export function buildChecklist(
       `- [ ] Nothing in the package from the prohibited list: ${PROHIBITED_CO_PACKED_CLASSES.join('; ')}. ` +
         'Division 1.4S is permitted.',
     )
-    if (assessed.effectiveLimitKg != null) {
-      out.push(`- [ ] Net battery weight per package at or below ${formatKg(assessed.effectiveLimitKg)} kg.`)
+    // Per regulatory entry, because that is how the limits are written and how the checks
+    // apply them: stating the lowest of them as a package ceiling told the packer a 10 kg
+    // box of UN3480 had to come in under the 2.5 kg its UN3090 line is allowed.
+    for (const [, { classification, weightKg }] of groupByClassification(assessed.entries)) {
+      const limit =
+        consignment.aircraft === 'passenger-and-cargo'
+          ? classification.limits.passengerKg
+          : classification.limits.cargoKg
+      if (limit == null) continue
+      out.push(
+        `- [ ] ${classification.unNumber}: ${formatKg(weightKg)} kg in this package, at or below the ` +
+          `${formatKg(limit)} kg its PI ${classification.packingInstructionLabel} allowance permits.`,
+      )
+    }
+    // And the box's own tested ceiling, which binds the package as a whole.
+    if (assessed.pkg.packagingAuthorizationLimitKg != null) {
+      out.push(
+        `- [ ] Total net battery weight in the package at or below ${formatKg(assessed.pkg.packagingAuthorizationLimitKg)} kg, ` +
+          'which is what this design type was tested to hold.',
+      )
     }
     if (overpack) {
       out.push(
