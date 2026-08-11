@@ -251,7 +251,12 @@ export function assess(consignment: DgConsignment): DgAssessment {
       pkg,
       entries,
       netWeightKg,
-      hazardCommunication: packageHazardCommunication(entries, consignment, pkg, exemption),
+      // Through `applyA181`, like the declaration, the checklist and the shared-packaging
+      // count. The marks go on the box, and a box holding one UN number both packed with
+      // and contained in equipment carries the packed-with name — which is what `dg.a181`
+      // instructs and what the declaration prints. Built from the raw entries, this list
+      // asked for both proper shipping names on the same package.
+      hazardCommunication: packageHazardCommunication(applyA181(entries), consignment, pkg, exemption),
       batteryMarkExemption: exemption,
       declarationRequired: entries.some((e) => e.classification.declarationRequired),
     })

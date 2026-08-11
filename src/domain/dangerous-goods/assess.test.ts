@@ -521,6 +521,31 @@ describe('packages holding more than one entry', () => {
     expect(a181[0]).toMatchObject({ passed: true, actual: '4 kg' })
   })
 
+  it('asks for one proper shipping name mark on a package A181 makes one entry of', () => {
+    // The marks go on the box, and A181 says the box is described as packed with
+    // equipment. Built from the raw entries, this list asked for both names on the same
+    // package while the declaration in the same envelope printed one.
+    const result = assess(
+      consignment([
+        pkg('p1', [
+          entry(
+            'e1',
+            { configuration: 'packed-with-equipment', wattHours: 90 },
+            { netWeightKgPerPackage: 2, prepareToSectionI: true },
+          ),
+          entry(
+            'e2',
+            { configuration: 'contained-in-equipment', wattHours: 90 },
+            { netWeightKgPerPackage: 2, countPerPackage: 1, prepareToSectionI: true },
+          ),
+        ]),
+      ]),
+    )
+    const names = result.packages[0].hazardCommunication.filter((m) => m.includes('Lithium ion batteries'))
+    expect(names.every((m) => !m.includes('contained in equipment'))).toBe(true)
+    expect(new Set(names).size).toBe(names.length)
+  })
+
   it('counts the lines A181 merges as the one line the declaration prints', () => {
     // Prepared to Section I, so both entries are declared. A181 puts them on one line —
     // the warning used to fire and describe a second line the paper does not have.

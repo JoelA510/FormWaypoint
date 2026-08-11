@@ -89,8 +89,14 @@ export function OutputPanel({
   const chosen = useRef(false)
   useEffect(() => {
     void (async () => {
-      const saved = await localStore.getKeyingOptions()
-      if (saved && !chosen.current) setOptions(withDefaults(saved))
+      try {
+        const saved = await localStore.getKeyingOptions()
+        if (saved && !chosen.current) setOptions(withDefaults(saved))
+      } catch {
+        // The layout is a convenience, not shipment data: falling back to the default is a
+        // complete answer, and a banner about column widths over a blocked database would
+        // bury the one that matters.
+      }
     })()
   }, [])
 
@@ -109,7 +115,9 @@ export function OutputPanel({
     const next = withDefaults(update(options))
     if (JSON.stringify(next) === JSON.stringify(options)) return
     setOptions(next)
-    void localStore.saveKeyingOptions(next)
+    // Same reasoning as the restore: the choice is applied to this session either way, and
+    // the only loss is that it is not remembered next time.
+    void localStore.saveKeyingOptions(next).catch(() => {})
   }
 
   /**

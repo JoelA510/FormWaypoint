@@ -422,13 +422,31 @@ export function App() {
       )
     )
       return
-    await localStore.clearAll()
+    // Reported, not abandoned. `db()` rejects rather than hanging now, so a superseded tab
+    // reaches here and threw straight out of the callback: nothing deleted, no panel reset,
+    // and a confirmation dialog that had just promised the data was gone.
+    try {
+      await localStore.clearAll()
+    } catch (e: unknown) {
+      setStorageError(
+        e instanceof Error
+          ? `Nothing was deleted: ${e.message}`
+          : 'Nothing was deleted — this machine’s stored data could not be reached.',
+      )
+      return
+    }
     setProfile(EMPTY_PROFILE)
     setOverrides([])
     setPartOverrides([])
     setItems([])
     setShipments([])
-    setDgConsignments(await localStore.listDgConsignments())
+    // The retention records survive `clearAll` by design, so the panel is re-read rather
+    // than emptied. A failed read leaves what is on screen, which is still true.
+    try {
+      setDgConsignments(await localStore.listDgConsignments())
+    } catch {
+      // Already deleted everything it was asked to; the list refreshes on the next load.
+    }
   }, [])
 
   return (
