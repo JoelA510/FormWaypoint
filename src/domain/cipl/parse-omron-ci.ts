@@ -484,6 +484,21 @@ function pagesToGrid(pages: TextPage[]): SheetRows {
     [...Object.entries(TOP_COLUMNS), ...Object.entries(SUB_COLUMNS)].map(([key, heading]) => [key, bandX(heading)]),
   ) as Anchors
 
+  // Every column has to have been located before any value can be assigned to one.
+  //
+  // A heading the extractor split across items yields no anchor, and an unfound anchor is
+  // -Infinity: `quantityBorder` then collapses and every cell on the line looks like it
+  // belongs to the numeric columns, while values belonging to the missing column fall to
+  // whichever heading is nearest. Both produce a plausible-looking table that is wrong, so
+  // the table is handed back unreshaped instead — `readLines` reports the missing headings
+  // and no line is invented from a grid nobody could calibrate.
+  const missing = (Object.entries(anchors) as [keyof Anchors, number][])
+    .filter(([, x]) => !Number.isFinite(x))
+    .map(([key]) => ({ ...TOP_COLUMNS, ...SUB_COLUMNS }[key])) as string[]
+  if (missing.length) {
+    return rows.map((row) => row.items.map((item) => item.str))
+  }
+
   // Everything between the table headings and the totals band belongs to line blocks.
   // The band is recognised by its own printed cells as *whole* cells, never as substrings
   // of row text — a commodity described as "Warranty replacement - NO CHARGE" is line

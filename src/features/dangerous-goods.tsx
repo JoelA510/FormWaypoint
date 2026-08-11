@@ -1136,12 +1136,17 @@ function EntryEditor({
           checked={entry.wattHourMarkedOnCase}
           onChange={(next) => onChange({ wattHourMarkedOnCase: next })}
         />
-        <Toggle
-          label="Button cells installed in equipment"
-          checked={entry.buttonCellsInEquipment}
-          onChange={(next) => onChange({ buttonCellsInEquipment: next })}
-          hint="Including circuit boards."
-        />
+        {/* Only meaningful for cells installed in equipment, and both rules that key on it
+            — the test-summary exception and the battery mark — require that. Offered on a
+            standalone entry, it read as a claim the regulations do not recognise. */}
+        {entry.spec.configuration === 'contained-in-equipment' ? (
+          <Toggle
+            label="Button cells installed in equipment"
+            checked={entry.buttonCellsInEquipment}
+            onChange={(next) => onChange({ buttonCellsInEquipment: next })}
+            hint="Including circuit boards."
+          />
+        ) : null}
         {entry.spec.configuration !== 'standalone' ? (
           <Toggle
             label="Prepared to Section I"

@@ -59,6 +59,11 @@ export interface OmronCiSpec {
    * text into several items. Only the PDF builder honours it.
    */
   splitValues?: boolean
+  /**
+   * Draw the `SME (Y/N)` column heading as two items, to model pdfjs splitting a *heading*
+   * rather than a value — which leaves that column with no anchor to calibrate against.
+   */
+  splitHeadings?: boolean
 }
 
 export function simpleOmronCi(): OmronCiSpec {
@@ -273,7 +278,13 @@ export async function buildOmronCiPdf(spec: OmronCiSpec): Promise<ArrayBuffer> {
   centred(center(COLUMNS.d), 538, 'HTS / SCHEDULE B')
   centred(center(COLUMNS.e), 538, 'ECCN / EAR99')
   centred(center(COLUMNS.f), 538, 'LICENSE / NLR')
-  centred(center(COLUMNS.g), 538, 'SME (Y/N)')
+  if (spec.splitHeadings) {
+    // Two items, so no single item reads "SME (Y/N)" and the column has no anchor.
+    at(COLUMNS.g.left + 2, 538, 'SME')
+    at(COLUMNS.g.left + 22, 538, '(Y/N)')
+  } else {
+    centred(center(COLUMNS.g), 538, 'SME (Y/N)')
+  }
 
   drawLines(page, font, spec)
 

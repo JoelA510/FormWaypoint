@@ -394,7 +394,12 @@ function entryChecks(assessment: PackageAssessment): CheckResult[] {
  * has to name the assembled article.
  */
 function testSummaryCheck(entry: BatteryEntry, ref: string, name: string): CheckResult {
-  if (entry.buttonCellsInEquipment) {
+  // The exception is written against button cells *installed in equipment* — the phrase is
+  // the whole of it. A loose button cell is an ordinary standalone cell and needs its
+  // summary like any other; reading the flag without the configuration let a UN3480
+  // consignment generate with nothing on file at all. `batteryMarkExemption`, the other
+  // rule keyed on this flag, has always required the configuration.
+  if (entry.buttonCellsInEquipment && entry.spec.configuration === 'contained-in-equipment') {
     return {
       id: `dg.test-summary.${ref}`,
       severity: 'blocking',

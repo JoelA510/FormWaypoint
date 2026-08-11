@@ -391,3 +391,14 @@ describe('the last block, when its compliance row was collapsed away', () => {
     expect(last.classification).toBe('')
   })
 })
+
+describe('a printed table whose headings could not all be located', () => {
+  it('reports the missing table instead of inventing lines from an uncalibrated grid', async () => {
+    const spec = simpleOmronCi()
+    const pdf = await buildOmronCiPdf({ ...spec, splitHeadings: true })
+    const parsed = await parseCipl('ci.pdf', pdf)
+    // No line is better than a line whose SME landed in the licence column.
+    expect(parsed.lines).toHaveLength(0)
+    expect(parsed.warnings.some((w) => w.includes('commodity table headings'))).toBe(true)
+  })
+})

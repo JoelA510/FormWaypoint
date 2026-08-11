@@ -925,3 +925,29 @@ describe('the packaging authorization binds the package, not each entry in it', 
     expect(check(assess(fine), 'dg.package-authorization.p1')).toMatchObject({ passed: true })
   })
 })
+
+describe('the button-cell test-summary exception', () => {
+  const buttonCells = (configuration: 'standalone' | 'contained-in-equipment') =>
+    consignment([
+      pkg('p1', [
+        entry('e1', { configuration, wattHours: 95 }, {
+          buttonCellsInEquipment: true,
+          testSummaryScope: null,
+          testSummaryReference: '',
+          netWeightKgPerPackage: 2,
+          countPerPackage: 2,
+          stateOfChargePercent: 20,
+        }),
+      ]),
+    ])
+
+  it('does not except a standalone cell — the exception is for cells installed in equipment', () => {
+    const result = assess(buttonCells('standalone'))
+    expect(check(result, 'dg.test-summary.p1')).toMatchObject({ severity: 'blocking', passed: false })
+    expect(result.canGenerate).toBe(false)
+  })
+
+  it('excepts them once they are installed in equipment', () => {
+    expect(check(assess(buttonCells('contained-in-equipment')), 'dg.test-summary.p1')).toMatchObject({ passed: true })
+  })
+})
