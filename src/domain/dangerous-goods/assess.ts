@@ -861,7 +861,14 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
   // "undetermined": PI 976 has no sections at all, and every standalone sodium ion battery
   // under it is fully regulated. Excluding those would let one share a package with
   // Section II goods and produce a declaration that omits half the box.
-  const classified = entries.filter((e) => e.classification.band !== 'unknown')
+  //
+  // Which is why an unstated rating is not enough to exclude one either. A standalone
+  // sodium ion battery is classified the same with a rating and without, so `dg.energy`
+  // does not block it — and dropping it here on the missing figure alone reopened exactly
+  // the hole this filter's second sentence describes.
+  const classified = entries.filter(
+    (e) => e.classification.band !== 'unknown' || !bandDeterminesTreatment(e.entry.spec),
+  )
   const declared = classified.filter((e) => e.classification.declarationRequired)
   if (declared.length && declared.length < classified.length) {
     checks.push({

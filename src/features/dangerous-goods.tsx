@@ -30,6 +30,7 @@ import { assess, packageCountInConsignment } from '../domain/dangerous-goods/ass
 import { buildChecklist } from '../domain/dangerous-goods/checklist'
 import { buildDeclaration, formatKg, retainUntil } from '../domain/dangerous-goods/dgd'
 import {
+  bandDeterminesTreatment,
   CHEMISTRY_LABELS,
   CONFIGURATION_LABELS,
   FORM_LABELS,
@@ -779,7 +780,15 @@ function PackagesEditor({
                           <span className="text-[var(--color-ink-soft)]">{classification.properShippingName}</span>{' '}
                           <span className="text-[var(--color-ink-faint)]">
                             · Class {classification.hazardClass} · PI {classification.packingInstruction}
-                            {classification.band === 'unknown' ? (
+                            {/*
+                              The unstated-rating wording belongs to entries whose treatment
+                              the rating decides. A standalone sodium ion battery under
+                              PI 976 is classified identically either way — saying its
+                              section is pending would contradict the check beside it and
+                              hide the limit for a consignment this tool will file.
+                            */}
+                            {classification.band === 'unknown' &&
+                            bandDeterminesTreatment(classification.spec) ? (
                               <> — the section follows from the energy content, which has not been stated</>
                             ) : (
                               <>

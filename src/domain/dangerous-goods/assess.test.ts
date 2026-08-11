@@ -263,6 +263,24 @@ describe('a rating that decides nothing', () => {
     expect(assess(unrated).canGenerate).toBe(true)
   })
 
+  it('still counts the unrated sodium ion line as fully regulated when it shares a box', () => {
+    // It does not block on `dg.energy` any more, so it has to be counted here: a UN3551
+    // line beside a Section II battery in the same package produces a declaration that
+    // omits half the box, which is what `dg.mixed-regulation` exists to refuse.
+    const mixed = consignment([
+      pkg('p1', [
+        entry('e1', { chemistry: 'sodium-ion', wattHours: null }, { netWeightKgPerPackage: 2 }),
+        entry('e2', { configuration: 'contained-in-equipment', wattHours: 90 }, {
+          netWeightKgPerPackage: 1,
+          countPerPackage: 1,
+        }),
+      ]),
+    ])
+    const result = assess(mixed)
+    expect(check(result, 'dg.mixed-regulation.p1')).toMatchObject({ severity: 'blocking', passed: false })
+    expect(result.canGenerate).toBe(false)
+  })
+
   it('still blocks a standalone lithium ion battery, where every threshold turns on it', () => {
     const unrated = consignment([
       pkg('p1', [entry('e1', { wattHours: null })], { unSpecificationMark: '4G/Y75/S/26/USA/+D02390' }),
