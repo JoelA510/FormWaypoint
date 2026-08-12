@@ -301,6 +301,24 @@ function sectionFor(
 }
 
 /**
+ * The two sections an unrated entry could fall in, where they disagree about packaging.
+ *
+ * Null where they do not, which is most of the time. Batteries *contained in* equipment
+ * never take UN specification packaging in any section — the equipment is its own enclosure
+ * — so nothing about that requirement is in doubt for them, whatever the rating turns out
+ * to be. Standalone is IA against IB, and A802 is the exception that names IB. Packed with
+ * equipment is Section I against Section II, and A802 has nothing to do with it: it is
+ * written for Sections IB of PI 965 and PI 968 alone.
+ */
+export function undecidedPackagingSections(spec: BatterySpec): { pair: string; a802: boolean } | null {
+  if (energyBand(spec) !== 'unknown' || !bandDeterminesTreatment(spec)) return null
+  if (spec.configuration === 'contained-in-equipment') return null
+  return spec.configuration === 'standalone'
+    ? { pair: 'Section IA requires it and Section IB is expressly excepted from it', a802: true }
+    : { pair: 'Section I requires it and Section II does not', a802: false }
+}
+
+/**
  * Whether the energy rating changes how this entry is treated at all.
  *
  * Almost always yes: every section boundary and every quantity limit turns on it. The

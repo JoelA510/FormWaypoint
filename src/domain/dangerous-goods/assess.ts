@@ -34,6 +34,7 @@ import {
   bandDeterminesTreatment,
   energyThreshold,
   INDICATED_CAPACITY_LIMIT,
+  undecidedPackagingSections,
   type AircraftLimitation,
   type AirClassification,
 } from './lithium'
@@ -1071,21 +1072,27 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
   // the *stricter* requirement for the packaging — so this says neither. Demanding a mark
   // would block a second time on the fact `dg.energy` is already blocking for; saying none
   // is needed would be a positive permissive claim about a section nothing has decided.
-  const undetermined = entries.some(
-    (e) => e.classification.band === 'unknown' && bandDeterminesTreatment(e.entry.spec),
-  )
+  //
+  // And only where they really do disagree. Batteries contained in equipment never take UN
+  // specification packaging in any section, so nothing about it is in doubt for them
+  // whatever the rating turns out to be — keyed on the band alone, this fired for them too,
+  // naming two sections the goods cannot be in and withholding the requirement that does
+  // apply to them.
+  const undecided = entries
+    .map((e) => undecidedPackagingSections(e.entry.spec))
+    .find((sections) => sections != null)
   const needsUnSpec = entries.some((e) => e.classification.unSpecificationPackagingRequired)
-  if (undetermined && !needsUnSpec) {
+  if (undecided && !needsUnSpec) {
     checks.push({
       id: `dg.packaging.${pkg.id}`,
       severity: 'info',
       title: `${label}: which packaging applies follows from the rating`,
       detail:
         'The watt-hour rating or lithium content of at least one battery in this package has not been stated, ' +
-        'and the two sections it could fall in do not agree: Section IA requires UN specification packaging ' +
-        'meeting Packing Group II performance, and Section IB is expressly excepted from it by special ' +
-        'provision A802. Enter the rating — the check above is already asking for it — and this will say which ' +
-        'of the two applies. Do not read this as either.',
+        `and the two sections it could fall in do not agree about UN specification packaging: ${undecided.pair}` +
+        (undecided.a802 ? ' by special provision A802' : '') +
+        '. Enter the rating — the check above is already asking for it — and this will say which of the two ' +
+        'applies. Do not read this as either.',
       passed: true,
       refs: [pkg.id],
     })

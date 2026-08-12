@@ -308,6 +308,33 @@ describe('a package whose section nothing has decided', () => {
     expect(check(result, 'dg.energy')).toMatchObject({ severity: 'blocking', passed: false })
   })
 
+  it('does not raise the question for equipment, which never takes the packaging', () => {
+    // Batteries contained in equipment take a strong rigid outer packaging in every
+    // section, so nothing about UN specification packaging is in doubt for them whatever
+    // the rating turns out to be. Keyed on the band alone, this named two sections the
+    // goods cannot be in and withheld the requirement that does apply to them.
+    const unrated = consignment([
+      pkg('p1', [
+        entry('e1', { configuration: 'contained-in-equipment', wattHours: null }, { countPerPackage: 1 }),
+      ]),
+    ])
+    const packaging = check(assess(unrated), 'dg.packaging')!
+    expect(packaging.detail).toContain('strong, rigid outer packaging')
+    expect(packaging.detail).not.toContain('do not agree')
+  })
+
+  it('names Section I and II for equipment packed beside batteries, and does not cite A802', () => {
+    // A802 is written for Section IB of PI 965 and PI 968. The candidates here are Section I
+    // and Section II of PI 966, and citing the wrong exception is the mismatch this file has
+    // been corrected for twice.
+    const unrated = consignment([
+      pkg('p1', [entry('e1', { configuration: 'packed-with-equipment', wattHours: null })]),
+    ])
+    const packaging = check(assess(unrated), 'dg.packaging')!
+    expect(packaging.detail).toContain('Section I requires it and Section II does not')
+    expect(packaging.detail).not.toContain('A802')
+  })
+
   it('says which one applies as soon as the rating settles it', () => {
     const large = assess(consignment([pkg('p1', [entry('e1', { wattHours: 500 })])]))
     expect(check(large, 'dg.un-packaging')).toMatchObject({ severity: 'blocking' })

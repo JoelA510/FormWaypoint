@@ -19,8 +19,8 @@ import {
   CHEMISTRY_LABELS,
   FORM_LABELS,
   combinedSectionIIStatement,
-  bandDeterminesTreatment,
   fullyRegulatedStatementVariants,
+  undecidedPackagingSections,
   type AircraftLimitation,
 } from './lithium'
 import { ARTICLE_LEVEL_PHRASES, PROHIBITED_CO_PACKED_CLASSES, type DgConsignment } from './types'
@@ -195,18 +195,18 @@ export function buildChecklist(
     const needsUnSpec = assessed.entries.some((e) => e.classification.unSpecificationPackagingRequired)
     const mark = pkg.unSpecificationMark.trim()
     // Three answers here as in the checks, not two. An entry whose rating nobody has stated
-    // has no section, and its two candidates disagree — Section IA requires the packaging
-    // and Section IB is excepted from it — so an affirmative "this section does not require
-    // it" would be a permissive claim about a section nothing has decided, printed on the
-    // sheet that goes to the bench.
-    const undetermined = assessed.entries.some(
-      (e) => e.classification.band === 'unknown' && bandDeterminesTreatment(e.entry.spec),
-    )
-    if (undetermined && !needsUnSpec) {
+    // has no section, and where its two candidates disagree about the packaging an
+    // affirmative "this section does not require it" would be a permissive claim about a
+    // section nothing has decided — printed on the sheet that goes to the bench.
+    const undecided = assessed.entries
+      .map((e) => undecidedPackagingSections(e.entry.spec))
+      .find((sections) => sections != null)
+    if (undecided && !needsUnSpec) {
       out.push(
         '- [ ] Packaging: the rating of at least one battery here has not been stated, and the two sections it ' +
-          'could fall in disagree — Section IA requires UN specification packaging meeting Packing Group II ' +
-          'performance, Section IB is excepted from it. Settle the rating before packing to either.',
+          `could fall in disagree about UN specification packaging — ${undecided.pair}` +
+          (undecided.a802 ? ' by special provision A802' : '') +
+          '. Settle the rating before packing to either.',
       )
     } else if (needsUnSpec) {
       out.push(
