@@ -252,7 +252,11 @@ export function assess(consignment: DgConsignment): DgAssessment {
       packageId: pkg.id,
       classification: classifyForAir(entry.spec, { prepareToSectionI: entry.prepareToSectionI }),
     }))
-    for (const { classification } of entries) {
+    // Through `applyA181`, like every other reader. These classifications are what the air
+    // waybill statement is built from — the entire hazard communication for an all-Section
+    // II consignment — and taken from the raw entries a package described as *packed with
+    // equipment* everywhere else still named PI 967 on the air waybill.
+    for (const { classification } of applyA181(entries)) {
       const key = classificationKey(classification)
       if (!byKey.has(key)) byKey.set(key, classification)
     }
@@ -722,6 +726,19 @@ function stateOfChargeChecks(
   return checks
 }
 
+/**
+ * The weight this package's design type was tested to hold, where one has been stated.
+ *
+ * Zero and below are not a ceiling of nothing — they are a mistyped or half-filled box, and
+ * taken literally they blocked the consignment for ever under a quantity message reading
+ * like a packing problem, naming a remedy that could never clear it. The box is optional, so
+ * an unusable figure is treated as the unstated value it is and reported on its own terms.
+ */
+function authorizationLimit(pkg: DgPackage): number | null {
+  const stated = pkg.packagingAuthorizationLimitKg
+  return stated != null && stated > 0 ? stated : null
+}
+
 /** Everything that depends on how the package was built. */
 function packageChecks(assessment: PackageAssessment, consignment: DgConsignment): CheckResult[] {
   const checks: CheckResult[] = []
@@ -777,7 +794,7 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
     if (instructionLimit == null) continue
     // Computed rather than asserted: `instructionLimit` is known finite by the guard above,
     // so the minimum of the two is a number without anything having to claim it is one.
-    const limit = Math.min(instructionLimit, pkg.packagingAuthorizationLimitKg ?? Infinity)
+    const limit = Math.min(instructionLimit, authorizationLimit(pkg) ?? Infinity)
     const authorizationBinds = limit < instructionLimit
     // Whether the A99 note below will actually be raised. Computed here so the remedy text
     // can point at it only when it exists: A99 relieves the 35 kg cargo aircraft maximum,
@@ -926,7 +943,7 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
   // get their own allowance — but a tested design type holds what it was proved to hold,
   // whatever is inside it. Applied per entry only, a box authorized for 6 kg passes twice
   // at 5 kg apiece and travels with 10 kg in it.
-  const authorization = pkg.packagingAuthorizationLimitKg
+  const authorization = authorizationLimit(pkg)
   if (authorization != null && entries.length) {
     const within = assessment.netWeightKg <= authorization
     checks.push({
@@ -1008,6 +1025,20 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
         refs: [pkg.id],
       })
     }
+  }
+
+  if (pkg.packagingAuthorizationLimitKg != null && pkg.packagingAuthorizationLimitKg <= 0) {
+    checks.push({
+      id: `dg.package-authorization-stated.${pkg.id}`,
+      severity: 'blocking',
+      title: `${label}: the packaging's authorized weight`,
+      detail:
+        `${pkg.packagingAuthorizationLimitKg} kg is not a weight a design type was tested to hold. Enter the ` +
+        'figure from the packaging certificate, or clear the box — it is optional, and the packing ' +
+        'instruction’s own limit applies on its own where no design type figure is stated.',
+      passed: false,
+      refs: [pkg.id],
+    })
   }
 
   // --- Weights -----------------------------------------------------------

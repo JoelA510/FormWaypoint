@@ -622,6 +622,24 @@ describe('packages holding more than one entry', () => {
     expect(check(result, 'dg.mixed-regulation.p1')).toMatchObject({ severity: 'blocking', passed: false })
   })
 
+  it('names the packed-with instruction on the air waybill, as the paper does', () => {
+    // The air waybill statement is the whole hazard communication for an all-Section II
+    // consignment. Built from the raw entries, a package described as packed with equipment
+    // everywhere else still named PI 967 on it.
+    const combined = consignment([
+      pkg('p1', [
+        entry('e1', { configuration: 'packed-with-equipment', wattHours: 90 }, { netWeightKgPerPackage: 2 }),
+        entry('e2', { configuration: 'contained-in-equipment', wattHours: 90 }, {
+          netWeightKgPerPackage: 2,
+          countPerPackage: 1,
+        }),
+      ]),
+    ])
+    expect(assess(combined).airWaybillStatements).toEqual([
+      'Lithium ion batteries in compliance with Section II of PI966',
+    ])
+  })
+
   it('does not gather two different UN numbers into one A181 total', () => {
     // Special provision A181 is written per entry: lithium ion packed with equipment and
     // lithium metal contained in equipment are two entries, each inside its own allowance,
@@ -1118,6 +1136,25 @@ describe('the count a check title states', () => {
       .map((c) => c.title)
     expect(titles.length).toBeGreaterThan(0)
     expect(titles.every((t) => t.startsWith('6 × Fibreboard box'))).toBe(true)
+  })
+})
+
+describe('a packaging authorization of zero', () => {
+  it('is refused on its own terms, not read as a ceiling of nothing', () => {
+    // Taken literally it blocked the consignment for ever, under a quantity message reading
+    // like a packing problem and naming a remedy that could never clear it.
+    const zeroed = consignment([
+      pkg('p1', [entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 7 })], {
+        packagingAuthorizationLimitKg: 0,
+      }),
+    ])
+    const result = assess(zeroed)
+    expect(check(result, 'dg.package-authorization-stated')).toMatchObject({
+      severity: 'blocking',
+      passed: false,
+    })
+    // And the quantity check measures against the packing instruction alone.
+    expect(check(result, 'dg.limit.p1')).toMatchObject({ passed: true, expected: '≤ 10 kg' })
   })
 })
 
