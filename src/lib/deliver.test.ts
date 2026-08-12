@@ -148,8 +148,11 @@ describe('safeFileName', () => {
     expect(safeFileName('   ')).toBe('document')
     expect(safeFileName('...')).toBe('document')
     expect(safeFileName('..')).toBe('document')
-    // CON.pdf is not a file on Windows, whatever the extension says.
-    expect(safeFileName('CON.pdf')).toBe('document')
+    // CON.pdf is not a file on Windows, whatever the extension says — but the extension is
+    // kept, because the fallback stem alone leaves a declaration the system cannot open by
+    // type, which the truncation branch below goes to some trouble to avoid.
+    expect(safeFileName('CON.pdf')).toBe('document.pdf')
+    expect(safeFileName('CON')).toBe('document')
     expect(safeFileName('lpt1')).toBe('document')
     // But a name that merely starts with those letters is fine.
     expect(safeFileName('console.pdf')).toBe('console.pdf')

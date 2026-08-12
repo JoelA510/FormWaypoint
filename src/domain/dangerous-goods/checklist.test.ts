@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { consignment, entry, overpack, pkg } from './test-support'
-import { assess } from './assess'
+import { assess, overpackOrder } from './assess'
 import { buildChecklist } from './checklist'
 import { buildDeclaration, retainUntil } from './dgd'
 import { localDate } from '../../lib/report'
@@ -136,6 +136,15 @@ describe('the section numbers on the bench sheet', () => {
       .filter((l) => l.startsWith('- **UN'))
       .map((l) => l.match(/(\d+) Wh/)![1])
     expect(listed).toEqual(['95', '97', '96'])
+
+    // And the editor numbers them the same way, so "Package 2" on screen is the box the
+    // sheet's second section describes.
+    expect(overpackOrder(shipment.packages, (p) => p.overpackId).map((p) => p.id)).toEqual(['p1', 'p3', 'p2'])
+  })
+
+  it('leaves a consignment with no overpacks in the order it was entered', () => {
+    const plain = [pkg('p1', []), pkg('p2', []), pkg('p3', [])]
+    expect(overpackOrder(plain, (p) => p.overpackId).map((p) => p.id)).toEqual(['p1', 'p2', 'p3'])
   })
 })
 

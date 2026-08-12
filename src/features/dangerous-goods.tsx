@@ -26,7 +26,7 @@ import {
   Toggle,
 } from '../components/ui'
 import { ChecksPanel } from './review'
-import { assess, packageCountInConsignment } from '../domain/dangerous-goods/assess'
+import { assess, overpackOrder, packageCountInConsignment } from '../domain/dangerous-goods/assess'
 import { buildChecklist } from '../domain/dangerous-goods/checklist'
 import { buildDeclaration, formatKg, retainUntil } from '../domain/dangerous-goods/dgd'
 import {
@@ -648,7 +648,11 @@ function PackagesEditor({
         }
       />
       <CardBody className="space-y-4">
-        {consignment.packages.map((pkg, index) => {
+        {/* Numbered the way the declaration and the bench checklist number them, so
+            "Package 2" here is the box "### 2." describes. Packages sharing an overpack are
+            emitted together on the paperwork, and a screen that listed them in entry order
+            gave the same ordinal to two different boxes. */}
+        {overpackOrder(consignment.packages, (p) => p.overpackId).map((pkg, index) => {
           const assessed = assessment.packages.find((p) => p.pkg.id === pkg.id)
           const total = packageCountInConsignment(pkg, consignment)
           return (

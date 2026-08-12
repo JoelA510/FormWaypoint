@@ -337,6 +337,17 @@ describe('an unstated rating', () => {
   })
 })
 
+describe('a rating that is not a figure', () => {
+  it('is unknown, not the largest band', () => {
+    // NaN fails every comparison, so it slipped past the `<= 0` guard and then past
+    // `stated <= threshold` — coming out large, which is Section IA, a 35 kg ceiling and a
+    // check that passes affirming "NaN Wh against a 100 Wh threshold".
+    expect(energyBand(spec({ wattHours: Number.NaN }))).toBe('unknown')
+    expect(energyBand(spec({ chemistry: 'lithium-metal', lithiumContentG: Number.NaN }))).toBe('unknown')
+    expect(classifyForAir(spec({ wattHours: Number.NaN })).sectionUndetermined).toBe(true)
+  })
+})
+
 describe('the special provisions listed against an entry', () => {
   it('gives every standalone battery its passenger-aircraft provision', () => {
     // Both are forbidden on passenger aircraft and both have a provision naming the

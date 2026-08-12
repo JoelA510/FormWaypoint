@@ -35,7 +35,7 @@ export interface Delivery {
  * two references differing only in punctuation do not collapse onto one name.
  */
 export function safeFileName(name: string, fallback = 'document'): string {
-  const cleaned = name
+  let cleaned = name
     // eslint-disable-next-line no-control-regex -- the point is to strip them
     .replace(/[\u0000-\u001f\u007f]/g, '')
     .replace(/[/\\:*?"<>|]/g, '-')
@@ -56,7 +56,15 @@ export function safeFileName(name: string, fallback = 'document'): string {
   const reserved = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i
   // A name left with no letters or digits names nothing — `..` reduces to a dash, and a file
   // called `-` is worse than one called `document`.
-  if (!cleaned || !/[a-z0-9]/i.test(cleaned) || reserved.test(cleaned)) return fallback
+  if (!cleaned || !/[a-z0-9]/i.test(cleaned)) return fallback
+  // A reserved name keeps its extension, and goes on through the length rule below like any
+  // other. Returning the bare fallback threw away the `.pdf` that the truncation branch is
+  // careful to preserve, leaving a declaration saved as a file the operating system cannot
+  // open by type.
+  if (reserved.test(cleaned)) {
+    const dot = cleaned.indexOf('.')
+    cleaned = dot > 0 ? `${fallback}${cleaned.slice(dot)}` : fallback
+  }
   // Long enough for any reference, short of the 255-byte limit most filesystems impose.
   if (cleaned.length <= MAX_FILE_NAME) return cleaned
   // Truncate the stem, not the name: a `.pdf` cut off the end leaves a file the operating

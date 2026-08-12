@@ -215,19 +215,24 @@ function a181Groups(entries: EntryAssessment[]): Map<string, EntryAssessment[]> 
  * that wording after entries not inside it. The bench checklist needs it because it numbers
  * its sections, and the two documents travel in one envelope: numbered in input order
  * against a declaration in this one, section 2 of the checklist described the third entry
- * on the paper.
+ * on the paper. The editor needs it because it numbers packages too, and "Package 2" on
+ * screen has to be the box "### 2." is describing.
+ *
+ * Generic in what a package is, so the editor can order the consignment's own packages and
+ * the two documents can order the assessed ones, through this one rule.
  *
  * A consignment with no overpacks, or one whose overpacks are already contiguous, comes back
  * exactly as it was entered.
  */
-export function overpackOrder(packages: readonly PackageAssessment[]): PackageAssessment[] {
+export function overpackOrder<T>(packages: readonly T[], overpackIdOf: (item: T) => string | null): T[] {
   const groupPosition = new Map<string, number>()
+  const keyAt = (item: T, index: number): string => overpackIdOf(item) || `pkg:${index}`
   packages.forEach((p, index) => {
-    const key = p.pkg.overpackId || `pkg:${index}`
+    const key = keyAt(p, index)
     if (!groupPosition.has(key)) groupPosition.set(key, index)
   })
   return packages
-    .map((p, index) => ({ p, index, at: groupPosition.get(p.pkg.overpackId || `pkg:${index}`) ?? index }))
+    .map((p, index) => ({ p, index, at: groupPosition.get(keyAt(p, index)) ?? index }))
     .sort((a, b) => a.at - b.at || a.index - b.index)
     .map((o) => o.p)
 }

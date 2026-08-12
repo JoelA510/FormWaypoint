@@ -125,8 +125,12 @@ export function energyBand(spec: BatterySpec): EnergyBand {
   // instruction in place of dangerous goods training, and a check that passes affirming
   // "0 Wh against a 100 Wh threshold". The sibling net-weight check refuses zero for
   // exactly this reason.
+  // And anything that is not a finite number at all. `NaN` fails every comparison, so a
+  // field parsed from something that was not a figure slipped past a `<= 0` guard and then
+  // past `stated <= threshold` — coming out *large*, which is Section IA, a 35 kg ceiling
+  // and a check that passes affirming "NaN Wh against a 100 Wh threshold".
   const stated = spec.chemistry === 'lithium-metal' ? spec.lithiumContentG : spec.wattHours
-  if (stated == null || stated <= 0) return 'unknown'
+  if (stated == null || !Number.isFinite(stated) || stated <= 0) return 'unknown'
   const threshold =
     spec.chemistry === 'lithium-metal'
       ? AIR_THRESHOLDS.lithiumContentG[spec.form]

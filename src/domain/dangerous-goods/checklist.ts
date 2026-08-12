@@ -133,7 +133,7 @@ export function buildChecklist(
   out.push('## Packages')
   out.push('')
   // Numbered in the order the declaration prints them; the two travel in one envelope.
-  for (const [index, assessed] of overpackOrder(assessment.packages).entries()) {
+  for (const [index, assessed] of overpackOrder(assessment.packages, (p) => p.pkg.overpackId).entries()) {
     const { pkg } = assessed
     const count = packageCountInConsignment(pkg, consignment)
     const overpack = pkg.overpackId ? consignment.overpacks.find((o) => o.id === pkg.overpackId) : null

@@ -241,7 +241,7 @@ export function buildDeclaration(consignment: DgConsignment, assessment: DgAsses
   // `dg.overpack-identifier` exists to prevent. Everything else keeps its order: the sort
   // key is the index of the first package of the group, so a consignment with no overpacks,
   // or one whose overpacks are already contiguous, is emitted exactly as it was entered.
-  const ordered = overpackOrder(assessment.packages)
+  const ordered = overpackOrder(assessment.packages, (p) => p.pkg.overpackId)
 
   for (const packageAssessment of ordered) {
     const { pkg } = packageAssessment
