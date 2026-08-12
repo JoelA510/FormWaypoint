@@ -51,8 +51,14 @@ const CONTENT = { left: FRAME.left + HATCH_WIDTH + 6, right: FRAME.right - HATCH
  */
 const PARTY_HEIGHT = 48
 
-/** Held back between the last departure-airport line and the caption below it, in points. */
-const AIRPORT_CLEARANCE = 4
+/**
+ * Held back between the last departure-airport line and the caption below it, in points.
+ *
+ * A full line, not a token gap. Measured baseline to baseline, 4pt against 7.5pt type put
+ * the last line's descenders through the capitals of "Airport of Destination:" — the block
+ * fitted its own capacity and still overlapped the box beneath it.
+ */
+const AIRPORT_CLEARANCE = 10
 
 /**
  * Column boundaries of the dangerous goods table, as x positions.
@@ -430,6 +436,12 @@ function drawEntry(
   // lost four rows, which reads as a different, larger problem than the one on the sheet.
   let clipped = 0
   for (let i = 0; i < totalRows; i++) if (!rowFits(i)) clipped++
+
+  // Nothing at all where the entry's own first row is already past the foot of the table.
+  // The wrapped columns are guarded row by row, but these five were drawn unconditionally —
+  // across the Additional Handling Information box beneath, under a warning saying those
+  // rows had not been printed.
+  if (!rowFits(0)) return top - totalRows * ROW_HEIGHT
 
   text(ctx, line.unNumber, COLUMNS.unNumber + 3, top, { size })
   line.properShippingName.forEach((part, i) => {
