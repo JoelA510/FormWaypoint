@@ -1752,6 +1752,10 @@ export function missingDeclarationFields(consignment: DgConsignment): string[] {
   if (!consignment.airportOfDeparture.trim()) missing.push('airport of departure')
   if (!consignment.airportOfDestination.trim()) missing.push('airport of destination')
   if (!consignment.signerName.trim()) missing.push('name of signatory')
+  // Box 20 is captioned "Place and Date", and the renderer draws whichever of the two it
+  // has. Demanding the date alone let the check affirm that every box the shipper is
+  // responsible for has a value, over a declaration printing a date with no place.
+  if (!consignment.signerPlace.trim()) missing.push('place of signing')
   if (!consignment.signerDate.trim()) missing.push('date')
   return missing
 }

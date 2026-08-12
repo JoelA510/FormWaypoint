@@ -304,7 +304,7 @@ export interface DgConsignment {
   additionalHandlingInformation: string
   signerName: string
   signerTitle: string
-  /** Where the declaration is signed. Optional on the form. */
+  /** Where the declaration is signed: the first half of box 20, "Place and Date". */
   signerPlace: string
   /** `YYYY-MM-DD`. Rendered in the form's own format at fill time. */
   signerDate: string

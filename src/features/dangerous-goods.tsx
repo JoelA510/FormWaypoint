@@ -497,7 +497,7 @@ export function DangerousGoodsPanel({
                 />
               )}
             </Field>
-            <Field label="Place" hint="Optional.">
+            <Field label="Place" hint="Box 20 is “Place and Date”; both halves are the shipper’s.">
               {(id) => (
                 <Input
                   id={id}

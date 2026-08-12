@@ -575,6 +575,17 @@ describe('what the shipper has to establish', () => {
     expect(fields?.detail).toContain('airport of destination')
   })
 
+  it('counts the place of signing among them, which box 20 asks for beside the date', () => {
+    // The box is captioned "Place and Date" and the renderer draws whichever of the two it
+    // has, so a blank place printed a bare date under a check affirming that every box the
+    // shipper is responsible for had a value.
+    const result = assess(consignment([pkg('p1', [entry('e1', { wattHours: 90 })])], { signerPlace: '' }))
+    const fields = check(result, 'dg.declaration-fields')
+    expect(fields).toMatchObject({ severity: 'blocking', passed: false })
+    expect(fields?.detail).toContain('place of signing')
+    expect(result.canGenerate).toBe(false)
+  })
+
   it('blocks an empty consignment', () => {
     expect(assess(consignment([])).canGenerate).toBe(false)
   })
