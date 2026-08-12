@@ -171,11 +171,15 @@ export function DangerousGoodsPanel({
   const record = useCallback((): DgConsignmentRecord => {
     const now = Date.now()
     const fingerprint = JSON.stringify(consignment)
-    const filed = records.find(
-      (r) =>
-        JSON.stringify(r.consignment) === fingerprint &&
-        now - new Date(r.preparedAt).getTime() < SAME_PREPARATION_MS,
-    )
+    const filed = records.find((r) => {
+      if (JSON.stringify(r.consignment) !== fingerprint) return false
+      // Bounded at both ends. Without a floor, a record stamped in the future — a clock
+      // that has since been corrected, a record restored from a machine set ahead —
+      // satisfied "less than half an hour ago", and a genuinely new preparation then reused
+      // its id and overwrote the earlier row with a back-dated one.
+      const age = now - new Date(r.preparedAt).getTime()
+      return age >= 0 && age < SAME_PREPARATION_MS
+    })
     const preparedAt = filed?.preparedAt ?? new Date(now).toISOString()
     return {
       id: `${consignment.airWaybillNumber || consignment.shippersReference || 'consignment'}@${preparedAt}`,

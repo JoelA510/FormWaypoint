@@ -286,6 +286,21 @@ describe('an unstated rating', () => {
     expect(sodium).not.toContain('Lithium battery mark')
   })
 
+  it('does not demand UN specification packaging for a section nothing has decided', () => {
+    // The two candidates are Section IA, which requires it, and Section IB, which A802
+    // excepts — and the quantity limit for the same entry is already stated as the lower
+    // candidate. Demanding the mark as well had the two halves of one classification
+    // assuming different sections, and blocked on a fact `dg.energy` is already blocking
+    // for.
+    expect(classifyForAir(spec({ wattHours: null })).unSpecificationPackagingRequired).toBe(false)
+    // PI 976's null section is a different answer: fully regulated, and it does require it.
+    expect(
+      classifyForAir(spec({ chemistry: 'sodium-ion', wattHours: null })).unSpecificationPackagingRequired,
+    ).toBe(true)
+    // And a rated large battery still requires it.
+    expect(classifyForAir(spec({ wattHours: 500 })).unSpecificationPackagingRequired).toBe(true)
+  })
+
   it('states the lower candidate for equipment too, not the Section I cargo allowance', () => {
     // Every instruction for batteries with equipment has both a Section I and a Section II,
     // so an unrated package could be either. Reading Section I's 35 kg to it showed a 20 kg

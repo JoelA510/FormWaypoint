@@ -106,15 +106,13 @@ const SUB_COLUMNS = {
 const TABLE_HEADINGS = new Set<string>([...Object.values(TOP_COLUMNS), ...Object.values(SUB_COLUMNS)])
 
 /**
- * How far below the top heading row the compliance heading row may sit, and how long a run
- * of blank rows inside the commodity table may be before it is read as the end of it.
+ * How far below the top heading row the compliance heading row may sit.
  *
- * Both exist because omitted rows are padded rather than closed up: the indices stay true,
+ * It exists because omitted rows are padded rather than closed up: the indices stay true,
  * and a gap the writer left is a gap the reader sees. Small on purpose — past a few rows,
- * what follows is no longer the table.
+ * what follows is not the other half of the heading.
  */
 const MAX_HEADING_GAP = 3
-const MAX_BLANK_ROWS_IN_TABLE = 4
 
 // ---------------------------------------------------------------------------
 // Workbook (.xlsx) reader — the primary path
@@ -337,25 +335,22 @@ function readLines(
   const isBlankRow = (row: string[]): boolean => row.every((c) => !c.trim())
 
   const lines: SourceLine[] = []
-  let blanks = 0
-  // The row the table stopped at, so the caller can tell an ordinary end from an early one.
-  // `null` means it ran out of rows, or out of patience with a run of blank ones.
-  let endedAt: string[] | null | undefined
+  // The row the table stopped at, where it stopped at one. Left unset where the rows simply
+  // ran out, which is not an early end and has nothing to report.
+  let endedAt: string[] | undefined
   for (let r = subIndex + 1; r < rows.length; ) {
     const top = rows[r]
     // A row the writer left out entirely. Padding the gap keeps every row's index true,
     // which is what the workbook reader now does — so a blank row can sit *inside* the
     // table, and reading it as the end of the table dropped every line below it without a
-    // word. Skipped, up to a run long enough to mean the table really has ended.
+    // word. Skipped however many there are: the table ends at its totals band, or at a row
+    // that carries something and is not a line, and a count of blank rows was an arbitrary
+    // third rule that dropped lines below a long gap on one template and cried truncation
+    // on every ordinary import of another.
     if (isBlankRow(top)) {
-      if (++blanks > MAX_BLANK_ROWS_IN_TABLE) {
-        endedAt = null
-        break
-      }
       r += 1
       continue
     }
-    blanks = 0
 
     const lineNumber = parseNumber(top[columns.ln] ?? '')
     // The table ends at the first row that carries something and is not a line (the totals
@@ -437,7 +432,7 @@ function readLines(
   // An early end is reported. The table stops at its totals band; anything else means the
   // rows below the stopping point were not read, and a short commodity list that looks
   // complete is the one failure this reader must not produce silently.
-  if (endedAt !== undefined && !(endedAt && isTotalsRow(endedAt))) {
+  if (endedAt !== undefined && !isTotalsRow(endedAt)) {
     warnings.push(
       `The commodity table ended before its totals band, after ${lines.length} line(s). Any line printed below ` +
         'that point was not read — check the form against what was imported before generating anything.',

@@ -210,6 +210,18 @@ describe('the workbook grid', () => {
     expect(parsed.warnings.some((w) => w.includes('ended before its totals band'))).toBe(true)
   })
 
+  it('reads past a long run of blank line slots', () => {
+    // A template whose unused slots are wholly blank leaves a gap longer than any count a
+    // rule could pick. Ending the table on a run of them dropped every line below the gap
+    // on one form and cried truncation on every ordinary import of another.
+    const grid = omronCiGrid(simpleOmronCi())
+    const secondTop = grid.findIndex((row) => row[2] === '20000-0002')
+    grid.splice(secondTop, 0, [], [], [], [], [], [])
+    const parsed = parseOmronCiWorkbook('ci.xlsx', grid)
+    expect(parsed.lines).toHaveLength(2)
+    expect(parsed.warnings.some((w) => w.includes('ended before its totals band'))).toBe(false)
+  })
+
   it('says nothing about the table ending when it ends where it should', () => {
     expect(parseGrid().warnings.some((w) => w.includes('ended before its totals band'))).toBe(false)
   })

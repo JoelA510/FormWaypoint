@@ -576,6 +576,9 @@ export function classifyForAir(
   const stateOfCharge = stateOfChargeFor(spec)
   const band = energyBand(spec)
   const section = sectionFor(spec.configuration, band, spec.chemistry, options.prepareToSectionI ?? false)
+  // A null section because nothing has decided it yet, as opposed to because the packing
+  // instruction has none. PI 976 is the second; an unrated battery is the first.
+  const sectionUndetermined = section === null && band === 'unknown' && bandDeterminesTreatment(spec)
   const limits = limitsFor(id.packingInstruction, section, spec.chemistry)
 
   // Standalone cells and batteries of every chemistry are cargo aircraft only. Everything
@@ -592,7 +595,15 @@ export function classifyForAir(
   // conservatively as fully regulated too. Treating those as though Section IB's A802
   // exception covered them let them skip the packaging check entirely, under a message
   // citing an exception written for two other packing instructions.
-  const performancePackagingSection = section === 'IA' || section === 'I' || section === null
+  // PI 976's null section is fully regulated and takes performance packaging. An *unrated*
+  // entry's null section is not the same answer: its two candidates are Section IA, which
+  // requires the packaging, and Section IB or II, which A802 excepts — and the quantity
+  // limit for that same entry is already stated as the lower candidate. Demanding the mark
+  // as well would have the two halves of one classification assuming different sections,
+  // and would block on a fact nobody can settle until the rating is entered, which
+  // `dg.energy` is already blocking for.
+  const performancePackagingSection =
+    section === 'IA' || section === 'I' || (section === null && !sectionUndetermined)
   // Equipment is its own enclosure, so contained-in never takes performance packaging.
   const unSpecificationPackaging = performancePackagingSection && spec.configuration !== 'contained-in-equipment'
 
@@ -630,7 +641,7 @@ export function classifyForAir(
       section,
       aircraft,
       id,
-      section === null && band === 'unknown' && bandDeterminesTreatment(spec),
+      sectionUndetermined,
     ),
     training: isSectionII ? 'adequate-instruction' : 'dangerous-goods',
     specialProvisions: specialProvisionsFor(spec, unSpecificationPackaging),
