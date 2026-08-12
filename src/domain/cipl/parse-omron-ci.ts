@@ -432,7 +432,16 @@ function readLines(
   // An early end is reported. The table stops at its totals band; anything else means the
   // rows below the stopping point were not read, and a short commodity list that looks
   // complete is the one failure this reader must not produce silently.
-  if (endedAt !== undefined && !isTotalsRow(endedAt)) {
+  // Reported only where the row that stopped the read looks like a line the reader failed
+  // on — a part number or a quantity, which is what a commodity whose LN cell was left
+  // blank still carries. Deliberately not the description column: a continuation marker or
+  // a no-charge note printed under the table is prose in exactly that column, and warning
+  // about it would cry truncation on every clean import of a template that carries one.
+  const stoppedOnGoods =
+    endedAt !== undefined &&
+    !isTotalsRow(endedAt) &&
+    [columns.part, columns.qty].some((c) => c >= 0 && (endedAt[c] ?? '').trim())
+  if (stoppedOnGoods) {
     warnings.push(
       `The commodity table ended before its totals band, after ${lines.length} line(s). Any line printed below ` +
         'that point was not read — check the form against what was imported before generating anything.',

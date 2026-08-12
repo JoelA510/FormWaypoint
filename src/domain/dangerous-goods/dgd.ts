@@ -170,15 +170,21 @@ export function wrap(text: string, width: number): string[] {
  * every used overpack has one — the identifier is what ties the physical overpack to its
  * declaration entry — and an identifier the check demands on the box but the paper never
  * states is exactly the box/paper mismatch these consignments get corrected for. The
- * per-overpack total stays a multiples-only line, because with one overpack it is the
- * quantity column's own figure restated.
+ * per-overpack total is withheld only where it would restate the quantity column's own
+ * figure: one overpack holding one entry. One overpack holding several is not that case —
+ * the quantities beside them are per package, and without the total nothing on the paper
+ * adds them up.
  */
-function overpackAnnotations(overpack: Overpack, totalPerOverpackKg: number): string[] {
+function overpackAnnotations(overpack: Overpack, totalPerOverpackKg: number, entryCount: number): string[] {
   const lines = overpack.count <= 1 ? ['Overpack used'] : [`Overpack used x ${overpack.count}`]
   // The marks are what must be listed; "identification marks" as a label is mine, not the
   // regulation's, and it costs a wrapped row every time.
   if (overpack.marks.trim()) lines.push(`Overpack marks: ${overpack.marks.trim()}`)
-  if (overpack.count > 1) {
+  // Stated where it is not the quantity column's own figure said twice: more than one
+  // overpack, or more than one entry inside a single one. Withheld on the entry count too,
+  // a single overpack spanning several package descriptions had its total appear nowhere —
+  // the per-line quantities are per package, and nothing on the paper added them up.
+  if (overpack.count > 1 || entryCount > 1) {
     lines.push(`Total quantity per Overpack ${formatKg(totalPerOverpackKg)} kg`)
   }
   // Wrapped to the same column the quantity is wrapped to, because that is the column they
@@ -209,7 +215,10 @@ export function buildDeclaration(consignment: DgConsignment, assessment: DgAsses
    * the mark on the box, is the single most frequent cause of a resubmission on these
    * consignments.
    */
-  const overpackTotals = new Map<string, { lastLineIndex: number; totalPerOverpackKg: number }>()
+  const overpackTotals = new Map<
+    string,
+    { lastLineIndex: number; totalPerOverpackKg: number; entryCount: number }
+  >()
 
   // Entries are emitted package by package so that the overpack wording lands immediately
   // after the entries it belongs to, which is where the regulation puts it.
@@ -285,14 +294,17 @@ export function buildDeclaration(consignment: DgConsignment, assessment: DgAsses
         overpackTotals.set(overpack.id, {
           lastLineIndex: lines.length - 1,
           totalPerOverpackKg: (held?.totalPerOverpackKg ?? 0) + contribution,
+          entryCount: (held?.entryCount ?? 0) + groupList.length,
         })
       }
     })
   }
 
-  for (const [overpackId, { lastLineIndex, totalPerOverpackKg }] of overpackTotals) {
+  for (const [overpackId, { lastLineIndex, totalPerOverpackKg, entryCount }] of overpackTotals) {
     const overpack = consignment.overpacks.find((o) => o.id === overpackId)
-    if (overpack) lines[lastLineIndex].annotations = overpackAnnotations(overpack, totalPerOverpackKg)
+    if (overpack) {
+      lines[lastLineIndex].annotations = overpackAnnotations(overpack, totalPerOverpackKg, entryCount)
+    }
   }
 
   return {

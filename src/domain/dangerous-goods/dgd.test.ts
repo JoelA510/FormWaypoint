@@ -142,7 +142,13 @@ describe('packaging descriptions', () => {
     )
     const declaration = buildDeclaration(shipment, assess(shipment))
     expect(declaration.lines[0].annotations).toEqual([])
-    expect(declaration.lines[1].annotations).toEqual(['Overpack used', 'Overpack marks: #A001'])
+    // And the total is stated: the quantities beside the two entries are per package, so
+    // without it nothing on the paper adds them up.
+    expect(declaration.lines[1].annotations).toEqual([
+      'Overpack used',
+      'Overpack marks: #A001',
+      'Total quantity per Overpack 8.5 kg',
+    ])
   })
 })
 

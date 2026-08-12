@@ -566,11 +566,21 @@ function specialProvisionsFor(spec: BatterySpec, unSpecificationRequired: boolea
   // Listed for exactly the entries the packaging check holds to it. Gating this on the
   // section while the check gated on something wider let a blocking check cite a provision
   // the entry's own list did not carry.
-  if (unSpecificationRequired) {
+  // A802 is written for lithium. A standalone sodium ion battery travels under PI 976, whose
+  // packaging requirement is its own — listing A802 against it cited a provision that does
+  // not mention the entry, which is the mismatch this line was corrected for once already.
+  if (unSpecificationRequired && spec.chemistry !== 'sodium-ion') {
     provisions.push('A802 — UN specification packaging meeting Packing Group II performance is required')
   }
   provisions.push('A99 — an exception to the 35 kg limit needs competent authority approval')
-  provisions.push('A181 — a package holding both packed-with and contained-in batteries is described as packed with equipment')
+  // A181 governs a package holding batteries both packed with and contained in equipment,
+  // so it belongs to UN3481 and UN3091 alone. Pushed unconditionally, it sat in the column M
+  // list of every standalone entry — invisible until this list started printing.
+  if (spec.configuration !== 'standalone') {
+    provisions.push(
+      'A181 — a package holding both packed-with and contained-in batteries is described as packed with equipment',
+    )
+  }
   if (spec.chemistry === 'sodium-ion') {
     provisions.push('A228 — sodium ion cells with an aqueous alkali electrolyte travel as UN2795, not UN3551/UN3552')
   }

@@ -222,6 +222,17 @@ describe('the workbook grid', () => {
     expect(parsed.warnings.some((w) => w.includes('ended before its totals band'))).toBe(false)
   })
 
+  it('says nothing about a note printed under the table', () => {
+    // A row that is neither the totals band nor a commodity — a continuation marker, a
+    // no-charge note — ends the table just as properly. Warning about it would cry
+    // truncation on every clean import of a template that carries one.
+    const grid = omronCiGrid(simpleOmronCi())
+    const totals = grid.findIndex((row) => row.some((c) => c.trim().toUpperCase() === 'SUBTOTAL'))
+    grid.splice(totals, 0, ['', '', '', 'Continued on attached sheet'])
+    const parsed = parseOmronCiWorkbook('ci.xlsx', grid)
+    expect(parsed.warnings.some((w) => w.includes('ended before its totals band'))).toBe(false)
+  })
+
   it('says nothing about the table ending when it ends where it should', () => {
     expect(parseGrid().warnings.some((w) => w.includes('ended before its totals band'))).toBe(false)
   })

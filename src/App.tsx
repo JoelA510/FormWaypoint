@@ -233,7 +233,8 @@ export function App() {
       if (missing.length) {
         setRestoreError(
           `This machine's stored data could not be read: ${missing.join(', ')}. What is shown is incomplete — ` +
-            'do not take an empty panel as evidence that nothing was saved.',
+            'do not take an empty panel as evidence that nothing was saved. Nothing here re-reads on its own, ' +
+            'so reload the page once the database is available again.',
         )
       }
     })()

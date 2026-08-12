@@ -357,6 +357,32 @@ describe('the special provisions listed against an entry', () => {
     ).specialProvisions
     expect(equipment.some((p) => p.startsWith('A201') || p.startsWith('A334'))).toBe(false)
   })
+
+  it('keeps A181 off a standalone entry, which cannot hold equipment', () => {
+    // A181 describes a package holding batteries both packed with and contained in
+    // equipment. Pushed against every entry, it sat in the column M list of UN3480.
+    const standalone = classifyForAir(spec({ wattHours: 95 })).specialProvisions
+    expect(standalone.some((p) => p.startsWith('A181'))).toBe(false)
+
+    const packedWith = classifyForAir(
+      spec({ configuration: 'packed-with-equipment', wattHours: 95 }),
+    ).specialProvisions
+    expect(packedWith.some((p) => p.startsWith('A181'))).toBe(true)
+  })
+
+  it('does not cite A802 against a sodium ion battery, which A802 does not mention', () => {
+    // A802 is written for lithium. Standalone sodium ion travels under PI 976, whose
+    // packaging requirement stands on its own.
+    const sodium = classifyForAir(
+      spec({ chemistry: 'sodium-ion', wattHours: 60 }),
+    )
+    expect(sodium.unSpecificationPackagingRequired).toBe(true)
+    expect(sodium.specialProvisions.some((p) => p.startsWith('A802'))).toBe(false)
+
+    const lithium = classifyForAir(spec({ wattHours: 500 }))
+    expect(lithium.unSpecificationPackagingRequired).toBe(true)
+    expect(lithium.specialProvisions.some((p) => p.startsWith('A802'))).toBe(true)
+  })
 })
 
 describe('standalone sodium ion', () => {
