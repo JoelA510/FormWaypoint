@@ -81,6 +81,12 @@ export interface OmronCiSpec {
    * on the header grid — which, unhealed, folds it into the value in the cell before it.
    */
   splitHeaderLabel?: boolean
+  /**
+   * Print no header grid at all, so nothing below the address band carries a label. Models
+   * a revision that moves those fields elsewhere: the addresses must still be bounded by
+   * the commodity table rather than running on into it.
+   */
+  omitHeaderGrid?: boolean
 }
 
 export function simpleOmronCi(): OmronCiSpec {
@@ -278,13 +284,15 @@ export async function buildOmronCiPdf(spec: OmronCiSpec): Promise<ArrayBuffer> {
   // With splitHeaderLabel, every right-hand label is drawn one item per word, the way pdfjs
   // reports a run it decided to break.
   const label = words
-  pairs.forEach(([label1, value1, label2, value2], i) => {
-    const y = 640 - i * 12
-    at(COLUMNS.ln.left, y, label1)
-    value(COLUMNS.d.left, y, value1)
-    label(COLUMNS.f.left, y, label2, !!spec.splitHeaderLabel)
-    value(COLUMNS.h.left, y, value2)
-  })
+  if (!spec.omitHeaderGrid) {
+    pairs.forEach(([label1, value1, label2, value2], i) => {
+      const y = 640 - i * 12
+      at(COLUMNS.ln.left, y, label1)
+      value(COLUMNS.d.left, y, value1)
+      label(COLUMNS.f.left, y, label2, !!spec.splitHeaderLabel)
+      value(COLUMNS.h.left, y, value2)
+    })
+  }
 
   // Table headings, centred like the printed form — including its awkwardest habit: the
   // vertically merged headings (LN, QTY, …) print centred *between* the two heading rows,

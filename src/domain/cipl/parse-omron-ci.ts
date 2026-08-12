@@ -60,7 +60,23 @@ const HEADER_LABELS = new Set([
 
 const normalizeLabel = (text: string): string =>
   text.replace(/:\s*$/, '').trim().replace(/\s+/g, ' ').toUpperCase()
-const isLabel = (text: string): boolean => HEADER_LABELS.has(normalizeLabel(text))
+/**
+ * Whether a cell is a header-grid label.
+ *
+ * Four of them — `INCOTERMS`, `PAGE`, `SIGNATURE`, `DATE` — are ordinary words as well as
+ * labels, and pdfjs hands back a printed run one word at a time: `3000 Page Mill Road`
+ * offers `Page`, and `CARRIER / AGENT: Page Aviation` offers it again. Read as labels those
+ * ended the address band on the consignee's own street and emptied all three blocks, with
+ * nothing said. The form prints every one of them with a colon, and no value word carries
+ * one, so for a label that is a bare word the colon is what makes it a label.
+ *
+ * The rest carry `#`, `/` or a second word and are in no danger of being typed by accident.
+ */
+const isLabel = (text: string): boolean => {
+  const normalized = normalizeLabel(text)
+  if (!HEADER_LABELS.has(normalized)) return false
+  return !/^[A-Z]+$/.test(normalized) || /:\s*$/.test(text.trim())
+}
 
 /**
  * Whether a cell titles one of the three address blocks, as opposed to a header-grid label
@@ -257,6 +273,11 @@ function readParties(
   for (let r = bandIndex + 1; r < rows.length; r++) {
     const row = rows[r]
     if (row.some((c) => isLabel(c))) break
+    // And at the commodity table, whether or not a header grid was found between the two.
+    // Stopping on a label alone rested on there being one below the addresses: a revision
+    // that moves those fields, or a print that loses them, ran the band to the end of the
+    // sheet and filed `PART #` and a part number as the consignee's street.
+    if (row.some((c) => TABLE_HEADINGS.has(c.trim().toUpperCase()))) break
     for (const key of ['shipper', 'consignee', 'billTo'] as const) {
       const column = columns[key]
       const cell = column >= 0 ? (row[column] ?? '').trim() : ''
@@ -700,20 +721,44 @@ function pagesToGrid(pages: TextPage[]): SheetRows {
     const strings = row.items.map((item) => item.str)
     return titlesPartyBlock(strings, 'SHIPPER') && titlesPartyBlock(strings, 'CONSIGNEE')
   })
+  // Where the commodity table's headings begin. The merged ones can land a row above the
+  // row carrying PART #, which is why the anchor band reaches back a row — but only where
+  // that row is a heading row. Taking it unconditionally cost the last line of every
+  // address on a form with nothing printed between the two.
+  const headingBandStart =
+    headIndex > 0 && rows[headIndex - 1].items.some((item) => TABLE_HEADINGS.has(item.str.toUpperCase()))
+      ? headIndex - 1
+      : headIndex
+
+  // The band runs to the first header-grid label below it, and no further than the table
+  // headings whatever else is found.
+  //
+  // Collapsing to the band's own row when no label follows meant no row was column-mapped
+  // at all, and `readParties` then read cells 0, 1 and 2 of every remaining row — the
+  // synthesized commodity headings among them — as shipper, consignee and bill-to. That
+  // there is always a header grid below the addresses is the print order this search is
+  // written not to rest on; the table headings bound it whether or not one is there.
   let partyEnd = partyBand
   if (partyBand !== -1) {
-    partyEnd = rows.findIndex((row, i) => i > partyBand && hasLabel(row))
-    if (partyEnd === -1) partyEnd = partyBand
+    const labelled = rows.findIndex((row, i) => i > partyBand && hasLabel(row))
+    partyEnd = labelled === -1 ? headingBandStart : Math.min(labelled, headingBandStart)
+    if (partyEnd < partyBand) partyEnd = partyBand
   }
 
   // The heading rows are synthesized in canonical order rather than passed through,
   // because the print can split them across baselines in ways `readLines` should not
   // have to know about. The blocks are emitted in the same canonical order.
-  const isHeadingRow = (row: TextRow): boolean => row.items.some((item) => TABLE_HEADINGS.has(item.str.toUpperCase()))
+  //
+  // Only rows inside the heading band count. Tested against the whole header region, a
+  // single ordinary word did it: an address line reading `Amount Tower` and a freight term
+  // reading `PREPAID AMOUNT AGREED` were dropped entire, silently, because `AMOUNT` is
+  // also the name of a column.
+  const isHeadingRow = (i: number): boolean =>
+    i >= headingBandStart && rows[i].items.some((item) => TABLE_HEADINGS.has(item.str.toUpperCase()))
 
   const grid: SheetRows = []
   for (let i = 0; i < subIndex + 1; i++) {
-    if (isHeadingRow(rows[i])) continue
+    if (isHeadingRow(i)) continue
     if (partyBand !== -1 && i > partyBand && i < partyEnd) {
       grid.push(partyRow(rows[i], rows[partyBand]))
     } else if (i === partyBand) {

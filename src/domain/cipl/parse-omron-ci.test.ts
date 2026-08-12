@@ -457,6 +457,67 @@ describe('the printed PDF', () => {
     expect(parsed.headers.FC.invoiceDate).toBe('08/10/2026')
   })
 
+  it('does not read a column name printed in an address or a value as a heading row', async () => {
+    // The heading test ran over the whole header region, so any row carrying a bare column
+    // name was dropped entire and in silence: `AMOUNT`, `QTY`, `UOM`, `COO` and `LN` are all
+    // ordinary words. Only rows inside the heading band are headings.
+    const parsed = await parseCipl(
+      'ci.pdf',
+      await buildOmronCiPdf({
+        ...simpleOmronCi(),
+        splitValues: true,
+        freightCharges: 'PREPAID AMOUNT AGREED',
+        consigneeName: 'Amount Tower Logistics',
+        consigneeLines: ['1 Harbour Way', 'Singapore 018989'],
+      }),
+    )
+    // `freightTerms` is normalised to the term itself; the point here is that the row
+    // survived at all, which the carrier beside it and the address below it evidence.
+    expect(parsed.headers.FC.freightTerms).toBe('PREPAID')
+    expect(parsed.headers.FC.vesselAgent).toBe('Nippon Express')
+    expect(parsed.headers.FC.consignedTo.name).toBe('Amount Tower Logistics')
+    expect(parsed.lines).toHaveLength(2)
+  })
+
+  it('does not read an address word as one of the four labels that are ordinary words', async () => {
+    // `PAGE`, `DATE`, `SIGNATURE` and `INCOTERMS` are labels on this form and words
+    // everywhere else. Split into items, `3000 Page Mill Road` offered `Page` as a label,
+    // which ended the address band on the consignee's own street: all three blocks empty,
+    // nothing said. The form prints its labels with a colon and no value word carries one.
+    const parsed = await parseCipl(
+      'ci.pdf',
+      await buildOmronCiPdf({
+        ...simpleOmronCi(),
+        splitValues: true,
+        carrier: 'Page Aviation',
+        consigneeName: 'Date Palm Freight Pte. Ltd.',
+        consigneeLines: ['3000 Page Mill Road', 'Singapore 018989'],
+      }),
+    )
+    expect(parsed.headers.FC.vesselAgent).toBe('Page Aviation')
+    expect(parsed.headers.FC.consignedTo.name).toBe('Date Palm Freight Pte. Ltd.')
+    expect(parsed.headers.FC.consignedTo.lines).toContain('3000 Page Mill Road')
+    // And the labels themselves still read, colon and all.
+    expect(parsed.headers.FC.incoterm).toBe('DAP Singapore')
+  })
+
+  it('bounds the address band by the commodity table when no label follows it', async () => {
+    // The band ran to the first header-grid label below it and collapsed onto itself when
+    // there was none, so no row was column-mapped and `readParties` read cells 0, 1 and 2
+    // of every remaining row — the synthesized commodity headings among them — as shipper,
+    // consignee and bill-to. That a header grid always sits below the addresses is the
+    // print order this search is written not to rest on.
+    const parsed = await parseCipl(
+      'ci.pdf',
+      await buildOmronCiPdf({ ...simpleOmronCi(), omitHeaderGrid: true }),
+    )
+    expect(parsed.headers.FC.consignedTo.name).toBe('Example Consignee Pte. Ltd.')
+    expect(parsed.headers.FC.consignedTo.lines).toEqual(['1 Harbour Way', 'Singapore 018989', 'Singapore'])
+    expect(parsed.headers.FC.consignedTo.lines.join(' ')).not.toContain('PART #')
+    // The goods still read; only the header fields are gone with the grid.
+    expect(parsed.lines).toHaveLength(2)
+  })
+
   it('does not let a totals cell swallow the header label it is a prefix of', async () => {
     // `FREIGHT` delimits the totals band and is also the first word of `FREIGHT CHARGES:`.
     // Matching the first item that hits anything stopped at the totals cell, so the label
