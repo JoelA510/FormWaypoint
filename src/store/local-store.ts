@@ -461,9 +461,19 @@ export const indexedDbStore: LocalStore = {
     await (await db()).put('shipments', record)
   },
 
-  async listDgConsignments(limit = 50) {
+  /**
+   * Every record, newest first, unless a caller asks for fewer.
+   *
+   * Uncapped by default on purpose, unlike the shipment history beside it. This list is the
+   * evidence behind a two-year retention obligation, and a silent ceiling on the one screen
+   * that exists to say what must be kept is the same failure as deleting them: a
+   * consignment still inside its window simply was not there. Two years of them is a few
+   * hundred rows.
+   */
+  async listDgConsignments(limit) {
     const all = (await (await db()).getAll('dgConsignments')) as DgConsignmentRecord[]
-    return all.sort((a, b) => b.preparedAt.localeCompare(a.preparedAt)).slice(0, limit)
+    const newestFirst = all.sort((a, b) => b.preparedAt.localeCompare(a.preparedAt))
+    return limit == null ? newestFirst : newestFirst.slice(0, limit)
   },
   async saveDgConsignment(record) {
     await (await db()).put('dgConsignments', record)

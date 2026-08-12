@@ -441,7 +441,12 @@ function buildHeader(
   return {
     invoiceNumber: field('INVOICE #'),
     invoiceDate: dateText(field('INVOICE DATE')),
-    onOrAboutDate: null,
+    // The form has its own SHIP DATE box, and it is the date of exportation the SLI asks
+    // for. Read into the header grid and then dropped, the SLI was dated from the invoice
+    // whatever the form said the goods were leaving on — and the two are routinely days
+    // apart. Null where the box is empty, which is what it usually is at invoicing time;
+    // the draft falls back to the invoice date there as it always has.
+    onOrAboutDate: dateText(field('SHIP DATE')) || null,
     // BILL TO / SOLD TO is only filled in when it differs from the consignee.
     soldTo: parties.billTo.name ? parties.billTo : parties.consignee,
     consignedTo: parties.consignee,
