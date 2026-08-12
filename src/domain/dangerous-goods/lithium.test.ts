@@ -294,6 +294,12 @@ describe('an unstated rating', () => {
     expect(packed.limits).toMatchObject({ passengerKg: 5, cargoKg: 5 })
     expect(packed.limits.source).toContain('pending')
 
+    // And a sodium entry is pointed at the sodium tables, not the lithium ones.
+    const sodium = classifyForAir(
+      spec({ chemistry: 'sodium-ion', configuration: 'packed-with-equipment', wattHours: null }),
+    )
+    expect(sodium.limits.source).toContain('5-30')
+
     // A rated one still gets its own section's figures.
     expect(classifyForAir(spec({ configuration: 'packed-with-equipment', wattHours: 300 })).limits).toMatchObject({
       passengerKg: 5,

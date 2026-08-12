@@ -808,9 +808,11 @@ export function buildKeyingSheet(
  * The hyphenated form takes three leading digits where the plain form needs four, because
  * Japan writes `150-0001`. It cannot be relaxed for the plain form too — `Suite 200` ends
  * an address line the same way — and the anchor is on the digits alone rather than on a
- * preceding hyphen, which shut out every Japanese postcode there is.
+ * preceding hyphen, which shut out every Japanese postcode there is. Its *second* group
+ * takes three or four for the same kind of reason: at two, `Unit 100-12` matched, and a
+ * room range on the last line hijacked both fields from the address above it.
  */
-const POSTCODE = /(?<!\d)((?:\d{3,8}-\d{2,4})|\d{4,8})\s*$/
+const POSTCODE = /(?<!\d)((?:\d{3,8}-\d{3,4})|\d{4,8})\s*$/
 
 /**
  * A line whose trailing digits are a telephone number, not a postcode.
@@ -879,9 +881,16 @@ function cityFrom(lines: string[]): string {
   const withoutPostcode = lines[index].replace(POSTCODE, '').trim()
   const withoutState = withoutPostcode.replace(/[\s,]+[A-Z]{2,}$/, '').trim()
   const city = (withoutState || withoutPostcode).replace(/[,;]+$/, '').trim()
-  // Trimmed like everything else here: a postcode printed on a line of its own falls back
-  // to the line above, and that line arrives with whatever spacing the document had.
-  return city || (index > 0 ? lines[index - 1].trim() : '')
+  if (city) return city
+  // A postcode printed on a line of its own falls back to the line above — the nearest one
+  // that is neither blank nor a telephone number. Taking the immediately preceding line
+  // whatever it was produced a City of `Tel: 555-1234`, which is the outcome the guard on
+  // the search itself exists to prevent, arrived at by another road.
+  for (let i = index - 1; i >= 0; i--) {
+    const above = lines[i].trim()
+    if (above && !CONTACT_LINE.test(above)) return above
+  }
+  return ''
 }
 
 function describeShipment(rows: KeyingCommodityRow[]): string {

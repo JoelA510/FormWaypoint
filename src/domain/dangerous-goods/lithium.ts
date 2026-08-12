@@ -377,9 +377,14 @@ function limitsFor(pi: number, section: PackingSection, chemistry: Chemistry): Q
     return {
       passengerKg: 5,
       cargoKg: 5,
+      // Named for the chemistry in hand, like the Section II branch above it: the sodium
+      // tables are different figures in the materials, and pointing a sodium shipper at
+      // the lithium pages sends them to the wrong part of their own course notes.
       source:
-        'Student Guide figs. 5-26 and 5-27 (Section II) — the lower of the two sections this could be, pending ' +
-        'the rating',
+        (chemistry === 'sodium-ion'
+          ? 'Student Guide figs. 5-30 and 5-31 (PI 977 / PI 978 Section II)'
+          : 'Student Guide figs. 5-26 and 5-27 (Section II)') +
+        ' — the lower of the two sections this could be, pending the rating',
     }
   }
   // Packed with / contained in, Section I: 5 kg passenger, 35 kg cargo.

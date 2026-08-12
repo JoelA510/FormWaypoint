@@ -383,6 +383,24 @@ describe('address extraction', () => {
     expect(field(registered, 'City')).toBe('Springfield')
   })
 
+  it('does not read a room range on the last line as a postcode', () => {
+    // Widening the hyphenated form for `150-0001` let `Unit 100-12` in with it, and a room
+    // range on the last line hijacked both fields from the address above. The second group
+    // takes three or four digits, which is what a postcode's does.
+    const unit = ['2nd Floor 40 Alps Avenue', 'Singapore EX 498781', 'Unit 100-12']
+    expect(field(unit, 'Postal code')).toBe('498781')
+    expect(field(unit, 'City')).toBe('Singapore')
+  })
+
+  it('skips a telephone line when falling back to the line above a bare postcode', () => {
+    // A postcode on a line of its own takes the city from above it, and taking whatever was
+    // immediately above produced a City of `Tel: 555-1234` — the outcome the guard on the
+    // search itself exists to prevent, arrived at by another road.
+    const bare = ['Acme Ltd', 'Springfield', 'Tel: 555-1234', '62704']
+    expect(field(bare, 'Postal code')).toBe('62704')
+    expect(field(bare, 'City')).toBe('Springfield')
+  })
+
   it('reads a Japanese postcode, whose leading group is three digits', () => {
     // Anchoring the search on a preceding hyphen as well as a digit shut every one of these
     // out, and the city came from the building number on the line above — the exact failure

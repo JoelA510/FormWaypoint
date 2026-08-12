@@ -99,6 +99,14 @@ export function App() {
   /** The most recent write failure, withdrawn when a write succeeds. */
   const [writeError, setWriteError] = useState<string | null>(null)
   /**
+   * A form that was generated whose history record was not written.
+   *
+   * Sticky, like the profile note and for the same reason: it is about an artifact that
+   * already exists and an audit row that does not, and no later success makes that untrue.
+   * Left on the transient banner, the next part-weight correction withdrew it.
+   */
+  const [unrecordedShipment, setUnrecordedShipment] = useState<string | null>(null)
+  /**
    * Whether the stored profile was actually read.
    *
    * The autosave below is guarded on the profile still being `EMPTY_PROFILE`, which held
@@ -447,9 +455,10 @@ export function App() {
     try {
       await localStore.saveShipment(record)
       setWriteError(null)
+      setUnrecordedShipment(null)
     } catch (e: unknown) {
       const because = e instanceof Error ? e.message : 'this machine’s stored data could not be reached'
-      setWriteError(
+      setUnrecordedShipment(
         `The form was generated, but this machine did not record the shipment (${because}). The history entry ` +
           'is the audit trail for what was filed — note the invoice number somewhere else.',
       )
@@ -616,6 +625,12 @@ export function App() {
         {writeError ? (
           <p className="rounded-md border border-[var(--color-block)] bg-[var(--color-block-soft)] px-3 py-2 text-sm">
             {writeError}
+          </p>
+        ) : null}
+
+        {unrecordedShipment ? (
+          <p className="rounded-md border border-[var(--color-block)] bg-[var(--color-block-soft)] px-3 py-2 text-sm">
+            {unrecordedShipment}
           </p>
         ) : null}
 
