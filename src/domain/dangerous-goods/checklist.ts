@@ -187,14 +187,23 @@ export function buildChecklist(
 
     out.push('**Packaging**')
     out.push('')
-    if (pkg.unSpecificationMark.trim()) {
+    // Which instruction applies follows the section, not whether somebody typed a mark. A
+    // Section II equipment package that happens to be in a box carrying a `4G/…` mark was
+    // handed the Packing Group II instruction while `dg.packaging` said, in the same
+    // document, that this section does not require it.
+    const needsUnSpec = assessed.entries.some((e) => e.classification.unSpecificationPackagingRequired)
+    const mark = pkg.unSpecificationMark.trim()
+    if (needsUnSpec) {
       out.push(
-        `- [ ] UN specification packaging \`${cell(pkg.unSpecificationMark)}\`, meeting Packing Group II ` +
+        `- [ ] UN specification packaging${mark ? ` \`${cell(mark)}\`` : ''}, meeting Packing Group II ` +
           'performance; follow the manufacturer’s closure instructions exactly and use every component ' +
           'supplied. Keep the instruction sheet with the packing record.',
       )
     } else {
-      out.push('- [ ] Strong rigid outer packaging.')
+      out.push(
+        '- [ ] Strong rigid outer packaging.' +
+          (mark ? ` This section does not require UN specification packaging; the box's own \`${cell(mark)}\` mark is not required here, and does no harm.` : ''),
+      )
     }
     // Not an either/or: a package may hold loose cells beside equipment with batteries
     // installed in it — the A181 case the assessment checks — and both lines are then true

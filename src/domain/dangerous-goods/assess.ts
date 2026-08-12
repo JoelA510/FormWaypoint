@@ -1334,7 +1334,10 @@ function consignmentChecks(
       checks.push({
         id: `dg.mixed-chemistry.${assessment.pkg.id}`,
         severity: 'info',
-        title: `${assessment.pkg.packagingType || 'Package'}: lithium ion and lithium metal together`,
+        // Named the way every other package check names one. In a consignment holding two
+        // descriptions of the same packaging type, a bare "Fibreboard box:" cannot be
+        // attributed to either of them.
+        title: `${packageLabel(assessment.pkg, consignment)}: lithium ion and lithium metal together`,
         detail:
           'A package may hold both, and each is declared under its own UN number. Note the separate case ' +
           'special provision A213 covers: a single *battery* built from both primary lithium metal cells and ' +

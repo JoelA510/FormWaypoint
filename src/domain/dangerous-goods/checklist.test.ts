@@ -68,6 +68,23 @@ describe('the package checklist', () => {
     expect(markdown).toContain('Packing Group II')
   })
 
+  it('picks the packaging instruction from the section, not from whether a mark was typed', () => {
+    // A Section II equipment package in a box that happens to carry a `4G/…` mark was
+    // handed the Packing Group II instruction, while `dg.packaging` said in the same
+    // document that this section does not require it.
+    const excepted = consignment([
+      pkg('p1', [
+        entry('e1', { configuration: 'contained-in-equipment', wattHours: 76 }, {
+          netWeightKgPerPackage: 1.5,
+          countPerPackage: 3,
+        }),
+      ], { unSpecificationMark: '4G/Y25/S/26/USA/+D02390' }),
+    ])
+    const markdown = buildChecklist(excepted, assess(excepted), '2026-08-06')
+    expect(markdown).toContain('- [ ] Strong rigid outer packaging.')
+    expect(markdown).not.toContain('meeting Packing Group II')
+  })
+
   it('carries the failing checks through, so a half-prepared consignment says what is missing', () => {
     const shipment = consignment([pkg('p1', [entry('e1', { wattHours: null })])])
     const markdown = buildChecklist(shipment, assess(shipment), '2026-08-06')
