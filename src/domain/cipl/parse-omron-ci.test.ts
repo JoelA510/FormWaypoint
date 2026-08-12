@@ -428,6 +428,15 @@ describe('the printed PDF', () => {
     expect(parsed.headers.FC.soldTo.name).toBe('Billing Party LLC')
   })
 
+  it('heals a header label the extractor split, rather than folding it into the value beside it', async () => {
+    // `INVOICE DATE:` drawn as two items is two ordinary cells, so it ran on to the end of
+    // the invoice number — which goes to the SLI, the keying sheet reference and the output
+    // filename — and the date was never found at all.
+    const parsed = await parseCipl('ci.pdf', await buildOmronCiPdf({ ...simpleOmronCi(), splitHeaderLabel: true }))
+    expect(parsed.headers.FC.invoiceNumber).toBe('CI-2026-0001')
+    expect(parsed.headers.FC.invoiceDate).toBe('08/10/2026')
+  })
+
   it('goes through the file entry point by content sniffing', async () => {
     const parsed = await parseCiplFile('ci.pdf', await buildOmronCiPdf(simpleOmronCi()))
     expect(parsed.format).toBe('omron-ci')

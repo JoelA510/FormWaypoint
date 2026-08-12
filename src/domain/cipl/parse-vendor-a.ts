@@ -658,6 +658,12 @@ function scaleFigure(value: number, divisor: number): number {
 function isTotalsRow(row: TextRow): boolean {
   const text = rowText(row)
   if (/^\s*TOTALS?\b/i.test(text) && /\d/.test(text)) return true
+  // The figures need not sit on the label's own baseline. A footer printed as a bare
+  // `TOTAL:` above its numbers carries no digit and so failed the rule above, and the block
+  // slice then ran past it — the failure this function's comment calls the worse one. The
+  // colon is what separates it from a heading: no commodity is named `Total:` and nothing
+  // else.
+  if (/^\s*TOTALS?\s*:\s*$/i.test(text)) return true
   if (/CARTONS ONLY/i.test(text)) return true
   // Upper case and unanchored: the packing list prints it mid-row. No heading spells it so.
   return /\bTOTALS\b/.test(text)

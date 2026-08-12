@@ -374,6 +374,17 @@ describe('address extraction', () => {
     expect(field(['1 Corniche Rd', 'AL AIN 12345'], 'City')).toBe('AL AIN')
   })
 
+  it('still takes the state off a US address printed wholly in capitals', () => {
+    // Keeping the second word of `LA PAZ` by refusing to strip from any capitalised line
+    // gave up the common case: these blocks are printed in capitals throughout, so
+    // `CLEVELAND OH 44114` was keyed with a City of `CLEVELAND OH`. On such a line the
+    // token has to be a subdivision code, which `PAZ` and `AIN` are not.
+    expect(field(['1200 Euclid Ave', 'CLEVELAND OH 44114'], 'City')).toBe('CLEVELAND')
+    expect(field(['100 Collins St', 'MELBOURNE VIC 3000'], 'City')).toBe('MELBOURNE')
+    // And a capitalised city whose last word merely looks like one keeps it.
+    expect(field(['Via Roma 1', 'ROMA 00184'], 'City')).toBe('ROMA')
+  })
+
   it('does not read a city whose name ends in one of those words as a phone line', () => {
     // The keyword has to begin a word as well as label the number.
     expect(field(['1 Dauphin St', 'MOBILE 36602'], 'Postal code')).toBe('36602')

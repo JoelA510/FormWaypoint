@@ -489,6 +489,23 @@ describe('a heading the totals test used to swallow', () => {
     expect(line.extendedValue).not.toBe(7765.29)
   })
 
+  it('finds a bare TOTAL: whose figures sit on the baseline below it', () => {
+    // Requiring a digit on the label's own row assumed the figures are printed beside it.
+    // A footer that prints `TOTAL:` above its numbers carries none, so the slice ran past it
+    // and the carried block took the page totals for its own quantity and value.
+    const opening = detailPage(2, [
+      row(['00000001OP0010', 72], ['00000001OP0010', 198], ['1', 246]),
+      row(['0001', 72], ['00000001X', 96], ['Japan', 198]),
+    ])
+    const tail = detailPage(3, [
+      row(['TOTAL:', 30]),
+      row(['26', 421], ['10.000', 472], ['7,765.290', 550]),
+    ])
+    const line = invoiceLines([headerPage(), opening, tail])[0]
+    expect(line.quantity).not.toBe(26)
+    expect(line.extendedValue).not.toBe(7765.29)
+  })
+
   it('still never reads the totals row itself', () => {
     const first = detailPage(2, [
       ...block('00000001OP0010', '10000-0001', '8544.42.0000', 'MODEL-A', 'CABLE ASSY'),

@@ -58,7 +58,8 @@ const HEADER_LABELS = new Set([
   'DATE',
 ])
 
-const normalizeLabel = (text: string): string => text.replace(/:\s*$/, '').trim().toUpperCase()
+const normalizeLabel = (text: string): string =>
+  text.replace(/:\s*$/, '').trim().replace(/\s+/g, ' ').toUpperCase()
 const isLabel = (text: string): boolean => HEADER_LABELS.has(normalizeLabel(text))
 
 /**
@@ -695,7 +696,7 @@ function pagesToGrid(pages: TextPage[]): SheetRows {
   )
   let partyEnd = partyBand
   if (partyBand !== -1) {
-    partyEnd = rows.findIndex((row, i) => i > partyBand && row.items.some((item) => isLabel(item.str)))
+    partyEnd = rows.findIndex((row, i) => i > partyBand && hasLabel(row))
     if (partyEnd === -1) partyEnd = partyBand
   }
 
@@ -752,16 +753,50 @@ function coalescedRow(row: TextRow): string[] {
     if (pending.length) cells.push(pending.join(' '))
     pending = []
   }
-  for (const item of row.items) {
-    if (isLabel(item.str) || TOTALS_CELLS.has(normalizeLabel(item.str))) {
+  for (let i = 0; i < row.items.length; i++) {
+    const span = labelSpanAt(row.items, i)
+    if (span) {
       flush()
-      cells.push(item.str)
+      cells.push(span.text)
+      i = span.end
     } else {
-      pending.push(item.str)
+      pending.push(row.items[i].str)
     }
   }
   flush()
   return cells
+}
+
+/** How many text items one printed label is allowed to have been split into. */
+const MAX_LABEL_ITEMS = 3
+
+/**
+ * The label printed at `start`, whether the extractor emitted it as one item or several.
+ *
+ * pdfjs splits a printed run wherever it likes, and the table headings are guarded against
+ * exactly that a few functions up. The header grid was not: a split `INVOICE DATE:` was two
+ * ordinary items, so it folded into the value beside `INVOICE #:` — leaving an invoice
+ * number of `INV-123 INVOICE DATE: 08/10/2026`, which goes on to the SLI, the keying sheet
+ * reference and the output filename — and the date itself was never found.
+ *
+ * A single item that is already a whole label wins before any lookahead, so a row that the
+ * extractor did not split reads exactly as it did before. Both joins are tried because the
+ * split can fall between words (`INVOICE` + `DATE:`) or inside one (`INVOICE DA` + `TE:`).
+ */
+function labelSpanAt(items: TextRow['items'], start: number): { text: string; end: number } | null {
+  const parts: string[] = []
+  for (let end = start; end < items.length && end - start < MAX_LABEL_ITEMS; end++) {
+    parts.push(items[end].str)
+    for (const joined of end === start ? [parts[0]] : [parts.join(' '), parts.join('')]) {
+      if (isLabel(joined) || TOTALS_CELLS.has(normalizeLabel(joined))) return { text: joined, end }
+    }
+  }
+  return null
+}
+
+/** Whether the row carries a header-grid label, counting one the extractor split. */
+function hasLabel(row: TextRow): boolean {
+  return row.items.some((_, i) => labelSpanAt(row.items, i) !== null)
 }
 
 /**

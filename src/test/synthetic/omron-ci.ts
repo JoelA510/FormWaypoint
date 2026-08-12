@@ -76,6 +76,11 @@ export interface OmronCiSpec {
    * the table must still parse.
    */
   splitDescriptionHeading?: boolean
+  /**
+   * Draw the `INVOICE DATE:` header label as two items, to model pdfjs splitting a *label*
+   * on the header grid — which, unhealed, folds it into the value beside `INVOICE #:`.
+   */
+  splitHeaderLabel?: boolean
 }
 
 export function simpleOmronCi(): OmronCiSpec {
@@ -267,11 +272,24 @@ export async function buildOmronCiPdf(spec: OmronCiSpec): Promise<ArrayBuffer> {
       cursor += font.widthOfTextAtSize(word + ' ', size)
     }
   }
+  // With splitHeaderLabel, the right-hand label of the first pair is drawn one item per
+  // word, the way pdfjs reports a run it decided to break.
+  const label = (x: number, y: number, text: string, split: boolean) => {
+    if (!split) {
+      at(x, y, text)
+      return
+    }
+    let cursor = x
+    for (const word of text.split(' ')) {
+      at(cursor, y, word)
+      cursor += font.widthOfTextAtSize(word + ' ', size)
+    }
+  }
   pairs.forEach(([label1, value1, label2, value2], i) => {
     const y = 640 - i * 12
     at(COLUMNS.ln.left, y, label1)
     value(COLUMNS.d.left, y, value1)
-    at(COLUMNS.f.left, y, label2)
+    label(COLUMNS.f.left, y, label2, i === 0 && !!spec.splitHeaderLabel)
     value(COLUMNS.h.left, y, value2)
   })
 

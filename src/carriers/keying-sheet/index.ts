@@ -870,25 +870,51 @@ function postalCodeFrom(lines: string[]): string {
 }
 
 /**
+ * The subdivision codes recognised on a line that is itself written in capitals.
+ *
+ * On a mixed-case line the capitals are the evidence: `Sao Paulo SP`, `Bangalore KARNATAKA`
+ * and `Singapore EX` all set the subdivision off from the city by case alone, at any length.
+ * A line printed wholly in capitals offers no such contrast, and stripping the last word
+ * from one took the second word off `LA PAZ` and `AL AIN`.
+ *
+ * So on those lines the token must be recognised rather than merely shaped: these are the
+ * codes of the countries whose addresses print a subdivision as a bare abbreviation between
+ * the city and the postcode. Anything outside the list stays in the City box, where it is
+ * visible to whoever keys the shipment rather than deleted on a hunch.
+ */
+const SUBDIVISION_CODES = new Set([
+  // United States, District of Columbia and territories
+  'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA',
+  'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ',
+  'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT',
+  'VA', 'WA', 'WV', 'WI', 'WY', 'DC', 'PR', 'VI', 'GU', 'AS', 'MP',
+  // Canada
+  'ON', 'QC', 'BC', 'AB', 'MB', 'SK', 'NS', 'NB', 'NL', 'PE', 'YT', 'NT', 'NU',
+  // Australia
+  'NSW', 'VIC', 'QLD', 'TAS', 'ACT',
+])
+
+/**
  * The same line with the postcode, and any state, taken off it.
  *
- * The state is only removed when something is left afterwards, so a city that is itself
- * written in capitals survives intact.
+ * The state is only removed when something is left afterwards, so a line that is a state
+ * code and nothing else keeps it rather than reading back empty.
  */
 function cityFrom(lines: string[]): string {
   const index = postcodeLineIndex(lines)
   if (index === -1) return ''
   const withoutPostcode = lines[index].replace(POSTCODE, '').trim()
-  // A state is stripped only where the evidence says it is one: separated by a comma, at any
-  // length, or a short code after a space on a line whose city is *not* itself in capitals.
-  //
-  // The last condition is what stops a two-word capitalised city losing its second word —
-  // `LA PAZ`, `AL AIN`, `HA NOI` are indistinguishable from `Springfield IL` without it, and
-  // deleting a word outright is worse than leaving a state code in the City box, where it is
-  // at least visible to whoever keys the shipment.
+  // A state is stripped on evidence, and which evidence is available depends on the line.
+  // A comma introduces one at any length. Failing that, a run of capitals at the end of a
+  // mixed-case line is set off from the city by its case; on a line that is capitals
+  // throughout, only a recognised subdivision code is.
   const commaSeparated = withoutPostcode.replace(/,\s*[A-Z]{2,}$/, '').trim()
   const capitalised = commaSeparated === commaSeparated.toUpperCase()
-  const withoutState = capitalised ? commaSeparated : commaSeparated.replace(/\s+[A-Z]{2,}$/, '').trim()
+  const withoutState = capitalised
+    ? commaSeparated
+        .replace(/\s+([A-Z]{2,3})$/, (whole, code: string) => (SUBDIVISION_CODES.has(code) ? '' : whole))
+        .trim()
+    : commaSeparated.replace(/\s+[A-Z]{2,}$/, '').trim()
   const city = (withoutState || withoutPostcode).replace(/[,;]+$/, '').trim()
   if (city) return city
   // A postcode printed on a line of its own falls back to the line above — the nearest one
