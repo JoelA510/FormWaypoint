@@ -879,10 +879,16 @@ function cityFrom(lines: string[]): string {
   const index = postcodeLineIndex(lines)
   if (index === -1) return ''
   const withoutPostcode = lines[index].replace(POSTCODE, '').trim()
-  // A state is either comma-separated, at any length, or a short code after a space. Any
-  // trailing all-caps word at all took the last word off every city written in capitals:
-  // `SAO PAULO 01310-100` came out as `SAO`, `LOS ANGELES 90001` as `LOS`.
-  const withoutState = withoutPostcode.replace(/,\s*[A-Z]{2,}$/, '').replace(/\s+[A-Z]{2,3}$/, '').trim()
+  // A state is stripped only where the evidence says it is one: separated by a comma, at any
+  // length, or a short code after a space on a line whose city is *not* itself in capitals.
+  //
+  // The last condition is what stops a two-word capitalised city losing its second word —
+  // `LA PAZ`, `AL AIN`, `HA NOI` are indistinguishable from `Springfield IL` without it, and
+  // deleting a word outright is worse than leaving a state code in the City box, where it is
+  // at least visible to whoever keys the shipment.
+  const commaSeparated = withoutPostcode.replace(/,\s*[A-Z]{2,}$/, '').trim()
+  const capitalised = commaSeparated === commaSeparated.toUpperCase()
+  const withoutState = capitalised ? commaSeparated : commaSeparated.replace(/\s+[A-Z]{2,3}$/, '').trim()
   const city = (withoutState || withoutPostcode).replace(/[,;]+$/, '').trim()
   if (city) return city
   // A postcode printed on a line of its own falls back to the line above — the nearest one

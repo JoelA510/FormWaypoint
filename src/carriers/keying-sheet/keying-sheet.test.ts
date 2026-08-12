@@ -363,6 +363,12 @@ describe('address extraction', () => {
     // length — both of which the filed shipments actually print.
     expect(field(['2nd Floor 40 Alps Avenue', 'Singapore EX 498781'], 'City')).toBe('Singapore')
     expect(field(['Plot 12', 'Bangalore, KARNATAKA 562123'], 'City')).toBe('Bangalore')
+
+    // And a two-word capitalised city keeps its second word even when that word is short.
+    // `LA PAZ` is indistinguishable from `Springfield IL` by shape alone, and deleting a
+    // word outright is worse than leaving a state code where it can be seen.
+    expect(field(['Av. Example 1', 'LA PAZ 0000'], 'City')).toBe('LA PAZ')
+    expect(field(['1 Corniche Rd', 'AL AIN 12345'], 'City')).toBe('AL AIN')
   })
 
   it('does not read a city whose name ends in one of those words as a phone line', () => {
