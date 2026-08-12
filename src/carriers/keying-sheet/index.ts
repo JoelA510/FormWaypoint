@@ -888,7 +888,7 @@ function cityFrom(lines: string[]): string {
   // at least visible to whoever keys the shipment.
   const commaSeparated = withoutPostcode.replace(/,\s*[A-Z]{2,}$/, '').trim()
   const capitalised = commaSeparated === commaSeparated.toUpperCase()
-  const withoutState = capitalised ? commaSeparated : commaSeparated.replace(/\s+[A-Z]{2,3}$/, '').trim()
+  const withoutState = capitalised ? commaSeparated : commaSeparated.replace(/\s+[A-Z]{2,}$/, '').trim()
   const city = (withoutState || withoutPostcode).replace(/[,;]+$/, '').trim()
   if (city) return city
   // A postcode printed on a line of its own falls back to the line above — the nearest one

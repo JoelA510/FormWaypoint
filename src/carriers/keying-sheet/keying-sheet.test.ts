@@ -316,6 +316,9 @@ describe('address extraction', () => {
     expect(field(['2nd Floor 40 Alps Avenue', 'Singapore EX 498781'], 'City')).toBe('Singapore')
     expect(field(['Europalaan 20', "'s-Hertogenbosch NA 5234"], 'City')).toBe("'s-Hertogenbosch")
     expect(field(['Plot 12', 'Bangalore, KARNATAKA 562123'], 'City')).toBe('Bangalore')
+    // A long state code with no comma is still a state where the city is not in capitals.
+    expect(field(['Plot 12', 'Bangalore KARNATAKA 562123'], 'City')).toBe('Bangalore')
+    expect(field(['Calle 1', 'Guadalajara JALISCO 44100'], 'City')).toBe('Guadalajara')
     expect(field(['Rua Example 100', 'Sao Paulo SP 01310-100'], 'City')).toBe('Sao Paulo')
   })
 

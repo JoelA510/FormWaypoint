@@ -156,14 +156,17 @@ export function App() {
    * since cleared is its own kind of wrong, so a success takes it back down.
    */
   const write = useCallback(
-    async (what: string, run: () => Promise<void>, refresh?: () => Promise<void>): Promise<void> => {
+    async (what: string, run: () => Promise<void>, refresh?: () => Promise<void>): Promise<boolean> => {
       try {
         await run()
         setWriteError((prev) => (prev && prev.what !== what ? prev : null))
       } catch (e: unknown) {
         const because = e instanceof Error ? e.message : 'the local database could not be reached'
         setWriteError({ what, message: `${what} could not be saved on this machine: ${because}` })
-        return
+        // Returned, not only shown. A caller that goes on to report what it wrote — the item
+        // library panel says "N added" and throws the staged file away — has to be able to
+        // tell that nothing was written.
+        return false
       }
       // Refreshing the list on screen is not the obligation the write satisfied. Inside the
       // same try, a committed write whose read-back failed was reported as "could not be
@@ -173,6 +176,7 @@ export function App() {
       } catch {
         // The list re-reads on the next load; what was written is written.
       }
+      return true
     },
     [],
   )
@@ -510,16 +514,15 @@ export function App() {
   }, [])
 
   const importItemLibrary = useCallback(
-    async (entries: ItemLibraryEntry[], mode: ImportMode) => {
-      await write(
+    (entries: ItemLibraryEntry[], mode: ImportMode) =>
+      write(
         'The imported item library',
         async () => {
           if (mode === 'merge') await localStore.mergeItems(entries)
           else await localStore.replaceItems(entries)
         },
         async () => setItems(await localStore.listItems()),
-      )
-    },
+      ),
     [write],
   )
 
@@ -700,7 +703,7 @@ export function App() {
               <ItemLibraryPanel
                 entries={items}
                 scheduleB={scheduleB}
-                onImport={(entries, mode) => void importItemLibrary(entries, mode)}
+                onImport={importItemLibrary}
                 onClear={() => void clearItemLibrary()}
               />
               <ItemMasterUpdatesPanel
