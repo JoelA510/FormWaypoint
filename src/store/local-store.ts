@@ -477,11 +477,20 @@ export const indexedDbStore: LocalStore = {
       ),
     )
     // Dangerous goods records inside their retention window stay — see the interface note.
-    const today = localDate()
-    const records = (await database.getAll('dgConsignments')) as DgConsignmentRecord[]
-    await Promise.all(
-      records.filter((r) => r.retainUntil < today).map((r) => database.delete('dgConsignments', r.id)),
-    )
+    //
+    // And a failure sweeping the expired ones does not fail the call. The six stores above
+    // are already gone by this point, and the caller reports a rejection as "nothing was
+    // deleted" — telling someone their data is intact after it has been erased is worse
+    // than leaving a handful of out-of-window records behind for the next sweep.
+    try {
+      const today = localDate()
+      const records = (await database.getAll('dgConsignments')) as DgConsignmentRecord[]
+      await Promise.all(
+        records.filter((r) => r.retainUntil < today).map((r) => database.delete('dgConsignments', r.id)),
+      )
+    } catch {
+      // Retried the next time this runs; nothing here is owed deletion on a schedule.
+    }
   },
 }
 

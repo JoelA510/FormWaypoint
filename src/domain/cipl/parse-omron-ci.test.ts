@@ -217,6 +217,17 @@ describe('the workbook grid', () => {
     expect(parsed.warnings.some((w) => w.includes('LN'))).toBe(true)
   })
 
+  it('names the saved per-part table, not a packing list this form cannot have', () => {
+    // The form is invoice-only. Told "no packing-list match", the operator is sent looking
+    // for a document the shipment does not have, and not told about the table that would
+    // actually fix it.
+    const result = reconcile(parseGrid(), null, { ...BLANK_CONTROLS })
+    const weights = result.checks.find((c) => c.id === 'weights-present')!
+    expect(weights).toMatchObject({ severity: 'blocking', passed: false })
+    expect(weights.detail).toContain('per-part table')
+    expect(weights.detail).not.toContain('packing-list match')
+  })
+
   it('blocks a line whose quantity could not be read instead of filing zero', () => {
     const spec = simpleOmronCi()
     const grid = omronCiGrid(spec)
