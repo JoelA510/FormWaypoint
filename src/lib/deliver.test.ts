@@ -123,6 +123,14 @@ describe('safeFileName', () => {
     }
   })
 
+  it('strips a leading dot that sits behind a space, and a trailing one', () => {
+    // The strip ran before the trim, so a space in front of the dot carried it through and
+    // named a hidden file — and the trailing dots the comment promised to remove were never
+    // looked for. Windows strips those itself, leaving a file the app cannot find again.
+    expect(safeFileName(' .A1_shippers-declaration.pdf')).toBe('A1_shippers-declaration.pdf')
+    expect(safeFileName('A1_dg-checklist.md.')).toBe('A1_dg-checklist.md')
+  })
+
   it('strips the other characters Windows refuses', () => {
     expect(safeFileName('inv:oice*?"<>|.pdf')).toBe('inv-oice------.pdf')
   })

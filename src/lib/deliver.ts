@@ -43,9 +43,13 @@ export function safeFileName(name: string, fallback = 'document'): string {
     // shell, which rejects any name containing `..` outright.
     .replace(/\.{2,}/g, '-')
     .replace(/\s+/g, ' ')
-    // Leading dots would hide the file; trailing dots and spaces are stripped by Windows
-    // itself, which turns `shipment .pdf` into something the app cannot then find.
+    // Trimmed first, then the dots. A leading dot behind a space survived the strip and
+    // named a hidden file, and the trailing dots the comment promised to remove were never
+    // looked for at all — Windows strips those itself, turning `shipment .pdf` into
+    // something the app cannot then find.
+    .trim()
     .replace(/^\.+/, '')
+    .replace(/\.+$/, '')
     .trim()
   // Reserved device names are still reserved with an extension: `CON.pdf` is not a file.
   const reserved = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i

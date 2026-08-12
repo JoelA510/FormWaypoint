@@ -992,7 +992,10 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
     detail: pkg.coPackedWithProhibitedClass
       ? 'Cells and batteries must not be packed in the same outer packaging with ' +
         `${PROHIBITED_CO_PACKED_CLASSES.join(', ')}. Repack the other goods separately.`
-      : `No ${PROHIBITED_CO_PACKED_CLASSES.length}-way conflict declared. The prohibited list is exactly: ` +
+      : // The list's own length is not a fact about this box. Interpolated, it read "No
+        // 5-way conflict declared" on every compliant package — a number describing the
+        // regulation, printed as though it described the packing.
+        'Nothing prohibited declared in the same outer packaging. The prohibited list is exactly: ' +
         `${PROHIBITED_CO_PACKED_CLASSES.join('; ')}. Division 1.4S is permitted, and Divisions 4.2, 4.3 and ` +
         '5.2, Class 8 and Division 2.2 do not appear in it.',
     passed: !pkg.coPackedWithProhibitedClass,
@@ -1367,8 +1370,8 @@ function cargoOnlyLabelWording(
       ? 'The passenger aircraft box on the declaration is struck out, and the Cargo Aircraft Only label goes on ' +
         'the same surface as the Class 9 label'
       : 'The declaration will strike out the cargo aircraft box while the goods may not travel that way, which ' +
-        'is why this check is failing; offer the consignment as cargo aircraft only. The Cargo Aircraft Only ' +
-        'label goes on the same surface as the Class 9 label') +
+        'is what the aircraft type check against each package is refusing; offer the consignment as cargo ' +
+        'aircraft only. The Cargo Aircraft Only label goes on the same surface as the Class 9 label') +
     (hasExceptedPackages
       ? ' — on the fully regulated packages only. The Section II packages in this consignment carry no Class 9 ' +
         'label and no Cargo Aircraft Only label; they remain permitted on passenger aircraft whatever routing ' +
