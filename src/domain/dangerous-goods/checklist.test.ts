@@ -85,6 +85,15 @@ describe('the package checklist', () => {
     expect(markdown).not.toContain('meeting Packing Group II')
   })
 
+  it('does not claim either packaging answer for an unrated battery', () => {
+    // The check panel says the two candidate sections disagree; the sheet that goes to the
+    // bench said flatly that none was required.
+    const unrated = consignment([pkg('p1', [entry('e1', { wattHours: null })])])
+    const markdown = buildChecklist(unrated, assess(unrated), '2026-08-06')
+    expect(markdown).toContain('the two sections it could fall in disagree')
+    expect(markdown).not.toContain('- [ ] Strong rigid outer packaging.')
+  })
+
   it('carries the failing checks through, so a half-prepared consignment says what is missing', () => {
     const shipment = consignment([pkg('p1', [entry('e1', { wattHours: null })])])
     const markdown = buildChecklist(shipment, assess(shipment), '2026-08-06')

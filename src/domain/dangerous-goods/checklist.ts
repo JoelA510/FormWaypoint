@@ -19,6 +19,7 @@ import {
   CHEMISTRY_LABELS,
   FORM_LABELS,
   combinedSectionIIStatement,
+  bandDeterminesTreatment,
   fullyRegulatedStatementVariants,
   type AircraftLimitation,
 } from './lithium'
@@ -193,7 +194,21 @@ export function buildChecklist(
     // document, that this section does not require it.
     const needsUnSpec = assessed.entries.some((e) => e.classification.unSpecificationPackagingRequired)
     const mark = pkg.unSpecificationMark.trim()
-    if (needsUnSpec) {
+    // Three answers here as in the checks, not two. An entry whose rating nobody has stated
+    // has no section, and its two candidates disagree — Section IA requires the packaging
+    // and Section IB is excepted from it — so an affirmative "this section does not require
+    // it" would be a permissive claim about a section nothing has decided, printed on the
+    // sheet that goes to the bench.
+    const undetermined = assessed.entries.some(
+      (e) => e.classification.band === 'unknown' && bandDeterminesTreatment(e.entry.spec),
+    )
+    if (undetermined && !needsUnSpec) {
+      out.push(
+        '- [ ] Packaging: the rating of at least one battery here has not been stated, and the two sections it ' +
+          'could fall in disagree — Section IA requires UN specification packaging meeting Packing Group II ' +
+          'performance, Section IB is excepted from it. Settle the rating before packing to either.',
+      )
+    } else if (needsUnSpec) {
       out.push(
         `- [ ] UN specification packaging${mark ? ` \`${cell(mark)}\`` : ''}, meeting Packing Group II ` +
           'performance; follow the manufacturer’s closure instructions exactly and use every component ' +

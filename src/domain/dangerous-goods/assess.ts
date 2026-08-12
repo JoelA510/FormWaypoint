@@ -1137,11 +1137,12 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
 
   // --- Shared packaging on the declaration -------------------------------
   // Counted the way the declaration builds its lines, by the same two functions in the same
-  // order: Section II entries are excluded from it, and A181 folds a contained-in entry
-  // into the packed-with line of its UN number. Counting the raw groups instead claimed a
-  // second line for a package that prints exactly one.
+  // order — merge, then filter. Section II entries are excluded from the paper, and A181
+  // folds a contained-in entry into the packed-with line of its UN number. Counting the raw
+  // groups claimed a second line for a package that prints exactly one, and filtering
+  // *before* merging claimed one for a package that prints two.
   const declaredGroups = groupByClassification(
-    applyA181(entries.filter((e) => e.classification.declarationRequired)),
+    applyA181(entries).filter((e) => e.classification.declarationRequired),
   ).size
   if (declaredGroups > 1) {
     checks.push({
