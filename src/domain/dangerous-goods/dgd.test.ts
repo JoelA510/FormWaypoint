@@ -101,9 +101,26 @@ describe('packaging descriptions', () => {
     )
     const declaration = buildDeclaration(shipment, assess(shipment))
     expect(declaration.lines[0].quantityAndType.join(' ')).toBe('3 Fibreboard box x 10 kg')
+    // And its total, which nothing else on the paper states: the quantity column gives the
+    // count and the per-package figure, not their product. Withheld here because one
+    // overpack was read as one package, three boxes in an overpack had their total appear
+    // nowhere.
+    expect(declaration.lines[0].annotations).toEqual([
+      'Overpack used',
+      'Overpack marks: #A001',
+      'Total quantity per Overpack 30 kg',
+    ])
+  })
+
+  it('withholds the total where it would restate the quantity column', () => {
+    // One overpack, one package, one entry: the column already reads `1 Fibreboard box x
+    // 10 kg`, and the total is that same 10 kg said again.
+    const shipment = consignment(
+      [pkg('p1', [entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 10 })], { count: 1, overpackId: 'o1' })],
+      { overpacks: [overpack('o1')] },
+    )
+    const declaration = buildDeclaration(shipment, assess(shipment))
     expect(declaration.lines[0].annotations).toEqual(['Overpack used', 'Overpack marks: #A001'])
-    // No per-overpack total for a single overpack: it would restate the quantity column.
-    expect(declaration.lines[0].annotations.join(' ')).not.toContain('Total quantity')
   })
 
   it('states the packaging once for a package holding two entries', () => {

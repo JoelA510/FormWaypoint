@@ -585,7 +585,10 @@ export function App() {
     // against writes, so nothing else takes them down: a wiped machine went on saying it
     // had not recorded a shipment, and that an empty panel was not evidence that nothing
     // was saved.
-    setUnrecordedShipment(null)
+    //
+    // Guarded like the panels above: the notice is about a row missing from the shipment
+    // history, and a history store that refused to clear still has that gap in it.
+    if (cleared('the shipment history')) setUnrecordedShipment(null)
     // The profile pair moves together. Withdrawing the banner while `profileLoaded` stayed
     // false left the guard on the autosave in place with nothing on screen to explain it,
     // so every edit made after the wipe was discarded in silence. Only where the profile
@@ -604,7 +607,10 @@ export function App() {
     // evidence for a retention obligation.
     try {
       setDgConsignments(await localStore.listDgConsignments())
-      setRestoreError(null)
+      // And only where every other store cleared as well: the banner lists the stores that
+      // could not be *read* at load, and one that has just refused to be cleared is not
+      // evidence that its earlier failure has passed.
+      if (!remaining.length) setRestoreError(null)
     } catch {
       setRestoreError(
         'The dangerous goods retention records could not be re-read after the deletion. They are kept by ' +

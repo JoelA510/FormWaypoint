@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { consignment, entry, pkg } from './test-support'
+import { consignment, entry, overpack, pkg } from './test-support'
 import { assess } from './assess'
 import { buildChecklist } from './checklist'
-import { retainUntil } from './dgd'
+import { buildDeclaration, retainUntil } from './dgd'
 import { localDate } from '../../lib/report'
 
 
@@ -107,6 +107,35 @@ describe('the package checklist', () => {
     })
     const markdown = buildChecklist(shipment, assess(shipment), '2026-08-06')
     expect(markdown).toContain('| Consignee | Acme \\| Distribution |')
+  })
+})
+
+describe('the section numbers on the bench sheet', () => {
+  it('follow the order the declaration prints the packages in', () => {
+    // The declaration brings packages sharing an overpack together, because the overpack
+    // wording is written once after the last entry inside it. The checklist numbered its
+    // sections in input order, so the two documents in one envelope disagreed about which
+    // box section 2 was describing.
+    const shipment = consignment(
+      [
+        pkg('p1', [entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 2 })], { overpackId: 'o1' }),
+        pkg('p2', [entry('e2', { wattHours: 96 }, { netWeightKgPerPackage: 3 })], { overpackId: 'o2' }),
+        pkg('p3', [entry('e3', { wattHours: 97 }, { netWeightKgPerPackage: 4 })], { overpackId: 'o1' }),
+      ],
+      { overpacks: [overpack('o1'), overpack('o2', { marks: '#A002' })] },
+    )
+    const assessed = assess(shipment)
+    const declared = buildDeclaration(shipment, assessed).lines.map((l) => l.quantityAndType.join(' '))
+    // The declaration puts the two #A001 packages together: 2 kg, 4 kg, then 3 kg.
+    expect(declared).toEqual(['1 Fibreboard box x 2 kg', '1 Fibreboard box x 4 kg', '1 Fibreboard box x 3 kg'])
+
+    const markdown = buildChecklist(shipment, assessed, '2026-08-06')
+    expect(markdown.split('\n').filter((l) => /^### \d+\./.test(l))).toHaveLength(3)
+    const listed = markdown
+      .split('\n')
+      .filter((l) => l.startsWith('- **UN'))
+      .map((l) => l.match(/(\d+) Wh/)![1])
+    expect(listed).toEqual(['95', '97', '96'])
   })
 })
 

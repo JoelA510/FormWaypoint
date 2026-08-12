@@ -13,7 +13,7 @@
  * rather than a summary of findings.
  */
 import { cell } from '../../lib/report'
-import { applyA181, groupByClassification, packageCountInConsignment, type DgAssessment } from './assess'
+import { applyA181, groupByClassification, overpackOrder, packageCountInConsignment, type DgAssessment } from './assess'
 import { formatKg } from './dgd'
 import {
   CHEMISTRY_LABELS,
@@ -132,7 +132,8 @@ export function buildChecklist(
   // --- Package by package ------------------------------------------------
   out.push('## Packages')
   out.push('')
-  for (const [index, assessed] of assessment.packages.entries()) {
+  // Numbered in the order the declaration prints them; the two travel in one envelope.
+  for (const [index, assessed] of overpackOrder(assessment.packages).entries()) {
     const { pkg } = assessed
     const count = packageCountInConsignment(pkg, consignment)
     const overpack = pkg.overpackId ? consignment.overpacks.find((o) => o.id === pkg.overpackId) : null

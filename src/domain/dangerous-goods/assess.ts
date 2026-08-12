@@ -207,6 +207,32 @@ function a181Groups(entries: EntryAssessment[]): Map<string, EntryAssessment[]> 
 }
 
 /**
+ * The packages in the order the paperwork presents them: as entered, except that packages
+ * sharing an overpack are brought together at the position of the first of them.
+ *
+ * The declaration needs it because an overpack's wording is written once, after the last
+ * entry belonging to it — packages of one overpack separated by a package of another put
+ * that wording after entries not inside it. The bench checklist needs it because it numbers
+ * its sections, and the two documents travel in one envelope: numbered in input order
+ * against a declaration in this one, section 2 of the checklist described the third entry
+ * on the paper.
+ *
+ * A consignment with no overpacks, or one whose overpacks are already contiguous, comes back
+ * exactly as it was entered.
+ */
+export function overpackOrder(packages: readonly PackageAssessment[]): PackageAssessment[] {
+  const groupPosition = new Map<string, number>()
+  packages.forEach((p, index) => {
+    const key = p.pkg.overpackId || `pkg:${index}`
+    if (!groupPosition.has(key)) groupPosition.set(key, index)
+  })
+  return packages
+    .map((p, index) => ({ p, index, at: groupPosition.get(p.pkg.overpackId || `pkg:${index}`) ?? index }))
+    .sort((a, b) => a.at - b.at || a.index - b.index)
+    .map((o) => o.p)
+}
+
+/**
  * How many physical packages of this description the consignment holds.
  *
  * `count` is per overpack for a package that sits in one, so the consignment total — which is

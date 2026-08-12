@@ -22,7 +22,7 @@
  *    that says "Page 1 of 1" on the first of two sheets is a defective document.
  */
 import { localDate } from '../../lib/report'
-import { applyA181, groupByClassification, packageCountInConsignment, type DgAssessment } from './assess'
+import { applyA181, groupByClassification, overpackOrder, packageCountInConsignment, type DgAssessment } from './assess'
 import type { DgConsignment, Overpack } from './types'
 
 /**
@@ -175,16 +175,29 @@ export function wrap(text: string, width: number): string[] {
  * the quantities beside them are per package, and without the total nothing on the paper
  * adds them up.
  */
-function overpackAnnotations(overpack: Overpack, totalPerOverpackKg: number, entryCount: number): string[] {
+/** What one overpack's wording is accumulated from, across every package inside it. */
+interface OverpackTotal {
+  /** The declaration line the wording is written after: the last entry belonging to it. */
+  lastLineIndex: number
+  totalPerOverpackKg: number
+  /** Declared entries inside the overpack, and the packages holding them. */
+  entryCount: number
+  packageCount: number
+}
+
+function overpackAnnotations(overpack: Overpack, held: OverpackTotal): string[] {
+  const { totalPerOverpackKg, entryCount, packageCount } = held
   const lines = overpack.count <= 1 ? ['Overpack used'] : [`Overpack used x ${overpack.count}`]
   // The marks are what must be listed; "identification marks" as a label is mine, not the
   // regulation's, and it costs a wrapped row every time.
   if (overpack.marks.trim()) lines.push(`Overpack marks: ${overpack.marks.trim()}`)
-  // Stated where it is not the quantity column's own figure said twice: more than one
-  // overpack, or more than one entry inside a single one. Withheld on the entry count too,
-  // a single overpack spanning several package descriptions had its total appear nowhere —
-  // the per-line quantities are per package, and nothing on the paper added them up.
-  if (overpack.count > 1 || entryCount > 1) {
+  // Stated wherever it is not simply the quantity column's own figure said twice — which
+  // it is only for a single overpack holding a single package of a single entry. Keyed on
+  // the overpack count alone, a single overpack spanning several package descriptions had
+  // its total appear nowhere; keyed on that and the entry count, so did one holding three
+  // copies of one description. The per-line quantities are per package, and nothing else on
+  // the paper adds them up.
+  if (overpack.count > 1 || entryCount > 1 || packageCount > 1) {
     lines.push(`Total quantity per Overpack ${formatKg(totalPerOverpackKg)} kg`)
   }
   // Wrapped to the same column the quantity is wrapped to, because that is the column they
@@ -215,10 +228,7 @@ export function buildDeclaration(consignment: DgConsignment, assessment: DgAsses
    * the mark on the box, is the single most frequent cause of a resubmission on these
    * consignments.
    */
-  const overpackTotals = new Map<
-    string,
-    { lastLineIndex: number; totalPerOverpackKg: number; entryCount: number }
-  >()
+  const overpackTotals = new Map<string, OverpackTotal>()
 
   // Entries are emitted package by package so that the overpack wording lands immediately
   // after the entries it belongs to, which is where the regulation puts it.
@@ -231,15 +241,7 @@ export function buildDeclaration(consignment: DgConsignment, assessment: DgAsses
   // `dg.overpack-identifier` exists to prevent. Everything else keeps its order: the sort
   // key is the index of the first package of the group, so a consignment with no overpacks,
   // or one whose overpacks are already contiguous, is emitted exactly as it was entered.
-  const groupPosition = new Map<string, number>()
-  assessment.packages.forEach((p, index) => {
-    const key = p.pkg.overpackId || `pkg:${index}`
-    if (!groupPosition.has(key)) groupPosition.set(key, index)
-  })
-  const ordered = assessment.packages
-    .map((p, index) => ({ p, index, at: groupPosition.get(p.pkg.overpackId || `pkg:${index}`) ?? index }))
-    .sort((a, b) => a.at - b.at || a.index - b.index)
-    .map((o) => o.p)
+  const ordered = overpackOrder(assessment.packages)
 
   for (const packageAssessment of ordered) {
     const { pkg } = packageAssessment
@@ -295,15 +297,17 @@ export function buildDeclaration(consignment: DgConsignment, assessment: DgAsses
           lastLineIndex: lines.length - 1,
           totalPerOverpackKg: (held?.totalPerOverpackKg ?? 0) + contribution,
           entryCount: (held?.entryCount ?? 0) + groupList.length,
+          packageCount: (held?.packageCount ?? 0) + Math.max(0, pkg.count),
         })
       }
     })
   }
 
-  for (const [overpackId, { lastLineIndex, totalPerOverpackKg, entryCount }] of overpackTotals) {
+  for (const [overpackId, held] of overpackTotals) {
+    const { lastLineIndex } = held
     const overpack = consignment.overpacks.find((o) => o.id === overpackId)
     if (overpack) {
-      lines[lastLineIndex].annotations = overpackAnnotations(overpack, totalPerOverpackKg, entryCount)
+      lines[lastLineIndex].annotations = overpackAnnotations(overpack, held)
     }
   }
 
