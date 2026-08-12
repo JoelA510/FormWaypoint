@@ -689,11 +689,17 @@ function pagesToGrid(pages: TextPage[]): SheetRows {
     }
   }
 
-  const partyBand = rows.findIndex(
-    (row) =>
-      row.items.some((i) => isPartyTitle(i.str, 'SHIPPER')) &&
-      row.items.some((i) => isPartyTitle(i.str, 'CONSIGNEE')),
-  )
+  // Searched through the same healing the rest of the grid gets. `isPartyTitle` refuses an
+  // item that *is* a header label, which is what keeps `SHIPPER EIN / TAX ID:` from passing
+  // for the SHIPPER block — but only while the extractor leaves the label in one piece.
+  // Split into words, its first item is the bare word `SHIPPER`, and the header grid then
+  // answers to the band's own description. That the real band is found first is a property
+  // of where the form prints its rows, which is exactly what this guard exists not to rest
+  // on.
+  const partyBand = rows.findIndex((row) => {
+    const strings = row.items.map((item) => item.str)
+    return titlesPartyBlock(strings, 'SHIPPER') && titlesPartyBlock(strings, 'CONSIGNEE')
+  })
   let partyEnd = partyBand
   if (partyBand !== -1) {
     partyEnd = rows.findIndex((row, i) => i > partyBand && hasLabel(row))
@@ -753,14 +759,15 @@ function coalescedRow(row: TextRow): string[] {
     if (pending.length) cells.push(pending.join(' '))
     pending = []
   }
-  for (let i = 0; i < row.items.length; i++) {
-    const span = labelSpanAt(row.items, i)
+  const strings = row.items.map((item) => item.str)
+  for (let i = 0; i < strings.length; i++) {
+    const span = labelSpanAt(strings, i)
     if (span) {
       flush()
       cells.push(span.text)
       i = span.end
     } else {
-      pending.push(row.items[i].str)
+      pending.push(strings[i])
     }
   }
   flush()
@@ -791,7 +798,7 @@ const MAX_LABEL_ITEMS = 6
  * split can fall between words (`INVOICE` + `DATE:`) or inside one (`INVOICE DA` + `TE:`).
  */
 function labelSpanAt(
-  items: TextRow['items'],
+  items: readonly string[],
   start: number,
   includeTotalsCells = true,
 ): { text: string; end: number } | null {
@@ -805,7 +812,7 @@ function labelSpanAt(
   // way.
   let best: { text: string; end: number; header: boolean } | null = null
   for (let end = start; end < items.length && end - start < MAX_LABEL_ITEMS; end++) {
-    parts.push(items[end].str)
+    parts.push(items[end])
     for (const joined of end === start ? [parts[0]] : [parts.join(' '), parts.join('')]) {
       const header = isLabel(joined)
       if (!header && !(includeTotalsCells && TOTALS_CELLS.has(normalizeLabel(joined)))) continue
@@ -825,7 +832,19 @@ function labelSpanAt(
  * on `FREIGHT` and every address in the consignment is dropped.
  */
 function hasLabel(row: TextRow): boolean {
-  return row.items.some((_, i) => labelSpanAt(row.items, i, false) !== null)
+  const strings = row.items.map((item) => item.str)
+  return strings.some((_, i) => labelSpanAt(strings, i, false) !== null)
+}
+
+/**
+ * Whether these text items title an address block, counting a header label the extractor
+ * split into words.
+ *
+ * Exported so the separation can be asserted against the form's real label list, the way
+ * `isPartyTitle` already is — the split case is the one `isPartyTitle` alone cannot see.
+ */
+export function titlesPartyBlock(items: readonly string[], block: PartyBlock): boolean {
+  return items.some((item, i) => labelSpanAt(items, i, false) === null && isPartyTitle(item, block))
 }
 
 /**

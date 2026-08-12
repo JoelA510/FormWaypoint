@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { parseCipl, parseCiplFile } from '.'
-import { isOmronCiWorkbook, isPartyTitle, parseOmronCiWorkbook } from './parse-omron-ci'
+import { isOmronCiWorkbook, isPartyTitle, parseOmronCiWorkbook, titlesPartyBlock } from './parse-omron-ci'
 import { reconcile } from '../reconcile'
 import { buildXlsx } from '../../lib/xlsx'
 import { buildOmronCiPdf, omronCiGrid, simpleOmronCi, subtotalOf } from '../../test/synthetic/omron-ci'
@@ -410,6 +410,26 @@ describe('the printed PDF', () => {
     const parsed = parseOmronCiWorkbook('ci.xlsx', grid)
     expect(parsed.headers.FC.consignedTo.name).toBe('')
     expect(parsed.warnings.some((w) => w.includes('could not be read from this document'))).toBe(true)
+  })
+
+  it('does not let the header grid answer to the address band’s description', () => {
+    // `SHIPPER EIN / TAX ID:` and `CONSIGNEE EORI / USCI / VAT:` share a row of the header
+    // grid, and `isPartyTitle` refuses them because each *is* a label — but only while the
+    // extractor leaves them whole. Split into words, the first item is the bare word
+    // `SHIPPER`, and the grid row satisfies the band's own test. That the real band is
+    // printed above it is where the form puts its rows, which is what this guard exists not
+    // to rest on.
+    const whole = ['SHIPPER EIN / TAX ID:', '', 'CONSIGNEE EORI / USCI / VAT:', '']
+    expect(titlesPartyBlock(whole, 'SHIPPER')).toBe(false)
+    expect(titlesPartyBlock(whole, 'CONSIGNEE')).toBe(false)
+
+    const split = ['SHIPPER', 'EIN', '/', 'TAX', 'ID:', 'CONSIGNEE', 'EORI', '/', 'USCI', '/', 'VAT:']
+    expect(titlesPartyBlock(split, 'SHIPPER')).toBe(false)
+    expect(titlesPartyBlock(split, 'CONSIGNEE')).toBe(false)
+
+    // The band itself still reads as the band.
+    expect(titlesPartyBlock(['SHIPPER (SHIP FROM / EXPORTER)'], 'SHIPPER')).toBe(true)
+    expect(titlesPartyBlock(['CONSIGNEE (SHIP TO)'], 'CONSIGNEE')).toBe(true)
   })
 
   it('leaves the address blocks empty rather than folding two into one', () => {

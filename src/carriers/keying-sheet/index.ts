@@ -901,6 +901,10 @@ const SUBDIVISION_CODES = new Set([
   // Brazil, which prints the two-letter state between the city and the CEP
   'AC', 'AM', 'AP', 'BA', 'CE', 'ES', 'GO', 'MA', 'MG', 'MS', 'MT', 'PB', 'PE', 'PI', 'PR',
   'RJ', 'RN', 'RO', 'RR', 'RS', 'SC', 'SE', 'SP', 'TO',
+  // Not subdivisions at all, but what the CIPL prints in that position for a country that
+  // has none — `Singapore EX 498781`, `'s-Hertogenbosch NA 5234`. They belong in the City
+  // box no more than a real state does, and the same postcode comment above cites them.
+  'EX', 'NA',
 ])
 
 /**

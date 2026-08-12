@@ -561,13 +561,16 @@ export function App() {
       })
       return
     }
-    // Something was deleted, so the panels are reset whatever else happened — leaving rows
-    // on screen that are gone on disk is the same misreport in the other direction.
-    setProfile(EMPTY_PROFILE)
-    setOverrides([])
-    setPartOverrides([])
-    setItems([])
-    setShipments([])
+    // Panel by panel, against what actually cleared. Leaving rows on screen that are gone
+    // on disk is the same misreport in the other direction — but blanking a panel whose
+    // store survived is worse than either: the profile autosave would then write the empty
+    // form over the profile the message beside it says is still there.
+    const cleared = (label: string): boolean => !remaining.includes(label)
+    if (cleared('the exporter profile')) setProfile(EMPTY_PROFILE)
+    if (cleared('the classification overrides')) setOverrides([])
+    if (cleared('the per-part weights')) setPartOverrides([])
+    if (cleared('the item library')) setItems([])
+    if (cleared('the shipment history')) setShipments([])
     setWriteError(
       remaining.length
         ? {
@@ -588,7 +591,7 @@ export function App() {
     // so every edit made after the wipe was discarded in silence. Only where the profile
     // store is one of the ones that actually cleared: a write just succeeded against it,
     // so this screen is now the truth about what is stored.
-    if (!remaining.includes('the exporter profile')) {
+    if (cleared('the exporter profile')) {
       setProfileUnavailable(false)
       setProfileLoaded(true)
     }

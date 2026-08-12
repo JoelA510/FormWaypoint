@@ -385,6 +385,10 @@ describe('address extraction', () => {
     expect(field(['Rua Example 100', 'SAO PAULO SP 01310-100'], 'City')).toBe('SAO PAULO')
     expect(field(['Rua Example 100', 'Sao Paulo SP 01310-100'], 'City')).toBe('Sao Paulo')
     expect(field(['1 King William St', 'ADELAIDE SA 5000'], 'City')).toBe('ADELAIDE')
+    // The placeholders these CIPLs print where a country has no subdivision are recognised
+    // too — they belong in the City box no more than a real state does.
+    expect(field(['2nd Floor 40 Alps Avenue', 'SINGAPORE EX 498781'], 'City')).toBe('SINGAPORE')
+    expect(field(['Europalaan 20', "'S-HERTOGENBOSCH NA 5234"], 'City')).toBe("'S-HERTOGENBOSCH")
     // And a capitalised city whose last word merely looks like one keeps it.
     expect(field(['Via Roma 1', 'ROMA 00184'], 'City')).toBe('ROMA')
   })
