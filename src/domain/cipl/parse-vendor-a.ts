@@ -828,7 +828,18 @@ function blockEndsAt(rows: TextRow[], from: number, to: number, kind: DocumentKi
   // decided the same way here as everywhere else in this file: the row belongs to the block.
   if (figures === -1) {
     const classification = classificationRowIn(rows, from, to)
-    return classification === -1 ? from : classification + 1
+    if (classification !== -1) return classification + 1
+    // Neither anchor in range. That is what a block carried across a page break looks like
+    // from here: its order, line, classification and figures printed on the sheet before,
+    // and only its description on this one. Returning the block's own start collapsed the
+    // floor to nothing — the degenerate case this whole branch exists to avoid — and let
+    // the row below be read as the next commodity's heading, which is the wording
+    // `aggregateLines` then files.
+    //
+    // The floor goes to the end of the range instead, which is the same rule the rest of
+    // this function applies: an unattributable row belongs to the block it follows, not to
+    // the one after it.
+    return Math.max(from, to - 1)
   }
   if (kind !== 'INVOICE') return figures
   // The description row. This layout always prints one, and the alternative reading is not

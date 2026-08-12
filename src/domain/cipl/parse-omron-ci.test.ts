@@ -38,20 +38,17 @@ describe('the workbook grid', () => {
     expect(header.consignedTo.lines).toEqual(['1 Harbour Way', 'Singapore 018989', 'Singapore'])
   })
 
-  it('takes the date of exportation from the form’s own SHIP DATE box', () => {
-    // Read into the header grid and then dropped, the SLI was dated from the invoice
-    // whatever the form said the goods were leaving on, and the two are routinely days
-    // apart.
+  it('does not put the form’s SHIP DATE into the field that means a sailing date', () => {
+    // `onOrAboutDate` is the later sailing date on the vendor layouts, and box 2 of the SLI
+    // deliberately takes the invoice date instead. Filling it from a box that means
+    // something else would move the date of exportation on those layouts too, through the
+    // one line in `buildDraft` that reads it.
     const grid = omronCiGrid(simpleOmronCi())
     const row = grid.find((r) => r[5] === 'SHIP DATE:')!
     row[7] = '08/14/2026'
     const header = parseOmronCiWorkbook('ci.xlsx', grid).headers.FC
-    expect(header.onOrAboutDate).toBe('08/14/2026')
+    expect(header.onOrAboutDate).toBeNull()
     expect(header.invoiceDate).toBe('08/10/2026')
-  })
-
-  it('leaves the date of exportation unset when the box is empty', () => {
-    expect(parseGrid().headers.FC.onOrAboutDate).toBeNull()
   })
 
   it('reconciles values against the subtotal, not the tax-and-freight total', () => {
