@@ -658,6 +658,12 @@ function scaleFigure(value: number, divisor: number): number {
 function isTotalsRow(row: TextRow): boolean {
   const text = rowText(row)
   if (/^\s*TOTALS?\b/i.test(text) && /\d/.test(text)) return true
+  // The figures need not sit on the label's own baseline. A footer printed as a bare
+  // `TOTAL:` above its numbers carries no digit and so failed the rule above, and the block
+  // slice then ran past it — the failure this function's comment calls the worse one. The
+  // colon is what separates it from a heading: no commodity is named `Total:` and nothing
+  // else.
+  if (/^\s*TOTALS?\s*:\s*$/i.test(text)) return true
   if (/CARTONS ONLY/i.test(text)) return true
   // Upper case and unanchored: the packing list prints it mid-row. No heading spells it so.
   return /\bTOTALS\b/.test(text)
@@ -828,7 +834,18 @@ function blockEndsAt(rows: TextRow[], from: number, to: number, kind: DocumentKi
   // decided the same way here as everywhere else in this file: the row belongs to the block.
   if (figures === -1) {
     const classification = classificationRowIn(rows, from, to)
-    return classification === -1 ? from : classification + 1
+    if (classification !== -1) return classification + 1
+    // Neither anchor in range. That is what a block carried across a page break looks like
+    // from here: its order, line, classification and figures printed on the sheet before,
+    // and only its description on this one. Returning the block's own start collapsed the
+    // floor to nothing — the degenerate case this whole branch exists to avoid — and let
+    // the row below be read as the next commodity's heading, which is the wording
+    // `aggregateLines` then files.
+    //
+    // The floor goes to the end of the range instead, which is the same rule the rest of
+    // this function applies: an unattributable row belongs to the block it follows, not to
+    // the one after it.
+    return Math.max(from, to - 1)
   }
   if (kind !== 'INVOICE') return figures
   // The description row. This layout always prints one, and the alternative reading is not

@@ -31,7 +31,10 @@ import {
   BATTERY_MARK_PREFIX,
   classifyForAir,
   CHEMISTRY_LABELS,
+  bandDeterminesTreatment,
   energyThreshold,
+  INDICATED_CAPACITY_LIMIT,
+  undecidedPackagingSections,
   type AircraftLimitation,
   type AirClassification,
 } from './lithium'
@@ -41,7 +44,15 @@ import {
   type BatteryEntry,
   type DgConsignment,
   type DgPackage,
+  type StateOfChargeBasis,
 } from './types'
+
+/** The three bases named as they are on screen, so a failing check quotes what was picked. */
+const SOC_BASIS_NAMES: Record<StateOfChargeBasis, string> = {
+  'rated-capacity': 'rated capacity',
+  'rated-design-capacity': 'rated design capacity',
+  'indicated-capacity': 'indicated capacity',
+}
 
 export interface EntryAssessment {
   entry: BatteryEntry
@@ -54,8 +65,6 @@ export interface PackageAssessment {
   entries: EntryAssessment[]
   /** Net battery weight in **one** package, summed over its entries. */
   netWeightKg: number
-  /** The net quantity ceiling actually in force — the lower of the PI figure and the box's own. */
-  effectiveLimitKg: number | null
   /** Marks and labels this package must carry, after the consignment-level exemptions. */
   hazardCommunication: string[]
   /** Why the battery mark may be omitted, or null when it must be applied. */
@@ -128,6 +137,107 @@ export function groupByClassification(
 }
 
 /**
+ * Special provision A181, applied to the entries a package puts on the declaration.
+ *
+ * A package holding batteries both packed with equipment and contained in equipment *is*
+ * described as packed with equipment — the package and the shipping paper alike, which is
+ * what the `dg.a181` check tells the shipper. Printing the contained-in entry as its own
+ * line contradicted that in the one place it is read: two entries on the paper, one of
+ * them naming a description the provision says does not apply to this package.
+ *
+ * Only the description changes. The batteries are the same batteries and their mass is the
+ * same mass — it lands on the packed-with line, which is where A181 puts the total.
+ *
+ * It lives beside the checks rather than beside the renderer because both need it and they
+ * must not disagree: the shared-packaging warning counts the lines the declaration prints,
+ * and counting them before this ran claimed a second line the paper does not have.
+ */
+export function applyA181(entries: EntryAssessment[]): EntryAssessment[] {
+  // Matched per UN number, not once for the package. A box holding UN3481 packed with
+  // equipment beside UN3091 in both configurations has two provisions to apply, and
+  // resolving a single target relabelled the lithium ion entry and left the lithium metal
+  // one printing the description A181 says does not apply to it.
+  const packedWithByUn = new Map<string, EntryAssessment>()
+  for (const e of entries) {
+    if (e.entry.spec.configuration === 'packed-with-equipment' && !packedWithByUn.has(e.classification.unNumber)) {
+      packedWithByUn.set(e.classification.unNumber, e)
+    }
+  }
+  if (!packedWithByUn.size) return entries
+
+  return entries.map((e) => {
+    if (e.entry.spec.configuration !== 'contained-in-equipment') return e
+    const packedWith = packedWithByUn.get(e.classification.unNumber)
+    if (!packedWith) return e
+    // Never onto a laxer classification. A181 changes a description, not a regulatory
+    // treatment, and relabelling a fully regulated contained-in entry with a Section II
+    // packed-with one took the Class 9 label and the UN and proper shipping name mark off
+    // the marks list for a box that needs them. `dg.mixed-regulation` refuses such a
+    // package — but the marks are read while it is being packed, before anyone has reached
+    // the checks.
+    if (e.classification.fullyRegulated && !packedWith.classification.fullyRegulated) return e
+    return { ...e, classification: packedWith.classification }
+  })
+}
+
+/**
+ * The UN numbers in a package that A181 speaks about, with the entries it gathers under
+ * each: the ones held both packed with and contained in equipment.
+ *
+ * Per UN number, because that is the scope of the provision. A box holding UN3481 in both
+ * configurations beside a standalone UN3480 line has one A181 total, and the standalone
+ * line is no part of it — summing the whole package failed consignments that comply.
+ */
+function a181Groups(entries: EntryAssessment[]): Map<string, EntryAssessment[]> {
+  const byUn = new Map<string, EntryAssessment[]>()
+  for (const e of entries) {
+    const configuration = e.entry.spec.configuration
+    if (configuration !== 'packed-with-equipment' && configuration !== 'contained-in-equipment') continue
+    const group = byUn.get(e.classification.unNumber)
+    if (group) group.push(e)
+    else byUn.set(e.classification.unNumber, [e])
+  }
+  for (const [un, group] of byUn) {
+    const both =
+      group.some((e) => e.entry.spec.configuration === 'packed-with-equipment') &&
+      group.some((e) => e.entry.spec.configuration === 'contained-in-equipment')
+    if (!both) byUn.delete(un)
+  }
+  return byUn
+}
+
+/**
+ * The packages in the order the paperwork presents them: as entered, except that packages
+ * sharing an overpack are brought together at the position of the first of them.
+ *
+ * The declaration needs it because an overpack's wording is written once, after the last
+ * entry belonging to it — packages of one overpack separated by a package of another put
+ * that wording after entries not inside it. The bench checklist needs it because it numbers
+ * its sections, and the two documents travel in one envelope: numbered in input order
+ * against a declaration in this one, section 2 of the checklist described the third entry
+ * on the paper. The editor needs it because it numbers packages too, and "Package 2" on
+ * screen has to be the box "### 2." is describing.
+ *
+ * Generic in what a package is, so the editor can order the consignment's own packages and
+ * the two documents can order the assessed ones, through this one rule.
+ *
+ * A consignment with no overpacks, or one whose overpacks are already contiguous, comes back
+ * exactly as it was entered.
+ */
+export function overpackOrder<T>(packages: readonly T[], overpackIdOf: (item: T) => string | null): T[] {
+  const groupPosition = new Map<string, number>()
+  const keyAt = (item: T, index: number): string => overpackIdOf(item) || `pkg:${index}`
+  packages.forEach((p, index) => {
+    const key = keyAt(p, index)
+    if (!groupPosition.has(key)) groupPosition.set(key, index)
+  })
+  return packages
+    .map((p, index) => ({ p, index, at: groupPosition.get(keyAt(p, index)) ?? index }))
+    .sort((a, b) => a.at - b.at || a.index - b.index)
+    .map((o) => o.p)
+}
+
+/**
  * How many physical packages of this description the consignment holds.
  *
  * `count` is per overpack for a package that sits in one, so the consignment total — which is
@@ -137,7 +247,25 @@ export function groupByClassification(
  */
 export function packageCountInConsignment(pkg: DgPackage, consignment: DgConsignment): number {
   const overpack = pkg.overpackId ? consignment.overpacks.find((o) => o.id === pkg.overpackId) : null
-  return Math.max(0, pkg.count) * Math.max(1, overpack?.count ?? 1)
+  // No overpack is a multiplier of one. An overpack whose count is *zero* is not: the panel
+  // stores zero for a cleared box so `dg.overpack-count` can refuse it, and flooring it back
+  // to one undid that here — four packages read as two, and the two-package battery mark
+  // exemption came off the marks list at the packing bench, above the checks that refuse it.
+  const multiplier = overpack ? Math.max(0, overpack.count) : 1
+  return Math.max(0, pkg.count) * multiplier
+}
+
+/**
+ * How a package description is named in a check title.
+ *
+ * The consignment total, not the per-overpack count. The declaration line, the checklist
+ * heading and the consignment totals all state the product of the package count and its
+ * overpack count; a check title reading "2 × Fibreboard box" beside a declaration reading
+ * "6 Fibreboard box" — both reproduced in the same checklist — reads as two different
+ * packages rather than one described twice.
+ */
+function packageLabel(pkg: DgPackage, consignment: DgConsignment): string {
+  return `${packageCountInConsignment(pkg, consignment)} × ${pkg.packagingType || 'package'}`
 }
 
 export function assess(consignment: DgConsignment): DgAssessment {
@@ -149,7 +277,6 @@ export function assess(consignment: DgConsignment): DgAssessment {
     (sum, p) => sum + packageCountInConsignment(p, consignment),
     0,
   )
-  const usingPassenger = consignment.aircraft === 'passenger-and-cargo'
 
   for (const pkg of consignment.packages) {
     const entries: EntryAssessment[] = pkg.entries.map((entry) => ({
@@ -157,27 +284,28 @@ export function assess(consignment: DgConsignment): DgAssessment {
       packageId: pkg.id,
       classification: classifyForAir(entry.spec, { prepareToSectionI: entry.prepareToSectionI }),
     }))
-    for (const { classification } of entries) {
+    // Through `applyA181`, like every other reader. These classifications are what the air
+    // waybill statement is built from — the entire hazard communication for an all-Section
+    // II consignment — and taken from the raw entries a package described as *packed with
+    // equipment* everywhere else still named PI 967 on the air waybill.
+    for (const { classification } of applyA181(entries)) {
       const key = classificationKey(classification)
       if (!byKey.has(key)) byKey.set(key, classification)
     }
 
     const netWeightKg = kg(entries.reduce((sum, e) => sum + (e.entry.netWeightKgPerPackage ?? 0), 0))
     const exemption = batteryMarkExemption(entries, totalPackages)
-    const instructionLimit = entries.length
-      ? Math.min(
-          ...entries.map((e) =>
-            usingPassenger ? (e.classification.limits.passengerKg ?? Infinity) : e.classification.limits.cargoKg,
-          ),
-        )
-      : Infinity
 
     packages.push({
       pkg,
       entries,
       netWeightKg,
-      effectiveLimitKg: effectiveLimit(instructionLimit, pkg.packagingAuthorizationLimitKg),
-      hazardCommunication: packageHazardCommunication(entries, consignment, pkg, exemption),
+      // Through `applyA181`, like the declaration, the checklist and the shared-packaging
+      // count. The marks go on the box, and a box holding one UN number both packed with
+      // and contained in equipment carries the packed-with name — which is what `dg.a181`
+      // instructs and what the declaration prints. Built from the raw entries, this list
+      // asked for both proper shipping names on the same package.
+      hazardCommunication: packageHazardCommunication(applyA181(entries), consignment, pkg, exemption),
       batteryMarkExemption: exemption,
       declarationRequired: entries.some((e) => e.classification.declarationRequired),
     })
@@ -233,23 +361,12 @@ export function assess(consignment: DgConsignment): DgAssessment {
   }
 }
 
-/**
- * The net quantity ceiling actually in force for a package.
- *
- * The packing instruction states the regulatory maximum; the tested design type states what
- * this box was proved to hold. Where the box's own authorization is lower it governs, because
- * a package filled to the regulatory figure in a container never tested for it is not a
- * compliant package — it is an untested one.
- */
-function effectiveLimit(instructionLimitKg: number, authorizationLimitKg: number | null): number | null {
-  const candidates = [instructionLimitKg, authorizationLimitKg ?? Infinity].filter((v) => Number.isFinite(v))
-  return candidates.length ? Math.min(...candidates) : null
-}
-
 /** The consignment has to describe something before any of it can be checked. */
 function structureChecks(consignment: DgConsignment): CheckResult[] {
   const entryCount = consignment.packages.reduce((sum, p) => sum + p.entries.length, 0)
-  const empty = consignment.packages.filter((p) => p.count < 1)
+  // Whole packages only. The number input has no step, and "1.5 Fibreboard box x 1 kg" is
+  // not a consignment anyone can present at a counter.
+  const empty = consignment.packages.filter((p) => !Number.isInteger(p.count) || p.count < 1)
   return [
     {
       id: 'dg.structure',
@@ -266,9 +383,10 @@ function structureChecks(consignment: DgConsignment): CheckResult[] {
       severity: 'blocking',
       title: 'Every package description covers at least one package',
       detail: empty.length
-        ? `${empty.map((p) => p.packagingType || 'a package').join(', ')} — a count of zero would put “0 ` +
-          'Fibreboard box x 7 kg” on the declaration and leave the batteries it describes out of the ' +
-          'consignment total. Remove the description, or say how many there are.'
+        ? `${empty.map((p) => p.packagingType || 'a package').join(', ')} — a count that is not a whole number ` +
+          'of packages would put “0 Fibreboard box x 7 kg”, or half a box, on the declaration and put the ' +
+          'batteries it describes wrongly into the consignment total. Remove the description, or say how many ' +
+          'there are.'
         : 'Each package description states how many identical packages it covers.',
       passed: empty.length === 0,
     },
@@ -314,23 +432,43 @@ function entryChecks(assessment: PackageAssessment): CheckResult[] {
     // --- Energy content --------------------------------------------------
     const threshold = energyThreshold(entry.spec)
     const stated = entry.spec.chemistry === 'lithium-metal' ? entry.spec.lithiumContentG : entry.spec.wattHours
+    // Blocking only where the figure decides something, which is what `sectionUndetermined`
+    // says. A standalone sodium ion battery is classified identically with and without a
+    // rating — PI 976 has no sections and one limit — and a package prepared to Section I
+    // has settled the same question a different way, since both bands it could be in lead
+    // there. Refusing to generate for want of a figure that cannot change the answer stops a
+    // consignment on a field nobody can usefully act on.
+    const unrated = classification.band === 'unknown'
+    const bandMatters = unrated ? classification.sectionUndetermined : bandDeterminesTreatment(entry.spec)
+    // Which of the two reasons a stated rating is not waited on — they read very differently
+    // to whoever is looking at the panel.
+    const noSections = !bandDeterminesTreatment(entry.spec)
     checks.push({
       id: `dg.energy.${ref}`,
-      severity: 'blocking',
+      severity: bandMatters ? 'blocking' : 'info',
       title: `${name}: energy content stated`,
-      detail:
-        classification.band === 'unknown'
+      detail: !unrated
+        ? `${stated} ${threshold.unit} per ${entry.spec.form}, against a ${threshold.limit} ${threshold.unit} ` +
+          `threshold — ${classification.band === 'small' ? 'small' : 'large'} by air, ` +
+          (classification.section
+            ? `PI ${classification.packingInstructionLabel}.`
+            : `PI ${classification.packingInstruction}.`)
+        : bandMatters
           ? `Every threshold in the packing instructions turns on this figure. Enter the ` +
             `${threshold.unit === 'Wh' ? 'watt-hour rating' : 'lithium content'} per ` +
             `${entry.spec.form}; a battery whose rating is unknown cannot be shown to be inside the ` +
             'Section II or Section IB relief, and nothing is assumed on its behalf. Take it from the datasheet ' +
             'or the test summary, not from a previous air waybill.'
-          : `${stated} ${threshold.unit} per ${entry.spec.form}, against a ${threshold.limit} ${threshold.unit} ` +
-            `threshold — ${classification.band === 'small' ? 'small' : 'large'} by air, ` +
-            (classification.section
-              ? `PI ${classification.packingInstructionLabel}.`
-              : `PI ${classification.packingInstruction}.`),
-      passed: classification.band !== 'unknown',
+          : noSections
+            ? `PI ${classification.packingInstruction} has no sections and one quantity limit, so these cells are ` +
+              'fully regulated at the same limit whatever their rating and nothing here waits on the figure. ' +
+              'Record it anyway: the datasheet value belongs in the file, and an operator or a state variation ' +
+              'may ask for it.'
+            : `Prepared to Section I of PI ${classification.packingInstruction}, which is where this entry ` +
+              'lands on either side of the threshold, so the section, the limit and the packaging are all ' +
+              'settled without the figure. Record it anyway: the datasheet value belongs in the file, and the ' +
+              'rating is what evidences the choice if anyone asks why Section II was not used.',
+      passed: !unrated || !bandMatters,
       refs: [ref],
     })
 
@@ -371,12 +509,15 @@ function entryChecks(assessment: PackageAssessment): CheckResult[] {
       severity: 'blocking',
       title: `${name}: net battery weight per package stated`,
       detail:
-        entry.netWeightKgPerPackage == null
+        // Zero is refused alongside blank. It is not a lighter package: it is the net
+        // quantity box of the declaration reading "1 Fibreboard box x 0 kg", and every
+        // limit in the assessment measured against a weight that describes no batteries.
+        entry.netWeightKgPerPackage == null || entry.netWeightKgPerPackage <= 0
           ? 'Enter the net weight of the cells or batteries of this type in one package. This is the weight of ' +
             'the batteries themselves — not the equipment they are packed with or installed in, and not the ' +
             'gross weight of the package, which is what the packing instruction limits are measured against.'
           : `${entry.netWeightKgPerPackage} kg of batteries per package.`,
-      passed: entry.netWeightKgPerPackage != null,
+      passed: entry.netWeightKgPerPackage != null && entry.netWeightKgPerPackage > 0,
       refs: [ref],
     })
   }
@@ -394,7 +535,12 @@ function entryChecks(assessment: PackageAssessment): CheckResult[] {
  * has to name the assembled article.
  */
 function testSummaryCheck(entry: BatteryEntry, ref: string, name: string): CheckResult {
-  if (entry.buttonCellsInEquipment) {
+  // The exception is written against button cells *installed in equipment* — the phrase is
+  // the whole of it. A loose button cell is an ordinary standalone cell and needs its
+  // summary like any other; reading the flag without the configuration let a UN3480
+  // consignment generate with nothing on file at all. `batteryMarkExemption`, the other
+  // rule keyed on this flag, has always required the configuration.
+  if (entry.buttonCellsInEquipment && entry.spec.configuration === 'contained-in-equipment') {
     return {
       id: `dg.test-summary.${ref}`,
       severity: 'blocking',
@@ -516,6 +662,17 @@ function stateOfChargeChecks(
   const severity = mandatory ? 'blocking' : 'warning'
   const checks: CheckResult[] = []
 
+  // The indicated-capacity alternative belongs to batteries contained in equipment, and to
+  // the vehicle entries. Applying it to a standalone or packed-with battery reads a 25% rule
+  // onto a 30%-of-rated-capacity limit, which is the error this check exists to catch.
+  const indicatedAllowed = classification.indicatedCapacityAlternative
+  const onIndicated = entry.stateOfChargeBasis === 'indicated-capacity'
+  // Measured against the alternative, checked against the alternative. It is a different
+  // number as well as a different basis — 30% of rated capacity *or* an indicated capacity
+  // of 25% — and holding an indicated reading to the 30% figure passed cells at 28% that
+  // the basis they were measured on caps five points lower.
+  const limitPercent = onIndicated && indicatedAllowed ? INDICATED_CAPACITY_LIMIT : rule.limitPercent
+
   const value = entry.stateOfChargePercent
   if (value == null) {
     checks.push({
@@ -524,7 +681,7 @@ function stateOfChargeChecks(
       title: `${name}: state of charge established`,
       detail:
         `${rule.detail} It has not been stated for these cells, so it cannot be shown to be inside the ` +
-        `${rule.limitPercent}% limit. Measure it — never infer it from voltage, storage time, display bars, or ` +
+        `${limitPercent}% limit. Measure it — never infer it from voltage, storage time, display bars, or ` +
         'the fact that a battery is new.',
       passed: false,
       refs: [ref],
@@ -532,38 +689,23 @@ function stateOfChargeChecks(
     return checks
   }
 
-  const within = value <= rule.limitPercent
+  const within = value <= limitPercent
   checks.push({
     id: `dg.soc.${ref}`,
     severity,
-    title: `${name}: state of charge within ${rule.limitPercent}%`,
+    title: `${name}: state of charge within ${limitPercent}%`,
     detail: within ? rule.detail : `${rule.detail} These cells are stated at ${value}%.`,
     passed: within,
-    expected: `≤ ${rule.limitPercent}%`,
+    expected: `≤ ${limitPercent}%`,
     actual: `${value}%`,
     refs: [ref],
   })
 
-  // The indicated-capacity alternative belongs to batteries contained in equipment, and to
-  // the vehicle entries. Applying it to a standalone or packed-with battery reads a 25% rule
-  // onto a 30%-of-rated-capacity limit, which is the error this check exists to catch.
-  const indicatedAllowed = classification.indicatedCapacityAlternative
-  if (entry.stateOfChargeBasis === 'indicated-capacity' && !indicatedAllowed) {
-    checks.push({
-      id: `dg.soc-basis.${ref}`,
-      severity: 'blocking',
-      title: `${name}: state of charge measured against rated capacity`,
-      detail:
-        'The limit for this entry is 30% of *rated capacity*, and the alternative of an indicated battery ' +
-        'capacity not exceeding 25% does not apply to it — that alternative belongs to batteries contained in ' +
-        'equipment and to the vehicle entries. An indicated-capacity reading cannot demonstrate this limit; ' +
-        'measure against rated capacity.',
-      passed: false,
-      expected: 'rated capacity',
-      actual: 'indicated capacity',
-      refs: [ref],
-    })
-  } else if (entry.stateOfChargeBasis == null) {
+  // Rated *design* capacity is not the basis any of these rules is written against either:
+  // it belongs to the vehicle entries. Checking only for the indicated-capacity case let it
+  // through in silence, under a check whose own text says one basis satisfies the entry.
+  const basisAccepted = entry.stateOfChargeBasis === 'rated-capacity' || (onIndicated && indicatedAllowed)
+  if (entry.stateOfChargeBasis == null) {
     checks.push({
       id: `dg.soc-basis.${ref}`,
       severity,
@@ -573,6 +715,30 @@ function stateOfChargeChecks(
         'against rated capacity, rated design capacity, or an indicated battery capacity — the three are not ' +
         'interchangeable and only one of them satisfies this entry.',
       passed: false,
+      refs: [ref],
+    })
+  } else if (!basisAccepted) {
+    checks.push({
+      id: `dg.soc-basis.${ref}`,
+      // The rule's own strength, like the missing-basis branch beside it. Hardcoding this
+      // blocking made a recorded-but-wrong basis harder to clear than no basis at all:
+      // picking the wrong item from the dropdown stopped an advisory entry generating,
+      // while clearing it back to "not recorded" — strictly less information — did not.
+      severity,
+      title: `${name}: state of charge measured against rated capacity`,
+      detail:
+        `The limit for this entry is ${rule.limitPercent}% of *rated capacity*` +
+        (indicatedAllowed
+          ? `, or an indicated battery capacity not exceeding ${INDICATED_CAPACITY_LIMIT}%. A rated *design* ` +
+            'capacity is neither of them — that basis belongs to the vehicle entries.'
+          : ', and the alternative of an indicated battery capacity not exceeding ' +
+            `${INDICATED_CAPACITY_LIMIT}% does not apply to it — that alternative belongs to batteries ` +
+            'contained in equipment and to the vehicle entries. Neither an indicated-capacity nor a rated ' +
+            'design capacity reading can demonstrate this limit.') +
+        ' Measure against rated capacity.',
+      passed: false,
+      expected: indicatedAllowed ? 'rated capacity, or indicated capacity' : 'rated capacity',
+      actual: SOC_BASIS_NAMES[entry.stateOfChargeBasis],
       refs: [ref],
     })
   }
@@ -602,25 +768,48 @@ function stateOfChargeChecks(
   return checks
 }
 
+/**
+ * The weight this package's design type was tested to hold, where one has been stated.
+ *
+ * Zero and below are not a ceiling of nothing — they are a mistyped or half-filled box, and
+ * taken literally they blocked the consignment for ever under a quantity message reading
+ * like a packing problem, naming a remedy that could never clear it. The box is optional, so
+ * an unusable figure is treated as the unstated value it is and reported on its own terms.
+ */
+function authorizationLimit(pkg: DgPackage): number | null {
+  const stated = pkg.packagingAuthorizationLimitKg
+  return stated != null && stated > 0 ? stated : null
+}
+
 /** Everything that depends on how the package was built. */
 function packageChecks(assessment: PackageAssessment, consignment: DgConsignment): CheckResult[] {
   const checks: CheckResult[] = []
   const { pkg, entries } = assessment
-  const label = `${pkg.count} × ${pkg.packagingType || 'package'}`
+  const label = packageLabel(pkg, consignment)
   const usingPassenger = consignment.aircraft === 'passenger-and-cargo'
 
   // --- Aircraft type -----------------------------------------------------
   const forbiddenOnPassenger = entries.filter((e) => e.classification.aircraft === 'cargo-aircraft-only')
+  const passengerProvisions = [
+    ...new Set(
+      forbiddenOnPassenger.map((e) => (e.entry.spec.chemistry === 'lithium-metal' ? 'A201' : 'A334')),
+    ),
+  ].sort()
   if (forbiddenOnPassenger.length) {
     checks.push({
       id: `dg.aircraft.${pkg.id}`,
       severity: 'blocking',
       title: `${label}: aircraft type`,
+      // Naming the provisions these entries actually carry, not both of them. A201 belongs
+      // to lithium metal and A334 to lithium ion and sodium ion, and citing the pair
+      // pointed a UN3480 consignment at the lithium metal provision — the same mismatch
+      // between a check and an entry's own list that A802 was corrected for.
       detail: usingPassenger
         ? `${forbiddenOnPassenger.map((e) => e.classification.unNumber).join(', ')} may not be carried as cargo ` +
           'on a passenger aircraft. Offer the consignment as cargo aircraft only, or an exemption has to be ' +
-          'requested from the States concerned (special provisions A201 and A334). If the routing on offer is a ' +
-          'passenger aircraft, it is the wrong routing.'
+          `requested from the States concerned (special provision${passengerProvisions.length === 1 ? '' : 's'} ` +
+          `${passengerProvisions.join(' and ')}). If the routing on offer is a passenger aircraft, it is the ` +
+          'wrong routing.'
         : 'Standalone cells and batteries are cargo aircraft only, and the consignment is offered as such.',
       passed: !usingPassenger,
       refs: [pkg.id],
@@ -630,7 +819,15 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
   // --- Net quantity per package ------------------------------------------
   // Grouped by regulatory entry, because that is what the limit is written against: two
   // different UN numbers in one box each get their own allowance.
-  const groups = groupByClassification(entries)
+  //
+  // Through `applyA181` first, like the declaration, the checklist, the marks list and the
+  // shared-packaging count. Left on the raw entries, this was the last reader still
+  // partitioning a package differently from the paper it produces: a box holding one UN
+  // number both packed with and contained in equipment showed two quantity rows passing at
+  // 3 kg each while the declaration printed one line of 6 kg.
+  const merged = applyA181(entries)
+  const groups = groupByClassification(merged)
+  const mergedByEntry = new Map(merged.map((e) => [e.entry.id, e.classification]))
 
   for (const [key, { classification, weightKg: weight }] of groups) {
     const instructionLimit = usingPassenger ? classification.limits.passengerKg : classification.limits.cargoKg
@@ -639,7 +836,7 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
     if (instructionLimit == null) continue
     // Computed rather than asserted: `instructionLimit` is known finite by the guard above,
     // so the minimum of the two is a number without anything having to claim it is one.
-    const limit = Math.min(instructionLimit, pkg.packagingAuthorizationLimitKg ?? Infinity)
+    const limit = Math.min(instructionLimit, authorizationLimit(pkg) ?? Infinity)
     const authorizationBinds = limit < instructionLimit
     // Whether the A99 note below will actually be raised. Computed here so the remedy text
     // can point at it only when it exists: A99 relieves the 35 kg cargo aircraft maximum,
@@ -759,7 +956,20 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
   // "undetermined": PI 976 has no sections at all, and every standalone sodium ion battery
   // under it is fully regulated. Excluding those would let one share a package with
   // Section II goods and produce a declaration that omits half the box.
-  const classified = entries.filter((e) => e.classification.band !== 'unknown')
+  //
+  // Which is why an unstated rating is not enough to exclude one either. A standalone
+  // sodium ion battery is classified the same with a rating and without, so `dg.energy`
+  // does not block it — and dropping it here on the missing figure alone reopened exactly
+  // the hole this filter's second sentence describes.
+  //
+  // Through `applyA181` first, like the declaration, the checklist, the marks list and the
+  // limit check. A181 makes one fully regulated entry of a package holding UN3481 both
+  // packed with and contained in equipment, and the declaration prints it as one line —
+  // while this check, partitioning the raw entries, called that same package a mix of
+  // Section I and Section II and refused to generate the paper it had already agreed with.
+  // A181 declines to relabel onto a laxer classification, so a genuine mix — a fully
+  // regulated contained-in entry beside a Section II packed-with one — still fails here.
+  const classified = applyA181(entries).filter((e) => !e.classification.sectionUndetermined)
   const declared = classified.filter((e) => e.classification.declarationRequired)
   if (declared.length && declared.length < classified.length) {
     checks.push({
@@ -781,7 +991,7 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
   // get their own allowance — but a tested design type holds what it was proved to hold,
   // whatever is inside it. Applied per entry only, a box authorized for 6 kg passes twice
   // at 5 kg apiece and travels with 10 kg in it.
-  const authorization = pkg.packagingAuthorizationLimitKg
+  const authorization = authorizationLimit(pkg)
   if (authorization != null && entries.length) {
     const within = assessment.netWeightKg <= authorization
     checks.push({
@@ -805,30 +1015,82 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
   // Special provision A181 governs a package holding both packed-with and contained-in
   // batteries: the *total* mass is what the column limits apply to, and the package and the
   // shipping paper are both described as packed with equipment.
-  const configurations = new Set(entries.map((e) => e.entry.spec.configuration))
-  if (configurations.has('packed-with-equipment') && configurations.has('contained-in-equipment')) {
-    const lowest = assessment.effectiveLimitKg ?? Infinity
+  // Not raised for a package already held for mixing Section II with fully regulated
+  // goods. A181 says how a permissible package of both configurations is described; saying
+  // it about a package the previous check is refusing gives two blocking instructions that
+  // point opposite ways — describe it as packed with equipment, and take it apart.
+  const mixesRegulation = declared.length > 0 && declared.length < classified.length
+  if (!mixesRegulation) {
+    // Over every entry, not just the classified ones, because `applyA181` merges every
+    // entry: an unrated contained-in line is folded into its packed-with neighbour on the
+    // declaration, the checklist and the shared-packaging count, and filtering it out here
+    // left that merged mass measured against nothing. `dg.energy` blocks the shipment
+    // either way, but the preview and the check list must not describe different packages.
+    for (const [unNumber, combined] of a181Groups(entries)) {
+      // Raised only where the merge did not happen — `applyA181` declines to relabel a
+      // fully regulated entry onto a Section II one, and that is the case A181's total has
+      // to be stated for. Where it did merge, `dg.limit` above measures the same mass
+      // against the same ceiling, and saying it again in other words is noise.
+      const packedWith = combined.find((e) => e.entry.spec.configuration === 'packed-with-equipment')
+      const allMerged =
+        packedWith != null &&
+        combined
+          .filter((e) => e.entry.spec.configuration === 'contained-in-equipment')
+          .every(
+            (e) =>
+              classificationKey(mergedByEntry.get(e.entry.id) ?? e.classification) ===
+              classificationKey(packedWith.classification),
+          )
+      if (allMerged) continue
+
+      const total = kg(combined.reduce((sum, e) => sum + (e.entry.netWeightKgPerPackage ?? 0), 0))
+      // The instruction limit of the entries A181 gathers, and only those. The packaging's
+      // own authorization is not folded in here: it is measured against the whole package,
+      // batteries of every UN number in it, by `dg.package-authorization` above. Capping
+      // this total with it as well would report one failure as two, and would state a
+      // ceiling for these batteries that is not theirs.
+      const lowest = Math.min(
+        ...combined.map((e) =>
+          usingPassenger ? (e.classification.limits.passengerKg ?? Infinity) : e.classification.limits.cargoKg,
+        ),
+      )
+      checks.push({
+        id: `dg.a181.${pkg.id}.${unNumber}`,
+        severity: 'blocking',
+        title: `${label}: ${unNumber} total mass under special provision A181`,
+        detail:
+          total <= lowest
+            ? `This package holds ${unNumber} batteries both packed with and contained in equipment. Under ` +
+              `special provision A181 their total mass of ${total} kg is what the column limits apply to, and ` +
+              `it is within ${lowest} kg. The package and the shipping paper must both describe them as ` +
+              `*packed with equipment*, and both rule sets apply — not the more permissive one.`
+            : `This package holds ${unNumber} batteries both packed with and contained in equipment. Under ` +
+              `special provision A181 the limits apply to their total mass, which is ${total} kg against ` +
+              `${lowest} kg.`,
+        passed: total <= lowest,
+        expected: `≤ ${lowest} kg`,
+        actual: `${total} kg`,
+        refs: [pkg.id],
+      })
+    }
+  }
+
+  if (pkg.packagingAuthorizationLimitKg != null && pkg.packagingAuthorizationLimitKg <= 0) {
     checks.push({
-      id: `dg.a181.${pkg.id}`,
+      id: `dg.package-authorization-stated.${pkg.id}`,
       severity: 'blocking',
-      title: `${label}: total mass under special provision A181`,
+      title: `${label}: the packaging's authorized weight`,
       detail:
-        assessment.netWeightKg <= lowest
-          ? `This package holds batteries both packed with and contained in equipment. Under special provision ` +
-            `A181 the total mass of ${assessment.netWeightKg} kg is what the column limits apply to, and it is ` +
-            `within ${lowest} kg. The package and the shipping paper must both describe it as *packed with ` +
-            `equipment*, and both rule sets apply — not the more permissive one.`
-          : `This package holds batteries both packed with and contained in equipment. Under special provision ` +
-            `A181 the limits apply to the total mass, which is ${assessment.netWeightKg} kg against ${lowest} kg.`,
-      passed: assessment.netWeightKg <= lowest,
-      expected: `≤ ${lowest} kg`,
-      actual: `${assessment.netWeightKg} kg`,
+        `${pkg.packagingAuthorizationLimitKg} kg is not a weight a design type was tested to hold. Enter the ` +
+        'figure from the packaging certificate, or clear the box — it is optional, and the packing ' +
+        'instruction’s own limit applies on its own where no design type figure is stated.',
+      passed: false,
       refs: [pkg.id],
     })
   }
 
   // --- Weights -----------------------------------------------------------
-  checks.push(weightChecks(assessment))
+  checks.push(weightChecks(assessment, consignment))
 
   // --- Co-packing --------------------------------------------------------
   checks.push({
@@ -838,7 +1100,10 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
     detail: pkg.coPackedWithProhibitedClass
       ? 'Cells and batteries must not be packed in the same outer packaging with ' +
         `${PROHIBITED_CO_PACKED_CLASSES.join(', ')}. Repack the other goods separately.`
-      : `No ${PROHIBITED_CO_PACKED_CLASSES.length}-way conflict declared. The prohibited list is exactly: ` +
+      : // The list's own length is not a fact about this box. Interpolated, it read "No
+        // 5-way conflict declared" on every compliant package — a number describing the
+        // regulation, printed as though it described the packing.
+        'Nothing prohibited declared in the same outer packaging. The prohibited list is exactly: ' +
         `${PROHIBITED_CO_PACKED_CLASSES.join('; ')}. Division 1.4S is permitted, and Divisions 4.2, 4.3 and ` +
         '5.2, Class 8 and Division 2.2 do not appear in it.',
     passed: !pkg.coPackedWithProhibitedClass,
@@ -846,15 +1111,57 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
   })
 
   // --- Packaging ---------------------------------------------------------
+  //
+  // Three answers, not two. An entry whose energy band nobody has stated has no section
+  // yet, and the two it could be disagree here: Section IA requires UN specification
+  // packaging, Section IB is expressly excepted from it. Conservative points in opposite
+  // directions for the two halves of that entry — the *lower* ceiling for the quantity,
+  // the *stricter* requirement for the packaging — so this says neither. Demanding a mark
+  // would block a second time on the fact `dg.energy` is already blocking for; saying none
+  // is needed would be a positive permissive claim about a section nothing has decided.
+  //
+  // And only where they really do disagree. Batteries contained in equipment never take UN
+  // specification packaging in any section, so nothing about it is in doubt for them
+  // whatever the rating turns out to be — keyed on the band alone, this fired for them too,
+  // naming two sections the goods cannot be in and withholding the requirement that does
+  // apply to them.
+  const undecided = entries
+    .map((e) => undecidedPackagingSections(e.classification))
+    .find((sections) => sections != null)
   const needsUnSpec = entries.some((e) => e.classification.unSpecificationPackagingRequired)
-  if (needsUnSpec) {
+  if (undecided && !needsUnSpec) {
+    checks.push({
+      id: `dg.packaging.${pkg.id}`,
+      severity: 'info',
+      title: `${label}: which packaging applies follows from the rating`,
+      detail:
+        'The watt-hour rating or lithium content of at least one battery in this package has not been stated, ' +
+        `and the two sections it could fall in do not agree about UN specification packaging: ${undecided.pair}` +
+        (undecided.a802 ? ' by special provision A802' : '') +
+        '. Enter the rating — the check above is already asking for it — and this will say which of the two ' +
+        'applies. Do not read this as either.',
+      passed: true,
+      refs: [pkg.id],
+    })
+  } else if (needsUnSpec) {
     checks.push({
       id: `dg.un-packaging.${pkg.id}`,
       severity: 'blocking',
       title: `${label}: UN specification packaging`,
       detail: pkg.unSpecificationMark.trim()
-        ? `Marked ${pkg.unSpecificationMark.trim()}. It must meet Packing Group II performance (special ` +
-          'provision A802), and the manufacturer’s closure instructions must be followed exactly and every ' +
+        ? `Marked ${pkg.unSpecificationMark.trim()}. It must meet Packing Group II performance` +
+          // Cited only where the entry that needs the packaging carries the provision.
+          // A802 is written for lithium, and a standalone sodium ion battery under PI 976
+          // needs performance packaging by its own instruction — naming A802 there put a
+          // provision in a blocking check that the same entry's column M list excludes.
+          (entries.some(
+            (e) =>
+              e.classification.unSpecificationPackagingRequired &&
+              e.classification.specialProvisions.some((p) => p.startsWith('A802')),
+          )
+            ? ' (special provision A802)'
+            : '') +
+          ', and the manufacturer’s closure instructions must be followed exactly and every ' +
           'component supplied used — changing the tape, the closure sequence or a component can void the ' +
           'certification. Keep the instruction sheet with the packing record.'
         : 'This section requires UN specification packaging meeting Packing Group II performance. Enter the ' +
@@ -863,17 +1170,29 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
       refs: [pkg.id],
     })
   } else {
+    const packagingCapabilities = [
+      entries.some((e) => e.classification.dropTestRequired) ? 'a 1.2 m drop test' : '',
+      entries.some((e) => e.classification.stackTestRequired) ? 'a 3 m stack test held for 24 hours' : '',
+    ].filter(Boolean)
     checks.push({
       id: `dg.packaging.${pkg.id}`,
       severity: 'info',
       title: `${label}: strong rigid outer packaging`,
       detail:
-        'This section does not require UN specification packaging — special provision A802 expressly excepts ' +
-        'Section IB of PI 965 and PI 968 — but the package must still be a strong, rigid outer packaging' +
-        (entries.some((e) => e.classification.dropTestRequired) ? ', capable of a 1.2 m drop test' : '') +
-        (entries.some((e) => e.classification.stackTestRequired)
-          ? ' and of a 3 m stack test held for 24 hours'
+        'This section does not require UN specification packaging' +
+        // Cited only where it is the reason. A802's exception is written for Section IB of
+        // PI 965 and PI 968; a Section II package is outside the requirement for its own
+        // reasons, and naming A802 there reads as though an exception had been applied to
+        // it that never mentions it.
+        (entries.some((e) => e.classification.section === 'IB')
+          ? ' — special provision A802 expressly excepts Section IB of PI 965 and PI 968 —'
           : '') +
+        ' but the package must still be a strong, rigid outer packaging' +
+        // Joined rather than concatenated. Written as two independent clauses, a package
+        // needing the stack test but not the drop test read "...outer packaging and of a
+        // 3 m stack test", which is the commonest excepted shipment there is — batteries
+        // contained in equipment, Section II.
+        (packagingCapabilities.length ? `, capable of ${packagingCapabilities.join(' and of ')}` : '') +
         '. The capability is a property of the design and may be demonstrated by testing, assessment or ' +
         'experience, so it is established once per design rather than per box.',
       passed: true,
@@ -882,9 +1201,14 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
   }
 
   // --- Shared packaging on the declaration -------------------------------
-  // Counted over the entries the declaration actually prints: Section II entries are
-  // excluded from it, so counting them here would claim lines the paper does not have.
-  const declaredGroups = [...groups.values()].filter((g) => g.classification.declarationRequired).length
+  // Counted the way the declaration builds its lines, by the same two functions in the same
+  // order — merge, then filter. Section II entries are excluded from the paper, and A181
+  // folds a contained-in entry into the packed-with line of its UN number. Counting the raw
+  // groups claimed a second line for a package that prints exactly one, and filtering
+  // *before* merging claimed one for a package that prints two.
+  const declaredGroups = groupByClassification(
+    applyA181(entries).filter((e) => e.classification.declarationRequired),
+  ).size
   if (declaredGroups > 1) {
     checks.push({
       id: `dg.shared-packaging.${pkg.id}`,
@@ -925,9 +1249,9 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
  * weighed. The only arithmetic done here is the sanity check that the parts are not heavier
  * than the whole.
  */
-function weightChecks(assessment: PackageAssessment): CheckResult {
+function weightChecks(assessment: PackageAssessment, consignment: DgConsignment): CheckResult {
   const { pkg, netWeightKg } = assessment
-  const label = `${pkg.count} × ${pkg.packagingType || 'package'}`
+  const label = packageLabel(pkg, consignment)
   const gross = pkg.grossWeightKg
   const equipment = pkg.equipmentNetWeightKg ?? 0
 
@@ -1137,7 +1461,10 @@ function consignmentChecks(
       checks.push({
         id: `dg.mixed-chemistry.${assessment.pkg.id}`,
         severity: 'info',
-        title: `${assessment.pkg.packagingType || 'Package'}: lithium ion and lithium metal together`,
+        // Named the way every other package check names one. In a consignment holding two
+        // descriptions of the same packaging type, a bare "Fibreboard box:" cannot be
+        // attributed to either of them.
+        title: `${packageLabel(assessment.pkg, consignment)}: lithium ion and lithium metal together`,
         detail:
           'A package may hold both, and each is declared under its own UN number. Note the separate case ' +
           'special provision A213 covers: a single *battery* built from both primary lithium metal cells and ' +
@@ -1189,8 +1516,16 @@ function cargoOnlyLabelWording(
 
   return (
     opening +
-    'The passenger aircraft box on the declaration is struck out, and the Cargo Aircraft Only label goes on the ' +
-    'same surface as the Class 9 label' +
+    // Which box is struck out follows the *booking*, because that is what the renderer
+    // draws from and what the declaration therefore says. Written from the goods alone,
+    // this told the shipper the passenger box was struck out while the preview beside it
+    // struck the cargo box — the reverse, on the one consignment where the two differ.
+    (offeredAircraft === 'cargo-aircraft-only'
+      ? 'The passenger aircraft box on the declaration is struck out, and the Cargo Aircraft Only label goes on ' +
+        'the same surface as the Class 9 label'
+      : 'The declaration will strike out the cargo aircraft box while the goods may not travel that way, which ' +
+        'is what the aircraft type check against each package is refusing; offer the consignment as cargo ' +
+        'aircraft only. The Cargo Aircraft Only label goes on the same surface as the Class 9 label') +
     (hasExceptedPackages
       ? ' — on the fully regulated packages only. The Section II packages in this consignment carry no Class 9 ' +
         'label and no Cargo Aircraft Only label; they remain permitted on passenger aircraft whatever routing ' +
@@ -1240,6 +1575,24 @@ function overpackChecks(consignment: DgConsignment, packages: PackageAssessment[
           : 'These hold only excepted Section II packages, so the identifier appears on the box alone — there is ' +
             'no declaration entry to match it against.'),
     passed: unmarked.length === 0,
+  })
+
+  // Held to the same rule as a package description's own count, and for the same reason:
+  // the consignment total is the product of the two, so a fractional or zero overpack count
+  // reaches the declaration as "1.5 Fibreboard box" and "Overpack used x 1.5", and reaches
+  // the two-package battery mark exemption as a fractional number of packages.
+  const miscounted = used.filter((o) => !Number.isInteger(o.count) || o.count < 1)
+  checks.push({
+    id: 'dg.overpack-count',
+    severity: 'blocking',
+    title: 'Every overpack description covers at least one whole overpack',
+    detail: miscounted.length
+      ? `${miscounted.map((o) => o.marks.trim() || 'an overpack').join(', ')} — the number of packages on the ` +
+        'declaration is the package count multiplied by the overpack count, so a count that is not a whole ' +
+        'number of overpacks misstates every quantity that follows from it. Say how many there are.'
+      : `${used.length} overpack description${used.length === 1 ? '' : 's'}, each covering a whole number of ` +
+        'overpacks.',
+    passed: miscounted.length === 0,
   })
 
   const notVisible = used.filter((o) => !o.innerMarksVisible)
@@ -1302,7 +1655,19 @@ function batteryMarkExemption(entries: EntryAssessment[], totalPackagesInConsign
 
   // Button cells installed in equipment do not count towards the four-cell/two-battery limit.
   const counted = relevant.filter((e) => !e.entry.buttonCellsInEquipment)
-  if (counted.some((e) => e.entry.countPerPackage == null)) return null
+  // A count of zero is unstated data, not a satisfied allowance. A package holding a
+  // kilogram of batteries whose count nobody typed would otherwise be handed the exception
+  // on the strength of a number that describes nothing.
+  if (
+    counted.some(
+      (e) =>
+        e.entry.countPerPackage == null ||
+        !Number.isInteger(e.entry.countPerPackage) ||
+        e.entry.countPerPackage < 1,
+    )
+  ) {
+    return null
+  }
 
   const cells = counted
     .filter((e) => e.entry.spec.form === 'cell')
@@ -1311,10 +1676,34 @@ function batteryMarkExemption(entries: EntryAssessment[], totalPackagesInConsign
     .filter((e) => e.entry.spec.form === 'battery')
     .reduce((sum, e) => sum + (e.entry.countPerPackage ?? 0), 0)
 
-  if (cells <= 4 && batteries <= 2 && totalPackagesInConsignment <= 2) {
+  // The exception is written "no more than four cells **or** two batteries" — one allowance
+  // or the other, for a package holding one form or the other. It says nothing about a
+  // package holding both, and reading the two allowances as additive would exempt four
+  // cells *and* two batteries in one box on the strength of a permission that was never
+  // given. The asymmetry decides it: an unnecessary battery mark costs a label, a missing
+  // one is an undeclared package, so a mixed package is not offered the exception.
+  const withinAllowance = batteries === 0 ? cells <= 4 : cells === 0 && batteries <= 2
+  // A positive count, not merely one at or below two. Zero packages is not a consignment of
+  // two of them, and an exemption measured against a number nobody has stated is not an
+  // exemption — the counts it rests on are held by `dg.package-count` and
+  // `dg.overpack-count`, and until those pass this says nothing.
+  // A whole number of packages, as well as a positive one. The count inputs take anything
+  // typed, and two descriptions of 1 and 0.5 gave a consignment of 1.5 — which sits inside
+  // "no more than two" and took the battery mark off the list at the packing bench, under
+  // wording reading "in a consignment of 1.5 packages". `dg.package-count` and
+  // `dg.overpack-count` refuse those counts; until they pass, this says nothing.
+  if (
+    withinAllowance &&
+    Number.isInteger(totalPackagesInConsignment) &&
+    totalPackagesInConsignment >= 1 &&
+    totalPackagesInConsignment <= 2
+  ) {
+    const contents =
+      batteries === 0
+        ? `${cells} cell${cells === 1 ? '' : 's'}`
+        : `${batteries} batter${batteries === 1 ? 'y' : 'ies'}`
     return (
-      `${batteries} batter${batteries === 1 ? 'y' : 'ies'} and ${cells} cell${cells === 1 ? '' : 's'} contained ` +
-      `in equipment, in a consignment of ${totalPackagesInConsignment} package` +
+      `${contents} contained in equipment, in a consignment of ${totalPackagesInConsignment} package` +
       `${totalPackagesInConsignment === 1 ? '' : 's'} — no more than four cells or two batteries per package, and ` +
       'no more than two packages, so the battery mark is not required. Add a third package to the consignment ' +
       'and every package needs marking, including these.'
@@ -1363,6 +1752,10 @@ export function missingDeclarationFields(consignment: DgConsignment): string[] {
   if (!consignment.airportOfDeparture.trim()) missing.push('airport of departure')
   if (!consignment.airportOfDestination.trim()) missing.push('airport of destination')
   if (!consignment.signerName.trim()) missing.push('name of signatory')
+  // Box 20 is captioned "Place and Date", and the renderer draws whichever of the two it
+  // has. Demanding the date alone let the check affirm that every box the shipper is
+  // responsible for has a value, over a declaration printing a date with no place.
+  if (!consignment.signerPlace.trim()) missing.push('place of signing')
   if (!consignment.signerDate.trim()) missing.push('date')
   return missing
 }

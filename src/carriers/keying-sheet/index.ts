@@ -795,9 +795,42 @@ export function buildKeyingSheet(
  * the CIPL prints rather than a real one — `Singapore EX 498781`, `'s-Hertogenbosch NA
  * 5234`. Taking the letters with the digits puts `EX 498781` into a field that Ship Manager
  * validates and a courier sorts on; the entry that shipment was actually keyed with reads
- * `498781`. The hyphen is allowed because Brazil writes `01310-100`.
+ * `498781`. The hyphen is allowed because Brazil writes `01310-100`, and the digits run to
+ * eight because Israel writes `3109601` and Japan `1500001` unhyphenated — bounded at six,
+ * a seven-digit postcode was read as its own last six.
+ *
+ * And it has to be the whole run, not the tail of a longer one. `VAT GB123456789` printed
+ * under the city otherwise yielded a postcode of `23456789` and a city of `VAT GB1`, and
+ * stopped the search before the real postcode line above it. The two bounds only work
+ * together: the length alone let a longer number in, and the anchor alone shut out the
+ * seven-digit postcodes that widening the length is for.
+ *
+ * The hyphenated form takes three leading digits where the plain form needs four, because
+ * Japan writes `150-0001`. It cannot be relaxed for the plain form too — `Suite 200` ends
+ * an address line the same way — and the anchor is on the digits alone rather than on a
+ * preceding hyphen, which shut out every Japanese postcode there is. Its *second* group
+ * takes three or four for the same kind of reason: at two, `Unit 100-12` matched, and a
+ * room range on the last line hijacked both fields from the address above it.
  */
-const POSTCODE = /(\d{4,6}(?:-\d{2,4})?)\s*$/
+const POSTCODE = /(?<!\d)((?:\d{3,8}-\d{3,4})|\d{4,8})\s*$/
+
+/**
+ * A line whose trailing digits are a telephone number, not a postcode.
+ *
+ * The keyword has to *label* the number — stand immediately in front of it, with only
+ * punctuation between — rather than merely appear on the line. Matched as a word anywhere,
+ * this skipped `Tel Aviv 61000`, `Mobile, AL 36602` and `Fax Islands 12345`, which are
+ * cities, and threw away the postcode and the city with them. Labelling is the whole of
+ * what distinguishes `Phone 5551234` from a place that happens to be spelled that way.
+ *
+ * It must also *begin* a word, which is what keeps `PURCELL 73080` and `Chatel 74390` out
+ * of it. And the list holds only words that are not themselves places: `mobile` and `cell`
+ * were in it until `MOBILE 36602` — Mobile, Alabama — lost its postcode and its city to
+ * them. A bare keyword in front of bare digits is all the signal there is here, so a word
+ * that can be a city cannot be on the list at all.
+ */
+const CONTACT_LINE = /\b(?:phone|telephone|tel|fax|attn|attention|contact|e-?mail)\.?\s*:?\s*[+(]?\d[\d\s()+.-]*$/i
+
 
 /**
  * The line the postcode is on — the *last* one that ends in one, not the first.
@@ -807,9 +840,25 @@ const POSTCODE = /(\d{4,6}(?:-\d{2,4})?)\s*$/
  * split them apart. `Postbus 1234` above `'s-Hertogenbosch NA 5234` gave the right postcode
  * and the city `Postbus` — a PO box label typed into the field a courier sorts on. A street
  * number, a suite number and a building number all end an address line the same way.
+ *
+ * One guard keeps the search from walking past the address the other way: a line whose
+ * trailing digits are labelled as a telephone number is skipped, so a `Phone 5551234`
+ * printed under the city stops supplying a City of `Phone 5`. It is not a rule about what a
+ * postcode is — it is about what a line that is plainly a phone number is not. Nothing
+ * bounds the *length* of the digits, because a seven-digit postcode is a real postcode:
+ * Israel writes `3109601` and Japan writes `1500001` unhyphenated.
+ *
+ * A short *unlabelled* registration line under the address — `VAT 12345678` — is a known
+ * limitation and is deliberately left alone. It is written exactly as `OH 44114` and
+ * `ROME 00184` are, and every rule tried against it took those with it: skipping a real
+ * city loses the postcode and the city together, which is worse and far commoner than
+ * reading a registration number as a postcode. A longer one is already excluded by the
+ * digit bounds, and a labelled telephone number by the rule above; between them the
+ * realistic trailing lines are covered without guessing at the rest.
  */
 function postcodeLineIndex(lines: string[]): number {
   for (let i = lines.length - 1; i >= 0; i--) {
+    if (CONTACT_LINE.test(lines[i])) continue
     if (POSTCODE.test(lines[i])) return i
   }
   return -1
@@ -821,18 +870,75 @@ function postalCodeFrom(lines: string[]): string {
 }
 
 /**
+ * The subdivision codes recognised on a line that is itself written in capitals.
+ *
+ * On a mixed-case line the capitals are the evidence: `Sao Paulo SP`, `Bangalore KARNATAKA`
+ * and `Singapore EX` all set the subdivision off from the city by case alone, at any length.
+ * A line printed wholly in capitals offers no such contrast, and stripping the last word
+ * from one took the second word off `LA PAZ` and `AL AIN`.
+ *
+ * So on those lines the token must be recognised rather than merely shaped: these are the
+ * codes of the countries whose addresses print a subdivision as a bare abbreviation between
+ * the city and the postcode. Anything outside the list stays in the City box, where it is
+ * visible to whoever keys the shipment rather than deleted on a hunch.
+ *
+ * The residual is a subdivision spelled out in full on an all-caps line — `BANGALORE
+ * KARNATAKA` keys as both words, where `Bangalore KARNATAKA` keys as the city alone.
+ * Recognising those would mean listing the subdivision names of every country, and the two
+ * errors are not equal: a state left in the City box is wrong in a way the person keying
+ * the shipment can see, and a city silently shortened to its first word is not.
+ */
+const SUBDIVISION_CODES = new Set([
+  // United States, District of Columbia and territories
+  'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA',
+  'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ',
+  'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT',
+  'VA', 'WA', 'WV', 'WI', 'WY', 'DC', 'PR', 'VI', 'GU', 'AS', 'MP',
+  // Canada
+  'ON', 'QC', 'BC', 'AB', 'MB', 'SK', 'NS', 'NB', 'NL', 'PE', 'YT', 'NT', 'NU',
+  // Australia
+  'NSW', 'VIC', 'QLD', 'TAS', 'ACT', 'SA',
+  // Brazil, which prints the two-letter state between the city and the CEP
+  'AC', 'AM', 'AP', 'BA', 'CE', 'ES', 'GO', 'MA', 'MG', 'MS', 'MT', 'PB', 'PE', 'PI', 'PR',
+  'RJ', 'RN', 'RO', 'RR', 'RS', 'SC', 'SE', 'SP', 'TO',
+  // Not subdivisions at all, but what the CIPL prints in that position for a country that
+  // has none — `Singapore EX 498781`, `'s-Hertogenbosch NA 5234`. They belong in the City
+  // box no more than a real state does, and the same postcode comment above cites them.
+  'EX', 'NA',
+])
+
+/**
  * The same line with the postcode, and any state, taken off it.
  *
- * The state is only removed when something is left afterwards, so a city that is itself
- * written in capitals survives intact.
+ * The state is only removed when something is left afterwards, so a line that is a state
+ * code and nothing else keeps it rather than reading back empty.
  */
 function cityFrom(lines: string[]): string {
   const index = postcodeLineIndex(lines)
   if (index === -1) return ''
   const withoutPostcode = lines[index].replace(POSTCODE, '').trim()
-  const withoutState = withoutPostcode.replace(/[\s,]+[A-Z]{2,}$/, '').trim()
+  // A state is stripped on evidence, and which evidence is available depends on the line.
+  // A comma introduces one at any length. Failing that, a run of capitals at the end of a
+  // mixed-case line is set off from the city by its case; on a line that is capitals
+  // throughout, only a recognised subdivision code is.
+  const commaSeparated = withoutPostcode.replace(/,\s*[A-Z]{2,}$/, '').trim()
+  const capitalised = commaSeparated === commaSeparated.toUpperCase()
+  const withoutState = capitalised
+    ? commaSeparated
+        .replace(/\s+([A-Z]{2,3})$/, (whole, code: string) => (SUBDIVISION_CODES.has(code) ? '' : whole))
+        .trim()
+    : commaSeparated.replace(/\s+[A-Z]{2,}$/, '').trim()
   const city = (withoutState || withoutPostcode).replace(/[,;]+$/, '').trim()
-  return city || (index > 0 ? lines[index - 1] : '')
+  if (city) return city
+  // A postcode printed on a line of its own falls back to the line above — the nearest one
+  // that is neither blank nor a telephone number. Taking the immediately preceding line
+  // whatever it was produced a City of `Tel: 555-1234`, which is the outcome the guard on
+  // the search itself exists to prevent, arrived at by another road.
+  for (let i = index - 1; i >= 0; i--) {
+    const above = lines[i].trim()
+    if (above && !CONTACT_LINE.test(above)) return above
+  }
+  return ''
 }
 
 function describeShipment(rows: KeyingCommodityRow[]): string {

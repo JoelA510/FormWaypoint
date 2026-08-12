@@ -21,7 +21,8 @@
  *  - **Box 3, page x of y.** Paginated here rather than at draw time, because a declaration
  *    that says "Page 1 of 1" on the first of two sheets is a defective document.
  */
-import { groupByClassification, packageCountInConsignment, type DgAssessment } from './assess'
+import { localDate } from '../../lib/report'
+import { applyA181, groupByClassification, overpackOrder, packageCountInConsignment, type DgAssessment } from './assess'
 import type { DgConsignment, Overpack } from './types'
 
 /**
@@ -124,9 +125,7 @@ export interface ShippersDeclaration {
  * United States, and this one is read off a shelf label.
  */
 export function retainUntil(preparedAt: Date): string {
-  const due = new Date(preparedAt.getFullYear() + 2, preparedAt.getMonth(), preparedAt.getDate())
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${due.getFullYear()}-${pad(due.getMonth() + 1)}-${pad(due.getDate())}`
+  return localDate(new Date(preparedAt.getFullYear() + 2, preparedAt.getMonth(), preparedAt.getDate()))
 }
 
 /** `7`, `1.5`, `10.25` — a weight without a trailing zero it did not earn. */
@@ -171,15 +170,34 @@ export function wrap(text: string, width: number): string[] {
  * every used overpack has one — the identifier is what ties the physical overpack to its
  * declaration entry — and an identifier the check demands on the box but the paper never
  * states is exactly the box/paper mismatch these consignments get corrected for. The
- * per-overpack total stays a multiples-only line, because with one overpack it is the
- * quantity column's own figure restated.
+ * per-overpack total is withheld only where it would restate the quantity column's own
+ * figure: one overpack holding one entry. One overpack holding several is not that case —
+ * the quantities beside them are per package, and without the total nothing on the paper
+ * adds them up.
  */
-function overpackAnnotations(overpack: Overpack, totalPerOverpackKg: number): string[] {
+/** What one overpack's wording is accumulated from, across every package inside it. */
+interface OverpackTotal {
+  /** The declaration line the wording is written after: the last entry belonging to it. */
+  lastLineIndex: number
+  totalPerOverpackKg: number
+  /** Declared entries inside the overpack, and the packages holding them. */
+  entryCount: number
+  packageCount: number
+}
+
+function overpackAnnotations(overpack: Overpack, held: OverpackTotal): string[] {
+  const { totalPerOverpackKg, entryCount, packageCount } = held
   const lines = overpack.count <= 1 ? ['Overpack used'] : [`Overpack used x ${overpack.count}`]
   // The marks are what must be listed; "identification marks" as a label is mine, not the
   // regulation's, and it costs a wrapped row every time.
   if (overpack.marks.trim()) lines.push(`Overpack marks: ${overpack.marks.trim()}`)
-  if (overpack.count > 1) {
+  // Stated wherever it is not simply the quantity column's own figure said twice — which
+  // it is only for a single overpack holding a single package of a single entry. Keyed on
+  // the overpack count alone, a single overpack spanning several package descriptions had
+  // its total appear nowhere; keyed on that and the entry count, so did one holding three
+  // copies of one description. The per-line quantities are per package, and nothing else on
+  // the paper adds them up.
+  if (overpack.count > 1 || entryCount > 1 || packageCount > 1) {
     lines.push(`Total quantity per Overpack ${formatKg(totalPerOverpackKg)} kg`)
   }
   // Wrapped to the same column the quantity is wrapped to, because that is the column they
@@ -210,11 +228,22 @@ export function buildDeclaration(consignment: DgConsignment, assessment: DgAsses
    * the mark on the box, is the single most frequent cause of a resubmission on these
    * consignments.
    */
-  const overpackTotals = new Map<string, { lastLineIndex: number; totalPerOverpackKg: number }>()
+  const overpackTotals = new Map<string, OverpackTotal>()
 
   // Entries are emitted package by package so that the overpack wording lands immediately
   // after the entries it belongs to, which is where the regulation puts it.
-  for (const packageAssessment of assessment.packages) {
+  //
+  // Packages sharing an overpack are emitted together, at the position of the first of
+  // them, because the wording is written once after the last entry belonging to it. Left
+  // in input order, an overpack whose packages are separated by a package of some other
+  // overpack put its identification after entries that are not in it, and left the first
+  // of its own entries carrying none at all — the box-against-paper mismatch that
+  // `dg.overpack-identifier` exists to prevent. Everything else keeps its order: the sort
+  // key is the index of the first package of the group, so a consignment with no overpacks,
+  // or one whose overpacks are already contiguous, is emitted exactly as it was entered.
+  const ordered = overpackOrder(assessment.packages, (p) => p.pkg.overpackId)
+
+  for (const packageAssessment of ordered) {
     const { pkg } = packageAssessment
     const totalPackages = packageCountInConsignment(pkg, consignment)
 
@@ -226,8 +255,12 @@ export function buildDeclaration(consignment: DgConsignment, assessment: DgAsses
     // the Shipper's Declaration would declare goods the declaration does not cover. A
     // mixed consignment therefore prints only its fully regulated entries, and the notes
     // say the Section II packages travel beside them.
+    // Merged first, then filtered — the order every other reader uses. Filtering first, a
+    // package whose entries A181 joins was partitioned here differently from the way the
+    // checks, the checklist and the marks list partition it, and the two artifacts on
+    // screen disagreed about the same box.
     const groups = groupByClassification(
-      packageAssessment.entries.filter((e) => e.classification.declarationRequired),
+      applyA181(packageAssessment.entries).filter((e) => e.classification.declarationRequired),
     )
 
     const overpack = pkg.overpackId ? consignment.overpacks.find((o) => o.id === pkg.overpackId) : null
@@ -263,14 +296,19 @@ export function buildDeclaration(consignment: DgConsignment, assessment: DgAsses
         overpackTotals.set(overpack.id, {
           lastLineIndex: lines.length - 1,
           totalPerOverpackKg: (held?.totalPerOverpackKg ?? 0) + contribution,
+          entryCount: (held?.entryCount ?? 0) + groupList.length,
+          packageCount: (held?.packageCount ?? 0) + Math.max(0, pkg.count),
         })
       }
     })
   }
 
-  for (const [overpackId, { lastLineIndex, totalPerOverpackKg }] of overpackTotals) {
+  for (const [overpackId, held] of overpackTotals) {
+    const { lastLineIndex } = held
     const overpack = consignment.overpacks.find((o) => o.id === overpackId)
-    if (overpack) lines[lastLineIndex].annotations = overpackAnnotations(overpack, totalPerOverpackKg)
+    if (overpack) {
+      lines[lastLineIndex].annotations = overpackAnnotations(overpack, held)
+    }
   }
 
   return {
@@ -396,7 +434,13 @@ function declarationNotes(consignment: DgConsignment, assessment: DgAssessment):
   if (!consignment.airWaybillNumber.trim()) {
     notes.push('The air waybill number is left blank for the forwarder; some carriers require the shipper to enter it.')
   }
-  const hasSectionII = assessment.packages.some((p) => p.entries.some((e) => e.classification.section === 'II'))
+  // Through `applyA181`, like the entries the declaration itself is built from. A package
+  // holding UN3481 both packed with and contained in equipment prints as one Section I
+  // line; reading the raw entries found the contained-in one still marked Section II and
+  // added a note, beneath that very line, saying Section II packages travel unlisted.
+  const hasSectionII = assessment.packages.some((p) =>
+    applyA181(p.entries).some((e) => e.classification.section === 'II'),
+  )
   if (hasSectionII && assessment.declarationRequired) {
     notes.push(
       'The Section II packages in this consignment are not listed on the declaration: excepted Class 9 travels ' +

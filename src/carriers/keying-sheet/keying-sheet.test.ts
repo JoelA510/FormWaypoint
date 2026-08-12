@@ -316,6 +316,9 @@ describe('address extraction', () => {
     expect(field(['2nd Floor 40 Alps Avenue', 'Singapore EX 498781'], 'City')).toBe('Singapore')
     expect(field(['Europalaan 20', "'s-Hertogenbosch NA 5234"], 'City')).toBe("'s-Hertogenbosch")
     expect(field(['Plot 12', 'Bangalore, KARNATAKA 562123'], 'City')).toBe('Bangalore')
+    // A long state code with no comma is still a state where the city is not in capitals.
+    expect(field(['Plot 12', 'Bangalore KARNATAKA 562123'], 'City')).toBe('Bangalore')
+    expect(field(['Calle 1', 'Guadalajara JALISCO 44100'], 'City')).toBe('Guadalajara')
     expect(field(['Rua Example 100', 'Sao Paulo SP 01310-100'], 'City')).toBe('Sao Paulo')
   })
 
@@ -331,6 +334,125 @@ describe('address extraction', () => {
     const suite = ['Example Tower Suite 1200', 'Singapore EX 498781']
     expect(field(suite, 'Postal code')).toBe('498781')
     expect(field(suite, 'City')).toBe('Singapore')
+  })
+
+  it('does not read a contact line printed under the city as the postcode line', () => {
+    // Reading from the bottom fixed the PO box above, and walked into the line below: a
+    // telephone number ends in digits too, and its last six gave the courier a City of
+    // `Phone 5`.
+    const phoned = ['Plot 12', 'Springfield IL 62704', 'Phone 5551234']
+    expect(field(phoned, 'Postal code')).toBe('62704')
+    expect(field(phoned, 'City')).toBe('Springfield')
+
+    const tel = ['Plot 12', 'Springfield IL 62704', 'Tel. 555-1234']
+    expect(field(tel, 'Postal code')).toBe('62704')
+    expect(field(tel, 'City')).toBe('Springfield')
+  })
+
+  it('does not mistake a city that reads like a contact label for one', () => {
+    // The keyword has to label the number, not merely appear on the line. These are all
+    // cities, and skipping them threw away the postcode and the city together.
+    expect(field(['Acme Israel Ltd', '12 Rothschild Blvd', 'Tel Aviv 61000'], 'Postal code')).toBe('61000')
+    expect(field(['Acme Israel Ltd', '12 Rothschild Blvd', 'Tel Aviv 61000'], 'City')).toBe('Tel Aviv')
+    expect(field(['1 Dauphin St', 'Mobile, AL 36602'], 'City')).toBe('Mobile')
+    expect(field(['1 Harbour Way', 'Fax Islands 12345'], 'City')).toBe('Fax Islands')
+  })
+
+  it('keeps both words of a city written in capitals', () => {
+    // Stripping any trailing all-caps word took the last word off every such city.
+    expect(field(['Rua Example 100', 'SAO PAULO 01310-100'], 'City')).toBe('SAO PAULO')
+    expect(field(['1 Sunset Blvd', 'LOS ANGELES 90001'], 'City')).toBe('LOS ANGELES')
+    // A short code after a space is still a state, and a comma still separates one at any
+    // length — both of which the filed shipments actually print.
+    expect(field(['2nd Floor 40 Alps Avenue', 'Singapore EX 498781'], 'City')).toBe('Singapore')
+    expect(field(['Plot 12', 'Bangalore, KARNATAKA 562123'], 'City')).toBe('Bangalore')
+
+    // And a two-word capitalised city keeps its second word even when that word is short.
+    // `LA PAZ` is indistinguishable from `Springfield IL` by shape alone, and deleting a
+    // word outright is worse than leaving a state code where it can be seen.
+    expect(field(['Av. Example 1', 'LA PAZ 0000'], 'City')).toBe('LA PAZ')
+    expect(field(['1 Corniche Rd', 'AL AIN 12345'], 'City')).toBe('AL AIN')
+  })
+
+  it('still takes the state off a US address printed wholly in capitals', () => {
+    // Keeping the second word of `LA PAZ` by refusing to strip from any capitalised line
+    // gave up the common case: these blocks are printed in capitals throughout, so
+    // `CLEVELAND OH 44114` was keyed with a City of `CLEVELAND OH`. On such a line the
+    // token has to be a subdivision code, which `PAZ` and `AIN` are not.
+    expect(field(['1200 Euclid Ave', 'CLEVELAND OH 44114'], 'City')).toBe('CLEVELAND')
+    expect(field(['100 Collins St', 'MELBOURNE VIC 3000'], 'City')).toBe('MELBOURNE')
+    // The same address in the same capitals as its mixed-case form keys the same way.
+    expect(field(['Rua Example 100', 'SAO PAULO SP 01310-100'], 'City')).toBe('SAO PAULO')
+    expect(field(['Rua Example 100', 'Sao Paulo SP 01310-100'], 'City')).toBe('Sao Paulo')
+    expect(field(['1 King William St', 'ADELAIDE SA 5000'], 'City')).toBe('ADELAIDE')
+    // The placeholders these CIPLs print where a country has no subdivision are recognised
+    // too — they belong in the City box no more than a real state does.
+    expect(field(['2nd Floor 40 Alps Avenue', 'SINGAPORE EX 498781'], 'City')).toBe('SINGAPORE')
+    expect(field(['Europalaan 20', "'S-HERTOGENBOSCH NA 5234"], 'City')).toBe("'S-HERTOGENBOSCH")
+    // And a capitalised city whose last word merely looks like one keeps it.
+    expect(field(['Via Roma 1', 'ROMA 00184'], 'City')).toBe('ROMA')
+  })
+
+  it('does not read a city whose name ends in one of those words as a phone line', () => {
+    // The keyword has to begin a word as well as label the number.
+    expect(field(['1 Dauphin St', 'MOBILE 36602'], 'Postal code')).toBe('36602')
+    expect(field(['1 Dauphin St', 'MOBILE 36602'], 'City')).toBe('MOBILE')
+    expect(field(['1 Main St', 'PURCELL 73080'], 'City')).toBe('PURCELL')
+    expect(field(['1 Rue Centrale', 'Chatel 74390'], 'City')).toBe('Chatel')
+  })
+
+  it('reads an address written wholly in capitals', () => {
+    // Every rule tried against a short unlabelled registration line — `VAT 12345678` — took
+    // these with it, and losing a real city loses the postcode with it. That trailing shape
+    // is a known limitation; a longer number is excluded by the digit bounds and a labelled
+    // telephone number by the rule above.
+    expect(field(['SUITE 200', 'CLEVELAND', 'OH 44114', 'USA'], 'Postal code')).toBe('44114')
+    expect(field(['SUITE 200', 'CLEVELAND', 'OH 44114', 'USA'], 'City')).toBe('OH')
+    expect(field(['VIA ROMA 1', 'ROME 00184', 'ITALY'], 'Postal code')).toBe('00184')
+    expect(field(['VIA ROMA 1', 'ROME 00184', 'ITALY'], 'City')).toBe('ROME')
+  })
+
+  it('does not take a postcode out of the tail of a longer number', () => {
+    // A registration number printed under the city ends in digits too, and reading its last
+    // eight gave a postcode of `23456789` and a city of `VAT GB1` — while stopping the
+    // search before the real postcode line above it.
+    const registered = ['Plot 12', 'Springfield IL 62704', 'VAT GB123456789']
+    expect(field(registered, 'Postal code')).toBe('62704')
+    expect(field(registered, 'City')).toBe('Springfield')
+  })
+
+  it('does not read a room range on the last line as a postcode', () => {
+    // Widening the hyphenated form for `150-0001` let `Unit 100-12` in with it, and a room
+    // range on the last line hijacked both fields from the address above. The second group
+    // takes three or four digits, which is what a postcode's does.
+    const unit = ['2nd Floor 40 Alps Avenue', 'Singapore EX 498781', 'Unit 100-12']
+    expect(field(unit, 'Postal code')).toBe('498781')
+    expect(field(unit, 'City')).toBe('Singapore')
+  })
+
+  it('skips a telephone line when falling back to the line above a bare postcode', () => {
+    // A postcode on a line of its own takes the city from above it, and taking whatever was
+    // immediately above produced a City of `Tel: 555-1234` — the outcome the guard on the
+    // search itself exists to prevent, arrived at by another road.
+    const bare = ['Acme Ltd', 'Springfield', 'Tel: 555-1234', '62704']
+    expect(field(bare, 'Postal code')).toBe('62704')
+    expect(field(bare, 'City')).toBe('Springfield')
+  })
+
+  it('reads a Japanese postcode, whose leading group is three digits', () => {
+    // Anchoring the search on a preceding hyphen as well as a digit shut every one of these
+    // out, and the city came from the building number on the line above — the exact failure
+    // reading from the bottom exists to prevent.
+    const tokyo = ['Building 1234', 'Tokyo 150-0001']
+    expect(field(tokyo, 'Postal code')).toBe('150-0001')
+    expect(field(tokyo, 'City')).toBe('Tokyo')
+  })
+
+  it('reads a seven-digit postcode, which several countries write', () => {
+    // Israel writes 3109601 and Japan writes 1500001 unhyphenated; bounding the digits to
+    // six lost the postcode and, because both fields read one line, the city with it.
+    expect(field(['12 Sderot', 'Haifa 3109601'], 'Postal code')).toBe('3109601')
+    expect(field(['12 Sderot', 'Haifa 3109601'], 'City')).toBe('Haifa')
   })
 
   it('keeps a city that is itself written in capitals', () => {

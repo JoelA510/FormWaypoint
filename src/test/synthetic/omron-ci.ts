@@ -34,6 +34,12 @@ export interface OmronCiLine {
    * model a split description overflowing its cell. Only the PDF builder draws it.
    */
   descriptionOverflow?: string
+  /**
+   * Draw the description and its wrapped tail one item per word, as pdfjs often reports
+   * text. Combined with `descriptionTail` this is the shape that exposes reading order:
+   * sorted across the column alone, the two printed lines interleave.
+   */
+  splitDescription?: boolean
 }
 
 export interface OmronCiSpec {
@@ -59,6 +65,28 @@ export interface OmronCiSpec {
    * text into several items. Only the PDF builder honours it.
    */
   splitValues?: boolean
+  /**
+   * Draw the `SME (Y/N)` column heading as two items, to model pdfjs splitting a *heading*
+   * rather than a value — which leaves that column with no anchor to calibrate against.
+   */
+  splitHeadings?: boolean
+  /**
+   * Draw the `DESCRIPTION OF GOODS` heading as two items. That column's heading positions
+   * nothing — part and description are separated by the border between COO and HTS — so
+   * the table must still parse.
+   */
+  splitDescriptionHeading?: boolean
+  /**
+   * Draw every right-hand header label one item per word, to model pdfjs splitting a *label*
+   * on the header grid — which, unhealed, folds it into the value in the cell before it.
+   */
+  splitHeaderLabel?: boolean
+  /**
+   * Print no header grid at all, so nothing below the address band carries a label. Models
+   * a revision that moves those fields elsewhere: the addresses must still be bounded by
+   * the commodity table rather than running on into it.
+   */
+  omitHeaderGrid?: boolean
 }
 
 export function simpleOmronCi(): OmronCiSpec {
@@ -214,6 +242,19 @@ export async function buildOmronCiPdf(spec: OmronCiSpec): Promise<ArrayBuffer> {
   at(COLUMNS.ln.left, 745, 'COMMERCIAL INVOICE')
   at(COLUMNS.j.left, 745, 'Doc. # 00004-00202   Rev. C')
 
+  // One printed run drawn as one item per word, the way pdfjs often reports it.
+  const words = (x: number, y: number, text: string, split: boolean) => {
+    if (!split || !text) {
+      at(x, y, text)
+      return
+    }
+    let cursor = x
+    for (const word of text.split(' ')) {
+      at(cursor, y, word)
+      cursor += font.widthOfTextAtSize(word + ' ', size)
+    }
+  }
+
   // Address band: titles and lines all left-aligned at their column's edge.
   const bandX = { shipper: COLUMNS.ln.left, consignee: COLUMNS.e.left, billTo: COLUMNS.h.left }
   at(bandX.shipper, 720, 'SHIPPER (SHIP FROM / EXPORTER)')
@@ -224,9 +265,9 @@ export async function buildOmronCiPdf(spec: OmronCiSpec): Promise<ArrayBuffer> {
   const billTo = spec.billToName ? [spec.billToName, ...(spec.billToLines ?? [])] : []
   for (let i = 0; i < 5; i++) {
     const y = 708 - i * 12
-    at(bandX.shipper, y, shipper[i] ?? '')
-    at(bandX.consignee, y, consignee[i] ?? '')
-    at(bandX.billTo, y, billTo[i] ?? '')
+    words(bandX.shipper, y, shipper[i] ?? '', !!spec.splitValues)
+    words(bandX.consignee, y, consignee[i] ?? '', !!spec.splitValues)
+    words(bandX.billTo, y, billTo[i] ?? '', !!spec.splitValues)
   }
 
   const pairs: [string, string, string, string][] = [
@@ -239,31 +280,31 @@ export async function buildOmronCiPdf(spec: OmronCiSpec): Promise<ArrayBuffer> {
     ['INCOTERMS:', spec.incoterms ?? '', 'PAGE:', '1 of 1'],
   ]
   // With splitValues, a value is drawn one item per word, as pdfjs often reports it.
-  const value = (x: number, y: number, text: string) => {
-    if (!spec.splitValues) {
-      at(x, y, text)
-      return
-    }
-    let cursor = x
-    for (const word of text.split(' ')) {
-      at(cursor, y, word)
-      cursor += font.widthOfTextAtSize(word + ' ', size)
-    }
+  const value = (x: number, y: number, text: string) => words(x, y, text, !!spec.splitValues)
+  // With splitHeaderLabel, every right-hand label is drawn one item per word, the way pdfjs
+  // reports a run it decided to break.
+  const label = words
+  if (!spec.omitHeaderGrid) {
+    pairs.forEach(([label1, value1, label2, value2], i) => {
+      const y = 640 - i * 12
+      at(COLUMNS.ln.left, y, label1)
+      value(COLUMNS.d.left, y, value1)
+      label(COLUMNS.f.left, y, label2, !!spec.splitHeaderLabel)
+      value(COLUMNS.h.left, y, value2)
+    })
   }
-  pairs.forEach(([label1, value1, label2, value2], i) => {
-    const y = 640 - i * 12
-    at(COLUMNS.ln.left, y, label1)
-    value(COLUMNS.d.left, y, value1)
-    at(COLUMNS.f.left, y, label2)
-    value(COLUMNS.h.left, y, value2)
-  })
 
   // Table headings, centred like the printed form — including its awkwardest habit: the
   // vertically merged headings (LN, QTY, …) print centred *between* the two heading rows,
   // so they land on their own baseline below PART # and DESCRIPTION. The real
   // LibreOffice print of the Rev C template does exactly this.
   centred(center(COLUMNS.c), 552, 'PART #')
-  centred(DESCRIPTION_CENTER, 552, 'DESCRIPTION OF GOODS')
+  if (spec.splitDescriptionHeading) {
+    at(DESCRIPTION_CENTER - 40, 552, 'DESCRIPTION')
+    at(DESCRIPTION_CENTER + 20, 552, 'OF GOODS')
+  } else {
+    centred(DESCRIPTION_CENTER, 552, 'DESCRIPTION OF GOODS')
+  }
   centred(center(COLUMNS.ln), 546, 'LN')
   centred(center(COLUMNS.h), 546, 'QTY')
   centred(center(COLUMNS.i), 546, 'UOM')
@@ -273,7 +314,13 @@ export async function buildOmronCiPdf(spec: OmronCiSpec): Promise<ArrayBuffer> {
   centred(center(COLUMNS.d), 538, 'HTS / SCHEDULE B')
   centred(center(COLUMNS.e), 538, 'ECCN / EAR99')
   centred(center(COLUMNS.f), 538, 'LICENSE / NLR')
-  centred(center(COLUMNS.g), 538, 'SME (Y/N)')
+  if (spec.splitHeadings) {
+    // Two items, so no single item reads "SME (Y/N)" and the column has no anchor.
+    at(COLUMNS.g.left + 2, 538, 'SME')
+    at(COLUMNS.g.left + 22, 538, '(Y/N)')
+  } else {
+    centred(center(COLUMNS.g), 538, 'SME (Y/N)')
+  }
 
   drawLines(page, font, spec)
 
@@ -315,8 +362,19 @@ function drawLines(page: PDFPage, font: PDFFont, spec: OmronCiSpec): void {
     // block's centre, exactly where a spreadsheet print puts them.
     centred(center(COLUMNS.ln), middleY, String(i + 1))
     at(COLUMNS.c.left + 2, topY, line.partNumber)
-    at(COLUMNS.d.left + 2, topY, line.description)
-    if (line.descriptionTail) at(COLUMNS.d.left + 2, topY - 9, line.descriptionTail)
+    const words = (x: number, y: number, text: string) => {
+      if (!line.splitDescription) {
+        at(x, y, text)
+        return
+      }
+      let cursor = x
+      for (const word of text.split(' ')) {
+        at(cursor, y, word)
+        cursor += font.widthOfTextAtSize(word + ' ', size)
+      }
+    }
+    words(COLUMNS.d.left + 2, topY, line.description)
+    if (line.descriptionTail) words(COLUMNS.d.left + 2, topY - 9, line.descriptionTail)
     if (line.descriptionOverflow) at(COLUMNS.h.left + 4, topY, line.descriptionOverflow)
     centred(center(COLUMNS.h), middleY, String(line.quantity))
     centred(center(COLUMNS.i), middleY, line.uom)

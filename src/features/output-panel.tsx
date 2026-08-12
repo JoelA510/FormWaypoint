@@ -87,10 +87,23 @@ export function OutputPanel({
   // not instant, and applying a stored layout over a choice already made would undo it
   // silently — and, because only `changeOptions` writes, would not even be saved.
   const chosen = useRef(false)
+  // Whether the restore has finished, either way. The download is held until it has: the
+  // read is fast but not instant, and a click inside that window produced a sheet in the
+  // default layout while the panel went on to render the saved one — a sheet that does not
+  // match the description of it on screen.
+  const [layoutSettled, setLayoutSettled] = useState(false)
   useEffect(() => {
     void (async () => {
-      const saved = await localStore.getKeyingOptions()
-      if (saved && !chosen.current) setOptions(withDefaults(saved))
+      try {
+        const saved = await localStore.getKeyingOptions()
+        if (saved && !chosen.current) setOptions(withDefaults(saved))
+      } catch {
+        // The layout is a convenience, not shipment data: falling back to the default is a
+        // complete answer, and a banner about column widths over a blocked database would
+        // bury the one that matters.
+      } finally {
+        setLayoutSettled(true)
+      }
     })()
   }, [])
 
@@ -109,7 +122,9 @@ export function OutputPanel({
     const next = withDefaults(update(options))
     if (JSON.stringify(next) === JSON.stringify(options)) return
     setOptions(next)
-    void localStore.saveKeyingOptions(next)
+    // Same reasoning as the restore: the choice is applied to this session either way, and
+    // the only loss is that it is not remembered next time.
+    void localStore.saveKeyingOptions(next).catch(() => {})
   }
 
   /**
@@ -178,6 +193,10 @@ export function OutputPanel({
     if (busy) return
     setBusy(true)
     setError(null)
+    // Cleared like the SLI's. The warnings belong to the artifact that raised them, and a
+    // form-fill warning left standing beside a keying sheet describes a box on a form this
+    // download does not produce.
+    setWarnings([])
     try {
       const sheet = buildKeyingSheet(target, reconciliation, draft, {
         descriptionsByPart,
@@ -298,7 +317,7 @@ export function OutputPanel({
               <option value="fedex-ship-manager">FedEx Ship Manager</option>
               <option value="ups-worldship">UPS WorldShip</option>
             </Select>
-            <Button onClick={() => void downloadKeyingSheet()} disabled={!canGenerate || busy}>
+            <Button onClick={() => void downloadKeyingSheet()} disabled={!canGenerate || busy || !layoutSettled}>
               Download keying sheet
             </Button>
           </div>

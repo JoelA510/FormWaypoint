@@ -140,7 +140,9 @@ export function createCevaAdapter(): CarrierAdapter {
           `Rows on this shipment carry different ECCNs (${eccns.join(', ')}), but the form has one box for all ` +
             'of them. Both were written; split the shipment or annotate box 24 before signing.',
         )
-      } else if (eccns.length === 1 && eccns[0] !== 'EAR99') {
+        // Compared the way `distinct` compares, which is case-insensitively: a hand-typed
+        // `ear99` is the same classification as `EAR99` and belongs in the same blank box.
+      } else if (eccns.length === 1 && eccns[0].trim().toUpperCase() !== 'EAR99') {
         setText(ctx, F.eccn, eccns[0])
       }
 
@@ -169,11 +171,19 @@ function formatQuantity(quantity: number): string {
   return Number.isInteger(quantity) ? String(quantity) : quantity.toFixed(3)
 }
 
-/** Distinct values, compared case-insensitively; the first spelling seen is kept. */
+/**
+ * Distinct values, compared without regard to case or surrounding space; the first
+ * spelling seen is kept, trimmed.
+ *
+ * Both of these are hand-typed fields, and ` EAR99 ` beside `EAR99` is one classification
+ * written twice — counted as two, it fills a box meant to stay blank and warns about a
+ * mixed shipment that is not mixed.
+ */
 function distinct(values: (string | null | undefined)[]): string[] {
   const seen = new Map<string, string>()
   for (const value of values) {
-    if (value && !seen.has(value.toUpperCase())) seen.set(value.toUpperCase(), value)
+    const trimmed = value?.trim()
+    if (trimmed && !seen.has(trimmed.toUpperCase())) seen.set(trimmed.toUpperCase(), trimmed)
   }
   return [...seen.values()]
 }

@@ -96,6 +96,15 @@ export const AIR_THRESHOLDS = {
 export const STATE_OF_CHARGE_LIMIT = 30
 
 /**
+ * The ceiling of the indicated-capacity alternative, where the entry has one at all.
+ *
+ * A different figure as well as a different basis: batteries contained in equipment are
+ * offered at 30% of rated capacity *or* an indicated battery capacity of 25%, and a reading
+ * taken against the alternative has to be measured against the alternative's own number.
+ */
+export const INDICATED_CAPACITY_LIMIT = 25
+
+/**
  * The watt-hour rating below which the 30% state of charge is advisory rather than mandatory
  * for cells packed with equipment (Student Guide fig. 5-26 note, effective 1 January 2026).
  */
@@ -110,12 +119,23 @@ export const SOC_ADVISORY_WH = 2.7
  * — the single most consequential mistake this module could make.
  */
 export function energyBand(spec: BatterySpec): EnergyBand {
-  if (spec.chemistry === 'lithium-metal') {
-    if (spec.lithiumContentG == null) return 'unknown'
-    return spec.lithiumContentG <= AIR_THRESHOLDS.lithiumContentG[spec.form] ? 'small' : 'large'
-  }
-  if (spec.wattHours == null) return 'unknown'
-  return spec.wattHours <= AIR_THRESHOLDS.wattHours[spec.form] ? 'small' : 'large'
+  // Zero and below are unknown too, not the smallest possible battery. No cell is rated at
+  // nothing, so the figure is a placeholder or a mistyped field — and read as a rating it
+  // is the most permissive answer there is: Section II, no declaration, adequate
+  // instruction in place of dangerous goods training, and a check that passes affirming
+  // "0 Wh against a 100 Wh threshold". The sibling net-weight check refuses zero for
+  // exactly this reason.
+  // And anything that is not a finite number at all. `NaN` fails every comparison, so a
+  // field parsed from something that was not a figure slipped past a `<= 0` guard and then
+  // past `stated <= threshold` — coming out *large*, which is Section IA, a 35 kg ceiling
+  // and a check that passes affirming "NaN Wh against a 100 Wh threshold".
+  const stated = spec.chemistry === 'lithium-metal' ? spec.lithiumContentG : spec.wattHours
+  if (stated == null || !Number.isFinite(stated) || stated <= 0) return 'unknown'
+  const threshold =
+    spec.chemistry === 'lithium-metal'
+      ? AIR_THRESHOLDS.lithiumContentG[spec.form]
+      : AIR_THRESHOLDS.wattHours[spec.form]
+  return stated <= threshold ? 'small' : 'large'
 }
 
 /** The threshold that decided the band, for display beside it. */
@@ -206,6 +226,17 @@ export interface AirClassification {
   packingInstruction: number
   section: PackingSection
   band: EnergyBand
+  /**
+   * Whether the section is null because nothing has decided it yet, as opposed to because
+   * the packing instruction has none.
+   *
+   * The two read alike and mean opposite things: PI 976 has no sections and is fully
+   * regulated, while an unrated battery has a section nobody can name. Exposed rather than
+   * re-derived, because "unrated" is not the same question — a package prepared to Section I
+   * is unrated and settled, and every consumer that re-derived it from the band alone said
+   * otherwise.
+   */
+  sectionUndetermined: boolean
   /** `965 IB`, `966`, `976` — the wording that goes in DGD box 16. */
   packingInstructionLabel: string
   /** True for Sections I, IA, IB and PI 976; false for Section II. */
@@ -214,7 +245,14 @@ export interface AirClassification {
   fullyRegulated: boolean
   aircraft: AircraftLimitation
   limits: QuantityLimits
-  /** UN specification packaging meeting Packing Group II performance is required. */
+  /**
+   * UN specification packaging meeting Packing Group II performance is required.
+   *
+   * False, not true, where the section is undetermined — an unrated battery could be
+   * Section IA, which requires it, or Section IB, which A802 excepts. `assess` reads the
+   * band alongside this and says neither rather than resolving the ambiguity one way; the
+   * flag alone is not the whole answer for such an entry.
+   */
   unSpecificationPackagingRequired: boolean
   /** Inner packaging that completely encloses each cell or battery is required. */
   innerPackagingRequired: boolean
@@ -268,6 +306,13 @@ function sectionFor(
 ): PackingSection {
   // PI 976 has no sections: every standalone sodium ion cell and battery is fully regulated.
   if (chemistry === 'sodium-ion' && configuration === 'standalone') return null
+  // A shipper who has prepared to Section I has already answered the only question the band
+  // asks of an entry travelling with equipment: small goes to Section I because that is what
+  // was prepared, large goes there because that is where it belongs. Reading the band first
+  // called that package "section undetermined" and then treated it as one — a 5 kg limit
+  // against a real 35 kg allowance, no UN specification packaging demanded where Section I
+  // demands it, and a blocking check for a figure that could not change any of it.
+  if (configuration !== 'standalone' && prepareToSectionI) return 'I'
   if (band === 'unknown') return null
   if (configuration === 'standalone') return band === 'small' ? 'IB' : 'IA'
   // Section II is a relief with conditions. A shipper who does not meet them — most often
@@ -275,6 +320,46 @@ function sectionFor(
   // packing instruction instead. Only ever an escalation: it never relieves anything.
   if (band === 'small') return prepareToSectionI ? 'I' : 'II'
   return 'I'
+}
+
+/**
+ * The two sections an unrated entry could fall in, where they disagree about packaging.
+ *
+ * Null where they do not, which is most of the time. Batteries *contained in* equipment
+ * never take UN specification packaging in any section — the equipment is its own enclosure
+ * — so nothing about that requirement is in doubt for them, whatever the rating turns out
+ * to be. Standalone is IA against IB, and A802 is the exception that names IB. Packed with
+ * equipment is Section I against Section II, and A802 has nothing to do with it: it is
+ * written for Sections IB of PI 965 and PI 968 alone.
+ *
+ * Takes the classification rather than the spec so that "undecided" means the one thing
+ * `sectionUndetermined` means. Re-deriving it from the rating alone named two candidate
+ * sections for a package prepared to Section I, whose section is not in doubt at all.
+ */
+export function undecidedPackagingSections(
+  classification: AirClassification,
+): { pair: string; a802: boolean } | null {
+  const spec = classification.spec
+  if (!classification.sectionUndetermined) return null
+  if (spec.configuration === 'contained-in-equipment') return null
+  return spec.configuration === 'standalone'
+    ? { pair: 'Section IA requires it and Section IB is expressly excepted from it', a802: true }
+    : { pair: 'Section I requires it and Section II does not', a802: false }
+}
+
+/**
+ * Whether the energy rating changes how this entry is treated at all.
+ *
+ * Almost always yes: every section boundary and every quantity limit turns on it. The
+ * exception is a standalone sodium ion battery, which travels under PI 976 — one packing
+ * instruction with no sections and a single 35 kg cargo limit, fully regulated whatever the
+ * rating. `sectionFor` short-circuits on that pair before it reads the band, so the
+ * classification comes out identical with a rating and without one, and blocking a
+ * consignment for want of a figure that changes nothing is a check that cannot be satisfied
+ * by doing anything useful.
+ */
+export function bandDeterminesTreatment(spec: BatterySpec): boolean {
+  return !(spec.chemistry === 'sodium-ion' && spec.configuration === 'standalone')
 }
 
 /**
@@ -289,11 +374,24 @@ function sectionFor(
 function limitsFor(pi: number, section: PackingSection, chemistry: Chemistry): QuantityLimits {
   // Standalone lithium: forbidden on passenger aircraft in every section.
   if (pi === 965 || pi === 968) {
-    if (section === 'IB') {
+    // A null section here means the energy band is unknown, and the two sections it could
+    // be carry very different ceilings — 10 kg or 2.5 kg under Section IB against 35 kg
+    // under Section IA. Standalone batteries have no choice between them: the rating
+    // decides it. So the lower figure is stated, the same conservative reading the
+    // packaging section takes, rather than an allowance three times too generous that
+    // turns out not to be this battery's. `dg.rating` blocks until the rating is entered,
+    // and the figure becomes the section's own when it is.
+    if (section === 'IB' || section === null) {
+      const base = 'Student Guide fig. 5-29 (PI 965 / PI 968 Section IB)'
       return {
         passengerKg: null,
         cargoKg: pi === 965 ? 10 : 2.5,
-        source: 'Student Guide fig. 5-29 (PI 965 / PI 968 Section IB)',
+        source:
+          section === 'IB'
+            ? base
+            : `${base} — the lower of the two sections this could be, pending the ` +
+              (pi === 965 ? 'watt-hour' : 'lithium content') +
+              ' rating',
       }
     }
     return {
@@ -322,6 +420,25 @@ function limitsFor(pi: number, section: PackingSection, chemistry: Chemistry): Q
         chemistry === 'sodium-ion'
           ? 'Student Guide figs. 5-30 and 5-31 (PI 977 / PI 978 Section II — 5 kg net per package on either aircraft)'
           : 'Student Guide figs. 5-26 and 5-27 (Section II — 5 kg net per package on either aircraft)',
+    }
+  }
+  // A null section this far down means the energy band is unknown — PI 976 was answered
+  // above, and every remaining instruction has both a Section I and a Section II. So the
+  // lower of the two candidates is stated, exactly as the standalone branch does: reading
+  // Section I's 35 kg cargo allowance to an unrated package showed a 20 kg box passing
+  // against a ceiling that may turn out to be 5 kg.
+  if (section === null) {
+    return {
+      passengerKg: 5,
+      cargoKg: 5,
+      // Named for the chemistry in hand, like the Section II branch above it: the sodium
+      // tables are different figures in the materials, and pointing a sodium shipper at
+      // the lithium pages sends them to the wrong part of their own course notes.
+      source:
+        (chemistry === 'sodium-ion'
+          ? 'Student Guide figs. 5-30 and 5-31 (PI 977 / PI 978 Section II)'
+          : 'Student Guide figs. 5-26 and 5-27 (Section II)') +
+        ' — the lower of the two sections this could be, pending the rating',
     }
   }
   // Packed with / contained in, Section I: 5 kg passenger, 35 kg cargo.
@@ -365,7 +482,16 @@ function stateOfChargeFor(spec: BatterySpec): StateOfChargeRule | null {
   }
   if (spec.chemistry === 'sodium-ion') return null
   if (spec.configuration === 'packed-with-equipment') {
-    const advisory = spec.wattHours != null && spec.wattHours <= SOC_ADVISORY_WH
+    // A rating of zero is not a rating, here as in `energyBand`: read literally it put the
+    // mandatory 30% state of charge below the 2.7 Wh threshold and downgraded it to advice,
+    // under a line that said "Rated at 0 Wh, at or below the 2.7 Wh threshold".
+    // Cells only. The relief is written against a cell's watt-hour rating, and read across
+    // to a battery it demoted the whole state-of-charge group — the figure, its basis and
+    // its provenance — from blocking to advice, so a declaration could be generated for a
+    // pack nobody had measured. A battery assembled from cells that each qualify is still
+    // a battery.
+    const advisory =
+      spec.form === 'cell' && spec.wattHours != null && spec.wattHours > 0 && spec.wattHours <= SOC_ADVISORY_WH
     return {
       limitPercent: STATE_OF_CHARGE_LIMIT,
       strength: advisory ? 'should' : 'must',
@@ -408,7 +534,23 @@ export const BATTERY_MARK_PREFIX = 'Lithium battery mark'
  * left off a package of equipment depends on how many packages are in the consignment, which
  * this function cannot see. `assess.ts` applies them.
  */
-function hazardCommunicationFor(section: PackingSection, aircraft: AircraftLimitation, id: Identity): string[] {
+function hazardCommunicationFor(
+  section: PackingSection,
+  aircraft: AircraftLimitation,
+  id: Identity,
+  /**
+   * Whether the section is null because nothing has decided it yet, as opposed to because
+   * the packing instruction has none.
+   *
+   * The two null sections are not the same answer. PI 976 genuinely has no sections and its
+   * packages are marked as Sections I and IA are; an unrated battery could still turn out to
+   * be Section IB, which carries the lithium battery mark as well as the label. The limit
+   * for that case is already stated conservatively, and the marks list has to agree — the
+   * panel is read while the box is being made up, and a mark that turns out to be needed is
+   * a mark applied after the box was closed.
+   */
+  sectionUndetermined: boolean,
+): string[] {
   const marks = ['Shipper and consignee name and address']
 
   if (section === 'II') {
@@ -421,7 +563,7 @@ function hazardCommunicationFor(section: PackingSection, aircraft: AircraftLimit
   if (aircraft === 'cargo-aircraft-only') marks.push('Cargo Aircraft Only label, on the same surface as the Class 9 label')
   // Section IB alone carries both the Class 9 label and the lithium battery mark (fig. 5-28);
   // Sections I and IA carry the label without the mark (figs. 5-32, 5-33, 5-34).
-  if (section === 'IB') marks.push(`${BATTERY_MARK_PREFIX} bearing ${id.unNumber}`)
+  if (section === 'IB' || sectionUndetermined) marks.push(`${BATTERY_MARK_PREFIX} bearing ${id.unNumber}`)
   marks.push('Net quantity mark, where multiple non-identical packages are offered in the consignment')
   return marks
 }
@@ -433,22 +575,41 @@ function hazardCommunicationFor(section: PackingSection, aircraft: AircraftLimit
  * does. The rest of column M is reproduced in the Supplemental Appendix and still has to be
  * read for every shipment, which is why the assessment engine says so.
  */
-function specialProvisionsFor(spec: BatterySpec, section: PackingSection): string[] {
+function specialProvisionsFor(spec: BatterySpec, unSpecificationRequired: boolean): string[] {
   const provisions = ['A154 — damaged or defective cells and batteries are forbidden for transport by air']
-  if (spec.chemistry === 'lithium-ion' || spec.chemistry === 'sodium-ion') {
-    if (spec.configuration === 'standalone') {
+  if (spec.configuration === 'standalone') {
+    // A331 is a state of charge provision, so it reaches only the rechargeable chemistries.
+    // The passenger-aircraft approval is not: every standalone battery is forbidden on
+    // passenger aircraft and every one of them has a provision naming the approval that
+    // relieves it — A201 for lithium metal, A334 for lithium ion and sodium ion. Nesting
+    // the second inside the first left UN3090 with no passenger provision at all, under a
+    // blocking check that cites both by number.
+    if (spec.chemistry === 'lithium-metal') {
+      provisions.push('A201 — state approval required to carry standalone lithium metal batteries on passenger aircraft')
+    } else {
       provisions.push('A331 — state approval required above 30% state of charge')
       provisions.push('A334 — state approval required to carry standalone batteries on passenger aircraft')
     }
-  }
-  if (spec.configuration === 'standalone') {
     provisions.push('A183 — waste batteries for recycling or disposal are forbidden without competent authority approval')
   }
-  if (section === 'I' || section === 'IA') {
+  // Listed for exactly the entries the packaging check holds to it. Gating this on the
+  // section while the check gated on something wider let a blocking check cite a provision
+  // the entry's own list did not carry.
+  // A802 is written for lithium. A standalone sodium ion battery travels under PI 976, whose
+  // packaging requirement is its own — listing A802 against it cited a provision that does
+  // not mention the entry, which is the mismatch this line was corrected for once already.
+  if (unSpecificationRequired && spec.chemistry !== 'sodium-ion') {
     provisions.push('A802 — UN specification packaging meeting Packing Group II performance is required')
   }
   provisions.push('A99 — an exception to the 35 kg limit needs competent authority approval')
-  provisions.push('A181 — a package holding both packed-with and contained-in batteries is described as packed with equipment')
+  // A181 governs a package holding batteries both packed with and contained in equipment,
+  // so it belongs to UN3481 and UN3091 alone. Pushed unconditionally, it sat in the column M
+  // list of every standalone entry — invisible until this list started printing.
+  if (spec.configuration !== 'standalone') {
+    provisions.push(
+      'A181 — a package holding both packed-with and contained-in batteries is described as packed with equipment',
+    )
+  }
   if (spec.chemistry === 'sodium-ion') {
     provisions.push('A228 — sodium ion cells with an aqueous alkali electrolyte travel as UN2795, not UN3551/UN3552')
   }
@@ -479,6 +640,9 @@ export function classifyForAir(
   const stateOfCharge = stateOfChargeFor(spec)
   const band = energyBand(spec)
   const section = sectionFor(spec.configuration, band, spec.chemistry, options.prepareToSectionI ?? false)
+  // A null section because nothing has decided it yet, as opposed to because the packing
+  // instruction has none. PI 976 is the second; an unrated battery is the first.
+  const sectionUndetermined = section === null && band === 'unknown' && bandDeterminesTreatment(spec)
   const limits = limitsFor(id.packingInstruction, section, spec.chemistry)
 
   // Standalone cells and batteries of every chemistry are cargo aircraft only. Everything
@@ -489,9 +653,23 @@ export function classifyForAir(
   const isSectionII = section === 'II'
   // Section I and IA are the fully regulated sections that demand performance packaging;
   // IB is fully regulated but takes a strong rigid outer packaging instead.
-  const isSectionIOrIA = section === 'IA' || section === 'I'
+  //
+  // A null section is *not* a lesser case: PI 976 has none at all and every standalone
+  // sodium ion battery under it is fully regulated, and an unknown energy band is read
+  // conservatively as fully regulated too. Treating those as though Section IB's A802
+  // exception covered them let them skip the packaging check entirely, under a message
+  // citing an exception written for two other packing instructions.
+  // PI 976's null section is fully regulated and takes performance packaging. An *unrated*
+  // entry's null section is not the same answer: its two candidates are Section IA, which
+  // requires the packaging, and Section IB or II, which A802 excepts — and the quantity
+  // limit for that same entry is already stated as the lower candidate. Demanding the mark
+  // as well would have the two halves of one classification assuming different sections,
+  // and would block on a fact nobody can settle until the rating is entered, which
+  // `dg.energy` is already blocking for.
+  const performancePackagingSection =
+    section === 'IA' || section === 'I' || (section === null && !sectionUndetermined)
   // Equipment is its own enclosure, so contained-in never takes performance packaging.
-  const unSpecificationPackaging = isSectionIOrIA && spec.configuration !== 'contained-in-equipment'
+  const unSpecificationPackaging = performancePackagingSection && spec.configuration !== 'contained-in-equipment'
 
   return {
     spec,
@@ -503,6 +681,7 @@ export function classifyForAir(
     packingInstruction: id.packingInstruction,
     section,
     band,
+    sectionUndetermined,
     packingInstructionLabel: section ? `${id.packingInstruction} ${section}` : String(id.packingInstruction),
     declarationRequired: !isSectionII,
     fullyRegulated: !isSectionII,
@@ -523,9 +702,14 @@ export function classifyForAir(
     stackTestRequired: !unSpecificationPackaging && spec.chemistry !== 'sodium-ion',
     stateOfCharge,
     indicatedCapacityAlternative: stateOfCharge?.indicatedCapacityAlternative ?? false,
-    hazardCommunication: hazardCommunicationFor(section, aircraft, id),
+    hazardCommunication: hazardCommunicationFor(
+      section,
+      aircraft,
+      id,
+      sectionUndetermined,
+    ),
     training: isSectionII ? 'adequate-instruction' : 'dangerous-goods',
-    specialProvisions: specialProvisionsFor(spec, section),
+    specialProvisions: specialProvisionsFor(spec, unSpecificationPackaging),
     basis: section
       ? `PI ${id.packingInstruction} Section ${section} · ${limits.source}`
       : `PI ${id.packingInstruction} · ${limits.source}`,

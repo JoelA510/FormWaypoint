@@ -58,8 +58,45 @@ const HEADER_LABELS = new Set([
   'DATE',
 ])
 
-const normalizeLabel = (text: string): string => text.replace(/:\s*$/, '').trim().toUpperCase()
-const isLabel = (text: string): boolean => HEADER_LABELS.has(normalizeLabel(text))
+const normalizeLabel = (text: string): string =>
+  text.replace(/:\s*$/, '').trim().replace(/\s+/g, ' ').toUpperCase()
+/**
+ * Whether a cell is a header-grid label.
+ *
+ * Four of them — `INCOTERMS`, `PAGE`, `SIGNATURE`, `DATE` — are ordinary words as well as
+ * labels, and pdfjs hands back a printed run one word at a time: `3000 Page Mill Road`
+ * offers `Page`, and `CARRIER / AGENT: Page Aviation` offers it again. Read as labels those
+ * ended the address band on the consignee's own street and emptied all three blocks, with
+ * nothing said. The form prints every one of them with a colon, and no value word carries
+ * one, so for a label that is a bare word the colon is what makes it a label.
+ *
+ * The rest carry `#`, `/` or a second word and are in no danger of being typed by accident.
+ */
+const isLabel = (text: string): boolean => {
+  const normalized = normalizeLabel(text)
+  if (!HEADER_LABELS.has(normalized)) return false
+  return !/^[A-Z]+$/.test(normalized) || /:\s*$/.test(text.trim())
+}
+
+/**
+ * Whether a cell titles one of the three address blocks, as opposed to a header-grid label
+ * that merely begins with the same word.
+ *
+ * `SHIPPER EIN / TAX ID:` and `CONSIGNEE EORI / USCI / VAT:` sit on one row of the header
+ * grid, and between them they satisfy "a cell starting SHIPPER and a cell starting
+ * CONSIGNEE" exactly as the address band does. Finding the band first is a property of the
+ * present layout, not of the search — put the grid above the addresses and all three
+ * blocks would parse empty, with no warning to say why.
+ *
+ * Exported so that separation can be asserted against the form's real label list rather
+ * than left resting on the order the rows happen to be printed in.
+ */
+export const isPartyTitle = (text: string, block: PartyBlock): boolean =>
+  !isLabel(text) && text.trim().toUpperCase().startsWith(block)
+
+/** The three address blocks the band titles, in the order the form prints them. */
+const PARTY_BLOCKS = ['SHIPPER', 'CONSIGNEE', 'BILL TO'] as const
+type PartyBlock = (typeof PARTY_BLOCKS)[number]
 
 /**
  * The commodity table's columns in printed order: the top row of each two-row block, and
@@ -85,6 +122,15 @@ const SUB_COLUMNS = {
 } as const
 const TABLE_HEADINGS = new Set<string>([...Object.values(TOP_COLUMNS), ...Object.values(SUB_COLUMNS)])
 
+/**
+ * How far below the top heading row the compliance heading row may sit.
+ *
+ * It exists because omitted rows are padded rather than closed up: the indices stay true,
+ * and a gap the writer left is a gap the reader sees. Small on purpose — past a few rows,
+ * what follows is not the other half of the heading.
+ */
+const MAX_HEADING_GAP = 3
+
 // ---------------------------------------------------------------------------
 // Workbook (.xlsx) reader — the primary path
 // ---------------------------------------------------------------------------
@@ -99,12 +145,38 @@ const TABLE_HEADINGS = new Set<string>([...Object.values(TOP_COLUMNS), ...Object
 export function isOmronCiWorkbook(rows: SheetRows): boolean {
   return (
     rows.some((row) => row.some((cell) => cell.includes(DOC_NUMBER))) &&
-    rows.some((row) => row.includes(TOP_COLUMNS.part)) &&
-    rows.some((row) => row.includes(SUB_COLUMNS.coo))
+    rows.some((row) => headingAt(row, TOP_COLUMNS.part) >= 0) &&
+    rows.some((row) => headingAt(row, SUB_COLUMNS.coo) >= 0)
   )
 }
 
-export function parseOmronCiWorkbook(fileName: string, rows: SheetRows): ParsedCipl {
+/**
+ * Where a heading sits in a row, or -1.
+ *
+ * Compared without case or surrounding space, like every other label on this form and like
+ * the whole of the PDF path. Matched exactly, a title-cased revision of the workbook was
+ * refused as "not the Commercial Invoice form" while its own printed PDF parsed cleanly —
+ * two answers about one document, decided by the shift key.
+ */
+function headingAt(row: string[], heading: string): number {
+  return row.findIndex((cell) => cell.trim().toUpperCase() === heading)
+}
+
+export function parseOmronCiWorkbook(
+  fileName: string,
+  rows: SheetRows,
+  /**
+   * Whether these rows came from a workbook rather than from the reshaped PDF.
+   *
+   * Two things follow from it. A workbook writer that omits rows with no content collapses
+   * an empty compliance row away and shifts every following block, which the PDF path
+   * cannot do — it synthesizes exactly one compliance row per block, and looking for a
+   * collapsed one there misreads that row's own first cell. And a workbook's cells sit in
+   * their real columns, so the totals band can be read from the AMOUNT column; the PDF's
+   * rows are rebuilt from drawn text and only the commodity blocks are column-aligned.
+   */
+  fromWorkbook = true,
+): ParsedCipl {
   const warnings: string[] = []
 
   // Header grid: first value found for each label anywhere on the sheet. The instructions
@@ -121,10 +193,10 @@ export function parseOmronCiWorkbook(fileName: string, rows: SheetRows): ParsedC
   }
   const field = (label: string): string => fields.get(label) ?? ''
 
-  const parties = readParties(rows)
-  const lines = readLines(rows, field('PURCHASE ORDER #'), field('INVOICE #'), warnings)
+  const parties = readParties(rows, warnings)
+  const lines = readLines(rows, field('PURCHASE ORDER #'), field('INVOICE #'), warnings, fromWorkbook)
 
-  const subtotal = amountOnRow(rows, 'SUBTOTAL')
+  const subtotal = amountOnRow(rows, 'SUBTOTAL', fromWorkbook ? amountColumnIn(rows) : -1)
   if (subtotal == null) {
     warnings.push(
       'No subtotal could be read from this invoice, so the commodity values cannot be proved against the ' +
@@ -170,24 +242,42 @@ function valueAfter(row: string[], index: number): string {
  * and its lines are whatever the following rows hold in that column, until the header grid
  * starts (its first row carries the INVOICE # label).
  */
-function readParties(rows: SheetRows): { shipper: PartyAddress; consignee: PartyAddress; billTo: PartyAddress } {
+function readParties(
+  rows: SheetRows,
+  warnings: string[],
+): { shipper: PartyAddress; consignee: PartyAddress; billTo: PartyAddress } {
   const empty = (): PartyAddress => ({ name: '', lines: [], country: null })
   const bandIndex = rows.findIndex(
-    (row) => row.some((c) => c.toUpperCase().startsWith('SHIPPER')) && row.some((c) => c.toUpperCase().startsWith('CONSIGNEE')),
+    (row) => row.some((c) => isPartyTitle(c, 'SHIPPER')) && row.some((c) => isPartyTitle(c, 'CONSIGNEE')),
   )
-  if (bandIndex === -1) return { shipper: empty(), consignee: empty(), billTo: empty() }
+  // Said out loud. The addresses are the one part of this form nothing downstream demands —
+  // the SLI will fill its consignee box with whatever is there, including nothing — so a
+  // band that could not be read has to report itself or it reads as a blank form.
+  const unreadable = () => {
+    warnings.push(
+      'The shipper, consignee and bill-to blocks could not be read from this document. Enter the consignee by ' +
+        'hand, and check the addresses on the generated form against the invoice before signing.',
+    )
+    return { shipper: empty(), consignee: empty(), billTo: empty() }
+  }
+  if (bandIndex === -1) return unreadable()
 
   const band = rows[bandIndex]
   const columns = {
-    shipper: band.findIndex((c) => c.toUpperCase().startsWith('SHIPPER')),
-    consignee: band.findIndex((c) => c.toUpperCase().startsWith('CONSIGNEE')),
-    billTo: band.findIndex((c) => c.toUpperCase().startsWith('BILL TO')),
+    shipper: band.findIndex((c) => isPartyTitle(c, 'SHIPPER')),
+    consignee: band.findIndex((c) => isPartyTitle(c, 'CONSIGNEE')),
+    billTo: band.findIndex((c) => isPartyTitle(c, 'BILL TO')),
   }
 
   const collected: Record<'shipper' | 'consignee' | 'billTo', string[]> = { shipper: [], consignee: [], billTo: [] }
   for (let r = bandIndex + 1; r < rows.length; r++) {
     const row = rows[r]
     if (row.some((c) => isLabel(c))) break
+    // And at the commodity table, whether or not a header grid was found between the two.
+    // Stopping on a label alone rested on there being one below the addresses: a revision
+    // that moves those fields, or a print that loses them, ran the band to the end of the
+    // sheet and filed `PART #` and a part number as the consignee's street.
+    if (row.some((c) => TABLE_HEADINGS.has(c.trim().toUpperCase()))) break
     for (const key of ['shipper', 'consignee', 'billTo'] as const) {
       const column = columns[key]
       const cell = column >= 0 ? (row[column] ?? '').trim() : ''
@@ -199,6 +289,9 @@ function readParties(rows: SheetRows): { shipper: PartyAddress; consignee: Party
     const [name = '', ...rest] = lines
     return { name, lines: rest, country: null }
   }
+  // The band was found and still yielded nothing — on the PDF path, a band whose three
+  // titles could not all be located, which `partyRow` declines to map rather than guess at.
+  if (!collected.shipper.length && !collected.consignee.length && !collected.billTo.length) return unreadable()
   return { shipper: toParty(collected.shipper), consignee: toParty(collected.consignee), billTo: toParty(collected.billTo) }
 }
 
@@ -209,23 +302,51 @@ function readParties(rows: SheetRows): { shipper: PartyAddress; consignee: Party
  * form, not data. A block that is only partly filled is kept — the reconciliation is
  * where an incomplete line gets held, with the person who can fix it looking at it.
  */
-function readLines(rows: SheetRows, purchaseOrder: string, invoiceNumber: string, warnings: string[]): SourceLine[] {
-  const headIndex = rows.findIndex((row) => row.includes(TOP_COLUMNS.part) && row.includes(TOP_COLUMNS.qty))
-  const subIndex = headIndex === -1 ? -1 : headIndex + 1
-  if (headIndex === -1 || !rows[subIndex]?.includes(SUB_COLUMNS.coo)) {
+function readLines(
+  rows: SheetRows,
+  purchaseOrder: string,
+  invoiceNumber: string,
+  warnings: string[],
+  fromWorkbook: boolean,
+): SourceLine[] {
+  const headIndex = rows.findIndex(
+    (row) => headingAt(row, TOP_COLUMNS.part) >= 0 && headingAt(row, TOP_COLUMNS.qty) >= 0,
+  )
+  // Searched for rather than assumed adjacent. The workbook reader honours each row's own
+  // `r` index and pads an omitted row with a blank one, so a heading pair that reads as two
+  // consecutive rows in Excel can arrive with a gap between them — and assuming `+1` left
+  // the sheet claimed as the form while no line at all was read from it.
+  let subIndex = -1
+  for (let i = headIndex + 1; headIndex !== -1 && i < Math.min(rows.length, headIndex + 1 + MAX_HEADING_GAP); i++) {
+    if (headingAt(rows[i], SUB_COLUMNS.coo) >= 0) {
+      subIndex = i
+      break
+    }
+  }
+  const subRow = subIndex === -1 ? undefined : rows[subIndex]
+  if (headIndex === -1 || !subRow) {
     warnings.push('The commodity table headings were not found; no lines were read.')
     return []
   }
 
   const head = rows[headIndex]
-  const sub = rows[subIndex]
+  const sub = subRow
   const columns = {
     ...(Object.fromEntries(
-      Object.entries(TOP_COLUMNS).map(([key, heading]) => [key, head.indexOf(heading)]),
+      Object.entries(TOP_COLUMNS).map(([key, heading]) => [key, headingAt(head, heading)]),
     ) as Record<keyof typeof TOP_COLUMNS, number>),
     ...(Object.fromEntries(
-      Object.entries(SUB_COLUMNS).map(([key, heading]) => [key, sub.indexOf(heading)]),
+      Object.entries(SUB_COLUMNS).map(([key, heading]) => [key, headingAt(sub, heading)]),
     ) as Record<keyof typeof SUB_COLUMNS, number>),
+  }
+
+  // The loop below walks the table by its LN column, so without it every row reads as "not
+  // a line number" and the table ends before its first block. Said out loud rather than
+  // returned as an empty list: no lines and no warning is indistinguishable from a blank
+  // form, and this one is a form whose heading row moved.
+  if (columns.ln < 0) {
+    warnings.push(`The commodity table has no "${TOP_COLUMNS.ln}" column, so no lines could be read.`)
+    return []
   }
 
   const isLineNumber = (cell: string): boolean => {
@@ -233,19 +354,51 @@ function readLines(rows: SheetRows, purchaseOrder: string, invoiceNumber: string
     return value != null && Number.isInteger(value) && value >= 1
   }
 
+  const isBlankRow = (row: string[]): boolean => row.every((c) => !c.trim())
+
   const lines: SourceLine[] = []
+  // The row the table stopped at, where it stopped at one. Left unset where the rows simply
+  // ran out, which is not an early end and has nothing to report.
+  let endedAt: string[] | undefined
   for (let r = subIndex + 1; r < rows.length; ) {
     const top = rows[r]
+    // A row the writer left out entirely. Padding the gap keeps every row's index true,
+    // which is what the workbook reader now does — so a blank row can sit *inside* the
+    // table, and reading it as the end of the table dropped every line below it without a
+    // word. Skipped however many there are: the table ends at its totals band, or at a row
+    // that carries something and is not a line, and a count of blank rows was an arbitrary
+    // third rule that dropped lines below a long gap on one template and cried truncation
+    // on every ordinary import of another.
+    if (isBlankRow(top)) {
+      r += 1
+      continue
+    }
+
     const lineNumber = parseNumber(top[columns.ln] ?? '')
-    // The table ends at the first row whose LN cell is not a line number (the totals band).
-    if (lineNumber == null || !Number.isInteger(lineNumber) || lineNumber < 1) break
+    // The table ends at the first row that carries something and is not a line (the totals
+    // band, or the instructions printed below the form).
+    if (lineNumber == null || !Number.isInteger(lineNumber) || lineNumber < 1) {
+      endedAt = top
+      break
+    }
 
     let bottom = rows[r + 1] ?? []
     let stride = 2
-    // If the next row starts its own block, this block's compliance row was collapsed away
-    // (a writer that omits rows with no content). Read it as empty and resync, rather than
-    // letting the stride mis-pair every following block's export-control cells.
-    if (isLineNumber(bottom[columns.ln] ?? '')) {
+    // If the next row starts its own block, or is the totals band, this block's compliance
+    // row was collapsed away (a writer that omits rows with no content). Read it as empty
+    // and resync, rather than letting the stride mis-pair every following block's
+    // export-control cells — or, on the last block, reading the totals band as one.
+    //
+    // The totals band currently holds nothing in the compliance columns, so reading it
+    // yields blanks either way; that is a coincidence of the present layout and not
+    // something to rest a customs classification on. A future revision that put anything
+    // in those cells would file it as a country of origin.
+    //
+    // Only where a row can actually be missing. On the PDF path the compliance row's first
+    // cell is the country of origin, not an LN — a numeric country code read as a line
+    // number there, throwing away the line's whole export-control row and filing the
+    // compliance row again as goods of its own.
+    if ((fromWorkbook && isLineNumber(bottom[columns.ln] ?? '')) || isTotalsRow(bottom)) {
       bottom = []
       stride = 1
     }
@@ -298,18 +451,73 @@ function readLines(rows: SheetRows, purchaseOrder: string, invoiceNumber: string
     })
     r += stride
   }
+  // An early end is reported. The table stops at its totals band; anything else means the
+  // rows below the stopping point were not read, and a short commodity list that looks
+  // complete is the one failure this reader must not produce silently.
+  // Reported only where the row that stopped the read looks like a line the reader failed
+  // on — a part number or a quantity, which is what a commodity whose LN cell was left
+  // blank still carries. Deliberately not the description column: a continuation marker or
+  // a no-charge note printed under the table is prose in exactly that column, and warning
+  // about it would cry truncation on every clean import of a template that carries one.
+  const stoppedOnGoods =
+    endedAt !== undefined &&
+    !isTotalsRow(endedAt) &&
+    [columns.part, columns.qty].some((c) => c >= 0 && (endedAt[c] ?? '').trim())
+  if (stoppedOnGoods) {
+    warnings.push(
+      `The commodity table ended before its totals band, after ${lines.length} line(s). Any line printed below ` +
+        'that point was not read — check the form against what was imported before generating anything.',
+    )
+  }
+
   return lines
 }
 
-/** The numeric cell on the row carrying `label` — the rightmost number wins. */
-function amountOnRow(rows: SheetRows, label: string): number | null {
+/**
+ * A row of the totals band, recognised by its own printed cells.
+ *
+ * Shared by the workbook reader and the PDF reshaper so both agree on where the commodity
+ * table ends. Matched as whole cells, never as substrings of the row — a commodity
+ * described as "Warranty replacement - NO CHARGE" is line data.
+ */
+function isTotalsRow(row: string[]): boolean {
+  return row.some((c) => {
+    const cell = normalizeLabel(c)
+    return cell === 'SUBTOTAL' || cell === 'TOTAL (USD)'
+  })
+}
+
+/**
+ * The amount on the row carrying `label`.
+ *
+ * Read from the AMOUNT column where the table's headings gave us one, and only from there.
+ * Taking the rightmost number on the row instead worked by luck of the present layout: the
+ * totals band shares its rows with `# OF PIECES`, `NET WT (KG)` and `GROSS WT (KG)`, and a
+ * shifted template — or simply an empty SUBTOTAL cell — would have handed a piece count or
+ * a weight to the blocking total-value check, which would then reconcile the shipment
+ * against it instead of failing.
+ *
+ * Without the column the rightmost number is still the fallback; the caller warns when no
+ * subtotal could be read at all, and that is the honest outcome of a table nobody could
+ * calibrate.
+ */
+function amountOnRow(rows: SheetRows, label: string, amountColumn: number): number | null {
   const row = rows.find((r) => r.some((c) => normalizeLabel(c) === label))
   if (!row) return null
+  if (amountColumn >= 0) return parseNumber(row[amountColumn] ?? '')
   for (let i = row.length - 1; i >= 0; i--) {
     const value = parseNumber(row[i])
     if (value != null) return value
   }
   return null
+}
+
+/** Where the AMOUNT column sits, from the commodity table's own heading row, or -1. */
+function amountColumnIn(rows: SheetRows): number {
+  const head = rows.find(
+    (row) => headingAt(row, TOP_COLUMNS.part) >= 0 && headingAt(row, TOP_COLUMNS.qty) >= 0,
+  )
+  return head ? headingAt(head, TOP_COLUMNS.amount) : -1
 }
 
 function buildHeader(
@@ -322,6 +530,14 @@ function buildHeader(
   return {
     invoiceNumber: field('INVOICE #'),
     invoiceDate: dateText(field('INVOICE DATE')),
+    // Left null, though the form does have a SHIP DATE box.
+    //
+    // `onOrAboutDate` means the *later sailing* date on the vendor layouts, and box 2 of the
+    // SLI deliberately takes the invoice date instead — the filed evidence for all three
+    // historical shipments. Filling this field from a box that means something else would
+    // change the date of exportation on those layouts too, through the one line in
+    // `buildDraft` that reads it. Whether this form's own ship date should date the SLI is
+    // a question for the people who file them, and it needs its own field to answer.
     onOrAboutDate: null,
     // BILL TO / SOLD TO is only filled in when it differs from the consignee.
     soldTo: parties.billTo.name ? parties.billTo : parties.consignee,
@@ -414,7 +630,7 @@ export function parseOmronCiPdf(fileName: string, pages: TextPage[]): ParsedCipl
     )
   }
   const grid = pagesToGrid(pages)
-  return parseOmronCiWorkbook(fileName, grid)
+  return parseOmronCiWorkbook(fileName, grid, false)
 }
 
 /**
@@ -464,41 +680,85 @@ function pagesToGrid(pages: TextPage[]): SheetRows {
     [...Object.entries(TOP_COLUMNS), ...Object.entries(SUB_COLUMNS)].map(([key, heading]) => [key, bandX(heading)]),
   ) as Anchors
 
+  // Every anchor that actually places a cell has to have been located before any value can
+  // be assigned to a column.
+  //
+  // A heading the extractor split across items yields no anchor, and an unfound anchor is
+  // -Infinity: `quantityBorder` then collapses and every cell on the line looks like it
+  // belongs to the numeric columns, while values belonging to the missing column fall to
+  // whichever heading is nearest. Both produce a plausible-looking table that is wrong, so
+  // the table is handed back unreshaped instead — `readLines` reports the missing headings
+  // and no line is invented from a grid nobody could calibrate.
+  //
+  // `part` and `description` are not among them: those two are separated from each other
+  // by the border between the COO and HTS columns beneath, so their own headings never
+  // position anything. Demanding them refused a table that parses perfectly well with a
+  // split DESCRIPTION OF GOODS heading — the same pdfjs behaviour this guard exists for,
+  // turned against a document it should have read.
+  const PLACING_ANCHORS = ['ln', 'qty', 'uom', 'unitPrice', 'amount', 'coo', 'hts', 'eccn', 'license', 'sme'] as const
+  const tableCalibrated = PLACING_ANCHORS.every((key) => Number.isFinite(anchors[key]))
+
   // Everything between the table headings and the totals band belongs to line blocks.
   // The band is recognised by its own printed cells as *whole* cells, never as substrings
   // of row text — a commodity described as "Warranty replacement - NO CHARGE" is line
   // data, and truncating the table at it would silently drop every following line.
   let tableEnd = rows.length
   for (let i = subIndex + 1; i < rows.length; i++) {
-    const isTotalsBand = rows[i].items.some((item) => {
-      const cell = normalizeLabel(item.str)
-      return cell === 'SUBTOTAL' || cell === 'TOTAL (USD)'
-    })
-    if (isTotalsBand) {
+    if (isTotalsRow(rows[i].items.map((item) => item.str))) {
       tableEnd = i
       break
     }
   }
 
-  const partyBand = rows.findIndex(
-    (row) =>
-      row.items.some((i) => i.str.toUpperCase().startsWith('SHIPPER')) &&
-      row.items.some((i) => i.str.toUpperCase().startsWith('CONSIGNEE')),
-  )
+  // Searched through the same healing the rest of the grid gets. `isPartyTitle` refuses an
+  // item that *is* a header label, which is what keeps `SHIPPER EIN / TAX ID:` from passing
+  // for the SHIPPER block — but only while the extractor leaves the label in one piece.
+  // Split into words, its first item is the bare word `SHIPPER`, and the header grid then
+  // answers to the band's own description. That the real band is found first is a property
+  // of where the form prints its rows, which is exactly what this guard exists not to rest
+  // on.
+  const partyBand = rows.findIndex((row) => {
+    const strings = row.items.map((item) => item.str)
+    return titlesPartyBlock(strings, 'SHIPPER') && titlesPartyBlock(strings, 'CONSIGNEE')
+  })
+  // Where the commodity table's headings begin. The merged ones can land a row above the
+  // row carrying PART #, which is why the anchor band reaches back a row — but only where
+  // that row is a heading row. Taking it unconditionally cost the last line of every
+  // address on a form with nothing printed between the two.
+  const headingBandStart =
+    headIndex > 0 && rows[headIndex - 1].items.some((item) => TABLE_HEADINGS.has(item.str.toUpperCase()))
+      ? headIndex - 1
+      : headIndex
+
+  // The band runs to the first header-grid label below it, and no further than the table
+  // headings whatever else is found.
+  //
+  // Collapsing to the band's own row when no label follows meant no row was column-mapped
+  // at all, and `readParties` then read cells 0, 1 and 2 of every remaining row — the
+  // synthesized commodity headings among them — as shipper, consignee and bill-to. That
+  // there is always a header grid below the addresses is the print order this search is
+  // written not to rest on; the table headings bound it whether or not one is there.
   let partyEnd = partyBand
   if (partyBand !== -1) {
-    partyEnd = rows.findIndex((row, i) => i > partyBand && row.items.some((item) => isLabel(item.str)))
-    if (partyEnd === -1) partyEnd = partyBand
+    const labelled = rows.findIndex((row, i) => i > partyBand && hasLabel(row))
+    partyEnd = labelled === -1 ? headingBandStart : Math.min(labelled, headingBandStart)
+    if (partyEnd < partyBand) partyEnd = partyBand
   }
 
   // The heading rows are synthesized in canonical order rather than passed through,
   // because the print can split them across baselines in ways `readLines` should not
   // have to know about. The blocks are emitted in the same canonical order.
-  const isHeadingRow = (row: TextRow): boolean => row.items.some((item) => TABLE_HEADINGS.has(item.str.toUpperCase()))
+  //
+  // Only rows inside the heading band count. Tested against the whole header region, a
+  // single ordinary word did it: an address line reading `Amount Tower` and a freight term
+  // reading `PREPAID AMOUNT AGREED` were dropped entire, silently, because `AMOUNT` is
+  // also the name of a column.
+  const isHeadingRow = (i: number): boolean =>
+    i >= headingBandStart && rows[i].items.some((item) => TABLE_HEADINGS.has(item.str.toUpperCase()))
 
   const grid: SheetRows = []
   for (let i = 0; i < subIndex + 1; i++) {
-    if (isHeadingRow(rows[i])) continue
+    if (isHeadingRow(i)) continue
     if (partyBand !== -1 && i > partyBand && i < partyEnd) {
       grid.push(partyRow(rows[i], rows[partyBand]))
     } else if (i === partyBand) {
@@ -511,6 +771,18 @@ function pagesToGrid(pages: TextPage[]): SheetRows {
       grid.push(coalescedRow(rows[i]))
     }
   }
+  // The headings and the blocks are emitted only when every column was located.
+  //
+  // Withholding just these two — rather than bailing out of the whole reshaping — keeps
+  // the header fields, the party band and the totals band readable, while leaving
+  // `readLines` with no headings to find, so it reports a commodity table it could not
+  // read. Emitting them anyway would hand it a grid calibrated against a column that was
+  // never found, and it would fill that column from whatever sat nearest.
+  if (!tableCalibrated) {
+    for (let i = subIndex + 1; i < rows.length; i++) grid.push(coalescedRow(rows[i]))
+    return grid
+  }
+
   grid.push([...Object.values(TOP_COLUMNS)], [...Object.values(SUB_COLUMNS)])
   grid.push(...tableRowsToBlocks(rows.slice(subIndex + 1, tableEnd), anchors))
   for (let i = tableEnd; i < rows.length; i++) grid.push(coalescedRow(rows[i]))
@@ -532,16 +804,92 @@ function coalescedRow(row: TextRow): string[] {
     if (pending.length) cells.push(pending.join(' '))
     pending = []
   }
-  for (const item of row.items) {
-    if (isLabel(item.str) || TOTALS_CELLS.has(normalizeLabel(item.str))) {
+  const strings = row.items.map((item) => item.str)
+  for (let i = 0; i < strings.length; i++) {
+    const span = labelSpanAt(strings, i)
+    if (span) {
       flush()
-      cells.push(item.str)
+      cells.push(span.text)
+      i = span.end
     } else {
-      pending.push(item.str)
+      pending.push(strings[i])
     }
   }
   flush()
   return cells
+}
+
+/**
+ * How many text items one printed label is allowed to have been split into.
+ *
+ * Six, because `CONSIGNEE EORI / USCI / VAT` is six words and a label that cannot be
+ * reassembled is a label that folds into the value beside it — which is the whole point of
+ * looking. Matching is on equality with a closed list, so the extra reach costs only the
+ * chance that several consecutive value items spell a label exactly.
+ */
+const MAX_LABEL_ITEMS = 6
+
+/**
+ * The label printed at `start`, whether the extractor emitted it as one item or several.
+ *
+ * pdfjs splits a printed run wherever it likes, and the table headings are guarded against
+ * exactly that a few functions up. The header grid was not: a split `INVOICE DATE:` was two
+ * ordinary items, so it folded into the value beside `INVOICE #:` — leaving an invoice
+ * number of `INV-123 INVOICE DATE: 08/10/2026`, which goes on to the SLI, the keying sheet
+ * reference and the output filename — and the date itself was never found.
+ *
+ * A single item that is already a whole label wins before any lookahead, so a row that the
+ * extractor did not split reads exactly as it did before. Both joins are tried because the
+ * split can fall between words (`INVOICE` + `DATE:`) or inside one (`INVOICE DA` + `TE:`).
+ */
+function labelSpanAt(
+  items: readonly string[],
+  start: number,
+  includeTotalsCells = true,
+): { text: string; end: number } | null {
+  const parts: string[] = []
+  // The longest match wins, and a header label beats a totals cell of the same length.
+  //
+  // Taking the first match instead let a shorter name swallow a longer one it is a prefix
+  // of: a split `FREIGHT CHARGES:` matched the totals cell `FREIGHT` on its first item and
+  // stopped there, so the label was never reassembled, `freightTerms` came back null and a
+  // PREPAID invoice was filed as COLLECT. `TAX` sits inside `SHIPPER EIN / TAX ID` the same
+  // way.
+  let best: { text: string; end: number; header: boolean } | null = null
+  for (let end = start; end < items.length && end - start < MAX_LABEL_ITEMS; end++) {
+    parts.push(items[end])
+    for (const joined of end === start ? [parts[0]] : [parts.join(' '), parts.join('')]) {
+      const header = isLabel(joined)
+      if (!header && !(includeTotalsCells && TOTALS_CELLS.has(normalizeLabel(joined)))) continue
+      if (!best || end > best.end || (end === best.end && header && !best.header)) {
+        best = { text: joined, end, header }
+      }
+    }
+  }
+  return best && { text: best.text, end: best.end }
+}
+
+/**
+ * Whether the row carries a header-grid label, counting one the extractor split.
+ *
+ * Header labels only. The totals cells `coalescedRow` also delimits on are ordinary words —
+ * a consignee at `NIPPON EXPRESS FREIGHT KK`, split into word items, ends the address band
+ * on `FREIGHT` and every address in the consignment is dropped.
+ */
+function hasLabel(row: TextRow): boolean {
+  const strings = row.items.map((item) => item.str)
+  return strings.some((_, i) => labelSpanAt(strings, i, false) !== null)
+}
+
+/**
+ * Whether these text items title an address block, counting a header label the extractor
+ * split into words.
+ *
+ * Exported so the separation can be asserted against the form's real label list, the way
+ * `isPartyTitle` already is — the split case is the one `isPartyTitle` alone cannot see.
+ */
+export function titlesPartyBlock(items: readonly string[], block: PartyBlock): boolean {
+  return items.some((item, i) => labelSpanAt(items, i, false) === null && isPartyTitle(item, block))
 }
 
 /**
@@ -550,8 +898,15 @@ function coalescedRow(row: TextRow): string[] {
  */
 function partyRow(row: TextRow, band: TextRow): string[] {
   const titles = band.items
-    .filter((item) => /^(SHIPPER|CONSIGNEE|BILL TO)/.test(item.str.toUpperCase()))
+    .filter((item) => PARTY_BLOCKS.some((block) => isPartyTitle(item.str, block)))
     .sort((a, b) => a.x - b.x)
+  // Three columns or none. The band is located on SHIPPER and CONSIGNEE alone, so an
+  // extractor that split "BILL TO / SOLD TO (IF DIFFERENT)" across items — leaving no item
+  // beginning "BILL TO" — still found it, and every bill-to address item then folded into
+  // the consignee's cell: a wrong CONSIGNED TO address on the SLI, with nothing said. An
+  // address block that cannot be mapped onto the form's three columns is not mapped at all,
+  // and `readParties` reports the empty blocks as it does for any band it cannot read.
+  if (titles.length !== PARTY_BLOCKS.length) return []
   const cells = titles.map(() => [] as string[])
   for (const item of row.items) {
     // The rightmost title at or left of the item owns it: titles and values are both
@@ -596,6 +951,15 @@ const isLnCell = (item: TextItem, anchors: Anchors): boolean =>
  *  - Top row vs compliance row is decided by baseline: the block's first (highest) left
  *    baseline is the part/description row. PDF y grows upward.
  */
+/**
+ * How far two baselines may differ and still be one printed line, in PDF units.
+ *
+ * Absorbs the fraction of a point a renderer puts between items of one line, and nothing
+ * more: the next wrapped line sits a whole font size below, which for this form is several
+ * times this figure.
+ */
+const SAME_BASELINE_TOLERANCE = 2
+
 function tableRowsToBlocks(rows: TextRow[], anchors: Anchors): SheetRows {
   interface Block {
     ln: string
@@ -691,12 +1055,38 @@ function tableRowsToBlocks(rows: TextRow[], anchors: Anchors): SheetRows {
     }
   }
 
-  const text = (map: Map<string, TextItem[]>, key: string): string =>
-    (map.get(key) ?? [])
-      .sort((a, b) => a.x - b.x)
-      .map((item) => item.str)
+  // Reading order is down the page and then across it, not across alone. A description
+  // that both wraps to a second printed line and is split into word items — the two
+  // behaviours this whole function is written around — was reassembled by x, which
+  // interleaves the lines: "Robot assembly cable, 5 m shielded" out of two rows that read
+  // "Robot cable assembly," and "5 m shielded". That scrambled string is what gets filed as
+  // the commodity description.
+  //
+  // Grouped into lines and then read across each, rather than sorted by a comparator that
+  // mixes the two axes. A tolerance inside a comparator is not an ordering — a can tie with
+  // b and b with c while a and c differ — and the tolerance itself has to be small: half a
+  // text row, which is what a quarter of the block pitch comes to, would swallow a tightly
+  // wrapped description and put its two lines back into one. Items are collected against
+  // the highest baseline of the line they join, so a run of small nudges cannot walk a line
+  // into the next one.
+  const text = (map: Map<string, TextItem[]>, key: string): string => {
+    const descending = (map.get(key) ?? []).slice().sort((a, b) => b.y - a.y)
+    const rows: TextItem[][] = []
+    for (const item of descending) {
+      const current = rows[rows.length - 1]
+      if (current && current[0].y - item.y <= SAME_BASELINE_TOLERANCE) current.push(item)
+      else rows.push([item])
+    }
+    return rows
+      .map((row) =>
+        row
+          .sort((a, b) => a.x - b.x)
+          .map((item) => item.str)
+          .join(' '),
+      )
       .join(' ')
       .trim()
+  }
 
   return blocks.flatMap((block) => [
     [block.ln, text(block.top, 'part'), text(block.top, 'description'), text(block.top, 'qty'),

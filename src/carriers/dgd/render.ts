@@ -41,6 +41,26 @@ const HATCH_WIDTH = 16
 const CONTENT = { left: FRAME.left + HATCH_WIDTH + 6, right: FRAME.right - HATCH_WIDTH - 6 }
 
 /**
+ * Vertical room for address lines in the Shipper and Consignee boxes, in points.
+ *
+ * Both boxes are 74pt tall and their first baseline sits 22pt below the top, leaving 48pt
+ * with 4pt held back off the floor. At the ordinary 10pt leading that is five lines; the
+ * condensed tier fits seven, which covers an international address with a unit and a
+ * region line. Without the bound the sixth line sat on the border and the seventh printed
+ * over the caption of the box beneath.
+ */
+const PARTY_HEIGHT = 48
+
+/**
+ * Held back between the last departure-airport line and the caption below it, in points.
+ *
+ * A full line, not a token gap. Measured baseline to baseline, 4pt against 7.5pt type put
+ * the last line's descenders through the capitals of "Airport of Destination:" — the block
+ * fitted its own capacity and still overlapped the box beneath it.
+ */
+const AIRPORT_CLEARANCE = 10
+
+/**
  * Column boundaries of the dangerous goods table, as x positions.
  *
  * The quantity column is the widest of the middle group on purpose. It carries not only
@@ -61,6 +81,29 @@ export const COLUMNS = {
 }
 
 export const ROW_HEIGHT = 11
+
+/** Points left between one entry and the next, so two entries do not read as one. */
+export const ENTRY_GAP = 4
+
+/**
+ * The table's own vertical extent, stated rather than accumulated.
+ *
+ * The boxes above it are 20pt of title and three stacked boxes of 74, 74 and 112; its
+ * headings take 58 and the first baseline sits 12 below them. The three boxes at the foot
+ * of the page are stacked up from the frame: 14, 88 and 58.
+ *
+ * Written here so the paginator's row budget can be checked against the space that actually
+ * exists. `ROWS_PER_PAGE` and this geometry were two unconnected numbers, and an entry
+ * beginning below the floor is one the sheet simply does not carry.
+ */
+export const TABLE_FIRST_ROW_Y = FRAME.top - 20 - 74 - 74 - 112 - 58 - 12
+export const TABLE_BOTTOM_Y = FRAME.bottom + 14 + 88 + 58
+
+/**
+ * Drawable width of the quantity column, in points: its own width less the 4pt inset the
+ * text starts at and a 4pt gap before the box beside it.
+ */
+export const QUANTITY_COLUMN_WIDTH = COLUMNS.packingInstruction - COLUMNS.quantity - 8
 
 /** Font size the quantity column and the overpack wording under it are drawn at. */
 export const QUANTITY_FONT_SIZE = 7
@@ -122,11 +165,15 @@ function drawPage(
   box(ctx, CONTENT.left, y - shipperHeight, midpoint, y)
   box(ctx, midpoint, y - shipperHeight, CONTENT.right, y)
   caption(ctx, 'Shipper', CONTENT.left + 4, y - 10)
-  lines(ctx, declaration.shipper, CONTENT.left + 6, y - 22, midpoint - CONTENT.left - 12, 'Shipper')
+  lines(ctx, declaration.shipper, CONTENT.left + 6, y - 22, midpoint - CONTENT.left - 12, 'Shipper', 8, PARTY_HEIGHT)
 
   caption(ctx, 'Air Waybill No.', midpoint + 4, y - 10)
   if (declaration.airWaybillNumber) {
-    text(ctx, declaration.airWaybillNumber, midpoint + 76, y - 10, { size: 8 })
+    text(ctx, declaration.airWaybillNumber, midpoint + 76, y - 10, {
+      size: 8,
+      maxWidth: CONTENT.right - (midpoint + 76) - 4,
+      label: 'Air waybill number',
+    })
   } else {
     fillable(ctx, doc, `awb_${pageModel.pageNumber}`, midpoint + 74, y - 13, 130, 12)
   }
@@ -135,7 +182,11 @@ function drawPage(
 
   caption(ctx, 'Shipper’s Reference Number', midpoint + 4, y - 46)
   text(ctx, '(optional)', midpoint + 4, y - 55, { size: 6, font: ctx.italic, color: GREY })
-  text(ctx, declaration.shippersReference, midpoint + 130, y - 46, { size: 8 })
+  text(ctx, declaration.shippersReference, midpoint + 130, y - 46, {
+    size: 8,
+    maxWidth: CONTENT.right - (midpoint + 130) - 4,
+    label: 'Shipper’s reference number',
+  })
   y -= shipperHeight
   void shipperTop
 
@@ -144,7 +195,7 @@ function drawPage(
   box(ctx, CONTENT.left, y - consigneeHeight, midpoint, y)
   box(ctx, midpoint, y - consigneeHeight, CONTENT.right, y)
   caption(ctx, 'Consignee', CONTENT.left + 4, y - 10)
-  lines(ctx, declaration.consignee, CONTENT.left + 6, y - 22, midpoint - CONTENT.left - 12, 'Consignee')
+  lines(ctx, declaration.consignee, CONTENT.left + 6, y - 22, midpoint - CONTENT.left - 12, 'Consignee', 8, PARTY_HEIGHT)
   text(ctx, 'For optional use — company logo, name and address', (midpoint + CONTENT.right) / 2, y - 38, {
     size: 7,
     color: GREY,
@@ -192,6 +243,8 @@ function drawPage(
 
   const airportLeft = CONTENT.left + 160
   const airportWidth = midpoint - airportLeft - 10
+  // Computed before the departure block is drawn, because it is what bounds it.
+  const destinationCaptionY = y - transportHeight + 10
   caption(ctx, 'Airport of Departure:', airportLeft, transportTop - 12)
   if (declaration.airportOfDeparture) {
     lines(
@@ -202,15 +255,24 @@ function drawPage(
       airportWidth,
       'Airport of departure',
       7.5,
+      // Bounded like the party blocks. The caption for the Airport of Destination sits
+      // directly beneath, and an airport named at length wrapped straight over it — the
+      // one value in this box that can run to several lines, and the only block still
+      // being told its box had no floor.
+      transportTop - 26 - destinationCaptionY - AIRPORT_CLEARANCE,
     )
   } else {
     fillable(ctx, doc, `departure_${pageModel.pageNumber}`, airportLeft, transportTop - 30, airportWidth, 12)
   }
 
-  const destinationY = y - transportHeight + 10
+  const destinationY = destinationCaptionY
   caption(ctx, 'Airport of Destination:', CONTENT.left + 7, destinationY)
   if (declaration.airportOfDestination) {
-    text(ctx, declaration.airportOfDestination, CONTENT.left + 96, destinationY, { size: 7.5 })
+    text(ctx, declaration.airportOfDestination, CONTENT.left + 96, destinationY, {
+      size: 7.5,
+      maxWidth: midpoint - (CONTENT.left + 96) - 6,
+      label: 'Airport of destination',
+    })
   } else {
     fillable(ctx, doc, `destination_${pageModel.pageNumber}`, CONTENT.left + 94, destinationY - 3, 140, 12)
   }
@@ -244,7 +306,7 @@ function drawPage(
   const signatureBottom = FRAME.bottom + 14
   const signatureTop = signatureBottom + 88
   const handlingTop = signatureTop + 58
-  const tableBottom = handlingTop
+  const tableBottom = TABLE_BOTTOM_Y
   box(ctx, CONTENT.left, tableBottom, CONTENT.right, y)
 
   text(ctx, 'NATURE AND QUANTITY OF DANGEROUS GOODS', CONTENT.left + 4, y - 10, { font: ctx.bold, size: 7.5 })
@@ -279,20 +341,32 @@ function drawPage(
     dashArray: [2, 2],
   })
 
-  let rowY = headerBottom - 12
+  let rowY = TABLE_FIRST_ROW_Y
   for (const line of pageModel.lines) {
     rowY = drawEntry(ctx, doc, line, rowY, pageModel.pageNumber, tableBottom)
-    rowY -= 4
+    rowY -= ENTRY_GAP
   }
 
   // --- Additional handling information -----------------------------------
   box(ctx, CONTENT.left, signatureTop, CONTENT.right, handlingTop)
   caption(ctx, 'Additional Handling Information', CONTENT.left + 4, handlingTop - 10)
+  // Warned about once for the declaration, not once per sheet. The box is drawn on every
+  // page and holds the same four lines on each, so a two-page consignment reported the same
+  // overflow twice — which reads as two separate things to shorten.
+  const firstSheet = pageModel.pageNumber === 1
+  const handlingWidth = CONTENT.right - CONTENT.left - 12
   declaration.additionalHandlingInformation.forEach((line, i) => {
     if (i > 3) return
-    text(ctx, line, CONTENT.left + 6, handlingTop - 22 - i * 9, { size: 7.5 })
+    // Cut to the box, like every other free-text value on the form. Box 18 takes whatever
+    // the shipper typed, and an emergency contact line long enough to leave the box was
+    // drawn straight over the red hatched margin and off the edge of the sheet.
+    text(ctx, line, CONTENT.left + 6, handlingTop - 22 - i * 9, {
+      size: 7.5,
+      maxWidth: handlingWidth,
+      label: 'Additional handling information',
+    })
   })
-  if (declaration.additionalHandlingInformation.length > 4) {
+  if (declaration.additionalHandlingInformation.length > 4 && firstSheet) {
     ctx.warnings.push(
       'The additional handling information runs to more lines than the box holds; only the first four were ' +
         'printed. Shorten it, or carry the rest on a separate sheet.',
@@ -316,9 +390,19 @@ function drawPage(
   )
 
   caption(ctx, 'Name', signatureSplit + 6, signatureTop - 12)
-  text(ctx, declaration.signerName, signatureSplit + 6, signatureTop - 23, { size: 8 })
+  const signerWidth = CONTENT.right - signatureSplit - 12
+  text(ctx, declaration.signerName, signatureSplit + 6, signatureTop - 23, {
+    size: 8,
+    maxWidth: signerWidth,
+    label: 'Name of signatory',
+  })
   if (declaration.signerTitle) {
-    text(ctx, declaration.signerTitle, signatureSplit + 6, signatureTop - 33, { size: 7, color: GREY })
+    text(ctx, declaration.signerTitle, signatureSplit + 6, signatureTop - 33, {
+      size: 7,
+      color: GREY,
+      maxWidth: signerWidth,
+      label: 'Title of signatory',
+    })
   }
   caption(ctx, 'Place and Date', signatureSplit + 6, signatureTop - 47)
   text(
@@ -326,7 +410,7 @@ function drawPage(
     [declaration.signerPlace, formatDate(declaration.signerDate)].filter(Boolean).join(', '),
     signatureSplit + 6,
     signatureTop - 58,
-    { size: 8 },
+    { size: 8, maxWidth: signerWidth, label: 'Place and date' },
   )
   // The caption sits at the top of the space, so the space beneath it is the space to sign in.
   caption(ctx, 'Signature', signatureSplit + 6, signatureTop - 72)
@@ -364,24 +448,47 @@ function drawEntry(
   // Rows at or below this y would leave the table box. `top` is the first row's baseline.
   const rowFits = (i: number) => top - i * ROW_HEIGHT > tableBottom + 2
   const totalRows = rows + line.annotations.length
+  // Counted over rows, not over the cells drawn in them. The name and the quantity are two
+  // columns of one row: incrementing in both callbacks reported a two-row entry as having
+  // lost four rows, which reads as a different, larger problem than the one on the sheet.
   let clipped = 0
+  for (let i = 0; i < totalRows; i++) if (!rowFits(i)) clipped++
+
+  // Nothing at all where the entry's own first row is already past the foot of the table.
+  // The wrapped columns are guarded row by row, but these five were drawn unconditionally —
+  // across the Additional Handling Information box beneath, under a warning saying those
+  // rows had not been printed.
+  //
+  // And said out loud. An entry the sheet does not carry is not a formatting problem; the
+  // paginator's budget is meant to make this unreachable, and if it is ever reached the
+  // declaration is short an entry, which nobody may discover by reading it.
+  if (!rowFits(0)) {
+    warnOnce(
+      ctx,
+      `The ${line.unNumber} entry begins below the foot of the table and was not printed at all. This sheet is ` +
+        'incomplete — do not offer it. Split the consignment across fewer entries per package, or report this.',
+    )
+    return top - totalRows * ROW_HEIGHT
+  }
 
   text(ctx, line.unNumber, COLUMNS.unNumber + 3, top, { size })
   line.properShippingName.forEach((part, i) => {
-    if (!rowFits(i)) {
-      clipped++
-      return
-    }
+    if (!rowFits(i)) return
     text(ctx, part, COLUMNS.properShippingName + 4, top - i * ROW_HEIGHT, { size })
   })
   text(ctx, line.classOrDivision, COLUMNS.classOrDivision + 18, top, { size })
   text(ctx, line.packingGroup, COLUMNS.packingGroup + 16, top, { size })
+  // Bounded like every other free-text value on this form. The model wraps this column by
+  // character count, which is a proxy for width and not a measurement of it: a packaging
+  // type or an overpack mark typed in capitals fits 34 characters and still overruns the
+  // column, printing across the Packing Inst. box beside it.
   line.quantityAndType.forEach((part, i) => {
-    if (!rowFits(i)) {
-      clipped++
-      return
-    }
-    text(ctx, part, COLUMNS.quantity + 4, top - i * ROW_HEIGHT, { size: QUANTITY_FONT_SIZE })
+    if (!rowFits(i)) return
+    text(ctx, part, COLUMNS.quantity + 4, top - i * ROW_HEIGHT, {
+      size: QUANTITY_FONT_SIZE,
+      maxWidth: QUANTITY_COLUMN_WIDTH,
+      label: `The ${line.unNumber} entry’s quantity and type of packing`,
+    })
   })
   text(ctx, line.packingInstruction, COLUMNS.packingInstruction + 5, top, { size })
 
@@ -404,11 +511,12 @@ function drawEntry(
 
   let y = top - rows * ROW_HEIGHT
   line.annotations.forEach((annotation, i) => {
-    if (!rowFits(rows + i)) {
-      clipped++
-      return
-    }
-    text(ctx, annotation, COLUMNS.quantity + 4, y - i * ROW_HEIGHT, { size: QUANTITY_FONT_SIZE })
+    if (!rowFits(rows + i)) return
+    text(ctx, annotation, COLUMNS.quantity + 4, y - i * ROW_HEIGHT, {
+      size: QUANTITY_FONT_SIZE,
+      maxWidth: QUANTITY_COLUMN_WIDTH,
+      label: `The ${line.unNumber} entry’s overpack wording`,
+    })
   })
   y -= line.annotations.length * ROW_HEIGHT
 
@@ -524,22 +632,107 @@ function caption(ctx: Ctx, label: string, x: number, y: number): void {
   text(ctx, label, x, y, { size: 7 })
 }
 
+/**
+ * The characters the standard fonts can put on the page.
+ *
+ * pdf-lib's standard fonts are WinAnsi-encoded, and `drawText` *throws* on anything outside
+ * it. Every value on this form comes from a person typing into a box — a consignee in
+ * Yokohama, a signer with a Cyrillic name — so an unencodable character has to be a
+ * substitution and a warning, not an exception that takes the whole declaration down with an
+ * opaque message about an encoding.
+ *
+ * Embedding a Unicode font instead would be the real answer and is a larger change: it means
+ * shipping a font file with a licence that permits it, and the regulation's own requirement
+ * is the Latin alphabet — "the information may be in a language other than English, provided
+ * an English translation is added" is about words, not glyphs.
+ */
+const WINANSI_EXTRAS = new Set('€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ')
+
+function encodable(char: string): boolean {
+  const code = char.codePointAt(0) ?? 0
+  return (code >= 0x20 && code <= 0x7e) || (code >= 0xa0 && code <= 0xff) || WINANSI_EXTRAS.has(char)
+}
+
+/** `value` with everything the font cannot draw replaced, or `value` where all of it can be. */
+function printable(value: string): string {
+  let out = ''
+  for (const char of value) out += encodable(char) ? char : '?'
+  return out
+}
+
 function text(
   ctx: Ctx,
   value: string,
   x: number,
   y: number,
-  options: { size?: number; font?: PDFFont; color?: ReturnType<typeof rgb>; align?: 'left' | 'right' | 'center' } = {},
+  options: {
+    size?: number
+    font?: PDFFont
+    color?: ReturnType<typeof rgb>
+    align?: 'left' | 'right' | 'center'
+    /**
+     * Cut the value to this width, with an ellipsis, rather than drawing past it.
+     *
+     * Every box on this form has a right-hand edge and something printed beyond it — the
+     * air waybill column, the WARNING box, the hatched margin. A value drawn over its
+     * neighbour is worse than a visibly shortened one, because the reader cannot tell which
+     * box the overrun belongs to.
+     */
+    maxWidth?: number
+    /** What to call the value in a warning about it. Omit to shorten silently. */
+    label?: string
+  } = {},
 ): void {
   if (!value) return
   const font = options.font ?? ctx.regular
   const size = options.size ?? 8
-  const width = font.widthOfTextAtSize(value, size)
+  const safe = printable(value)
+  if (safe !== value && options.label) {
+    warnOnce(
+      ctx,
+      `${options.label}: "${value}" contains characters this form cannot print; they were replaced with "?". ` +
+        'Write the value in the Latin alphabet, or add it to the printed form by hand before signing.',
+    )
+  }
+  const drawn = options.maxWidth == null ? safe : clipToWidth(font, safe, options.maxWidth, size)
+  if (drawn !== safe && options.label) {
+    warnOnce(
+      ctx,
+      `${options.label}: "${safe}" is wider than its box. Printed as "${drawn}". Shorten it, or write the ` +
+        'rest on the form by hand before signing.',
+    )
+  }
+  const width = font.widthOfTextAtSize(drawn, size)
   const left = options.align === 'right' ? x - width : options.align === 'center' ? x - width / 2 : x
-  ctx.page.drawText(value, { x: left, y, size, font, color: options.color ?? BLACK })
+  ctx.page.drawText(drawn, { x: left, y, size, font, color: options.color ?? BLACK })
 }
 
-/** A block of address lines, reporting anything too wide for its box rather than clipping it. */
+/**
+ * A warning raised at most once per declaration.
+ *
+ * Every box is drawn on every sheet, so a complaint about one value would otherwise be made
+ * once per page. Deduplicated by the whole message, which carries the value it is about.
+ */
+function warnOnce(ctx: Ctx, message: string): void {
+  if (!ctx.warnings.includes(message)) ctx.warnings.push(message)
+}
+
+/**
+ * The longest prefix of `value` that fits `maxWidth`, marked with an ellipsis where one was
+ * taken. Returns `value` unchanged when the whole of it fits.
+ *
+ * A shortened line is visibly shortened. Cut silently at the box edge it would read as a
+ * complete instruction that happens to end oddly, which on a shipping paper is worse than
+ * an obviously truncated one — the ellipsis is what sends a reader back to the screen.
+ */
+function clipToWidth(font: PDFFont, value: string, maxWidth: number, size: number): string {
+  if (font.widthOfTextAtSize(value, size) <= maxWidth) return value
+  let cut = value.length
+  while (cut > 0 && font.widthOfTextAtSize(`${value.slice(0, cut)}…`, size) > maxWidth) cut--
+  return `${value.slice(0, cut)}…`
+}
+
+/** A block of address lines, each cut to its box and reported where cutting was needed. */
 function lines(
   ctx: Ctx,
   values: string[],
@@ -548,13 +741,64 @@ function lines(
   maxWidth: number,
   label: string,
   size = 8,
+  /**
+   * Vertical room below `top`, in points, or `Infinity` where the box is not the
+   * constraint.
+   *
+   * A block that does not fit is condensed rather than truncated. Address lines are not
+   * decoration — box 1 and box 2 are required to be complete, and an address delivered
+   * without its country line is a defective declaration whether the reader is told or
+   * not. Only past what condensing can hold is anything left off, and then loudly.
+   */
+  available = Infinity,
 ): void {
+  // These blocks are drawn on every sheet, so each complaint would otherwise be made once
+  // per page about one address. Deduplicated rather than emitted per page: two genuinely
+  // different truncated table rows can carry the same wording, and `warnOnce` compares the
+  // whole message, which names the value it is about.
+  const warn = (message: string) => warnOnce(ctx, message)
+
+  const fit = fitLines(values.length, available, size)
   values.forEach((value, i) => {
-    if (ctx.regular.widthOfTextAtSize(value, size) > maxWidth) {
-      ctx.warnings.push(`${label}: "${value}" is wider than its box and may be clipped when printed.`)
-    }
-    text(ctx, value, x, top - i * 10, { size })
+    if (i >= fit.capacity) return
+    // Cut, not merely reported. `fitLines` condenses on line *count*; a single line wider
+    // than the box was drawn in full over the air waybill column beside it, under a warning
+    // that said it "may be clipped" while nothing clipped it.
+    text(ctx, value, x, top - i * fit.leading, { size: fit.size, maxWidth, label })
   })
+
+  if (values.length > fit.capacity) {
+    warn(
+      `${label}: ${values.length} lines were supplied and only ${fit.capacity} fit the box, even condensed. ` +
+        `Not printed: ${values.slice(fit.capacity).map((v) => `"${v}"`).join(', ')}. ` +
+        'Shorten the address, or write the rest on the form by hand before signing.',
+    )
+  }
+}
+
+/**
+ * The type size and leading that put `count` lines inside `available` points.
+ *
+ * Two tiers and then a stop. The printed form's own boxes are generous for four lines and
+ * tight for six, so the second tier buys the two lines that separate an ordinary
+ * international address from one that overflows, without shrinking every declaration to
+ * fit the worst one.
+ */
+function fitLines(
+  count: number,
+  available: number,
+  size: number,
+): { size: number; leading: number; capacity: number } {
+  const tiers = [
+    { size, leading: 10 },
+    { size: size - 1, leading: 8 },
+  ]
+  for (const tier of tiers) {
+    const capacity = Number.isFinite(available) ? Math.floor(available / tier.leading) + 1 : Infinity
+    if (count <= capacity) return { ...tier, capacity }
+  }
+  const last = tiers[tiers.length - 1]
+  return { ...last, capacity: Math.floor(available / last.leading) + 1 }
 }
 
 /** Word wrap against the real font metrics, for the few places the model does not pre-wrap. */
@@ -564,7 +808,12 @@ function wrapToWidth(ctx: Ctx, value: string, maxWidth: number, size: number): s
   let current = ''
   for (const word of words) {
     const candidate = current ? `${current} ${word}` : word
-    if (ctx.regular.widthOfTextAtSize(candidate, size) <= maxWidth || !current) current = candidate
+    // Measured through `printable`, drawn as it came. `widthOfTextAtSize` throws on anything
+    // outside WinAnsi exactly as `drawText` does, so measuring the raw string took the whole
+    // declaration down for an airport named in Japanese — the one path into the font that
+    // reached it before `text()` had a chance to substitute. The lines are returned
+    // unchanged, so `text()` still does the substituting and still says it did.
+    if (ctx.regular.widthOfTextAtSize(printable(candidate), size) <= maxWidth || !current) current = candidate
     else {
       out.push(current)
       current = word

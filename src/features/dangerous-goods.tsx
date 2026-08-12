@@ -26,7 +26,7 @@ import {
   Toggle,
 } from '../components/ui'
 import { ChecksPanel } from './review'
-import { assess, packageCountInConsignment } from '../domain/dangerous-goods/assess'
+import { assess, overpackOrder, packageCountInConsignment } from '../domain/dangerous-goods/assess'
 import { buildChecklist } from '../domain/dangerous-goods/checklist'
 import { buildDeclaration, formatKg, retainUntil } from '../domain/dangerous-goods/dgd'
 import {
@@ -73,6 +73,16 @@ const ARTICLE_LEVEL_LABELS: Record<ArticleLevel, string> = {
   equipment: 'Equipment containing cells or batteries',
 }
 
+/**
+ * How long after filing a consignment a second download counts as the same preparation.
+ *
+ * Generating the declaration and then printing the bench checklist is one preparation and
+ * belongs in one retention row; coming back to the same shipment next quarter is not, and
+ * must not inherit the first one's date. Half an hour is long enough for the first and far
+ * short of the second.
+ */
+const SAME_PREPARATION_MS = 30 * 60 * 1000
+
 const SOC_BASIS_LABELS: Record<StateOfChargeBasis, string> = {
   'rated-capacity': 'Rated capacity',
   'rated-design-capacity': 'Rated design capacity',
@@ -94,7 +104,12 @@ export function DangerousGoodsPanel({
   /** Held above this component so switching tabs does not discard it. */
   consignment: DgConsignment
   onConsignmentChange: Dispatch<SetStateAction<DgConsignment>>
-  onPrepared: (record: DgConsignmentRecord) => void
+  /**
+   * Awaited, and its failure carried into the caller's `catch`. The retention record is
+   * the evidence that this declaration was produced; writing the PDF and reporting "Saved
+   * to …" over a rejected write would leave the file on disk with nothing behind it.
+   */
+  onPrepared: (record: DgConsignmentRecord) => void | Promise<void>
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -131,14 +146,44 @@ export function DangerousGoodsPanel({
     }))
   }, [setConsignment])
 
-  /** Records what was prepared, which is the two-year retention obligation in practice. */
+  /**
+   * Records what was prepared, which is the two-year retention obligation in practice.
+   *
+   * Downloading the declaration and then the checklist is one preparation of one
+   * consignment, not two, and minting a fresh timestamp for each put two indistinguishable
+   * rows in the retention list — the `busy` guards only ever stopped a double-click on one
+   * button. So a consignment already on file keeps the identity it was filed under, and the
+   * second write lands on the first. Edit anything and it is a new preparation, with its
+   * own row.
+   *
+   * Matched against the records rather than remembered in a ref, because this panel
+   * unmounts every time the other tab is shown: a component-local memory of the last write
+   * forgets across a tab switch, and across a reload, which is exactly when someone comes
+   * back to print the checklist for what they generated earlier.
+   *
+   * And bounded in time, because that match is on content alone. Preparing the same
+   * consignment again months later is a *new* preparation with its own two-year window;
+   * inheriting the old row's date would back-date it, overwrite the earlier evidence, and
+   * shorten the period both are kept for. Only a record from the last little while is the
+   * same preparation as this one.
+   */
   const record = useCallback((): DgConsignmentRecord => {
-    const now = new Date()
-    const preparedAt = now.toISOString()
+    const now = Date.now()
+    const fingerprint = JSON.stringify(consignment)
+    const filed = records.find((r) => {
+      if (JSON.stringify(r.consignment) !== fingerprint) return false
+      // Bounded at both ends. Without a floor, a record stamped in the future — a clock
+      // that has since been corrected, a record restored from a machine set ahead —
+      // satisfied "less than half an hour ago", and a genuinely new preparation then reused
+      // its id and overwrote the earlier row with a back-dated one.
+      const age = now - new Date(r.preparedAt).getTime()
+      return age >= 0 && age < SAME_PREPARATION_MS
+    })
+    const preparedAt = filed?.preparedAt ?? new Date(now).toISOString()
     return {
       id: `${consignment.airWaybillNumber || consignment.shippersReference || 'consignment'}@${preparedAt}`,
       preparedAt,
-      retainUntil: retainUntil(now),
+      retainUntil: retainUntil(new Date(preparedAt)),
       airWaybillNumber: consignment.airWaybillNumber,
       shippersReference: consignment.shippersReference,
       consigneeName: consignment.consignee.name,
@@ -153,7 +198,29 @@ export function DangerousGoodsPanel({
       consignment,
       checks: assessment.checks,
     }
-  }, [consignment, assessment])
+  }, [consignment, assessment, records])
+
+  /**
+   * Writes the retention record, and reports a failed write as what it is.
+   *
+   * Called after the file has been delivered and opened, so a rejection here is not a
+   * failed generation: the artifact exists, and telling someone it could not be generated
+   * would send them to produce a second one. What is missing is the evidence that this one
+   * was produced, which is the two-year obligation and has to be said plainly — beside the
+   * "Saved to …" line, not instead of it.
+   */
+  async function retain(artifact: string) {
+    try {
+      await onPrepared(record())
+    } catch (e) {
+      const because = e instanceof Error ? e.message : 'the record could not be written'
+      setError(
+        `The ${artifact} was saved, but this machine did not record that it was prepared (${because}). ` +
+          'The retention record is the evidence of preparation and has to be kept for two years — note this ' +
+          'consignment somewhere else, and check the browser storage for this site.',
+      )
+    }
+  }
 
   async function generateDeclaration() {
     // Guarded like the checklist below: each run appends a retention record, and a
@@ -175,7 +242,7 @@ export function DangerousGoodsPanel({
       // Opened straight away, like the SLI: the next thing anyone does with a declaration is
       // read it, print it in colour and sign it by hand.
       await openDelivery(bridge, delivery)
-      onPrepared(record())
+      await retain('declaration')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'The declaration could not be generated.')
     } finally {
@@ -189,6 +256,9 @@ export function DangerousGoodsPanel({
     if (busy) return
     setBusy(true)
     setError(null)
+    // And cleared like it. The warnings come from drawing the declaration; left standing
+    // beside a checklist download they describe a form this button does not produce.
+    setWarnings([])
     try {
       const markdown = buildChecklist(consignment, assessment, localDate())
       const delivery = await deliver(
@@ -201,7 +271,7 @@ export function DangerousGoodsPanel({
       await openDelivery(bridge, delivery)
       // Recorded too: for a Section II consignment this checklist is the only artifact, and a
       // consignment that left the tool with no record has no audit trail at all.
-      onPrepared(record())
+      await retain('checklist')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'The checklist could not be saved.')
     } finally {
@@ -427,7 +497,7 @@ export function DangerousGoodsPanel({
                 />
               )}
             </Field>
-            <Field label="Place" hint="Optional.">
+            <Field label="Place" hint="Box 20 is “Place and Date”; both halves are the shipper’s.">
               {(id) => (
                 <Input
                   id={id}
@@ -578,7 +648,11 @@ function PackagesEditor({
         }
       />
       <CardBody className="space-y-4">
-        {consignment.packages.map((pkg, index) => {
+        {/* Numbered the way the declaration and the bench checklist number them, so
+            "Package 2" here is the box "### 2." describes. Packages sharing an overpack are
+            emitted together on the paperwork, and a screen that listed them in entry order
+            gave the same ordinal to two different boxes. */}
+        {overpackOrder(consignment.packages, (p) => p.overpackId).map((pkg, index) => {
           const assessed = assessment.packages.find((p) => p.pkg.id === pkg.id)
           const total = packageCountInConsignment(pkg, consignment)
           return (
@@ -749,7 +823,14 @@ function PackagesEditor({
                           <span className="text-[var(--color-ink-soft)]">{classification.properShippingName}</span>{' '}
                           <span className="text-[var(--color-ink-faint)]">
                             · Class {classification.hazardClass} · PI {classification.packingInstruction}
-                            {classification.band === 'unknown' ? (
+                            {/*
+                              The unstated-rating wording belongs to entries whose treatment
+                              the rating decides. A standalone sodium ion battery under
+                              PI 976 is classified identically either way — saying its
+                              section is pending would contradict the check beside it and
+                              hide the limit for a consignment this tool will file.
+                            */}
+                            {classification.sectionUndetermined ? (
                               <> — the section follows from the energy content, which has not been stated</>
                             ) : (
                               <>
@@ -763,6 +844,20 @@ function PackagesEditor({
                             )}
                           </span>
                         </p>
+                      ) : null}
+                      {/*
+                        Column M, on screen beside the entry it belongs to. The checks cite
+                        individual provisions where one decides an answer, but a shipper
+                        reading a classification needs the list itself — it is what the
+                        column is for, and the ones that do not decide anything here are
+                        still the ones a state or operator variation is written against.
+                      */}
+                      {classification?.specialProvisions.length ? (
+                        <ul className="mt-2 space-y-0.5 text-xs text-[var(--color-ink-faint)]">
+                          {classification.specialProvisions.map((provision) => (
+                            <li key={provision}>{provision}</li>
+                          ))}
+                        </ul>
                       ) : null}
                     </div>
                   )
@@ -798,7 +893,14 @@ function PackagesEditor({
                       type="number"
                       min={1}
                       value={overpack.count}
-                      onChange={(e) => updateOverpack(overpack.id, { count: Number(e.target.value) || 1 })}
+                      // Zero, like the package count beside it, not one. Coerced to one, a
+                      // cleared box silently under-counted the consignment: the package
+                      // total is the product of the two, so six packages read as two, the
+                      // two-package battery mark exemption was granted, and the mark came
+                      // off the marks list and the bench checklist for packages that need
+                      // it. `dg.overpack-count` is there to refuse this, and could never
+                      // see it.
+                      onChange={(e) => updateOverpack(overpack.id, { count: Number(e.target.value) || 0 })}
                     />
                   )}
                 </Field>
@@ -1136,12 +1238,17 @@ function EntryEditor({
           checked={entry.wattHourMarkedOnCase}
           onChange={(next) => onChange({ wattHourMarkedOnCase: next })}
         />
-        <Toggle
-          label="Button cells installed in equipment"
-          checked={entry.buttonCellsInEquipment}
-          onChange={(next) => onChange({ buttonCellsInEquipment: next })}
-          hint="Including circuit boards."
-        />
+        {/* Only meaningful for cells installed in equipment, and both rules that key on it
+            — the test-summary exception and the battery mark — require that. Offered on a
+            standalone entry, it read as a claim the regulations do not recognise. */}
+        {entry.spec.configuration === 'contained-in-equipment' ? (
+          <Toggle
+            label="Button cells installed in equipment"
+            checked={entry.buttonCellsInEquipment}
+            onChange={(next) => onChange({ buttonCellsInEquipment: next })}
+            hint="Including circuit boards."
+          />
+        ) : null}
         {entry.spec.configuration !== 'standalone' ? (
           <Toggle
             label="Prepared to Section I"
@@ -1187,7 +1294,11 @@ function RequirementsPanel({
         {!assessment.packages.length ? (
           <EmptyState title="Nothing described yet">Add a package and the batteries in it.</EmptyState>
         ) : (
-          assessment.packages.map((assessed, index) => (
+          // Through `overpackOrder`, like the editor, the declaration and the bench sheet.
+          // This is the panel that says which marks go on which box, so its "Package 2"
+          // being a different box from the editor's is the worst place for the two to
+          // disagree.
+          overpackOrder(assessment.packages, (p) => p.pkg.overpackId).map((assessed, index) => (
             <div key={assessed.pkg.id}>
               <p className="text-sm font-medium">
                 Package {index + 1} — {packageCountInConsignment(assessed.pkg, consignment)} ×{' '}
@@ -1394,7 +1505,7 @@ export function DgHistoryPanel({ records }: { records: DgConsignmentRecord[] }) 
                     </td>
                     <td className="tabular py-2 pr-4 text-right">{record.packages}</td>
                     <td className="tabular py-2 pr-4 text-right">{formatKg(record.netWeightKg)}</td>
-                    <td className="py-2 pr-4 text-[var(--color-ink-faint)]">{record.preparedAt.slice(0, 10)}</td>
+                    <td className="py-2 pr-4 text-[var(--color-ink-faint)]">{localDate(new Date(record.preparedAt))}</td>
                     <td className="tabular py-2">{record.retainUntil}</td>
                   </tr>
                 ))}

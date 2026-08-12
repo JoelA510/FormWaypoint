@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { consignment, entry, pkg } from './test-support'
-import { assess } from './assess'
+import { consignment, entry, overpack, pkg } from './test-support'
+import { assess, overpackOrder } from './assess'
 import { buildChecklist } from './checklist'
-import { retainUntil } from './dgd'
+import { buildDeclaration, retainUntil } from './dgd'
+import { localDate } from '../../lib/report'
 
 
 describe('the package checklist', () => {
@@ -67,6 +68,32 @@ describe('the package checklist', () => {
     expect(markdown).toContain('Packing Group II')
   })
 
+  it('picks the packaging instruction from the section, not from whether a mark was typed', () => {
+    // A Section II equipment package in a box that happens to carry a `4G/…` mark was
+    // handed the Packing Group II instruction, while `dg.packaging` said in the same
+    // document that this section does not require it.
+    const excepted = consignment([
+      pkg('p1', [
+        entry('e1', { configuration: 'contained-in-equipment', wattHours: 76 }, {
+          netWeightKgPerPackage: 1.5,
+          countPerPackage: 3,
+        }),
+      ], { unSpecificationMark: '4G/Y25/S/26/USA/+D02390' }),
+    ])
+    const markdown = buildChecklist(excepted, assess(excepted), '2026-08-06')
+    expect(markdown).toContain('- [ ] Strong rigid outer packaging.')
+    expect(markdown).not.toContain('meeting Packing Group II')
+  })
+
+  it('does not claim either packaging answer for an unrated battery', () => {
+    // The check panel says the two candidate sections disagree; the sheet that goes to the
+    // bench said flatly that none was required.
+    const unrated = consignment([pkg('p1', [entry('e1', { wattHours: null })])])
+    const markdown = buildChecklist(unrated, assess(unrated), '2026-08-06')
+    expect(markdown).toContain('the two sections it could fall in disagree')
+    expect(markdown).not.toContain('- [ ] Strong rigid outer packaging.')
+  })
+
   it('carries the failing checks through, so a half-prepared consignment says what is missing', () => {
     const shipment = consignment([pkg('p1', [entry('e1', { wattHours: null })])])
     const markdown = buildChecklist(shipment, assess(shipment), '2026-08-06')
@@ -80,6 +107,60 @@ describe('the package checklist', () => {
     })
     const markdown = buildChecklist(shipment, assess(shipment), '2026-08-06')
     expect(markdown).toContain('| Consignee | Acme \\| Distribution |')
+  })
+})
+
+describe('the section numbers on the bench sheet', () => {
+  it('follow the order the declaration prints the packages in', () => {
+    // The declaration brings packages sharing an overpack together, because the overpack
+    // wording is written once after the last entry inside it. The checklist numbered its
+    // sections in input order, so the two documents in one envelope disagreed about which
+    // box section 2 was describing.
+    const shipment = consignment(
+      [
+        pkg('p1', [entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 2 })], { overpackId: 'o1' }),
+        pkg('p2', [entry('e2', { wattHours: 96 }, { netWeightKgPerPackage: 3 })], { overpackId: 'o2' }),
+        pkg('p3', [entry('e3', { wattHours: 97 }, { netWeightKgPerPackage: 4 })], { overpackId: 'o1' }),
+      ],
+      { overpacks: [overpack('o1'), overpack('o2', { marks: '#A002' })] },
+    )
+    const assessed = assess(shipment)
+    const declared = buildDeclaration(shipment, assessed).lines.map((l) => l.quantityAndType.join(' '))
+    // The declaration puts the two #A001 packages together: 2 kg, 4 kg, then 3 kg.
+    expect(declared).toEqual(['1 Fibreboard box x 2 kg', '1 Fibreboard box x 4 kg', '1 Fibreboard box x 3 kg'])
+
+    const markdown = buildChecklist(shipment, assessed, '2026-08-06')
+    expect(markdown.split('\n').filter((l) => /^### \d+\./.test(l))).toHaveLength(3)
+    const listed = markdown
+      .split('\n')
+      .filter((l) => l.startsWith('- **UN'))
+      .map((l) => l.match(/(\d+) Wh/)![1])
+    expect(listed).toEqual(['95', '97', '96'])
+
+    // And the editor numbers them the same way, so "Package 2" on screen is the box the
+    // sheet's second section describes.
+    expect(overpackOrder(shipment.packages, (p) => p.overpackId).map((p) => p.id)).toEqual(['p1', 'p3', 'p2'])
+  })
+
+  it('leaves a consignment with no overpacks in the order it was entered', () => {
+    const plain = [pkg('p1', []), pkg('p2', []), pkg('p3', [])]
+    expect(overpackOrder(plain, (p) => p.overpackId).map((p) => p.id)).toEqual(['p1', 'p2', 'p3'])
+  })
+})
+
+describe('the air waybill alternatives', () => {
+  it('does not offer an un-annotated wording for goods that may not fly on a passenger aircraft', () => {
+    // The annotation follows the same input the statement itself does: cargo-only where the
+    // goods force it or the consignment chose it. Reading the consignment alone offered
+    // "equally accepted" wordings without it for standalone batteries, which are cargo
+    // aircraft only whatever the booking says.
+    const shipment = consignment([pkg('p1', [entry('e1', { wattHours: 95 })])], {
+      aircraft: 'passenger-and-cargo',
+    })
+    const markdown = buildChecklist(shipment, assess(shipment), '2026-08-06')
+    const offered = markdown.split('\n').filter((l) => l.startsWith('- “Dangerous goods'))
+    expect(offered.length).toBeGreaterThan(0)
+    expect(offered.every((l) => l.includes('Cargo Aircraft Only'))).toBe(true)
   })
 })
 
@@ -157,5 +238,42 @@ describe('the checklist states each entry against its own allowance', () => {
     const markdown = buildChecklist(shipment, assess(shipment), '2026-08-06')
     expect(markdown).toContain('UN3480: 8 kg in this package, at or below the 10 kg')
     expect(markdown).toContain('UN3090: 2 kg in this package, at or below the 2.5 kg')
+  })
+
+  it('states one allowance for a package A181 makes one entry of', () => {
+    // Prepared to Section I, so both are declared. A181 makes them one entry: the bench
+    // checklist listed two, each against its own configuration's allowance, while the
+    // declaration in the same envelope printed one merged line.
+    const shipment = consignment([
+      pkg('p1', [
+        entry('e1', { configuration: 'packed-with-equipment', wattHours: 90 }, {
+          netWeightKgPerPackage: 2,
+          prepareToSectionI: true,
+        }),
+        entry('e2', { configuration: 'contained-in-equipment', wattHours: 90 }, {
+          netWeightKgPerPackage: 2,
+          countPerPackage: 1,
+          prepareToSectionI: true,
+        }),
+      ]),
+    ])
+    const markdown = buildChecklist(shipment, assess(shipment), '2026-08-06')
+    const allowances = markdown.split('\n').filter((l) => l.includes('in this package, at or below'))
+    expect(allowances).toHaveLength(1)
+    expect(allowances[0]).toContain('UN3481: 4 kg in this package')
+  })
+})
+
+describe('the prepared date shown beside the retention date', () => {
+  it('is the same calendar basis, so the pair is exactly two years apart', () => {
+    // What the record stores, and what the history table renders from it.
+    const now = new Date(2026, 7, 11, 18, 0) // 6pm local — the next day in UTC west of Greenwich
+    const preparedAt = now.toISOString()
+    const shown = localDate(new Date(preparedAt))
+    const keepUntil = retainUntil(now)
+
+    // Taking the date off the ISO string instead would show a UTC day, and the pair would
+    // read a day short of the two years the table exists to evidence.
+    expect(keepUntil).toBe(`${Number(shown.slice(0, 4)) + 2}${shown.slice(4)}`)
   })
 })

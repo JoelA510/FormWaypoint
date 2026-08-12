@@ -54,7 +54,14 @@ export function ItemLibraryPanel({
 }: {
   entries: ItemLibraryEntry[]
   scheduleB: ScheduleBIndex | null
-  onImport: (entries: ItemLibraryEntry[], mode: ImportMode) => void
+  /**
+   * Resolves `false` where the write failed.
+   *
+   * The panel reports "N added" and discards the staged file on the strength of this, so a
+   * failed write reported as a successful import left nothing on disk, an unchanged count on
+   * screen, and no file to try again with.
+   */
+  onImport: (entries: ItemLibraryEntry[], mode: ImportMode) => Promise<boolean>
   onClear: () => void
 }) {
   const fileInput = useRef<HTMLInputElement>(null)
@@ -93,14 +100,17 @@ export function ItemLibraryPanel({
     }
   }
 
-  function commit() {
+  async function commit() {
     if (!staged) return
     try {
       const result = importItems(staged.rows, { fileName: staged.fileName, weightUnit: unit, index: scheduleB })
       const effective = entries.length ? mode : 'replace'
       const held = new Set(entries.map((e) => e.partNumber))
       const updated = result.entries.filter((e) => held.has(e.partNumber)).length
-      onImport(result.entries, effective)
+      // Nothing is reported and nothing is discarded until the write has actually landed.
+      // The caller says where it failed; keeping the staged file means the operator can try
+      // again without going back to the spreadsheet.
+      if (!(await onImport(result.entries, effective))) return
       setSummary(result)
       // Only meaningful for a merge — after a replace nothing was "already held".
       setAdded(effective === 'merge' ? { added: result.entries.length - updated, updated } : null)
@@ -177,7 +187,7 @@ export function ItemLibraryPanel({
               setStaged(null)
               if (fileInput.current) fileInput.current.value = ''
             }}
-            onCommit={commit}
+            onCommit={() => void commit()}
           />
         )}
 

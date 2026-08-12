@@ -123,6 +123,17 @@ describe('safeFileName', () => {
     }
   })
 
+  it('strips a leading dot that sits behind a space, and a trailing one', () => {
+    // The strip ran before the trim, so a space in front of the dot carried it through and
+    // named a hidden file — and the trailing dots the comment promised to remove were never
+    // looked for. Windows strips those itself, leaving a file the app cannot find again.
+    expect(safeFileName(' .A1_shippers-declaration.pdf')).toBe('A1_shippers-declaration.pdf')
+    expect(safeFileName('A1_dg-checklist.md.')).toBe('A1_dg-checklist.md')
+    // And more than one run of them, from either end.
+    expect(safeFileName('. .A1_shippers-declaration.pdf')).toBe('A1_shippers-declaration.pdf')
+    expect(safeFileName('A1_dg-checklist.md. .')).toBe('A1_dg-checklist.md')
+  })
+
   it('strips the other characters Windows refuses', () => {
     expect(safeFileName('inv:oice*?"<>|.pdf')).toBe('inv-oice------.pdf')
   })
@@ -137,8 +148,11 @@ describe('safeFileName', () => {
     expect(safeFileName('   ')).toBe('document')
     expect(safeFileName('...')).toBe('document')
     expect(safeFileName('..')).toBe('document')
-    // CON.pdf is not a file on Windows, whatever the extension says.
-    expect(safeFileName('CON.pdf')).toBe('document')
+    // CON.pdf is not a file on Windows, whatever the extension says — but the extension is
+    // kept, because the fallback stem alone leaves a declaration the system cannot open by
+    // type, which the truncation branch below goes to some trouble to avoid.
+    expect(safeFileName('CON.pdf')).toBe('document.pdf')
+    expect(safeFileName('CON')).toBe('document')
     expect(safeFileName('lpt1')).toBe('document')
     // But a name that merely starts with those letters is fine.
     expect(safeFileName('console.pdf')).toBe('console.pdf')

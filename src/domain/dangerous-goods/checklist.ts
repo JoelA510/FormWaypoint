@@ -13,13 +13,15 @@
  * rather than a summary of findings.
  */
 import { cell } from '../../lib/report'
-import { groupByClassification, packageCountInConsignment, type DgAssessment } from './assess'
+import { applyA181, groupByClassification, overpackOrder, packageCountInConsignment, type DgAssessment } from './assess'
 import { formatKg } from './dgd'
 import {
   CHEMISTRY_LABELS,
   FORM_LABELS,
   combinedSectionIIStatement,
   fullyRegulatedStatementVariants,
+  undecidedPackagingSections,
+  type AircraftLimitation,
 } from './lithium'
 import { ARTICLE_LEVEL_PHRASES, PROHIBITED_CO_PACKED_CLASSES, type DgConsignment } from './types'
 
@@ -89,7 +91,15 @@ export function buildChecklist(
     if (assessment.declarationRequired) {
       // Only the wordings not already listed above, so the reader is looking at alternatives
       // rather than at the same sentence twice.
-      const alternatives = fullyRegulatedStatementVariants(consignment.aircraft).filter(
+      // The same input `airWaybillStatement` decides the annotation from: cargo-only where
+      // the goods force it *or* the consignment chose it. Reading the consignment alone,
+      // the alternatives offered un-annotated wordings as "equally accepted" for goods that
+      // may not be carried on a passenger aircraft at all.
+      const offered: AircraftLimitation =
+        consignment.aircraft === 'cargo-aircraft-only' || assessment.requiredAircraft === 'cargo-aircraft-only'
+          ? 'cargo-aircraft-only'
+          : 'passenger-and-cargo'
+      const alternatives = fullyRegulatedStatementVariants(offered).filter(
         (variant) => !assessment.airWaybillStatements.includes(variant),
       )
       if (alternatives.length) {
@@ -122,7 +132,8 @@ export function buildChecklist(
   // --- Package by package ------------------------------------------------
   out.push('## Packages')
   out.push('')
-  for (const [index, assessed] of assessment.packages.entries()) {
+  // Numbered in the order the declaration prints them; the two travel in one envelope.
+  for (const [index, assessed] of overpackOrder(assessment.packages, (p) => p.pkg.overpackId).entries()) {
     const { pkg } = assessed
     const count = packageCountInConsignment(pkg, consignment)
     const overpack = pkg.overpackId ? consignment.overpacks.find((o) => o.id === pkg.overpackId) : null
@@ -178,14 +189,37 @@ export function buildChecklist(
 
     out.push('**Packaging**')
     out.push('')
-    if (pkg.unSpecificationMark.trim()) {
+    // Which instruction applies follows the section, not whether somebody typed a mark. A
+    // Section II equipment package that happens to be in a box carrying a `4G/…` mark was
+    // handed the Packing Group II instruction while `dg.packaging` said, in the same
+    // document, that this section does not require it.
+    const needsUnSpec = assessed.entries.some((e) => e.classification.unSpecificationPackagingRequired)
+    const mark = pkg.unSpecificationMark.trim()
+    // Three answers here as in the checks, not two. An entry whose rating nobody has stated
+    // has no section, and where its two candidates disagree about the packaging an
+    // affirmative "this section does not require it" would be a permissive claim about a
+    // section nothing has decided — printed on the sheet that goes to the bench.
+    const undecided = assessed.entries
+      .map((e) => undecidedPackagingSections(e.classification))
+      .find((sections) => sections != null)
+    if (undecided && !needsUnSpec) {
       out.push(
-        `- [ ] UN specification packaging \`${cell(pkg.unSpecificationMark)}\`, meeting Packing Group II ` +
+        '- [ ] Packaging: the rating of at least one battery here has not been stated, and the two sections it ' +
+          `could fall in disagree about UN specification packaging — ${undecided.pair}` +
+          (undecided.a802 ? ' by special provision A802' : '') +
+          '. Settle the rating before packing to either.',
+      )
+    } else if (needsUnSpec) {
+      out.push(
+        `- [ ] UN specification packaging${mark ? ` \`${cell(mark)}\`` : ''}, meeting Packing Group II ` +
           'performance; follow the manufacturer’s closure instructions exactly and use every component ' +
           'supplied. Keep the instruction sheet with the packing record.',
       )
     } else {
-      out.push('- [ ] Strong rigid outer packaging.')
+      out.push(
+        '- [ ] Strong rigid outer packaging.' +
+          (mark ? ` This section does not require UN specification packaging; the box's own \`${cell(mark)}\` mark is not required here, and does no harm.` : ''),
+      )
     }
     // Not an either/or: a package may hold loose cells beside equipment with batteries
     // installed in it — the A181 case the assessment checks — and both lines are then true
@@ -210,7 +244,11 @@ export function buildChecklist(
     // Per regulatory entry, because that is how the limits are written and how the checks
     // apply them: stating the lowest of them as a package ceiling told the packer a 10 kg
     // box of UN3480 had to come in under the 2.5 kg its UN3090 line is allowed.
-    for (const [, { classification, weightKg }] of groupByClassification(assessed.entries)) {
+    // Through `applyA181` first, like the declaration and the shared-packaging count. A box
+    // holding one UN number both packed with and contained in equipment is one entry under
+    // that provision; listing two here would have the packer checking two allowances
+    // against a package the paper describes as one.
+    for (const [, { classification, weightKg }] of groupByClassification(applyA181(assessed.entries))) {
       const limit =
         consignment.aircraft === 'passenger-and-cargo'
           ? classification.limits.passengerKg

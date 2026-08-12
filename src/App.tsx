@@ -86,6 +86,52 @@ export function App() {
   const [scheduleB, setScheduleB] = useState<ScheduleBIndex | null>(null)
   const [scheduleBPayload, setScheduleBPayload] = useState<RawPayload | null>(null)
   const [scheduleBError, setScheduleBError] = useState<string | null>(null)
+  /**
+   * What could not be *read* when the page loaded. Set once and left alone.
+   *
+   * Kept apart from the write report below because they answer different questions and
+   * clear at different times: a later write succeeding says nothing about the reads that
+   * failed, and the panels those reads would have filled are still empty. Folding the two
+   * together erased this within the first second of every affected session, since the
+   * profile autosave fires 400 ms after load.
+   */
+  const [restoreError, setRestoreError] = useState<string | null>(null)
+  /**
+   * The most recent write failure, and what it was about.
+   *
+   * Withdrawn by a later success only where that success is about the *same* thing. Cleared
+   * on any success, a failed item library import — whose panel has already reported "N
+   * added" and discarded the staged file — was taken off the screen by the profile autosave
+   * 400 ms into the next keystroke, leaving no sign the import never landed.
+   */
+  const [writeError, setWriteError] = useState<{ what: string; message: string } | null>(null)
+  /**
+   * A form that was generated whose history record was not written.
+   *
+   * Sticky, like the profile note and for the same reason: it is about an artifact that
+   * already exists and an audit row that does not, and no later success makes that untrue.
+   * Left on the transient banner, the next part-weight correction withdrew it.
+   */
+  const [unrecordedShipment, setUnrecordedShipment] = useState<string | null>(null)
+  /**
+   * Whether the stored profile was actually read.
+   *
+   * The autosave below is guarded on the profile still being `EMPTY_PROFILE`, which held
+   * while a failed read meant a failed write too. It no longer does — a transient failure
+   * can leave this screen empty over a database that opens fine a moment later — so the
+   * first keystroke would have saved a near-blank profile over the real one. Nothing is
+   * written back until something was read.
+   */
+  const [profileLoaded, setProfileLoaded] = useState(false)
+  /**
+   * Set when the profile read failed, which is a different thing from a write failing.
+   *
+   * Sticky, and reported separately, because nothing will write the profile back for the
+   * rest of the page's life: autosaving over a form that was never filled from storage
+   * would replace the saved profile with whatever is on screen. A successful write to some
+   * other store clears the transient banner and must not clear this.
+   */
+  const [profileUnavailable, setProfileUnavailable] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -98,6 +144,42 @@ export function App() {
   )
   // Null in the browser build; the whole desktop surface keys off this.
   const bridge = useMemo(() => desktopBridge(), [])
+
+  /**
+   * Runs a store write, saying so when it fails and withdrawing a stale complaint when it
+   * does not.
+   *
+   * Every one of these used to be a bare `await` inside a `void`-ed callback, which was
+   * survivable while a store that could be read could also be written. A tab superseded by
+   * a newer version in another window breaks that: every write rejects, and an import or a
+   * weight correction disappears without a word. And a message about a failure that has
+   * since cleared is its own kind of wrong, so a success takes it back down.
+   */
+  const write = useCallback(
+    async (what: string, run: () => Promise<void>, refresh?: () => Promise<void>): Promise<boolean> => {
+      try {
+        await run()
+        setWriteError((prev) => (prev && prev.what !== what ? prev : null))
+      } catch (e: unknown) {
+        const because = e instanceof Error ? e.message : 'the local database could not be reached'
+        setWriteError({ what, message: `${what} could not be saved on this machine: ${because}` })
+        // Returned, not only shown. A caller that goes on to report what it wrote — the item
+        // library panel says "N added" and throws the staged file away — has to be able to
+        // tell that nothing was written.
+        return false
+      }
+      // Refreshing the list on screen is not the obligation the write satisfied. Inside the
+      // same try, a committed write whose read-back failed was reported as "could not be
+      // saved" — the misreport already fixed for the retention record and for `clearAll`.
+      try {
+        await refresh?.()
+      } catch {
+        // The list re-reads on the next load; what was written is written.
+      }
+      return true
+    },
+    [],
+  )
 
   // Load the Schedule B dataset and anything saved locally.
   useEffect(() => {
@@ -113,30 +195,60 @@ export function App() {
       }
     })()
 
+    // Settled rather than all-or-nothing, and reported rather than swallowed. One rejecting
+    // read used to discard the other five, so a browser that refused a single store left the
+    // profile blank and the retention panel reading "Nothing prepared yet" for consignments
+    // still inside their two-year window — with no indication that anything had failed.
     void (async () => {
-      const [saved, savedOverrides, savedPartOverrides, savedItems, history, dgHistory] = await Promise.all([
-        localStore.getProfile(),
-        localStore.listOverrides(),
-        localStore.listPartOverrides(),
-        localStore.listItems(),
-        localStore.listShipments(),
-        localStore.listDgConsignments(),
-      ])
-      if (saved) setProfile(saved)
-      setOverrides(savedOverrides)
-      setPartOverrides(savedPartOverrides)
-      setItems(savedItems)
-      setShipments(history)
-      setDgConsignments(dgHistory)
+      const [saved, savedOverrides, savedPartOverrides, savedItems, history, dgHistory] =
+        await Promise.allSettled([
+          localStore.getProfile(),
+          localStore.listOverrides(),
+          localStore.listPartOverrides(),
+          localStore.listItems(),
+          localStore.listShipments(),
+          localStore.listDgConsignments(),
+        ])
+      if (saved.status === 'fulfilled') {
+        if (saved.value) setProfile(saved.value)
+        setProfileLoaded(true)
+      } else {
+        setProfileUnavailable(true)
+      }
+      if (savedOverrides.status === 'fulfilled') setOverrides(savedOverrides.value)
+      if (savedPartOverrides.status === 'fulfilled') setPartOverrides(savedPartOverrides.value)
+      if (savedItems.status === 'fulfilled') setItems(savedItems.value)
+      if (history.status === 'fulfilled') setShipments(history.value)
+      if (dgHistory.status === 'fulfilled') setDgConsignments(dgHistory.value)
+
+      const failed = [
+        [saved, 'the exporter profile'],
+        [savedOverrides, 'the classification overrides'],
+        [savedPartOverrides, 'the per-part weights'],
+        [savedItems, 'the item library'],
+        [history, 'the shipment history'],
+        [dgHistory, 'the dangerous goods retention records'],
+      ] as const
+      const missing = failed.filter(([result]) => result.status === 'rejected').map(([, label]) => label)
+      if (missing.length) {
+        setRestoreError(
+          `This machine's stored data could not be read: ${missing.join(', ')}. What is shown is incomplete — ` +
+            'do not take an empty panel as evidence that nothing was saved. Nothing here re-reads on its own, ' +
+            'so reload the page once the database is available again.',
+        )
+      }
     })()
   }, [bridge])
 
   // Persist the profile as it is edited; it is reference data, not shipment data.
   useEffect(() => {
-    if (profile === EMPTY_PROFILE) return
-    const timer = setTimeout(() => void localStore.saveProfile(profile), 400)
+    if (!profileLoaded || profile === EMPTY_PROFILE) return
+    // Reported, not swallowed. A tab superseded by a newer version in another window can no
+    // longer write at all, and edits that vanish without a word are worse than edits that
+    // fail loudly.
+    const timer = setTimeout(() => void write('The exporter profile', () => localStore.saveProfile(profile)), 400)
     return () => clearTimeout(timer)
-  }, [profile])
+  }, [profile, profileLoaded, write])
 
   const handleParsed = useCallback(
     async (next: ParsedCipl) => {
@@ -150,22 +262,29 @@ export function App() {
         const nextCarrier = detected ?? carrierId
         setCarrierId(nextCarrier)
 
-        // Reuse what was learned about this consignee last time.
         const base = defaultShipmentSettings(
           getAdapter(isKeyedCarrier(nextCarrier) ? 'nippon-express' : (nextCarrier as CarrierId)),
         )
+        // Reset before the lookup, not after it.
+        //
+        // `defaultShipmentSettings` blanks the export-control triplet deliberately — an
+        // ECCN is a classification the filer makes per shipment, and one carried over from
+        // the last one would be filed against these goods with the export-control check
+        // passing on it. Setting the defaults only on the success path left exactly that
+        // behind whenever the saved-consignee read failed.
+        setSettings(base)
+
+        // Then reuse what was learned about this consignee last time.
         const known = header ? await localStore.getConsignee(header.consignedTo.name) : null
-        setSettings(
-          known
-            ? {
-                ...base,
-                consigneeId: known.consigneeId,
-                consigneeType: known.consigneeType,
-                partiesRelated: known.partiesRelated,
-                destinationCountry: known.destinationCountry ?? '',
-              }
-            : base,
-        )
+        if (known) {
+          setSettings({
+            ...base,
+            consigneeId: known.consigneeId,
+            consigneeType: known.consigneeType,
+            partiesRelated: known.partiesRelated,
+            destinationCountry: known.destinationCountry ?? '',
+          })
+        }
       } catch (e) {
         // The parse already succeeded; only the saved-consignee lookup can land here. The
         // shipment is still workable, so say what was lost rather than wedging the screen.
@@ -240,15 +359,27 @@ export function App() {
     [checks],
   )
 
-  const saveOverride = useCallback(async (record: OverrideRecord) => {
-    await localStore.saveOverride(record)
-    setOverrides(await localStore.listOverrides())
-  }, [])
+  const saveOverride = useCallback(
+    async (record: OverrideRecord) => {
+      await write(
+        'The classification override',
+        () => localStore.saveOverride(record),
+        async () => setOverrides(await localStore.listOverrides()),
+      )
+    },
+    [write],
+  )
 
-  const removeOverride = useCallback(async (sourceCode: string) => {
-    await localStore.deleteOverride(sourceCode)
-    setOverrides(await localStore.listOverrides())
-  }, [])
+  const removeOverride = useCallback(
+    async (sourceCode: string) => {
+      await write(
+        'The removal of the classification override',
+        () => localStore.deleteOverride(sourceCode),
+        async () => setOverrides(await localStore.listOverrides()),
+      )
+    },
+    [write],
+  )
 
   /**
    * Saves one field of a part's manual values.
@@ -260,10 +391,13 @@ export function App() {
    */
   const savePartOverride = useCallback(
     async (partNumber: string, description: string, patch: PartOverridePatch) => {
-      await localStore.savePartOverride(partNumber, description, patch)
-      setPartOverrides(await localStore.listPartOverrides())
+      await write(
+        `The saved values for part ${partNumber}`,
+        () => localStore.savePartOverride(partNumber, description, patch),
+        async () => setPartOverrides(await localStore.listPartOverrides()),
+      )
     },
-    [],
+    [write],
   )
 
   const savePartWeight = useCallback(
@@ -325,36 +459,82 @@ export function App() {
       checks,
       settings,
     }
-    await localStore.saveShipment(record)
-    if (header.consignedTo.name) {
-      await localStore.saveConsignee({
-        name: header.consignedTo.name,
-        consigneeId: settings.consigneeId,
-        consigneeType: settings.consigneeType,
-        partiesRelated: settings.partiesRelated,
-        destinationCountry: draft?.destinationCountry ?? '',
-        lastUsed: new Date().toISOString(),
-      })
+    // Reported, not swallowed. This is the audit record for a form that has already been
+    // written and opened, and `db()` rejects rather than hanging now — so a tab superseded
+    // by a newer version in another window would lose the record while the panel went on
+    // saying "Saved to …". The consignee is convenience data and the list on screen is a
+    // view; the record is the only one of the three that has to be said out loud.
+    try {
+      await localStore.saveShipment(record)
+      setUnrecordedShipment(null)
+    } catch (e: unknown) {
+      const because = e instanceof Error ? e.message : 'this machine’s stored data could not be reached'
+      setUnrecordedShipment(
+        `The form was generated, but this machine did not record the shipment (${because}). The history entry ` +
+          'is the audit trail for what was filed — note the invoice number somewhere else.',
+      )
     }
-    setShipments(await localStore.listShipments())
+    // Two independent things, in their own attempts. Sharing one, a failed consignee write
+    // skipped the history refresh after a shipment record that had gone in.
+    try {
+      if (header.consignedTo.name) {
+        await localStore.saveConsignee({
+          name: header.consignedTo.name,
+          consigneeId: settings.consigneeId,
+          consigneeType: settings.consigneeType,
+          partiesRelated: settings.partiesRelated,
+          destinationCountry: draft?.destinationCountry ?? '',
+          lastUsed: new Date().toISOString(),
+        })
+      }
+    } catch {
+      // Consignee autofill is convenience data; it is re-offered from the next document.
+    }
+    try {
+      setShipments(await localStore.listShipments())
+    } catch {
+      // The history list re-reads on the next load.
+    }
   }, [reconciliation, parsed, adapter, settings, draft, checks])
 
   const handleDgPrepared = useCallback(async (record: DgConsignmentRecord) => {
     await localStore.saveDgConsignment(record)
-    setDgConsignments(await localStore.listDgConsignments())
+    // Refreshing the list on screen is not part of the obligation the write satisfies. The
+    // caller reports a rejection here as "this machine did not record that it was
+    // prepared", which would be false if the record went in and only the read back failed —
+    // and would send someone to duplicate evidence that is already on file.
+    try {
+      setDgConsignments(await localStore.listDgConsignments())
+    } catch {
+      // The record itself is written, and the list is re-read on the next load — but the
+      // panel checks this list to tell a second download of the same consignment from a
+      // second preparation of it. Left stale, printing the checklist after the declaration
+      // would file a duplicate retention row. So what was written is put in by hand.
+      setDgConsignments((prev) => [record, ...prev.filter((r) => r.id !== record.id)])
+    }
   }, [])
 
-  const importItemLibrary = useCallback(async (entries: ItemLibraryEntry[], mode: ImportMode) => {
-    if (mode === 'merge') await localStore.mergeItems(entries)
-    else await localStore.replaceItems(entries)
-    setItems(await localStore.listItems())
-  }, [])
+  const importItemLibrary = useCallback(
+    (entries: ItemLibraryEntry[], mode: ImportMode) =>
+      write(
+        'The imported item library',
+        async () => {
+          if (mode === 'merge') await localStore.mergeItems(entries)
+          else await localStore.replaceItems(entries)
+        },
+        async () => setItems(await localStore.listItems()),
+      ),
+    [write],
+  )
 
   const clearItemLibrary = useCallback(async () => {
     if (!window.confirm('Remove the imported item library from this machine?')) return
-    await localStore.clearItems()
-    setItems([])
-  }, [])
+    await write(
+      'The removal of the item library',
+      () => localStore.clearItems(),
+      () => Promise.resolve(setItems([])),
+    )
+  }, [write])
 
   const clearAll = useCallback(async () => {
     if (
@@ -365,13 +545,79 @@ export function App() {
       )
     )
       return
-    await localStore.clearAll()
-    setProfile(EMPTY_PROFILE)
-    setOverrides([])
-    setPartOverrides([])
-    setItems([])
-    setShipments([])
-    setDgConsignments(await localStore.listDgConsignments())
+    // Reported, not abandoned. `db()` rejects rather than hanging now, so a superseded tab
+    // reaches here and threw straight out of the callback: nothing deleted, no panel reset,
+    // and a confirmation dialog that had just promised the data was gone.
+    let remaining: string[]
+    try {
+      remaining = await localStore.clearAll()
+    } catch (e: unknown) {
+      setWriteError({
+        what: 'The deletion',
+        message:
+          e instanceof Error
+            ? `Nothing was deleted: ${e.message}`
+            : 'Nothing was deleted — this machine’s stored data could not be reached.',
+      })
+      return
+    }
+    // Panel by panel, against what actually cleared. Leaving rows on screen that are gone
+    // on disk is the same misreport in the other direction — but blanking a panel whose
+    // store survived is worse than either: the profile autosave would then write the empty
+    // form over the profile the message beside it says is still there.
+    const cleared = (label: string): boolean => !remaining.includes(label)
+    if (cleared('the exporter profile')) setProfile(EMPTY_PROFILE)
+    if (cleared('the classification overrides')) setOverrides([])
+    if (cleared('the per-part weights')) setPartOverrides([])
+    if (cleared('the item library')) setItems([])
+    if (cleared('the shipment history')) setShipments([])
+    setWriteError(
+      remaining.length
+        ? {
+            what: 'The deletion',
+            message:
+              `${remaining.join(', ')} could not be cleared and ${remaining.length === 1 ? 'is' : 'are'} still ` +
+              'on this machine; everything else was deleted. Reload the page to see what is left.',
+          }
+        : null,
+    )
+    // These describe stored data, and there is none of it now. They are deliberately sticky
+    // against writes, so nothing else takes them down: a wiped machine went on saying it
+    // had not recorded a shipment, and that an empty panel was not evidence that nothing
+    // was saved.
+    //
+    // Guarded like the panels above: the notice is about a row missing from the shipment
+    // history, and a history store that refused to clear still has that gap in it.
+    if (cleared('the shipment history')) setUnrecordedShipment(null)
+    // The profile pair moves together. Withdrawing the banner while `profileLoaded` stayed
+    // false left the guard on the autosave in place with nothing on screen to explain it,
+    // so every edit made after the wipe was discarded in silence. Only where the profile
+    // store is one of the ones that actually cleared: a write just succeeded against it,
+    // so this screen is now the truth about what is stored.
+    if (cleared('the exporter profile')) {
+      setProfileUnavailable(false)
+      setProfileLoaded(true)
+    }
+    // The retention records survive `clearAll` by design, so the panel is re-read rather
+    // than emptied.
+    //
+    // And the restore banner comes down only once that read has succeeded. It is the one
+    // panel a wipe does not refill, so withdrawing the warning before re-reading it took
+    // down the only thing on screen saying the list might be short — over a list that is
+    // evidence for a retention obligation.
+    try {
+      setDgConsignments(await localStore.listDgConsignments())
+      // And only where every other store cleared as well: the banner lists the stores that
+      // could not be *read* at load, and one that has just refused to be cleared is not
+      // evidence that its earlier failure has passed.
+      if (!remaining.length) setRestoreError(null)
+    } catch {
+      setRestoreError(
+        'The dangerous goods retention records could not be re-read after the deletion. They are kept by ' +
+          'design, and what is shown here may be incomplete — reload the page before treating this list as ' +
+          'the full set.',
+      )
+    }
   }, [])
 
   return (
@@ -426,6 +672,33 @@ export function App() {
       </header>
 
       <main className="mx-auto max-w-6xl space-y-4 px-5 py-6">
+        {/* Above the tabs, because local storage backs the panels on both of them. */}
+        {restoreError ? (
+          <p className="rounded-md border border-[var(--color-block)] bg-[var(--color-block-soft)] px-3 py-2 text-sm">
+            {restoreError}
+          </p>
+        ) : null}
+
+        {writeError ? (
+          <p className="rounded-md border border-[var(--color-block)] bg-[var(--color-block-soft)] px-3 py-2 text-sm">
+            {writeError.message}
+          </p>
+        ) : null}
+
+        {unrecordedShipment ? (
+          <p className="rounded-md border border-[var(--color-block)] bg-[var(--color-block-soft)] px-3 py-2 text-sm">
+            {unrecordedShipment}
+          </p>
+        ) : null}
+
+        {profileUnavailable ? (
+          <p className="rounded-md border border-[var(--color-block)] bg-[var(--color-block-soft)] px-3 py-2 text-sm">
+            The saved exporter profile could not be read, so nothing typed into it is being written back —
+            saving over a form that was never filled from storage would replace the profile that is there.
+            Reload the page.
+          </p>
+        ) : null}
+
         {workflow === 'dangerous-goods' ? (
           <DangerousGoodsPanel
             profile={profile}
@@ -433,7 +706,7 @@ export function App() {
             records={dgConsignments}
             consignment={dgConsignment}
             onConsignmentChange={setDgConsignment}
-            onPrepared={(record) => void handleDgPrepared(record)}
+            onPrepared={handleDgPrepared}
           />
         ) : (
           <>
@@ -476,7 +749,7 @@ export function App() {
               <ItemLibraryPanel
                 entries={items}
                 scheduleB={scheduleB}
-                onImport={(entries, mode) => void importItemLibrary(entries, mode)}
+                onImport={importItemLibrary}
                 onClear={() => void clearItemLibrary()}
               />
               <ItemMasterUpdatesPanel

@@ -35,7 +35,7 @@ export interface Delivery {
  * two references differing only in punctuation do not collapse onto one name.
  */
 export function safeFileName(name: string, fallback = 'document'): string {
-  const cleaned = name
+  let cleaned = name
     // eslint-disable-next-line no-control-regex -- the point is to strip them
     .replace(/[\u0000-\u001f\u007f]/g, '')
     .replace(/[/\\:*?"<>|]/g, '-')
@@ -43,15 +43,28 @@ export function safeFileName(name: string, fallback = 'document'): string {
     // shell, which rejects any name containing `..` outright.
     .replace(/\.{2,}/g, '-')
     .replace(/\s+/g, ' ')
-    // Leading dots would hide the file; trailing dots and spaces are stripped by Windows
-    // itself, which turns `shipment .pdf` into something the app cannot then find.
-    .replace(/^\.+/, '')
+    // Trimmed first, then the dots. A leading dot behind a space survived the strip and
+    // named a hidden file, and the trailing dots the comment promised to remove were never
+    // looked for at all — Windows strips those itself, turning `shipment .pdf` into
+    // something the app cannot then find.
     .trim()
+    // Dots *and* spaces, from both ends, until neither remains. Stripping a single leading
+    // run left `. .hidden.pdf` as `.hidden.pdf` — still a hidden file, one space later.
+    .replace(/^[.\s]+/, '')
+    .replace(/[.\s]+$/, '')
   // Reserved device names are still reserved with an extension: `CON.pdf` is not a file.
   const reserved = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i
   // A name left with no letters or digits names nothing — `..` reduces to a dash, and a file
   // called `-` is worse than one called `document`.
-  if (!cleaned || !/[a-z0-9]/i.test(cleaned) || reserved.test(cleaned)) return fallback
+  if (!cleaned || !/[a-z0-9]/i.test(cleaned)) return fallback
+  // A reserved name keeps its extension, and goes on through the length rule below like any
+  // other. Returning the bare fallback threw away the `.pdf` that the truncation branch is
+  // careful to preserve, leaving a declaration saved as a file the operating system cannot
+  // open by type.
+  if (reserved.test(cleaned)) {
+    const dot = cleaned.indexOf('.')
+    cleaned = dot > 0 ? `${fallback}${cleaned.slice(dot)}` : fallback
+  }
   // Long enough for any reference, short of the 255-byte limit most filesystems impose.
   if (cleaned.length <= MAX_FILE_NAME) return cleaned
   // Truncate the stem, not the name: a `.pdf` cut off the end leaves a file the operating

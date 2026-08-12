@@ -62,6 +62,7 @@ export function consignment(packages: DgPackage[], overrides: Partial<DgConsignm
     emergencyContactName: 'CHEMTREC',
     emergencyContactPhone: '1-800-424-9300 / +1-703-527-3887',
     signerName: 'J. Alvarez',
+    signerPlace: 'Long Beach, CA',
     signerDate: '2026-08-06',
     forwarder: 'Nippon Express USA',
     operatingCarrier: 'UPS Airlines',

@@ -101,10 +101,14 @@ needs a declaration. Every standalone sodium ion battery is fully regulated unde
 which has no sections. The U.S. ground "medium" band does not exist by air and is not applied.
 
 **What it refuses.** Damaged or defective batteries (A154) and waste batteries for recycling
-(A183) are forbidden by air, and block. So does a lithium ion state of charge over 30%, an
-unmarked battery case, a net battery weight over the package limit, a standalone entry offered
-on a passenger aircraft, Section I or IA without a UN specification marking, and — most
-importantly — a battery whose watt-hour rating or lithium content has not been stated. That
+(A183) are forbidden by air, and block. So does an unmarked battery case, a net battery weight
+over the package limit, a standalone entry offered on a passenger aircraft, Section I or IA
+without a UN specification marking, and — most importantly — a battery whose watt-hour rating
+or lithium content has not been stated. A state of charge over 30% blocks where the materials
+write the rule as a requirement — every standalone lithium ion and sodium ion battery, and
+everything packed with equipment except a cell rated at or below 2.7 Wh — and warns where they
+write it as a recommendation, which is batteries contained in equipment and those cells. The
+check says which of the two it is applying. That
 last one is the point: a missing rating is not evidence of a small battery, and treating it as
 one would move a fully regulated shipment onto an air waybill statement and no declaration.
 
@@ -219,7 +223,8 @@ manufacture the parts a document cannot support:
 
 ## Verification
 
-A clean checkout runs **336 tests**. They cover the parsers, the reconciliation engine, the
+A clean checkout runs the whole suite — several hundred tests, and `npm run check` prints the
+count. They cover the parsers, the reconciliation engine, the
 Schedule B validator, the carrier adapters and the guards, using synthetic documents built
 to reproduce each supported layout without reproducing anyone's data.
 

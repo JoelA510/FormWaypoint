@@ -417,14 +417,25 @@ function totalsChecks(
   }
 
   const missingWeights = merged.filter((l) => l.netWeightKg == null)
+  // Worded for where the weight was supposed to come from. An invoice-only format has no
+  // packing list to match against — its weights come from the saved per-part table — and
+  // being told "no packing-list match" names a document the shipment cannot have while
+  // saying nothing about the thing that would fix it.
+  const lineRefs = missingWeights.map((l) => `${l.orderNumber}/${l.sequence}`).join(', ')
   results.push({
     id: 'weights-present',
     severity: 'blocking',
-    title: 'Every invoice line has a packing-list weight',
-    detail: missingWeights.length
-      ? `No packing-list match for ${missingWeights.length} line(s): ${missingWeights.map((l) => `${l.orderNumber}/${l.sequence}`).join(', ')}. ` +
-        'A blank weight must not be filed as zero.'
-      : 'All invoice lines matched a packing-list line.',
+    title: providesWeights ? 'Every invoice line has a packing-list weight' : 'Every invoice line has a net weight',
+    detail: !missingWeights.length
+      ? providesWeights
+        ? 'All invoice lines matched a packing-list line.'
+        : 'Every line has a net weight from the saved per-part table.'
+      : providesWeights
+        ? `No packing-list match for ${missingWeights.length} line(s): ${lineRefs}. ` +
+          'A blank weight must not be filed as zero.'
+        : `No saved weight for ${missingWeights.length} line(s): ${lineRefs}. This document states no ` +
+          'per-line weights, so each part needs one in the saved per-part table, or entered by hand. A blank ' +
+          'weight must not be filed as zero.',
     passed: missingWeights.length === 0,
     refs: missingWeights.map((l) => l.id),
   })

@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { parseCipl, parseCiplFile } from '.'
-import { isOmronCiWorkbook, parseOmronCiWorkbook } from './parse-omron-ci'
+import { isOmronCiWorkbook, isPartyTitle, parseOmronCiWorkbook, titlesPartyBlock } from './parse-omron-ci'
 import { reconcile } from '../reconcile'
 import { buildXlsx } from '../../lib/xlsx'
 import { buildOmronCiPdf, omronCiGrid, simpleOmronCi, subtotalOf } from '../../test/synthetic/omron-ci'
@@ -36,6 +36,19 @@ describe('the workbook grid', () => {
     expect(header.totalGrossWeightKg).toBeCloseTo(4.1, 3)
     expect(header.consignedTo.name).toBe('Example Consignee Pte. Ltd.')
     expect(header.consignedTo.lines).toEqual(['1 Harbour Way', 'Singapore 018989', 'Singapore'])
+  })
+
+  it('does not put the form’s SHIP DATE into the field that means a sailing date', () => {
+    // `onOrAboutDate` is the later sailing date on the vendor layouts, and box 2 of the SLI
+    // deliberately takes the invoice date instead. Filling it from a box that means
+    // something else would move the date of exportation on those layouts too, through the
+    // one line in `buildDraft` that reads it.
+    const grid = omronCiGrid(simpleOmronCi())
+    const row = grid.find((r) => r[5] === 'SHIP DATE:')!
+    row[7] = '08/14/2026'
+    const header = parseOmronCiWorkbook('ci.xlsx', grid).headers.FC
+    expect(header.onOrAboutDate).toBeNull()
+    expect(header.invoiceDate).toBe('08/10/2026')
   })
 
   it('reconciles values against the subtotal, not the tax-and-freight total', () => {
@@ -151,6 +164,132 @@ describe('the workbook grid', () => {
     expect(parsed.lines[1]).toMatchObject({ partNumber: '20000-0002', countryOfOrigin: 'JP' })
   })
 
+  it('reads past a blank row inside the commodity table instead of stopping at it', () => {
+    // The workbook reader honours each row's own index and pads an omitted row with a blank
+    // one, so a gap the writer left is a gap the reader sees. Read as the end of the table,
+    // it dropped every line below it without a word.
+    const grid = omronCiGrid(simpleOmronCi())
+    const secondTop = grid.findIndex((row) => row[2] === '20000-0002')
+    grid.splice(secondTop, 0, [])
+    const parsed = parseOmronCiWorkbook('ci.xlsx', grid)
+    expect(parsed.lines).toHaveLength(2)
+    expect(parsed.lines[1]).toMatchObject({ partNumber: '20000-0002', countryOfOrigin: 'JP' })
+  })
+
+  it('finds the compliance heading row when a blank row is padded in above it', () => {
+    // Same cause, one row higher: assuming the two heading rows are adjacent left the sheet
+    // claimed as the form while no line at all was read from it.
+    const grid = omronCiGrid(simpleOmronCi())
+    const head = grid.findIndex((row) => row.includes('PART #'))
+    grid.splice(head + 1, 0, [])
+    expect(isOmronCiWorkbook(grid)).toBe(true)
+    const parsed = parseOmronCiWorkbook('ci.xlsx', grid)
+    expect(parsed.lines).toHaveLength(2)
+    expect(parsed.lines[0]).toMatchObject({ partNumber: '10000-0001', eccn: 'EAR99' })
+  })
+
+  it('reads the subtotal from the AMOUNT column, not the rightmost number on the row', () => {
+    // The totals band shares its rows with `# OF PIECES`, `NET WT (KG)` and `GROSS WT (KG)`.
+    // Taking the rightmost number handed one of those to the blocking total-value check,
+    // which then reconciled the shipment against a piece count.
+    const grid = omronCiGrid(simpleOmronCi())
+    const row = grid.find((r) => r.some((c) => c.trim().toUpperCase() === 'SUBTOTAL'))!
+    row.push('2') // a stray value printed further right than the amount
+    const parsed = parseOmronCiWorkbook('ci.xlsx', grid)
+    expect(parsed.headers.FC.totalValue).toBeCloseTo(190, 2)
+  })
+
+  it('says so when the commodity table ends before its totals band', () => {
+    // A blank LN cell mid-table stopped the read and returned a short list that looks
+    // complete. The lines below it are simply gone, and nothing said so.
+    const grid = omronCiGrid(simpleOmronCi())
+    const secondTop = grid.findIndex((row) => row[2] === '20000-0002')
+    grid[secondTop][1] = ''
+    const parsed = parseOmronCiWorkbook('ci.xlsx', grid)
+    expect(parsed.lines).toHaveLength(1)
+    expect(parsed.warnings.some((w) => w.includes('ended before its totals band'))).toBe(true)
+  })
+
+  it('reads past a long run of blank line slots', () => {
+    // A template whose unused slots are wholly blank leaves a gap longer than any count a
+    // rule could pick. Ending the table on a run of them dropped every line below the gap
+    // on one form and cried truncation on every ordinary import of another.
+    const grid = omronCiGrid(simpleOmronCi())
+    const secondTop = grid.findIndex((row) => row[2] === '20000-0002')
+    grid.splice(secondTop, 0, [], [], [], [], [], [])
+    const parsed = parseOmronCiWorkbook('ci.xlsx', grid)
+    expect(parsed.lines).toHaveLength(2)
+    expect(parsed.warnings.some((w) => w.includes('ended before its totals band'))).toBe(false)
+  })
+
+  it('says nothing about a note printed under the table', () => {
+    // A row that is neither the totals band nor a commodity — a continuation marker, a
+    // no-charge note — ends the table just as properly. Warning about it would cry
+    // truncation on every clean import of a template that carries one.
+    const grid = omronCiGrid(simpleOmronCi())
+    const totals = grid.findIndex((row) => row.some((c) => c.trim().toUpperCase() === 'SUBTOTAL'))
+    grid.splice(totals, 0, ['', '', '', 'Continued on attached sheet'])
+    const parsed = parseOmronCiWorkbook('ci.xlsx', grid)
+    expect(parsed.warnings.some((w) => w.includes('ended before its totals band'))).toBe(false)
+  })
+
+  it('says nothing about the table ending when it ends where it should', () => {
+    expect(parseGrid().warnings.some((w) => w.includes('ended before its totals band'))).toBe(false)
+  })
+
+  it('accepts a title-cased revision of the form, as the printed PDF path already does', () => {
+    // Every other label on this form is matched uppercased. Matched exactly, a workbook
+    // whose headings were re-typed in title case was refused as "not the Commercial Invoice
+    // form" while its own printed PDF parsed cleanly.
+    const grid = omronCiGrid(simpleOmronCi()).map((row) =>
+      row.map((cell) =>
+        ['LN', 'PART #', 'DESCRIPTION OF GOODS', 'QTY', 'UOM', 'UNIT PRICE', 'AMOUNT',
+         'COO', 'HTS / SCHEDULE B', 'ECCN / EAR99', 'LICENSE / NLR', 'SME (Y/N)'].includes(cell)
+          ? cell.toLowerCase()
+          : cell,
+      ),
+    )
+    expect(isOmronCiWorkbook(grid)).toBe(true)
+    const parsed = parseOmronCiWorkbook('ci.xlsx', grid)
+    expect(parsed.lines).toHaveLength(2)
+    expect(parsed.lines[0]).toMatchObject({ partNumber: '10000-0001', countryOfOrigin: 'US', eccn: 'EAR99' })
+  })
+
+  it('does not mistake the header grid’s SHIPPER and CONSIGNEE labels for the address band', () => {
+    // `SHIPPER EIN / TAX ID:` and `CONSIGNEE EORI / USCI / VAT:` share a row of the header
+    // grid, and between them they satisfy the band's own test. The band is located first
+    // only because it is printed first; the two are told apart by the label list, not by
+    // the order of the rows.
+    expect(isPartyTitle('SHIPPER (SHIP FROM / EXPORTER)', 'SHIPPER')).toBe(true)
+    expect(isPartyTitle('CONSIGNEE (SHIP TO)', 'CONSIGNEE')).toBe(true)
+    expect(isPartyTitle('BILL TO / SOLD TO (IF DIFFERENT)', 'BILL TO')).toBe(true)
+    expect(isPartyTitle('SHIPPER EIN / TAX ID:', 'SHIPPER')).toBe(false)
+    expect(isPartyTitle('CONSIGNEE EORI / USCI / VAT:', 'CONSIGNEE')).toBe(false)
+  })
+
+  it('says so when the LN column is missing rather than reading no lines in silence', () => {
+    // The table is walked by its LN column, so a revision that renames or drops that
+    // heading ends the table before its first block. Zero lines and no warning is
+    // indistinguishable from a blank form.
+    const grid = omronCiGrid(simpleOmronCi())
+    const head = grid.find((row) => row.includes('LN'))!
+    head[head.indexOf('LN')] = 'LINE'
+    const parsed = parseOmronCiWorkbook('ci.xlsx', grid)
+    expect(parsed.lines).toHaveLength(0)
+    expect(parsed.warnings.some((w) => w.includes('LN'))).toBe(true)
+  })
+
+  it('names the saved per-part table, not a packing list this form cannot have', () => {
+    // The form is invoice-only. Told "no packing-list match", the operator is sent looking
+    // for a document the shipment does not have, and not told about the table that would
+    // actually fix it.
+    const result = reconcile(parseGrid(), null, { ...BLANK_CONTROLS })
+    const weights = result.checks.find((c) => c.id === 'weights-present')!
+    expect(weights).toMatchObject({ severity: 'blocking', passed: false })
+    expect(weights.detail).toContain('per-part table')
+    expect(weights.detail).not.toContain('packing-list match')
+  })
+
   it('blocks a line whose quantity could not be read instead of filing zero', () => {
     const spec = simpleOmronCi()
     const grid = omronCiGrid(spec)
@@ -261,11 +400,156 @@ describe('the printed PDF', () => {
     expect(parsed.lines[1].extendedValue).toBeCloseTo(150, 2)
   })
 
+  it('says so when the address blocks could not be read at all', () => {
+    // Nothing downstream demands a consignee — the SLI fills its box with whatever is
+    // there, including nothing — so a band that could not be read has to report itself or
+    // it reads as a blank form.
+    const grid = omronCiGrid(simpleOmronCi())
+    const band = grid.findIndex((row) => row.includes('SHIPPER (SHIP FROM / EXPORTER)'))
+    grid.splice(band, 1)
+    const parsed = parseOmronCiWorkbook('ci.xlsx', grid)
+    expect(parsed.headers.FC.consignedTo.name).toBe('')
+    expect(parsed.warnings.some((w) => w.includes('could not be read from this document'))).toBe(true)
+  })
+
+  it('does not let the header grid answer to the address band’s description', () => {
+    // `SHIPPER EIN / TAX ID:` and `CONSIGNEE EORI / USCI / VAT:` share a row of the header
+    // grid, and `isPartyTitle` refuses them because each *is* a label — but only while the
+    // extractor leaves them whole. Split into words, the first item is the bare word
+    // `SHIPPER`, and the grid row satisfies the band's own test. That the real band is
+    // printed above it is where the form puts its rows, which is what this guard exists not
+    // to rest on.
+    const whole = ['SHIPPER EIN / TAX ID:', '', 'CONSIGNEE EORI / USCI / VAT:', '']
+    expect(titlesPartyBlock(whole, 'SHIPPER')).toBe(false)
+    expect(titlesPartyBlock(whole, 'CONSIGNEE')).toBe(false)
+
+    const split = ['SHIPPER', 'EIN', '/', 'TAX', 'ID:', 'CONSIGNEE', 'EORI', '/', 'USCI', '/', 'VAT:']
+    expect(titlesPartyBlock(split, 'SHIPPER')).toBe(false)
+    expect(titlesPartyBlock(split, 'CONSIGNEE')).toBe(false)
+
+    // The band itself still reads as the band.
+    expect(titlesPartyBlock(['SHIPPER (SHIP FROM / EXPORTER)'], 'SHIPPER')).toBe(true)
+    expect(titlesPartyBlock(['CONSIGNEE (SHIP TO)'], 'CONSIGNEE')).toBe(true)
+  })
+
+  it('leaves the address blocks empty rather than folding two into one', () => {
+    // The band is located on SHIPPER and CONSIGNEE alone, so an extractor that split the
+    // BILL TO heading across items still found it — and every bill-to address item then
+    // folded into the consignee's cell, putting a wrong address in CONSIGNED TO with
+    // nothing said. Three columns or none.
+    expect(isPartyTitle('BILL TO / SOLD TO (IF DIFFERENT)', 'BILL TO')).toBe(true)
+    expect(isPartyTitle('SOLD TO (IF DIFFERENT)', 'BILL TO')).toBe(false)
+  })
+
   it('keeps an empty consignee from shifting the bill-to into its column', async () => {
     const spec = { ...simpleOmronCi(), consigneeName: '', consigneeLines: [], billToName: 'Billing Party LLC' }
     const parsed = await parseCipl('ci.pdf', await buildOmronCiPdf(spec))
     expect(parsed.headers.FC.consignedTo.name).toBe('')
     expect(parsed.headers.FC.soldTo.name).toBe('Billing Party LLC')
+  })
+
+  it('heals a header label the extractor split, rather than folding it into the value beside it', async () => {
+    // `INVOICE DATE:` drawn as two items is two ordinary cells, so it ran on to the end of
+    // the invoice number — which goes to the SLI, the keying sheet reference and the output
+    // filename — and the date was never found at all.
+    const parsed = await parseCipl('ci.pdf', await buildOmronCiPdf({ ...simpleOmronCi(), splitHeaderLabel: true }))
+    expect(parsed.headers.FC.invoiceNumber).toBe('CI-2026-0001')
+    expect(parsed.headers.FC.invoiceDate).toBe('08/10/2026')
+  })
+
+  it('does not read a column name printed in an address or a value as a heading row', async () => {
+    // The heading test ran over the whole header region, so any row carrying a bare column
+    // name was dropped entire and in silence: `AMOUNT`, `QTY`, `UOM`, `COO` and `LN` are all
+    // ordinary words. Only rows inside the heading band are headings.
+    const parsed = await parseCipl(
+      'ci.pdf',
+      await buildOmronCiPdf({
+        ...simpleOmronCi(),
+        splitValues: true,
+        freightCharges: 'PREPAID AMOUNT AGREED',
+        consigneeName: 'Amount Tower Logistics',
+        consigneeLines: ['1 Harbour Way', 'Singapore 018989'],
+      }),
+    )
+    // `freightTerms` is normalised to the term itself; the point here is that the row
+    // survived at all, which the carrier beside it and the address below it evidence.
+    expect(parsed.headers.FC.freightTerms).toBe('PREPAID')
+    expect(parsed.headers.FC.vesselAgent).toBe('Nippon Express')
+    expect(parsed.headers.FC.consignedTo.name).toBe('Amount Tower Logistics')
+    expect(parsed.lines).toHaveLength(2)
+  })
+
+  it('does not read an address word as one of the four labels that are ordinary words', async () => {
+    // `PAGE`, `DATE`, `SIGNATURE` and `INCOTERMS` are labels on this form and words
+    // everywhere else. Split into items, `3000 Page Mill Road` offered `Page` as a label,
+    // which ended the address band on the consignee's own street: all three blocks empty,
+    // nothing said. The form prints its labels with a colon and no value word carries one.
+    const parsed = await parseCipl(
+      'ci.pdf',
+      await buildOmronCiPdf({
+        ...simpleOmronCi(),
+        splitValues: true,
+        carrier: 'Page Aviation',
+        consigneeName: 'Date Palm Freight Pte. Ltd.',
+        consigneeLines: ['3000 Page Mill Road', 'Singapore 018989'],
+      }),
+    )
+    expect(parsed.headers.FC.vesselAgent).toBe('Page Aviation')
+    expect(parsed.headers.FC.consignedTo.name).toBe('Date Palm Freight Pte. Ltd.')
+    expect(parsed.headers.FC.consignedTo.lines).toContain('3000 Page Mill Road')
+    // And the labels themselves still read, colon and all.
+    expect(parsed.headers.FC.incoterm).toBe('DAP Singapore')
+  })
+
+  it('bounds the address band by the commodity table when no label follows it', async () => {
+    // The band ran to the first header-grid label below it and collapsed onto itself when
+    // there was none, so no row was column-mapped and `readParties` read cells 0, 1 and 2
+    // of every remaining row — the synthesized commodity headings among them — as shipper,
+    // consignee and bill-to. That a header grid always sits below the addresses is the
+    // print order this search is written not to rest on.
+    const parsed = await parseCipl(
+      'ci.pdf',
+      await buildOmronCiPdf({ ...simpleOmronCi(), omitHeaderGrid: true }),
+    )
+    expect(parsed.headers.FC.consignedTo.name).toBe('Example Consignee Pte. Ltd.')
+    expect(parsed.headers.FC.consignedTo.lines).toEqual(['1 Harbour Way', 'Singapore 018989', 'Singapore'])
+    expect(parsed.headers.FC.consignedTo.lines.join(' ')).not.toContain('PART #')
+    // The goods still read; only the header fields are gone with the grid.
+    expect(parsed.lines).toHaveLength(2)
+  })
+
+  it('does not let a totals cell swallow the header label it is a prefix of', async () => {
+    // `FREIGHT` delimits the totals band and is also the first word of `FREIGHT CHARGES:`.
+    // Matching the first item that hits anything stopped at the totals cell, so the label
+    // was never reassembled: `freightTerms` came back null and a PREPAID invoice would be
+    // filed as COLLECT. The longest match wins instead.
+    const parsed = await parseCipl(
+      'ci.pdf',
+      await buildOmronCiPdf({ ...simpleOmronCi(), splitValues: true, splitHeaderLabel: true }),
+    )
+    expect(parsed.headers.FC.freightTerms).toBe('PREPAID')
+    expect(parsed.headers.FC.invoiceNumber).toBe('CI-2026-0001')
+    expect(parsed.headers.FC.incoterm).toBe('DAP Singapore')
+  })
+
+  it('does not end the address band on a consignee whose name contains a totals word', async () => {
+    // The band ends at the first row carrying a header-grid label. Counting a split label
+    // there is right; counting the cells that delimit the *totals* band is not — they are
+    // ordinary words, and a forwarder named `NIPPON EXPRESS FREIGHT KK`, split into word
+    // items, ended the band on its own first line. Every address in the consignment then
+    // came back empty.
+    const parsed = await parseCipl(
+      'ci.pdf',
+      await buildOmronCiPdf({
+        ...simpleOmronCi(),
+        splitValues: true,
+        consigneeName: 'NIPPON EXPRESS FREIGHT KK',
+        consigneeLines: ['1 Harbour Way', 'Singapore 018989'],
+      }),
+    )
+    expect(parsed.headers.FC.consignedTo.name).toBe('NIPPON EXPRESS FREIGHT KK')
+    expect(parsed.headers.FC.consignedTo.lines).toContain('1 Harbour Way')
+    expect(parsed.headers.FC.shippedFrom).toContain('Omron')
   })
 
   it('goes through the file entry point by content sniffing', async () => {
@@ -295,6 +579,21 @@ describe('the printed PDF', () => {
     expect(parsed.lines[0].countryOfOrigin).toBe('US')
   })
 
+  it('reads a wrapped description down the page, not across it', async () => {
+    // Both behaviours at once — wrapped to a second printed line *and* split into word
+    // items. Reassembled by x alone the two lines interleave, and the scrambled string is
+    // what gets filed as the commodity description.
+    const spec = simpleOmronCi()
+    spec.lines[0] = {
+      ...spec.lines[0],
+      description: 'Robot cable assembly,',
+      descriptionTail: '5 m shielded',
+      splitDescription: true,
+    }
+    const parsed = await parseCipl('ci.pdf', await buildOmronCiPdf(spec))
+    expect(parsed.lines[0].description).toBe('Robot cable assembly, 5 m shielded')
+  })
+
   it('keeps a description word that overflows past the quantity border out of the numeric columns', async () => {
     const spec = simpleOmronCi()
     spec.lines[0] = { ...spec.lines[0], descriptionOverflow: 'kit' }
@@ -302,6 +601,23 @@ describe('the printed PDF', () => {
     expect(parsed.lines[0].quantity).toBe(4)
     expect(parsed.lines[0].uom).toBe('EA')
     expect(parsed.lines[0].description).toBe('Robot cable assembly kit')
+  })
+
+  it('does not read a numeric country of origin as the start of another line', async () => {
+    // The workbook resync looks for a block whose compliance row was collapsed away by
+    // recognising a line number in that row's first cell. On this path the first cell is
+    // the country of origin, so a numeric country code fired it — throwing away the line's
+    // whole export-control row and filing the compliance row again as goods.
+    const spec = simpleOmronCi()
+    spec.lines[0] = { ...spec.lines[0], coo: '840' }
+    const parsed = await parseCipl('ci.pdf', await buildOmronCiPdf(spec))
+    expect(parsed.lines).toHaveLength(2)
+    expect(parsed.lines[0]).toMatchObject({
+      partNumber: '10000-0001',
+      countryOfOrigin: '840',
+      classification: '8544.42.0000',
+      eccn: 'EAR99',
+    })
   })
 
   it('reads a header value whole when the extractor splits it into several items', async () => {
@@ -341,5 +657,96 @@ describe('the printed PDF', () => {
     const [page] = await doc.copyPages(copy, [0])
     doc.addPage(page)
     await expect(parseCipl('ci.pdf', (await doc.save()).buffer as ArrayBuffer)).rejects.toThrow(/single page/)
+  })
+})
+
+describe('the last block, when its compliance row was collapsed away', () => {
+  const eight = () => ({
+    ...simpleOmronCi(),
+    lines: Array.from({ length: 8 }, (_, i) => ({
+      partNumber: `P-${i + 1}`,
+      description: `Part ${i + 1}`,
+      coo: 'US',
+      hts: '8544.42.0000',
+      eccn: 'EAR99',
+      license: 'NLR',
+      sme: 'N',
+      quantity: 1,
+      uom: 'EA',
+      unitPrice: 10,
+    })),
+  })
+
+  it('does not read the totals band as the last line’s compliance row', () => {
+    const grid = omronCiGrid(eight())
+    const lastTop = grid.findIndex((r) => r[2] === 'P-8')
+    // With every form line used, the row after the last block is the totals band.
+    grid.splice(lastTop + 1, 1)
+    const parsed = parseOmronCiWorkbook('ci.xlsx', grid)
+    expect(parsed.lines).toHaveLength(8)
+    const last = parsed.lines[7]
+    expect(last.partNumber).toBe('P-8')
+    // Blank because the row is genuinely absent — never picked up off the totals band.
+    expect(last.countryOfOrigin).toBe('')
+    expect(last.classification).toBe('')
+    // And the subtotal is still read, so the value check still has something to prove against.
+    expect(parsed.headers.FC.totalValue).toBeCloseTo(80, 2)
+  })
+
+  it('reads a totals band that carries text in the compliance columns as totals, not goods', () => {
+    const grid = omronCiGrid(eight())
+    const lastTop = grid.findIndex((r) => r[2] === 'P-8')
+    grid.splice(lastTop + 1, 1)
+    // A future revision of the form putting anything in those cells must not have it filed
+    // as a country of origin.
+    const totals = grid.findIndex((r) => r.some((c) => c === 'SUBTOTAL'))
+    grid[totals][2] = 'CN'
+    grid[totals][3] = '9999.99.9999'
+    const last = parseOmronCiWorkbook('ci.xlsx', grid).lines[7]
+    expect(last.countryOfOrigin).toBe('')
+    expect(last.classification).toBe('')
+  })
+})
+
+describe('a printed table whose headings could not all be located', () => {
+  it('reports the missing table instead of inventing lines from an uncalibrated grid', async () => {
+    const spec = simpleOmronCi()
+    const pdf = await buildOmronCiPdf({ ...spec, splitHeadings: true })
+    const parsed = await parseCipl('ci.pdf', pdf)
+    // No line is better than a line whose SME landed in the licence column.
+    expect(parsed.lines).toHaveLength(0)
+    expect(parsed.warnings.some((w) => w.includes('commodity table headings'))).toBe(true)
+  })
+
+  it('withholds only the table — the header, parties and totals still read', async () => {
+    const spec = {
+      ...simpleOmronCi(),
+      splitHeadings: true,
+      consigneeName: 'Example Consignee Pte. Ltd.',
+      consigneeLines: [] as string[],
+      billToName: 'Buyer GmbH',
+      billToLines: ['9 Payer Street'],
+    }
+    const header = (await parseCipl('ci.pdf', await buildOmronCiPdf(spec))).headers.FC
+    expect(header.invoiceNumber).toBe('CI-2026-0001')
+    expect(header.totalValue).toBeCloseTo(190, 2)
+    // The party band is still mapped by column, so a blank consignee address does not
+    // absorb the bill-to's street.
+    expect(header.consignedTo).toMatchObject({ name: 'Example Consignee Pte. Ltd.', lines: [] })
+    expect(header.soldTo.name).toBe('Buyer GmbH')
+  })
+
+  it('still reads the table when only the description heading was split', async () => {
+    // That heading positions nothing — part and description are separated by the border
+    // between the COO and HTS columns — so refusing the table would be a false negative.
+    const parsed = await parseCipl('ci.pdf', await buildOmronCiPdf({ ...simpleOmronCi(), splitDescriptionHeading: true }))
+    expect(parsed.lines).toHaveLength(2)
+    expect(parsed.lines[0]).toMatchObject({
+      partNumber: '10000-0001',
+      description: 'Robot cable assembly',
+      countryOfOrigin: 'US',
+      sme: 'N',
+      quantity: 4,
+    })
   })
 })

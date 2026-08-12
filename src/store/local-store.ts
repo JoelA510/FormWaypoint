@@ -225,17 +225,92 @@ export interface LocalStore {
    * `dgConsignments` holds the evidence behind a two-year retention obligation, and this
    * used to delete it under a confirmation dialog that read as though it were kept. Records
    * past their `retainUntil` date are owed nothing and are dropped.
+   *
+   * Resolves with the stores that could *not* be cleared, described the way the UI names
+   * them; an empty array means everything went. Rejects only where nothing was deleted at
+   * all, which is the one case the caller may report as "nothing was deleted". Clearing six
+   * stores under a single `Promise.all` gave no way to tell the two apart: one store
+   * rejecting left the other five gone and the caller told the user their data was intact.
    */
-  clearAll(): Promise<void>
+  clearAll(): Promise<string[]>
 }
 
 type Schema = IDBPDatabase<unknown>
 
-let dbPromise: Promise<Schema> | null = null
+/**
+ * How long a caller waits on an open that another tab is blocking, before being told.
+ *
+ * Bounded rather than terminal. The other tab may close at any moment and the open completes
+ * when it does, so the request is left running and only the wait is cut short — an
+ * unbounded wait is the failure this replaces, and giving up on the database entirely would
+ * be the opposite mistake.
+ */
+const BLOCKED_GRACE_MS = 4000
 
+const SUPERSEDED_MESSAGE =
+  'Another tab has opened a newer version of this application, which needed the local database. This tab is ' +
+  'now working without it — nothing typed here is being saved. Reload the page.'
+
+const BLOCKED_MESSAGE =
+  'Another tab has this application open on an older version and is holding the local database, so it cannot ' +
+  'be upgraded. Close the other tabs and reload this one.'
+
+/** The handle, once one has been obtained; every later call is served straight from it. */
+let handle: Schema | null = null
+/** The in-flight open, and the bounded wait callers get on it. */
+let opening: { database: Promise<Schema>; wait: Promise<Schema> } | null = null
+/**
+ * Set when a newer version in another tab took the database away from this one.
+ *
+ * Terminal, deliberately. This tab is running the old code and can only ever ask for the old
+ * version, which the browser now refuses — reopening would fail with a `VersionError` on
+ * every call for the life of the page, and the writes that swallow their errors would go on
+ * disappearing in silence. Saying so once is the only honest answer.
+ */
+let superseded = false
+
+/**
+ * The open database, opened once.
+ *
+ * Wrapped rather than handed straight back from `openDB` because of what happens when the
+ * version changes under a browser that already has this app open somewhere else. IndexedDB
+ * will not upgrade while an older connection is live: the new tab's open request goes to
+ * `blocked` and stays pending *forever*. Memoized, that pending promise is every store call
+ * in the application, so the panels sit empty and the Generate buttons stay disabled with
+ * nothing said — the `finally` that clears `busy` never runs.
+ *
+ * Both sides of that are handled, and they are not symmetrical. Being blocked is temporary
+ * and self-healing: the wait is bounded, the open is left running, and the first call after
+ * it completes is served normally. Being *superseded* is not: that tab's code is a version
+ * behind and there is nothing it can do but say so.
+ */
 function db(): Promise<Schema> {
-  if (!dbPromise) {
-    dbPromise = openDB(DB_NAME, DB_VERSION, {
+  if (superseded) return Promise.reject(new Error(SUPERSEDED_MESSAGE))
+  // Served from the handle once there is one, so a caller that gave up waiting on a blocked
+  // open does not keep failing after the block clears.
+  if (handle) return Promise.resolve(handle)
+
+  if (!opening) {
+    let giveUp: (reason: Error) => void = () => {}
+    const abandoned = new Promise<never>((_, reject) => {
+      giveUp = reject
+    })
+    const database = openDB(DB_NAME, DB_VERSION, {
+      blocked() {
+        setTimeout(() => giveUp(new Error(BLOCKED_MESSAGE)), BLOCKED_GRACE_MS)
+      },
+      blocking(_current, _blocked, event) {
+        // This tab is the old one. Letting go is what unblocks the other; holding on would
+        // leave it waiting on a connection nobody is going to use again.
+        superseded = true
+        handle = null
+        opening = null
+        ;(event.target as IDBDatabase | null)?.close()
+      },
+      terminated() {
+        handle = null
+        opening = null
+      },
       upgrade(database, oldVersion) {
         if (!database.objectStoreNames.contains('profile')) database.createObjectStore('profile')
         if (!database.objectStoreNames.contains('consignees')) {
@@ -275,8 +350,24 @@ function db(): Promise<Schema> {
         }
       },
     })
+    const current = { database, wait: Promise.race([database, abandoned]) }
+    opening = current
+    database.then(
+      (opened) => {
+        // Kept even if `blocking` fired while the open was in flight: that tab is
+        // superseded and must not go on using a connection the newer one is waiting for.
+        if (superseded) opened.close()
+        else handle = opened
+      },
+      () => {
+        if (opening === current) opening = null
+      },
+    )
+    // The bounded wait rejects on its own schedule; nothing else may treat that as an
+    // unhandled failure.
+    current.wait.catch(() => {})
   }
-  return dbPromise
+  return opening.wait
 }
 
 export const indexedDbStore: LocalStore = {
@@ -376,9 +467,19 @@ export const indexedDbStore: LocalStore = {
     await (await db()).put('shipments', record)
   },
 
-  async listDgConsignments(limit = 50) {
+  /**
+   * Every record, newest first, unless a caller asks for fewer.
+   *
+   * Uncapped by default on purpose, unlike the shipment history beside it. This list is the
+   * evidence behind a two-year retention obligation, and a silent ceiling on the one screen
+   * that exists to say what must be kept is the same failure as deleting them: a
+   * consignment still inside its window simply was not there. Two years of them is a few
+   * hundred rows.
+   */
+  async listDgConsignments(limit) {
     const all = (await (await db()).getAll('dgConsignments')) as DgConsignmentRecord[]
-    return all.sort((a, b) => b.preparedAt.localeCompare(a.preparedAt)).slice(0, limit)
+    const newestFirst = all.sort((a, b) => b.preparedAt.localeCompare(a.preparedAt))
+    return limit == null ? newestFirst : newestFirst.slice(0, limit)
   },
   async saveDgConsignment(record) {
     await (await db()).put('dgConsignments', record)
@@ -386,18 +487,65 @@ export const indexedDbStore: LocalStore = {
 
   async clearAll() {
     const database = await db()
-    await Promise.all(
-      ['profile', 'consignees', 'overrides', 'shipments', 'partWeights', 'items'].map((name) =>
-        database.clear(name),
-      ),
-    )
+    // Settled rather than all-or-nothing, so what actually happened can be reported. The
+    // stores are independent and one refusing does not put the others back.
+    const outcome = clearOutcome(await Promise.allSettled(CLEARABLE_STORES.map(([name]) => database.clear(name))))
+    if (outcome.failure) throw outcome.failure
+    const remaining = outcome.remaining
     // Dangerous goods records inside their retention window stay — see the interface note.
-    const today = localDate()
-    const records = (await database.getAll('dgConsignments')) as DgConsignmentRecord[]
-    await Promise.all(
-      records.filter((r) => r.retainUntil < today).map((r) => database.delete('dgConsignments', r.id)),
-    )
+    //
+    // And a failure sweeping the expired ones does not fail the call. The six stores above
+    // are already gone by this point, and the caller reports a rejection as "nothing was
+    // deleted" — telling someone their data is intact after it has been erased is worse
+    // than leaving a handful of out-of-window records behind for the next sweep.
+    try {
+      const today = localDate()
+      const records = (await database.getAll('dgConsignments')) as DgConsignmentRecord[]
+      await Promise.all(
+        records.filter((r) => r.retainUntil < today).map((r) => database.delete('dgConsignments', r.id)),
+      )
+    } catch {
+      // Retried the next time this runs; nothing here is owed deletion on a schedule.
+    }
+    return remaining
   },
+}
+
+/**
+ * The stores "remove everything from this machine" empties, with the wording the UI uses for
+ * each. `dgConsignments` is deliberately absent — see the interface note.
+ */
+export const CLEARABLE_STORES: readonly (readonly [string, string])[] = [
+  ['profile', 'the exporter profile'],
+  ['consignees', 'the saved consignees'],
+  ['overrides', 'the classification overrides'],
+  ['shipments', 'the shipment history'],
+  ['partWeights', 'the per-part weights'],
+  ['items', 'the item library'],
+]
+
+/**
+ * What a round of store clears amounts to: which are still there, and whether the call
+ * failed outright.
+ *
+ * A partial failure and a total one are different events and the screen says different
+ * things about them, so the distinction is drawn here rather than left to a rejection that
+ * cannot carry it. Separated from the IndexedDB call so it can be tested at all — nothing in
+ * the test environment provides a database.
+ */
+export function clearOutcome(
+  results: readonly PromiseSettledResult<unknown>[],
+): { remaining: string[]; failure: Error | null } {
+  const remaining = CLEARABLE_STORES.filter((_, i) => results[i]?.status === 'rejected').map(([, label]) => label)
+  if (remaining.length < CLEARABLE_STORES.length) return { remaining, failure: null }
+  const first = results.find((r) => r.status === 'rejected')
+  return {
+    remaining,
+    failure:
+      first?.status === 'rejected' && first.reason instanceof Error
+        ? first.reason
+        : new Error('this machine’s stored data could not be reached'),
+  }
 }
 
 /**
