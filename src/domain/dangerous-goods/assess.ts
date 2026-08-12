@@ -401,12 +401,17 @@ function entryChecks(assessment: PackageAssessment): CheckResult[] {
     // --- Energy content --------------------------------------------------
     const threshold = energyThreshold(entry.spec)
     const stated = entry.spec.chemistry === 'lithium-metal' ? entry.spec.lithiumContentG : entry.spec.wattHours
-    // Blocking only where the figure decides something. A standalone sodium ion battery is
-    // classified identically with and without a rating — PI 976 has no sections and one
-    // limit — so refusing to generate for want of it stopped a consignment on a field that
-    // could not change the answer, under a message citing reliefs PI 976 does not have.
-    const bandMatters = bandDeterminesTreatment(entry.spec)
+    // Blocking only where the figure decides something, which is what `sectionUndetermined`
+    // says. A standalone sodium ion battery is classified identically with and without a
+    // rating — PI 976 has no sections and one limit — and a package prepared to Section I
+    // has settled the same question a different way, since both bands it could be in lead
+    // there. Refusing to generate for want of a figure that cannot change the answer stops a
+    // consignment on a field nobody can usefully act on.
     const unrated = classification.band === 'unknown'
+    const bandMatters = unrated ? classification.sectionUndetermined : bandDeterminesTreatment(entry.spec)
+    // Which of the two reasons a stated rating is not waited on — they read very differently
+    // to whoever is looking at the panel.
+    const noSections = !bandDeterminesTreatment(entry.spec)
     checks.push({
       id: `dg.energy.${ref}`,
       severity: bandMatters ? 'blocking' : 'info',
@@ -423,10 +428,15 @@ function entryChecks(assessment: PackageAssessment): CheckResult[] {
             `${entry.spec.form}; a battery whose rating is unknown cannot be shown to be inside the ` +
             'Section II or Section IB relief, and nothing is assumed on its behalf. Take it from the datasheet ' +
             'or the test summary, not from a previous air waybill.'
-          : `PI ${classification.packingInstruction} has no sections and one quantity limit, so these cells are ` +
-            'fully regulated at the same limit whatever their rating and nothing here waits on the figure. ' +
-            'Record it anyway: the datasheet value belongs in the file, and an operator or a state variation ' +
-            'may ask for it.',
+          : noSections
+            ? `PI ${classification.packingInstruction} has no sections and one quantity limit, so these cells are ` +
+              'fully regulated at the same limit whatever their rating and nothing here waits on the figure. ' +
+              'Record it anyway: the datasheet value belongs in the file, and an operator or a state variation ' +
+              'may ask for it.'
+            : `Prepared to Section I of PI ${classification.packingInstruction}, which is where this entry ` +
+              'lands on either side of the threshold, so the section, the limit and the packaging are all ' +
+              'settled without the figure. Record it anyway: the datasheet value belongs in the file, and the ' +
+              'rating is what evidences the choice if anyone asks why Section II was not used.',
       passed: !unrated || !bandMatters,
       refs: [ref],
     })
@@ -920,9 +930,7 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
   // sodium ion battery is classified the same with a rating and without, so `dg.energy`
   // does not block it — and dropping it here on the missing figure alone reopened exactly
   // the hole this filter's second sentence describes.
-  const classified = entries.filter(
-    (e) => e.classification.band !== 'unknown' || !bandDeterminesTreatment(e.entry.spec),
-  )
+  const classified = entries.filter((e) => !e.classification.sectionUndetermined)
   const declared = classified.filter((e) => e.classification.declarationRequired)
   if (declared.length && declared.length < classified.length) {
     checks.push({
@@ -1079,7 +1087,7 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
   // naming two sections the goods cannot be in and withholding the requirement that does
   // apply to them.
   const undecided = entries
-    .map((e) => undecidedPackagingSections(e.entry.spec))
+    .map((e) => undecidedPackagingSections(e.classification))
     .find((sections) => sections != null)
   const needsUnSpec = entries.some((e) => e.classification.unSpecificationPackagingRequired)
   if (undecided && !needsUnSpec) {

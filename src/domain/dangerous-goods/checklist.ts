@@ -199,7 +199,7 @@ export function buildChecklist(
     // affirmative "this section does not require it" would be a permissive claim about a
     // section nothing has decided — printed on the sheet that goes to the bench.
     const undecided = assessed.entries
-      .map((e) => undecidedPackagingSections(e.entry.spec))
+      .map((e) => undecidedPackagingSections(e.classification))
       .find((sections) => sections != null)
     if (undecided && !needsUnSpec) {
       out.push(

@@ -11,6 +11,7 @@ import {
   classifyForAir,
   combinedSectionIIStatement,
   energyBand,
+  undecidedPackagingSections,
   type BatterySpec,
 } from './lithium'
 
@@ -426,6 +427,32 @@ describe('the Section I route for a heavy package of small batteries', () => {
     const standalone = classifyForAir(spec({ wattHours: 95 }), { prepareToSectionI: true })
     expect(standalone.packingInstructionLabel).toBe('965 IB')
     expect(standalone.limits.cargoKg).toBe(10)
+  })
+
+  it('settles the section for an unrated package prepared to Section I, because both bands lead there', () => {
+    // Reading the band first returned a null section for an entry whose section is not in
+    // doubt: small goes to Section I because that is what was prepared, large goes there
+    // because that is where it belongs. The classification then read as an *undetermined*
+    // one — the 5 kg Section II ceiling in place of a 35 kg allowance, no UN specification
+    // packaging demanded where Section I demands it, and a blocking rating check for a
+    // figure that could not change any of it.
+    const unrated = classifyForAir(spec({ configuration: 'packed-with-equipment', wattHours: null }), {
+      prepareToSectionI: true,
+    })
+    expect(unrated.section).toBe('I')
+    expect(unrated.sectionUndetermined).toBe(false)
+    expect(unrated.limits).toMatchObject({ passengerKg: 5, cargoKg: 35 })
+    expect(unrated.unSpecificationPackagingRequired).toBe(true)
+    expect(unrated.specialProvisions.some((p) => p.startsWith('A802'))).toBe(true)
+    expect(undecidedPackagingSections(unrated)).toBeNull()
+
+    // Without the flag the same entry is genuinely undecided, and says so.
+    const undecided = classifyForAir(spec({ configuration: 'packed-with-equipment', wattHours: null }))
+    expect(undecided.sectionUndetermined).toBe(true)
+    expect(undecidedPackagingSections(undecided)).not.toBeNull()
+
+    // Standalone has no Section II to escalate from, so the flag settles nothing there.
+    expect(classifyForAir(spec({ wattHours: null }), { prepareToSectionI: true }).sectionUndetermined).toBe(true)
   })
 
   it('cites the sodium tables for a sodium ion Section II entry, not the lithium ones', () => {

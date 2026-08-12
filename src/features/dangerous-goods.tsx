@@ -30,7 +30,6 @@ import { assess, packageCountInConsignment } from '../domain/dangerous-goods/ass
 import { buildChecklist } from '../domain/dangerous-goods/checklist'
 import { buildDeclaration, formatKg, retainUntil } from '../domain/dangerous-goods/dgd'
 import {
-  bandDeterminesTreatment,
   CHEMISTRY_LABELS,
   CONFIGURATION_LABELS,
   FORM_LABELS,
@@ -827,8 +826,7 @@ function PackagesEditor({
                               section is pending would contradict the check beside it and
                               hide the limit for a consignment this tool will file.
                             */}
-                            {classification.band === 'unknown' &&
-                            bandDeterminesTreatment(classification.spec) ? (
+                            {classification.sectionUndetermined ? (
                               <> — the section follows from the energy content, which has not been stated</>
                             ) : (
                               <>

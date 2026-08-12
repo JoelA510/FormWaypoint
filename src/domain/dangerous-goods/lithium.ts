@@ -222,6 +222,17 @@ export interface AirClassification {
   packingInstruction: number
   section: PackingSection
   band: EnergyBand
+  /**
+   * Whether the section is null because nothing has decided it yet, as opposed to because
+   * the packing instruction has none.
+   *
+   * The two read alike and mean opposite things: PI 976 has no sections and is fully
+   * regulated, while an unrated battery has a section nobody can name. Exposed rather than
+   * re-derived, because "unrated" is not the same question — a package prepared to Section I
+   * is unrated and settled, and every consumer that re-derived it from the band alone said
+   * otherwise.
+   */
+  sectionUndetermined: boolean
   /** `965 IB`, `966`, `976` — the wording that goes in DGD box 16. */
   packingInstructionLabel: string
   /** True for Sections I, IA, IB and PI 976; false for Section II. */
@@ -291,6 +302,13 @@ function sectionFor(
 ): PackingSection {
   // PI 976 has no sections: every standalone sodium ion cell and battery is fully regulated.
   if (chemistry === 'sodium-ion' && configuration === 'standalone') return null
+  // A shipper who has prepared to Section I has already answered the only question the band
+  // asks of an entry travelling with equipment: small goes to Section I because that is what
+  // was prepared, large goes there because that is where it belongs. Reading the band first
+  // called that package "section undetermined" and then treated it as one — a 5 kg limit
+  // against a real 35 kg allowance, no UN specification packaging demanded where Section I
+  // demands it, and a blocking check for a figure that could not change any of it.
+  if (configuration !== 'standalone' && prepareToSectionI) return 'I'
   if (band === 'unknown') return null
   if (configuration === 'standalone') return band === 'small' ? 'IB' : 'IA'
   // Section II is a relief with conditions. A shipper who does not meet them — most often
@@ -309,9 +327,16 @@ function sectionFor(
  * to be. Standalone is IA against IB, and A802 is the exception that names IB. Packed with
  * equipment is Section I against Section II, and A802 has nothing to do with it: it is
  * written for Sections IB of PI 965 and PI 968 alone.
+ *
+ * Takes the classification rather than the spec so that "undecided" means the one thing
+ * `sectionUndetermined` means. Re-deriving it from the rating alone named two candidate
+ * sections for a package prepared to Section I, whose section is not in doubt at all.
  */
-export function undecidedPackagingSections(spec: BatterySpec): { pair: string; a802: boolean } | null {
-  if (energyBand(spec) !== 'unknown' || !bandDeterminesTreatment(spec)) return null
+export function undecidedPackagingSections(
+  classification: AirClassification,
+): { pair: string; a802: boolean } | null {
+  const spec = classification.spec
+  if (!classification.sectionUndetermined) return null
   if (spec.configuration === 'contained-in-equipment') return null
   return spec.configuration === 'standalone'
     ? { pair: 'Section IA requires it and Section IB is expressly excepted from it', a802: true }
@@ -652,6 +677,7 @@ export function classifyForAir(
     packingInstruction: id.packingInstruction,
     section,
     band,
+    sectionUndetermined,
     packingInstructionLabel: section ? `${id.packingInstruction} ${section}` : String(id.packingInstruction),
     declarationRequired: !isSectionII,
     fullyRegulated: !isSectionII,

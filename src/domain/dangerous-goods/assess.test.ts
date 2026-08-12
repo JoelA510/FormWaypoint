@@ -1273,6 +1273,50 @@ describe('the Section I route out of the 5 kg Section II ceiling', () => {
     expect(result.declarationRequired).toBe(true)
     expect(result.packages[0].hazardCommunication.join(' ')).toContain('Class 9')
   })
+
+  it('holds an unrated package prepared to Section I to Section I, not to "undetermined"', () => {
+    // The rating decides which side of the threshold an entry falls on, and both sides lead
+    // to Section I once the shipper has prepared to it. Reading the band first left the
+    // package classed as undetermined: a blocking limit check citing a 5 kg ceiling against
+    // a real 35 kg allowance, no UN specification packaging demanded, and a blocking rating
+    // check for a figure that could change none of it.
+    const unrated = consignment([
+      pkg('p1', [
+        entry('e1', { configuration: 'packed-with-equipment', wattHours: null }, {
+          netWeightKgPerPackage: 20,
+          prepareToSectionI: true,
+        }),
+      ], { unSpecificationMark: '4G/Y30/S/26' }),
+    ])
+    const result = assess(unrated)
+    expect(check(result, 'dg.limit.p1')).toMatchObject({ passed: true, expected: '≤ 35 kg' })
+    expect(check(result, 'dg.un-packaging.p1')).toBeDefined()
+    expect(check(result, 'dg.packaging.p1')).toBeUndefined()
+
+    // The rating is still worth recording, but it no longer blocks — nothing waits on it.
+    const rating = check(result, 'dg.energy')!
+    expect(rating.severity).toBe('info')
+    expect(rating.detail).toContain('Prepared to Section I')
+    expect(rating.detail).not.toContain('has no sections')
+  })
+
+  it('still counts an unrated Section I package as classified when it shares a consignment', () => {
+    // `dg.mixed-regulation` drops entries nothing has classified. This one is classified,
+    // so a Section II package beside it is a genuinely mixed package and must still block.
+    const mixedPackage = consignment([
+      pkg('p1', [
+        entry('e1', { configuration: 'packed-with-equipment', wattHours: null }, {
+          netWeightKgPerPackage: 2,
+          prepareToSectionI: true,
+        }),
+        entry('e2', { configuration: 'contained-in-equipment', wattHours: 76 }, {
+          netWeightKgPerPackage: 1,
+          countPerPackage: 1,
+        }),
+      ]),
+    ])
+    expect(check(assess(mixedPackage), 'dg.mixed-regulation.p1')).toMatchObject({ severity: 'blocking' })
+  })
 })
 
 describe('a mixed consignment offered cargo-aircraft-only', () => {
