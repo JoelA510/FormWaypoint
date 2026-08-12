@@ -84,6 +84,22 @@ describe('the package checklist', () => {
   })
 })
 
+describe('the air waybill alternatives', () => {
+  it('does not offer an un-annotated wording for goods that may not fly on a passenger aircraft', () => {
+    // The annotation follows the same input the statement itself does: cargo-only where the
+    // goods force it or the consignment chose it. Reading the consignment alone offered
+    // "equally accepted" wordings without it for standalone batteries, which are cargo
+    // aircraft only whatever the booking says.
+    const shipment = consignment([pkg('p1', [entry('e1', { wattHours: 95 })])], {
+      aircraft: 'passenger-and-cargo',
+    })
+    const markdown = buildChecklist(shipment, assess(shipment), '2026-08-06')
+    const offered = markdown.split('\n').filter((l) => l.startsWith('- “Dangerous goods'))
+    expect(offered.length).toBeGreaterThan(0)
+    expect(offered.every((l) => l.includes('Cargo Aircraft Only'))).toBe(true)
+  })
+})
+
 describe('the retention date', () => {
   it('is two years on, in local time', () => {
     expect(retainUntil(new Date(2026, 7, 6))).toBe('2028-08-06')

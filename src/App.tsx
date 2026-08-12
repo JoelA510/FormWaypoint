@@ -486,7 +486,11 @@ export function App() {
     try {
       setDgConsignments(await localStore.listDgConsignments())
     } catch {
-      // The retention list is re-read on the next load; the record itself is written.
+      // The record itself is written, and the list is re-read on the next load — but the
+      // panel checks this list to tell a second download of the same consignment from a
+      // second preparation of it. Left stale, printing the checklist after the declaration
+      // would file a duplicate retention row. So what was written is put in by hand.
+      setDgConsignments((prev) => [record, ...prev.filter((r) => r.id !== record.id)])
     }
   }, [])
 

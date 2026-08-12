@@ -20,6 +20,7 @@ import {
   FORM_LABELS,
   combinedSectionIIStatement,
   fullyRegulatedStatementVariants,
+  type AircraftLimitation,
 } from './lithium'
 import { ARTICLE_LEVEL_PHRASES, PROHIBITED_CO_PACKED_CLASSES, type DgConsignment } from './types'
 
@@ -89,7 +90,15 @@ export function buildChecklist(
     if (assessment.declarationRequired) {
       // Only the wordings not already listed above, so the reader is looking at alternatives
       // rather than at the same sentence twice.
-      const alternatives = fullyRegulatedStatementVariants(consignment.aircraft).filter(
+      // The same input `airWaybillStatement` decides the annotation from: cargo-only where
+      // the goods force it *or* the consignment chose it. Reading the consignment alone,
+      // the alternatives offered un-annotated wordings as "equally accepted" for goods that
+      // may not be carried on a passenger aircraft at all.
+      const offered: AircraftLimitation =
+        consignment.aircraft === 'cargo-aircraft-only' || assessment.requiredAircraft === 'cargo-aircraft-only'
+          ? 'cargo-aircraft-only'
+          : 'passenger-and-cargo'
+      const alternatives = fullyRegulatedStatementVariants(offered).filter(
         (variant) => !assessment.airWaybillStatements.includes(variant),
       )
       if (alternatives.length) {
