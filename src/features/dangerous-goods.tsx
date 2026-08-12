@@ -887,7 +887,14 @@ function PackagesEditor({
                       type="number"
                       min={1}
                       value={overpack.count}
-                      onChange={(e) => updateOverpack(overpack.id, { count: Number(e.target.value) || 1 })}
+                      // Zero, like the package count beside it, not one. Coerced to one, a
+                      // cleared box silently under-counted the consignment: the package
+                      // total is the product of the two, so six packages read as two, the
+                      // two-package battery mark exemption was granted, and the mark came
+                      // off the marks list and the bench checklist for packages that need
+                      // it. `dg.overpack-count` is there to refuse this, and could never
+                      // see it.
+                      onChange={(e) => updateOverpack(overpack.id, { count: Number(e.target.value) || 0 })}
                     />
                   )}
                 </Field>

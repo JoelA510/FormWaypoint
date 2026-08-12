@@ -1064,6 +1064,19 @@ describe('a package description covering no packages', () => {
     expect(result.canGenerate).toBe(false)
   })
 
+  it('catches an overpack count of zero, which the totals also multiply', () => {
+    // A cleared box coerced to one under-counted the consignment silently: the package
+    // total is the product of the two, so six packages read as two, the two-package battery
+    // mark exemption was granted, and the mark came off the marks list.
+    const result = assess(
+      consignment([pkg('p1', [entry('e1', { wattHours: 95 })], { count: 3, overpackId: 'o1' })], {
+        overpacks: [overpack('o1', { count: 0 })],
+      }),
+    )
+    expect(check(result, 'dg.overpack-count')).toMatchObject({ severity: 'blocking', passed: false })
+    expect(result.canGenerate).toBe(false)
+  })
+
   it('holds the overpack count to the same rule, because the totals multiply', () => {
     // The number of packages on the paper is the package count times the overpack count, so
     // half an overpack misstates every quantity that follows from it — and reached the
