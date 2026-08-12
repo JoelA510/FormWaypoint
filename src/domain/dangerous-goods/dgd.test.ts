@@ -3,7 +3,16 @@ import { PDFDocument, StandardFonts } from 'pdf-lib'
 import { consignment, entry, overpack, pkg } from './test-support'
 import { assess } from './assess'
 import { buildDeclaration, QUANTITY_WIDTH, wrap } from './dgd'
-import { COLUMNS, fitHeadingSize, QUANTITY_FONT_SIZE, renderDeclaration } from '../../carriers/dgd/render'
+import {
+  COLUMNS,
+  ENTRY_GAP,
+  fitHeadingSize,
+  QUANTITY_FONT_SIZE,
+  ROW_HEIGHT,
+  renderDeclaration,
+  TABLE_BOTTOM_Y,
+  TABLE_FIRST_ROW_Y,
+} from '../../carriers/dgd/render'
 
 
 /** The workbook's Section IB exercise, which prints the expected declaration alongside it. */
@@ -451,6 +460,20 @@ describe('the drawn table, measured in points rather than characters', () => {
 function line0Annotations(declaration: ReturnType<typeof buildDeclaration>): string[] {
   return declaration.lines.flatMap((l) => l.annotations)
 }
+
+describe('the paginator’s budget against the space that exists', () => {
+  it('fits every page shape it can produce, gaps included', () => {
+    // Two unconnected constants until this test: the model paginates to `ROWS_PER_PAGE`
+    // rows, and the renderer draws into whatever the boxes leave. The worst shape is the
+    // most entries, because each one costs a gap on top of its rows.
+    const rowsPerPage = 14
+    for (let entries = 1; entries <= rowsPerPage; entries++) {
+      const used = rowsPerPage * ROW_HEIGHT + (entries - 1) * ENTRY_GAP
+      // The last row's baseline, against the floor `rowFits` holds it to.
+      expect(TABLE_FIRST_ROW_Y - used + ROW_HEIGHT, `${entries} entries`).toBeGreaterThan(TABLE_BOTTOM_Y + 2)
+    }
+  })
+})
 
 describe('the table headings', () => {
   it('fit the columns they name, including "(Subsidiary Risk)"', async () => {

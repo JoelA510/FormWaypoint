@@ -82,6 +82,23 @@ export const COLUMNS = {
 
 export const ROW_HEIGHT = 11
 
+/** Points left between one entry and the next, so two entries do not read as one. */
+export const ENTRY_GAP = 4
+
+/**
+ * The table's own vertical extent, stated rather than accumulated.
+ *
+ * The boxes above it are 20pt of title and three stacked boxes of 74, 74 and 112; its
+ * headings take 58 and the first baseline sits 12 below them. The three boxes at the foot
+ * of the page are stacked up from the frame: 14, 88 and 58.
+ *
+ * Written here so the paginator's row budget can be checked against the space that actually
+ * exists. `ROWS_PER_PAGE` and this geometry were two unconnected numbers, and an entry
+ * beginning below the floor is one the sheet simply does not carry.
+ */
+export const TABLE_FIRST_ROW_Y = FRAME.top - 20 - 74 - 74 - 112 - 58 - 12
+export const TABLE_BOTTOM_Y = FRAME.bottom + 14 + 88 + 58
+
 /**
  * Drawable width of the quantity column, in points: its own width less the 4pt inset the
  * text starts at and a 4pt gap before the box beside it.
@@ -289,7 +306,7 @@ function drawPage(
   const signatureBottom = FRAME.bottom + 14
   const signatureTop = signatureBottom + 88
   const handlingTop = signatureTop + 58
-  const tableBottom = handlingTop
+  const tableBottom = TABLE_BOTTOM_Y
   box(ctx, CONTENT.left, tableBottom, CONTENT.right, y)
 
   text(ctx, 'NATURE AND QUANTITY OF DANGEROUS GOODS', CONTENT.left + 4, y - 10, { font: ctx.bold, size: 7.5 })
@@ -324,10 +341,10 @@ function drawPage(
     dashArray: [2, 2],
   })
 
-  let rowY = headerBottom - 12
+  let rowY = TABLE_FIRST_ROW_Y
   for (const line of pageModel.lines) {
     rowY = drawEntry(ctx, doc, line, rowY, pageModel.pageNumber, tableBottom)
-    rowY -= 4
+    rowY -= ENTRY_GAP
   }
 
   // --- Additional handling information -----------------------------------
@@ -441,7 +458,18 @@ function drawEntry(
   // The wrapped columns are guarded row by row, but these five were drawn unconditionally —
   // across the Additional Handling Information box beneath, under a warning saying those
   // rows had not been printed.
-  if (!rowFits(0)) return top - totalRows * ROW_HEIGHT
+  //
+  // And said out loud. An entry the sheet does not carry is not a formatting problem; the
+  // paginator's budget is meant to make this unreachable, and if it is ever reached the
+  // declaration is short an entry, which nobody may discover by reading it.
+  if (!rowFits(0)) {
+    warnOnce(
+      ctx,
+      `The ${line.unNumber} entry begins below the foot of the table and was not printed at all. This sheet is ` +
+        'incomplete — do not offer it. Split the consignment across fewer entries per package, or report this.',
+    )
+    return top - totalRows * ROW_HEIGHT
+  }
 
   text(ctx, line.unNumber, COLUMNS.unNumber + 3, top, { size })
   line.properShippingName.forEach((part, i) => {
