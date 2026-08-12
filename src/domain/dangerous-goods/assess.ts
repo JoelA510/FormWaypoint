@@ -1561,7 +1561,16 @@ function batteryMarkExemption(entries: EntryAssessment[], totalPackagesInConsign
   // A count of zero is unstated data, not a satisfied allowance. A package holding a
   // kilogram of batteries whose count nobody typed would otherwise be handed the exception
   // on the strength of a number that describes nothing.
-  if (counted.some((e) => e.entry.countPerPackage == null || e.entry.countPerPackage < 1)) return null
+  if (
+    counted.some(
+      (e) =>
+        e.entry.countPerPackage == null ||
+        !Number.isInteger(e.entry.countPerPackage) ||
+        e.entry.countPerPackage < 1,
+    )
+  ) {
+    return null
+  }
 
   const cells = counted
     .filter((e) => e.entry.spec.form === 'cell')
@@ -1581,7 +1590,17 @@ function batteryMarkExemption(entries: EntryAssessment[], totalPackagesInConsign
   // two of them, and an exemption measured against a number nobody has stated is not an
   // exemption — the counts it rests on are held by `dg.package-count` and
   // `dg.overpack-count`, and until those pass this says nothing.
-  if (withinAllowance && totalPackagesInConsignment >= 1 && totalPackagesInConsignment <= 2) {
+  // A whole number of packages, as well as a positive one. The count inputs take anything
+  // typed, and two descriptions of 1 and 0.5 gave a consignment of 1.5 — which sits inside
+  // "no more than two" and took the battery mark off the list at the packing bench, under
+  // wording reading "in a consignment of 1.5 packages". `dg.package-count` and
+  // `dg.overpack-count` refuse those counts; until they pass, this says nothing.
+  if (
+    withinAllowance &&
+    Number.isInteger(totalPackagesInConsignment) &&
+    totalPackagesInConsignment >= 1 &&
+    totalPackagesInConsignment <= 2
+  ) {
     const contents =
       batteries === 0
         ? `${cells} cell${cells === 1 ? '' : 's'}`

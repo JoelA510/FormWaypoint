@@ -196,6 +196,25 @@ describe('the battery mark exemption for equipment', () => {
     expect(check(result, 'dg.test-summary')).toMatchObject({ passed: true })
   })
 
+  it('does not grant the exemption on a fractional consignment', () => {
+    // The count inputs take whatever is typed, and 1 + 0.5 sits inside "no more than two"
+    // — taking the mark off the list at the packing bench, under wording reading "in a
+    // consignment of 1.5 packages".
+    const laptop = () =>
+      entry('e1', { configuration: 'contained-in-equipment', wattHours: 86 }, {
+        netWeightKgPerPackage: 1,
+        countPerPackage: 2,
+        stateOfChargePercent: 20,
+      })
+    const fractional = consignment([
+      pkg('p1', [laptop()], { count: 1 }),
+      pkg('p2', [laptop()], { count: 0.5 }),
+    ])
+    const result = assess(fractional)
+    expect(result.packages[0].batteryMarkExemption).toBeNull()
+    expect(result.packages[0].hazardCommunication).toContain('Lithium battery mark bearing UN3481')
+  })
+
   it('does not grant the exemption on a count nobody has stated', () => {
     // The panel stores zero for a cleared overpack box so `dg.overpack-count` can refuse
     // it, and flooring that back to one undid it in the multiplier: four packages read as
