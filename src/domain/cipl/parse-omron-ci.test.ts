@@ -437,6 +437,20 @@ describe('the printed PDF', () => {
     expect(parsed.headers.FC.invoiceDate).toBe('08/10/2026')
   })
 
+  it('does not let a totals cell swallow the header label it is a prefix of', async () => {
+    // `FREIGHT` delimits the totals band and is also the first word of `FREIGHT CHARGES:`.
+    // Matching the first item that hits anything stopped at the totals cell, so the label
+    // was never reassembled: `freightTerms` came back null and a PREPAID invoice would be
+    // filed as COLLECT. The longest match wins instead.
+    const parsed = await parseCipl(
+      'ci.pdf',
+      await buildOmronCiPdf({ ...simpleOmronCi(), splitValues: true, splitHeaderLabel: true }),
+    )
+    expect(parsed.headers.FC.freightTerms).toBe('PREPAID')
+    expect(parsed.headers.FC.invoiceNumber).toBe('CI-2026-0001')
+    expect(parsed.headers.FC.incoterm).toBe('DAP Singapore')
+  })
+
   it('does not end the address band on a consignee whose name contains a totals word', async () => {
     // The band ends at the first row carrying a header-grid label. Counting a split label
     // there is right; counting the cells that delimit the *totals* band is not — they are

@@ -381,6 +381,10 @@ describe('address extraction', () => {
     // token has to be a subdivision code, which `PAZ` and `AIN` are not.
     expect(field(['1200 Euclid Ave', 'CLEVELAND OH 44114'], 'City')).toBe('CLEVELAND')
     expect(field(['100 Collins St', 'MELBOURNE VIC 3000'], 'City')).toBe('MELBOURNE')
+    // The same address in the same capitals as its mixed-case form keys the same way.
+    expect(field(['Rua Example 100', 'SAO PAULO SP 01310-100'], 'City')).toBe('SAO PAULO')
+    expect(field(['Rua Example 100', 'Sao Paulo SP 01310-100'], 'City')).toBe('Sao Paulo')
+    expect(field(['1 King William St', 'ADELAIDE SA 5000'], 'City')).toBe('ADELAIDE')
     // And a capitalised city whose last word merely looks like one keeps it.
     expect(field(['Via Roma 1', 'ROMA 00184'], 'City')).toBe('ROMA')
   })

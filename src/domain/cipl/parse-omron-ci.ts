@@ -767,8 +767,15 @@ function coalescedRow(row: TextRow): string[] {
   return cells
 }
 
-/** How many text items one printed label is allowed to have been split into. */
-const MAX_LABEL_ITEMS = 3
+/**
+ * How many text items one printed label is allowed to have been split into.
+ *
+ * Six, because `CONSIGNEE EORI / USCI / VAT` is six words and a label that cannot be
+ * reassembled is a label that folds into the value beside it — which is the whole point of
+ * looking. Matching is on equality with a closed list, so the extra reach costs only the
+ * chance that several consecutive value items spell a label exactly.
+ */
+const MAX_LABEL_ITEMS = 6
 
 /**
  * The label printed at `start`, whether the extractor emitted it as one item or several.
@@ -789,15 +796,25 @@ function labelSpanAt(
   includeTotalsCells = true,
 ): { text: string; end: number } | null {
   const parts: string[] = []
+  // The longest match wins, and a header label beats a totals cell of the same length.
+  //
+  // Taking the first match instead let a shorter name swallow a longer one it is a prefix
+  // of: a split `FREIGHT CHARGES:` matched the totals cell `FREIGHT` on its first item and
+  // stopped there, so the label was never reassembled, `freightTerms` came back null and a
+  // PREPAID invoice was filed as COLLECT. `TAX` sits inside `SHIPPER EIN / TAX ID` the same
+  // way.
+  let best: { text: string; end: number; header: boolean } | null = null
   for (let end = start; end < items.length && end - start < MAX_LABEL_ITEMS; end++) {
     parts.push(items[end].str)
     for (const joined of end === start ? [parts[0]] : [parts.join(' '), parts.join('')]) {
-      if (isLabel(joined) || (includeTotalsCells && TOTALS_CELLS.has(normalizeLabel(joined)))) {
-        return { text: joined, end }
+      const header = isLabel(joined)
+      if (!header && !(includeTotalsCells && TOTALS_CELLS.has(normalizeLabel(joined)))) continue
+      if (!best || end > best.end || (end === best.end && header && !best.header)) {
+        best = { text: joined, end, header }
       }
     }
   }
-  return null
+  return best && { text: best.text, end: best.end }
 }
 
 /**

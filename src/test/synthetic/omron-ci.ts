@@ -77,8 +77,8 @@ export interface OmronCiSpec {
    */
   splitDescriptionHeading?: boolean
   /**
-   * Draw the `INVOICE DATE:` header label as two items, to model pdfjs splitting a *label*
-   * on the header grid — which, unhealed, folds it into the value beside `INVOICE #:`.
+   * Draw every right-hand header label one item per word, to model pdfjs splitting a *label*
+   * on the header grid — which, unhealed, folds it into the value in the cell before it.
    */
   splitHeaderLabel?: boolean
 }
@@ -275,14 +275,14 @@ export async function buildOmronCiPdf(spec: OmronCiSpec): Promise<ArrayBuffer> {
   ]
   // With splitValues, a value is drawn one item per word, as pdfjs often reports it.
   const value = (x: number, y: number, text: string) => words(x, y, text, !!spec.splitValues)
-  // With splitHeaderLabel, the right-hand label of the first pair is drawn one item per
-  // word, the way pdfjs reports a run it decided to break.
+  // With splitHeaderLabel, every right-hand label is drawn one item per word, the way pdfjs
+  // reports a run it decided to break.
   const label = words
   pairs.forEach(([label1, value1, label2, value2], i) => {
     const y = 640 - i * 12
     at(COLUMNS.ln.left, y, label1)
     value(COLUMNS.d.left, y, value1)
-    label(COLUMNS.f.left, y, label2, i === 0 && !!spec.splitHeaderLabel)
+    label(COLUMNS.f.left, y, label2, !!spec.splitHeaderLabel)
     value(COLUMNS.h.left, y, value2)
   })
 

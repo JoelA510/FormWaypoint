@@ -881,6 +881,12 @@ function postalCodeFrom(lines: string[]): string {
  * codes of the countries whose addresses print a subdivision as a bare abbreviation between
  * the city and the postcode. Anything outside the list stays in the City box, where it is
  * visible to whoever keys the shipment rather than deleted on a hunch.
+ *
+ * The residual is a subdivision spelled out in full on an all-caps line — `BANGALORE
+ * KARNATAKA` keys as both words, where `Bangalore KARNATAKA` keys as the city alone.
+ * Recognising those would mean listing the subdivision names of every country, and the two
+ * errors are not equal: a state left in the City box is wrong in a way the person keying
+ * the shipment can see, and a city silently shortened to its first word is not.
  */
 const SUBDIVISION_CODES = new Set([
   // United States, District of Columbia and territories
@@ -891,7 +897,10 @@ const SUBDIVISION_CODES = new Set([
   // Canada
   'ON', 'QC', 'BC', 'AB', 'MB', 'SK', 'NS', 'NB', 'NL', 'PE', 'YT', 'NT', 'NU',
   // Australia
-  'NSW', 'VIC', 'QLD', 'TAS', 'ACT',
+  'NSW', 'VIC', 'QLD', 'TAS', 'ACT', 'SA',
+  // Brazil, which prints the two-letter state between the city and the CEP
+  'AC', 'AM', 'AP', 'BA', 'CE', 'ES', 'GO', 'MA', 'MG', 'MS', 'MT', 'PB', 'PE', 'PI', 'PR',
+  'RJ', 'RN', 'RO', 'RR', 'RS', 'SC', 'SE', 'SP', 'TO',
 ])
 
 /**

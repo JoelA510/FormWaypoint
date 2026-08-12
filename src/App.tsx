@@ -578,19 +578,36 @@ export function App() {
           }
         : null,
     )
-    // These three describe stored data, and there is none of it now. They are deliberately
-    // sticky against writes, so nothing else takes them down: a wiped machine went on
-    // saying it had not recorded a shipment, and that an empty panel was not evidence that
-    // nothing was saved.
-    setRestoreError(null)
+    // These describe stored data, and there is none of it now. They are deliberately sticky
+    // against writes, so nothing else takes them down: a wiped machine went on saying it
+    // had not recorded a shipment, and that an empty panel was not evidence that nothing
+    // was saved.
     setUnrecordedShipment(null)
-    setProfileUnavailable(false)
+    // The profile pair moves together. Withdrawing the banner while `profileLoaded` stayed
+    // false left the guard on the autosave in place with nothing on screen to explain it,
+    // so every edit made after the wipe was discarded in silence. Only where the profile
+    // store is one of the ones that actually cleared: a write just succeeded against it,
+    // so this screen is now the truth about what is stored.
+    if (!remaining.includes('the exporter profile')) {
+      setProfileUnavailable(false)
+      setProfileLoaded(true)
+    }
     // The retention records survive `clearAll` by design, so the panel is re-read rather
-    // than emptied. A failed read leaves what is on screen, which is still true.
+    // than emptied.
+    //
+    // And the restore banner comes down only once that read has succeeded. It is the one
+    // panel a wipe does not refill, so withdrawing the warning before re-reading it took
+    // down the only thing on screen saying the list might be short — over a list that is
+    // evidence for a retention obligation.
     try {
       setDgConsignments(await localStore.listDgConsignments())
+      setRestoreError(null)
     } catch {
-      // Already deleted everything it was asked to; the list refreshes on the next load.
+      setRestoreError(
+        'The dangerous goods retention records could not be re-read after the deletion. They are kept by ' +
+          'design, and what is shown here may be incomplete — reload the page before treating this list as ' +
+          'the full set.',
+      )
     }
   }, [])
 
