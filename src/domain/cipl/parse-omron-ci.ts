@@ -74,8 +74,12 @@ const isLabel = (text: string): boolean => HEADER_LABELS.has(normalizeLabel(text
  * Exported so that separation can be asserted against the form's real label list rather
  * than left resting on the order the rows happen to be printed in.
  */
-export const isPartyTitle = (text: string, block: 'SHIPPER' | 'CONSIGNEE' | 'BILL TO'): boolean =>
+export const isPartyTitle = (text: string, block: PartyBlock): boolean =>
   !isLabel(text) && text.trim().toUpperCase().startsWith(block)
+
+/** The three address blocks the band titles, in the order the form prints them. */
+const PARTY_BLOCKS = ['SHIPPER', 'CONSIGNEE', 'BILL TO'] as const
+type PartyBlock = (typeof PARTY_BLOCKS)[number]
 
 /**
  * The commodity table's columns in printed order: the top row of each two-row block, and
@@ -746,8 +750,15 @@ function coalescedRow(row: TextRow): string[] {
  */
 function partyRow(row: TextRow, band: TextRow): string[] {
   const titles = band.items
-    .filter((item) => /^(SHIPPER|CONSIGNEE|BILL TO)/.test(item.str.toUpperCase()))
+    .filter((item) => PARTY_BLOCKS.some((block) => isPartyTitle(item.str, block)))
     .sort((a, b) => a.x - b.x)
+  // Three columns or none. The band is located on SHIPPER and CONSIGNEE alone, so an
+  // extractor that split "BILL TO / SOLD TO (IF DIFFERENT)" across items — leaving no item
+  // beginning "BILL TO" — still found it, and every bill-to address item then folded into
+  // the consignee's cell: a wrong CONSIGNED TO address on the SLI, with nothing said. An
+  // address block that cannot be mapped onto the form's three columns is not mapped at all,
+  // and `readParties` reports the empty blocks as it does for any band it cannot read.
+  if (titles.length !== PARTY_BLOCKS.length) return []
   const cells = titles.map(() => [] as string[])
   for (const item of row.items) {
     // The rightmost title at or left of the item owns it: titles and values are both

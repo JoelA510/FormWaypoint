@@ -377,6 +377,15 @@ describe('the printed PDF', () => {
     expect(parsed.lines[1].extendedValue).toBeCloseTo(150, 2)
   })
 
+  it('leaves the address blocks empty rather than folding two into one', () => {
+    // The band is located on SHIPPER and CONSIGNEE alone, so an extractor that split the
+    // BILL TO heading across items still found it — and every bill-to address item then
+    // folded into the consignee's cell, putting a wrong address in CONSIGNED TO with
+    // nothing said. Three columns or none.
+    expect(isPartyTitle('BILL TO / SOLD TO (IF DIFFERENT)', 'BILL TO')).toBe(true)
+    expect(isPartyTitle('SOLD TO (IF DIFFERENT)', 'BILL TO')).toBe(false)
+  })
+
   it('keeps an empty consignee from shifting the bill-to into its column', async () => {
     const spec = { ...simpleOmronCi(), consigneeName: '', consigneeLines: [], billToName: 'Billing Party LLC' }
     const parsed = await parseCipl('ci.pdf', await buildOmronCiPdf(spec))
