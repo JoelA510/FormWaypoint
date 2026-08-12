@@ -530,6 +530,28 @@ describe('a consignment mixing fully regulated and Section II packages', () => {
     expect(declaration.notes.join(' ')).toContain('not listed on the declaration')
   })
 
+  it('does not add that note for a Section II entry A181 merged away', () => {
+    // One package, one printed line: A181 describes the whole box as packed with equipment,
+    // and the contained-in entry inside it is part of that line. Reading the raw entries
+    // found it still marked Section II and printed a note, directly beneath the line that
+    // covers it, saying the consignment's Section II packages travel unlisted.
+    const a181 = consignment([
+      pkg('p1', [
+        entry('e1', { configuration: 'packed-with-equipment', wattHours: 90 }, {
+          netWeightKgPerPackage: 1,
+          prepareToSectionI: true,
+        }),
+        entry('e2', { configuration: 'contained-in-equipment', wattHours: 90 }, {
+          netWeightKgPerPackage: 1,
+          countPerPackage: 1,
+        }),
+      ], { unSpecificationMark: '4G/Y25/S/26/USA/+D02390' }),
+    ])
+    const declaration = buildDeclaration(a181, assess(a181))
+    expect(declaration.lines).toHaveLength(1)
+    expect(declaration.notes.join(' ')).not.toContain('not listed on the declaration')
+  })
+
   it('sums an overpack total from the declared entries only', () => {
     const shared = consignment(
       [

@@ -430,7 +430,13 @@ function declarationNotes(consignment: DgConsignment, assessment: DgAssessment):
   if (!consignment.airWaybillNumber.trim()) {
     notes.push('The air waybill number is left blank for the forwarder; some carriers require the shipper to enter it.')
   }
-  const hasSectionII = assessment.packages.some((p) => p.entries.some((e) => e.classification.section === 'II'))
+  // Through `applyA181`, like the entries the declaration itself is built from. A package
+  // holding UN3481 both packed with and contained in equipment prints as one Section I
+  // line; reading the raw entries found the contained-in one still marked Section II and
+  // added a note, beneath that very line, saying Section II packages travel unlisted.
+  const hasSectionII = assessment.packages.some((p) =>
+    applyA181(p.entries).some((e) => e.classification.section === 'II'),
+  )
   if (hasSectionII && assessment.declarationRequired) {
     notes.push(
       'The Section II packages in this consignment are not listed on the declaration: excepted Class 9 travels ' +

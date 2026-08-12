@@ -542,6 +542,23 @@ describe('what the shipper has to establish', () => {
       consignment([pkg('p1', [entry('e1', { wattHours: 500 })], { unSpecificationMark: '4G/Y25/S/26/USA/+D02390' })]),
     )
     expect(check(marked, 'dg.un-packaging')).toMatchObject({ passed: true })
+    expect(check(marked, 'dg.un-packaging')!.detail).toContain('A802')
+  })
+
+  it('does not cite A802 to a sodium ion shipper, whose entry does not carry it', () => {
+    // PI 976 requires the performance packaging by its own instruction. A802 is written for
+    // lithium and `specialProvisionsFor` leaves it off UN3551 for that reason — so the
+    // blocking check named a provision the column M list beside it excludes.
+    const sodium = assess(
+      consignment([
+        pkg('p1', [entry('e1', { chemistry: 'sodium-ion', wattHours: 60 })], {
+          unSpecificationMark: '4G/Y25/S/26/USA/+D02390',
+        }),
+      ]),
+    )
+    const packaging = check(sodium, 'dg.un-packaging')!
+    expect(packaging.detail).toContain('Packing Group II performance')
+    expect(packaging.detail).not.toContain('A802')
   })
 
   it('blocks until the state and operator variations have been read', () => {
@@ -1302,16 +1319,18 @@ describe('the Section I route out of the 5 kg Section II ceiling', () => {
 
   it('still counts an unrated Section I package as classified when it shares a consignment', () => {
     // `dg.mixed-regulation` drops entries nothing has classified. This one is classified,
-    // so a Section II package beside it is a genuinely mixed package and must still block.
+    // so Section II goods beside it are a genuinely mixed package and must still block.
+    // Two UN numbers, so A181 — which is per UN number — does not join them into one.
     const mixedPackage = consignment([
       pkg('p1', [
         entry('e1', { configuration: 'packed-with-equipment', wattHours: null }, {
           netWeightKgPerPackage: 2,
           prepareToSectionI: true,
         }),
-        entry('e2', { configuration: 'contained-in-equipment', wattHours: 76 }, {
+        entry('e2', { chemistry: 'lithium-metal', configuration: 'contained-in-equipment', lithiumContentG: 1 }, {
           netWeightKgPerPackage: 1,
           countPerPackage: 1,
+          wattHourMarkedOnCase: false,
         }),
       ]),
     ])
@@ -1365,6 +1384,31 @@ describe('edge cases around the mixed-regulation and Section I wording', () => {
     expect(check(result, 'dg.mixed-regulation.p1')).toBeUndefined()
     // The real defect is still blocking, in the words that fix it.
     expect(check(result, 'dg.energy.p1/e2')).toMatchObject({ severity: 'blocking', passed: false })
+  })
+
+  it('does not call a package A181 makes one entry of a mixture of two sections', () => {
+    // A181 makes one fully regulated UN3481 entry of a package holding batteries both
+    // packed with and contained in equipment, and the declaration prints exactly one line
+    // for it. This check partitioned the raw entries, so it refused to generate the paper
+    // every other reader in the file had already agreed on — and told the shipper to split
+    // out Section II batteries the merged package does not have.
+    // 90 Wh is small, so the packed-with entry is Section I only because it was prepared to
+    // it; A181 carries that onto the contained-in entry beside it, which would otherwise be
+    // Section II.
+    const merged = consignment([
+      pkg('p1', [
+        entry('e1', { configuration: 'packed-with-equipment', wattHours: 90 }, {
+          netWeightKgPerPackage: 1,
+          prepareToSectionI: true,
+        }),
+        entry('e2', { configuration: 'contained-in-equipment', wattHours: 90 }, {
+          netWeightKgPerPackage: 1,
+          countPerPackage: 1,
+        }),
+      ], { unSpecificationMark: '4G/Y25/S/26/USA/+D02390' }),
+    ])
+    const result = assess(merged)
+    expect(check(result, 'dg.mixed-regulation.p1')).toBeUndefined()
   })
 
   it('does not offer Section I on a passenger aircraft, where it allows the same 5 kg', () => {

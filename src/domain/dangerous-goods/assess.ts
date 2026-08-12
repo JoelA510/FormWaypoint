@@ -930,7 +930,15 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
   // sodium ion battery is classified the same with a rating and without, so `dg.energy`
   // does not block it — and dropping it here on the missing figure alone reopened exactly
   // the hole this filter's second sentence describes.
-  const classified = entries.filter((e) => !e.classification.sectionUndetermined)
+  //
+  // Through `applyA181` first, like the declaration, the checklist, the marks list and the
+  // limit check. A181 makes one fully regulated entry of a package holding UN3481 both
+  // packed with and contained in equipment, and the declaration prints it as one line —
+  // while this check, partitioning the raw entries, called that same package a mix of
+  // Section I and Section II and refused to generate the paper it had already agreed with.
+  // A181 declines to relabel onto a laxer classification, so a genuine mix — a fully
+  // regulated contained-in entry beside a Section II packed-with one — still fails here.
+  const classified = applyA181(entries).filter((e) => !e.classification.sectionUndetermined)
   const declared = classified.filter((e) => e.classification.declarationRequired)
   if (declared.length && declared.length < classified.length) {
     checks.push({
@@ -1110,8 +1118,19 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
       severity: 'blocking',
       title: `${label}: UN specification packaging`,
       detail: pkg.unSpecificationMark.trim()
-        ? `Marked ${pkg.unSpecificationMark.trim()}. It must meet Packing Group II performance (special ` +
-          'provision A802), and the manufacturer’s closure instructions must be followed exactly and every ' +
+        ? `Marked ${pkg.unSpecificationMark.trim()}. It must meet Packing Group II performance` +
+          // Cited only where the entry that needs the packaging carries the provision.
+          // A802 is written for lithium, and a standalone sodium ion battery under PI 976
+          // needs performance packaging by its own instruction — naming A802 there put a
+          // provision in a blocking check that the same entry's column M list excludes.
+          (entries.some(
+            (e) =>
+              e.classification.unSpecificationPackagingRequired &&
+              e.classification.specialProvisions.some((p) => p.startsWith('A802')),
+          )
+            ? ' (special provision A802)'
+            : '') +
+          ', and the manufacturer’s closure instructions must be followed exactly and every ' +
           'component supplied used — changing the tape, the closure sequence or a component can void the ' +
           'certification. Keep the instruction sheet with the packing record.'
         : 'This section requires UN specification packaging meeting Packing Group II performance. Enter the ' +
