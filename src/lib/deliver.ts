@@ -48,9 +48,10 @@ export function safeFileName(name: string, fallback = 'document'): string {
     // looked for at all — Windows strips those itself, turning `shipment .pdf` into
     // something the app cannot then find.
     .trim()
-    .replace(/^\.+/, '')
-    .replace(/\.+$/, '')
-    .trim()
+    // Dots *and* spaces, from both ends, until neither remains. Stripping a single leading
+    // run left `. .hidden.pdf` as `.hidden.pdf` — still a hidden file, one space later.
+    .replace(/^[.\s]+/, '')
+    .replace(/[.\s]+$/, '')
   // Reserved device names are still reserved with an extension: `CON.pdf` is not a file.
   const reserved = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i
   // A name left with no letters or digits names nothing — `..` reduces to a dash, and a file

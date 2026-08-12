@@ -129,6 +129,9 @@ describe('safeFileName', () => {
     // looked for. Windows strips those itself, leaving a file the app cannot find again.
     expect(safeFileName(' .A1_shippers-declaration.pdf')).toBe('A1_shippers-declaration.pdf')
     expect(safeFileName('A1_dg-checklist.md.')).toBe('A1_dg-checklist.md')
+    // And more than one run of them, from either end.
+    expect(safeFileName('. .A1_shippers-declaration.pdf')).toBe('A1_shippers-declaration.pdf')
+    expect(safeFileName('A1_dg-checklist.md. .')).toBe('A1_dg-checklist.md')
   })
 
   it('strips the other characters Windows refuses', () => {

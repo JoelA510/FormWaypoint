@@ -244,7 +244,13 @@ export function buildDeclaration(consignment: DgConsignment, assessment: DgAsses
     // the Shipper's Declaration would declare goods the declaration does not cover. A
     // mixed consignment therefore prints only its fully regulated entries, and the notes
     // say the Section II packages travel beside them.
-    const groups = groupByClassification(applyA181(packageAssessment.entries.filter((e) => e.classification.declarationRequired)))
+    // Merged first, then filtered — the order every other reader uses. Filtering first, a
+    // package whose entries A181 joins was partitioned here differently from the way the
+    // checks, the checklist and the marks list partition it, and the two artifacts on
+    // screen disagreed about the same box.
+    const groups = groupByClassification(
+      applyA181(packageAssessment.entries).filter((e) => e.classification.declarationRequired),
+    )
 
     const overpack = pkg.overpackId ? consignment.overpacks.find((o) => o.id === pkg.overpackId) : null
     const groupList = [...groups.values()]
