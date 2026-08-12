@@ -96,8 +96,15 @@ export function App() {
    * profile autosave fires 400 ms after load.
    */
   const [restoreError, setRestoreError] = useState<string | null>(null)
-  /** The most recent write failure, withdrawn when a write succeeds. */
-  const [writeError, setWriteError] = useState<string | null>(null)
+  /**
+   * The most recent write failure, and what it was about.
+   *
+   * Withdrawn by a later success only where that success is about the *same* thing. Cleared
+   * on any success, a failed item library import — whose panel has already reported "N
+   * added" and discarded the staged file — was taken off the screen by the profile autosave
+   * 400 ms into the next keystroke, leaving no sign the import never landed.
+   */
+  const [writeError, setWriteError] = useState<{ what: string; message: string } | null>(null)
   /**
    * A form that was generated whose history record was not written.
    *
@@ -152,10 +159,10 @@ export function App() {
     async (what: string, run: () => Promise<void>, refresh?: () => Promise<void>): Promise<void> => {
       try {
         await run()
-        setWriteError(null)
+        setWriteError((prev) => (prev && prev.what !== what ? prev : null))
       } catch (e: unknown) {
         const because = e instanceof Error ? e.message : 'the local database could not be reached'
-        setWriteError(`${what} could not be saved on this machine: ${because}`)
+        setWriteError({ what, message: `${what} could not be saved on this machine: ${because}` })
         return
       }
       // Refreshing the list on screen is not the obligation the write satisfied. Inside the
@@ -454,7 +461,6 @@ export function App() {
     // view; the record is the only one of the three that has to be said out loud.
     try {
       await localStore.saveShipment(record)
-      setWriteError(null)
       setUnrecordedShipment(null)
     } catch (e: unknown) {
       const because = e instanceof Error ? e.message : 'this machine’s stored data could not be reached'
@@ -542,11 +548,13 @@ export function App() {
       await localStore.clearAll()
       setWriteError(null)
     } catch (e: unknown) {
-      setWriteError(
-        e instanceof Error
-          ? `Nothing was deleted: ${e.message}`
-          : 'Nothing was deleted — this machine’s stored data could not be reached.',
-      )
+      setWriteError({
+        what: 'The deletion',
+        message:
+          e instanceof Error
+            ? `Nothing was deleted: ${e.message}`
+            : 'Nothing was deleted — this machine’s stored data could not be reached.',
+      })
       return
     }
     setProfile(EMPTY_PROFILE)
@@ -624,7 +632,7 @@ export function App() {
 
         {writeError ? (
           <p className="rounded-md border border-[var(--color-block)] bg-[var(--color-block-soft)] px-3 py-2 text-sm">
-            {writeError}
+            {writeError.message}
           </p>
         ) : null}
 

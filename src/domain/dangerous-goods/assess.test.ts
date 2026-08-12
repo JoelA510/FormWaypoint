@@ -475,10 +475,11 @@ describe('packages holding more than one entry', () => {
       ]),
     ])
     const result = assess(combined)
-    // 2 and 2.5 kg, each inside its own 5 kg Section II allowance...
-    expect(result.checks.filter((c) => c.id.startsWith('dg.limit.p1')).every((c) => c.passed)).toBe(true)
-    // ...and 4.5 kg in total, inside it too.
-    expect(check(result, 'dg.a181')).toMatchObject({ passed: true, actual: '4.5 kg' })
+    // A181 makes these one entry, so there is one quantity row and it states the total —
+    // the same 4.5 kg the declaration prints, inside the 5 kg Section II allowance.
+    const limits = result.checks.filter((c) => c.id.startsWith('dg.limit.p1'))
+    expect(limits).toHaveLength(1)
+    expect(limits[0]).toMatchObject({ passed: true, actual: '4.5 kg' })
   })
 
   it('holds the A181 total to the 5 kg Section II ceiling, which has no cargo relief', () => {
@@ -490,7 +491,11 @@ describe('packages holding more than one entry', () => {
     ])
     // Each entry is inside its own 5 kg allowance, but under A181 the 6 kg total is what
     // the limit applies to — and on a cargo aircraft the Section II ceiling is still 5 kg.
-    expect(check(assess(combined), 'dg.a181')).toMatchObject({ passed: false, actual: '6 kg', expected: '≤ 5 kg' })
+    expect(check(assess(combined), 'dg.limit.p1')).toMatchObject({
+      passed: false,
+      actual: '6 kg',
+      expected: '≤ 5 kg',
+    })
   })
 
   it('blocks a combined package whose total mass exceeds the lowest limit', () => {
@@ -504,7 +509,7 @@ describe('packages holding more than one entry', () => {
       { aircraft: 'passenger-and-cargo' },
     )
     const result = assess(heavy)
-    expect(check(result, 'dg.a181')).toMatchObject({ severity: 'blocking', passed: false, expected: '≤ 5 kg' })
+    expect(check(result, 'dg.limit.p1')).toMatchObject({ severity: 'blocking', passed: false, expected: '≤ 5 kg' })
   })
 
   it('measures the total A181 merges even when one entry has no rating', () => {
@@ -585,9 +590,12 @@ describe('packages holding more than one entry', () => {
         ]),
       ]),
     )
-    const a181 = result.checks.filter((c) => c.id.startsWith('dg.a181'))
-    expect(a181).toHaveLength(1)
-    expect(a181[0]).toMatchObject({ passed: true, actual: '4 kg' })
+    // The lithium ion pair is one row at their combined 4 kg; the lithium metal line keeps
+    // its own, at its own 3 kg.
+    const limits = result.checks.filter((c) => c.id.startsWith('dg.limit.p1'))
+    expect(limits).toHaveLength(2)
+    expect(limits.find((c) => c.id.includes('UN3481'))).toMatchObject({ passed: true, actual: '4 kg' })
+    expect(limits.find((c) => c.id.includes('UN3091'))).toMatchObject({ passed: true, actual: '3 kg' })
   })
 
   it('asks for one proper shipping name mark on a package A181 makes one entry of', () => {

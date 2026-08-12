@@ -755,7 +755,15 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
   // --- Net quantity per package ------------------------------------------
   // Grouped by regulatory entry, because that is what the limit is written against: two
   // different UN numbers in one box each get their own allowance.
-  const groups = groupByClassification(entries)
+  //
+  // Through `applyA181` first, like the declaration, the checklist, the marks list and the
+  // shared-packaging count. Left on the raw entries, this was the last reader still
+  // partitioning a package differently from the paper it produces: a box holding one UN
+  // number both packed with and contained in equipment showed two quantity rows passing at
+  // 3 kg each while the declaration printed one line of 6 kg.
+  const merged = applyA181(entries)
+  const groups = groupByClassification(merged)
+  const mergedByEntry = new Map(merged.map((e) => [e.entry.id, e.classification]))
 
   for (const [key, { classification, weightKg: weight }] of groups) {
     const instructionLimit = usingPassenger ? classification.limits.passengerKg : classification.limits.cargoKg
@@ -949,6 +957,22 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
     // left that merged mass measured against nothing. `dg.energy` blocks the shipment
     // either way, but the preview and the check list must not describe different packages.
     for (const [unNumber, combined] of a181Groups(entries)) {
+      // Raised only where the merge did not happen — `applyA181` declines to relabel a
+      // fully regulated entry onto a Section II one, and that is the case A181's total has
+      // to be stated for. Where it did merge, `dg.limit` above measures the same mass
+      // against the same ceiling, and saying it again in other words is noise.
+      const packedWith = combined.find((e) => e.entry.spec.configuration === 'packed-with-equipment')
+      const allMerged =
+        packedWith != null &&
+        combined
+          .filter((e) => e.entry.spec.configuration === 'contained-in-equipment')
+          .every(
+            (e) =>
+              classificationKey(mergedByEntry.get(e.entry.id) ?? e.classification) ===
+              classificationKey(packedWith.classification),
+          )
+      if (allMerged) continue
+
       const total = kg(combined.reduce((sum, e) => sum + (e.entry.netWeightKgPerPackage ?? 0), 0))
       // The instruction limit of the entries A181 gathers, and only those. The packaging's
       // own authorization is not folded in here: it is measured against the whole package,
