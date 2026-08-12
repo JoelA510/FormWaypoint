@@ -1032,8 +1032,33 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
   })
 
   // --- Packaging ---------------------------------------------------------
+  //
+  // Three answers, not two. An entry whose energy band nobody has stated has no section
+  // yet, and the two it could be disagree here: Section IA requires UN specification
+  // packaging, Section IB is expressly excepted from it. Conservative points in opposite
+  // directions for the two halves of that entry — the *lower* ceiling for the quantity,
+  // the *stricter* requirement for the packaging — so this says neither. Demanding a mark
+  // would block a second time on the fact `dg.energy` is already blocking for; saying none
+  // is needed would be a positive permissive claim about a section nothing has decided.
+  const undetermined = entries.some(
+    (e) => e.classification.band === 'unknown' && bandDeterminesTreatment(e.entry.spec),
+  )
   const needsUnSpec = entries.some((e) => e.classification.unSpecificationPackagingRequired)
-  if (needsUnSpec) {
+  if (undetermined && !needsUnSpec) {
+    checks.push({
+      id: `dg.packaging.${pkg.id}`,
+      severity: 'info',
+      title: `${label}: which packaging applies follows from the rating`,
+      detail:
+        'The watt-hour rating or lithium content of at least one battery in this package has not been stated, ' +
+        'and the two sections it could fall in do not agree: Section IA requires UN specification packaging ' +
+        'meeting Packing Group II performance, and Section IB is expressly excepted from it by special ' +
+        'provision A802. Enter the rating — the check above is already asking for it — and this will say which ' +
+        'of the two applies. Do not read this as either.',
+      passed: true,
+      refs: [pkg.id],
+    })
+  } else if (needsUnSpec) {
     checks.push({
       id: `dg.un-packaging.${pkg.id}`,
       severity: 'blocking',

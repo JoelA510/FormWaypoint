@@ -272,6 +272,32 @@ describe('the battery mark exemption for equipment', () => {
   })
 })
 
+describe('a package whose section nothing has decided', () => {
+  it('claims neither packaging answer, because the two candidates disagree', () => {
+    // Conservative points opposite ways for the two halves of the same entry: the lower
+    // ceiling for the quantity, the stricter requirement for the packaging. Demanding a
+    // mark blocks a second time on what `dg.energy` is already blocking for; saying none is
+    // needed is a positive permissive claim about a section nothing has decided.
+    const unrated = consignment([pkg('p1', [entry('e1', { wattHours: null })])])
+    const result = assess(unrated)
+    const packaging = check(result, 'dg.packaging')
+    expect(packaging).toMatchObject({ severity: 'info', passed: true })
+    expect(packaging!.detail).toContain('do not agree')
+    expect(packaging!.detail).not.toContain('does not require UN specification packaging')
+    expect(check(result, 'dg.un-packaging')).toBeUndefined()
+    // And the rating is still what the shipment is held on.
+    expect(check(result, 'dg.energy')).toMatchObject({ severity: 'blocking', passed: false })
+  })
+
+  it('says which one applies as soon as the rating settles it', () => {
+    const large = assess(consignment([pkg('p1', [entry('e1', { wattHours: 500 })])]))
+    expect(check(large, 'dg.un-packaging')).toMatchObject({ severity: 'blocking' })
+
+    const small = assess(consignment([pkg('p1', [entry('e1', { wattHours: 95 })])]))
+    expect(check(small, 'dg.packaging')!.detail).toContain('A802')
+  })
+})
+
 describe('a rating that decides nothing', () => {
   it('does not block a standalone sodium ion consignment on a figure PI 976 ignores', () => {
     // PI 976 has no sections and one 35 kg limit: the classification is identical with a

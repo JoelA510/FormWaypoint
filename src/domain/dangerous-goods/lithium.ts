@@ -230,7 +230,14 @@ export interface AirClassification {
   fullyRegulated: boolean
   aircraft: AircraftLimitation
   limits: QuantityLimits
-  /** UN specification packaging meeting Packing Group II performance is required. */
+  /**
+   * UN specification packaging meeting Packing Group II performance is required.
+   *
+   * False, not true, where the section is undetermined — an unrated battery could be
+   * Section IA, which requires it, or Section IB, which A802 excepts. `assess` reads the
+   * band alongside this and says neither rather than resolving the ambiguity one way; the
+   * flag alone is not the whole answer for such an entry.
+   */
   unSpecificationPackagingRequired: boolean
   /** Inner packaging that completely encloses each cell or battery is required. */
   innerPackagingRequired: boolean
