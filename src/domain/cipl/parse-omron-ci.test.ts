@@ -151,6 +151,30 @@ describe('the workbook grid', () => {
     expect(parsed.lines[1]).toMatchObject({ partNumber: '20000-0002', countryOfOrigin: 'JP' })
   })
 
+  it('reads past a blank row inside the commodity table instead of stopping at it', () => {
+    // The workbook reader honours each row's own index and pads an omitted row with a blank
+    // one, so a gap the writer left is a gap the reader sees. Read as the end of the table,
+    // it dropped every line below it without a word.
+    const grid = omronCiGrid(simpleOmronCi())
+    const secondTop = grid.findIndex((row) => row[2] === '20000-0002')
+    grid.splice(secondTop, 0, [])
+    const parsed = parseOmronCiWorkbook('ci.xlsx', grid)
+    expect(parsed.lines).toHaveLength(2)
+    expect(parsed.lines[1]).toMatchObject({ partNumber: '20000-0002', countryOfOrigin: 'JP' })
+  })
+
+  it('finds the compliance heading row when a blank row is padded in above it', () => {
+    // Same cause, one row higher: assuming the two heading rows are adjacent left the sheet
+    // claimed as the form while no line at all was read from it.
+    const grid = omronCiGrid(simpleOmronCi())
+    const head = grid.findIndex((row) => row.includes('PART #'))
+    grid.splice(head + 1, 0, [])
+    expect(isOmronCiWorkbook(grid)).toBe(true)
+    const parsed = parseOmronCiWorkbook('ci.xlsx', grid)
+    expect(parsed.lines).toHaveLength(2)
+    expect(parsed.lines[0]).toMatchObject({ partNumber: '10000-0001', eccn: 'EAR99' })
+  })
+
   it('accepts a title-cased revision of the form, as the printed PDF path already does', () => {
     // Every other label on this form is matched uppercased. Matched exactly, a workbook
     // whose headings were re-typed in title case was refused as "not the Commercial Invoice

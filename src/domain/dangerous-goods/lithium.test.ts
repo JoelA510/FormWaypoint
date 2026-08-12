@@ -184,11 +184,19 @@ describe('state of charge', () => {
     expect(rule!.detail).not.toContain('Rated at 0 Wh')
   })
 
-  it('is a requirement for batteries packed with equipment above 2.7 Wh, and advice at or below', () => {
-    expect(classifyForAir(spec({ configuration: 'packed-with-equipment', wattHours: 20 })).stateOfCharge)
+  it('is a requirement for cells packed with equipment above 2.7 Wh, and advice at or below', () => {
+    expect(classifyForAir(spec({ configuration: 'packed-with-equipment', form: 'cell', wattHours: 20 })).stateOfCharge)
       .toMatchObject({ strength: 'must' })
-    expect(classifyForAir(spec({ configuration: 'packed-with-equipment', wattHours: 2.7 })).stateOfCharge)
+    expect(classifyForAir(spec({ configuration: 'packed-with-equipment', form: 'cell', wattHours: 2.7 })).stateOfCharge)
       .toMatchObject({ strength: 'should' })
+  })
+
+  it('does not read the 2.7 Wh relief across to a battery', () => {
+    // The relief is written against a cell's watt-hour rating. Read across, it demoted the
+    // whole state-of-charge group — the figure, its basis and its provenance — from
+    // blocking to advice, so a declaration could be generated for a pack nobody measured.
+    expect(classifyForAir(spec({ configuration: 'packed-with-equipment', form: 'battery', wattHours: 2.7 })).stateOfCharge)
+      .toMatchObject({ strength: 'must' })
   })
 
   it('is advice for batteries contained in equipment', () => {

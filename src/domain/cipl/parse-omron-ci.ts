@@ -101,6 +101,17 @@ const SUB_COLUMNS = {
 } as const
 const TABLE_HEADINGS = new Set<string>([...Object.values(TOP_COLUMNS), ...Object.values(SUB_COLUMNS)])
 
+/**
+ * How far below the top heading row the compliance heading row may sit, and how long a run
+ * of blank rows inside the commodity table may be before it is read as the end of it.
+ *
+ * Both exist because omitted rows are padded rather than closed up: the indices stay true,
+ * and a gap the writer left is a gap the reader sees. Small on purpose — past a few rows,
+ * what follows is no longer the table.
+ */
+const MAX_HEADING_GAP = 3
+const MAX_BLANK_ROWS_IN_TABLE = 4
+
 // ---------------------------------------------------------------------------
 // Workbook (.xlsx) reader — the primary path
 // ---------------------------------------------------------------------------
@@ -259,9 +270,19 @@ function readLines(
   const headIndex = rows.findIndex(
     (row) => headingAt(row, TOP_COLUMNS.part) >= 0 && headingAt(row, TOP_COLUMNS.qty) >= 0,
   )
-  const subIndex = headIndex === -1 ? -1 : headIndex + 1
+  // Searched for rather than assumed adjacent. The workbook reader honours each row's own
+  // `r` index and pads an omitted row with a blank one, so a heading pair that reads as two
+  // consecutive rows in Excel can arrive with a gap between them — and assuming `+1` left
+  // the sheet claimed as the form while no line at all was read from it.
+  let subIndex = -1
+  for (let i = headIndex + 1; headIndex !== -1 && i < Math.min(rows.length, headIndex + 1 + MAX_HEADING_GAP); i++) {
+    if (headingAt(rows[i], SUB_COLUMNS.coo) >= 0) {
+      subIndex = i
+      break
+    }
+  }
   const subRow = subIndex === -1 ? undefined : rows[subIndex]
-  if (headIndex === -1 || !subRow || headingAt(subRow, SUB_COLUMNS.coo) < 0) {
+  if (headIndex === -1 || !subRow) {
     warnings.push('The commodity table headings were not found; no lines were read.')
     return []
   }
@@ -291,11 +312,26 @@ function readLines(
     return value != null && Number.isInteger(value) && value >= 1
   }
 
+  const isBlankRow = (row: string[]): boolean => row.every((c) => !c.trim())
+
   const lines: SourceLine[] = []
+  let blanks = 0
   for (let r = subIndex + 1; r < rows.length; ) {
     const top = rows[r]
+    // A row the writer left out entirely. Padding the gap keeps every row's index true,
+    // which is what the workbook reader now does — so a blank row can sit *inside* the
+    // table, and reading it as the end of the table dropped every line below it without a
+    // word. Skipped, up to a run long enough to mean the table really has ended.
+    if (isBlankRow(top)) {
+      if (++blanks > MAX_BLANK_ROWS_IN_TABLE) break
+      r += 1
+      continue
+    }
+    blanks = 0
+
     const lineNumber = parseNumber(top[columns.ln] ?? '')
-    // The table ends at the first row whose LN cell is not a line number (the totals band).
+    // The table ends at the first row that carries something and is not a line (the totals
+    // band, or the instructions printed below the form).
     if (lineNumber == null || !Number.isInteger(lineNumber) || lineNumber < 1) break
 
     let bottom = rows[r + 1] ?? []

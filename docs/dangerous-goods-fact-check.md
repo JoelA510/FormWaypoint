@@ -65,9 +65,10 @@ provision A802 says so expressly: *"This does not apply … for lithium batterie
 accordance with Section IB of Packing Instructions 965 or 968."*
 
 **The state of charge model in §4.2 is right, including the v1.1 correction.** Standalone
-lithium ion: mandatory 30% of rated capacity. Packed with equipment above 2.7 Wh: mandatory
-30% from 1 January 2026, with **no** indicated-capacity alternative. At or below 2.7 Wh:
-recommended. Contained in equipment: recommended, 30% of rated capacity *or* 25% indicated
+lithium ion: mandatory 30% of rated capacity. Packed with equipment: mandatory 30% from
+1 January 2026, with **no** indicated-capacity alternative. The relief at or below 2.7 Wh —
+recommended rather than required — is written against a **cell**'s watt-hour rating, and is
+applied to cells alone; a battery assembled from cells that each qualify is still a battery. Contained in equipment: recommended, 30% of rated capacity *or* 25% indicated
 capacity. Confirmed against Student Guide p. 55 and figs. 5-26 and 5-27. The 25% alternative
 appears only in the contained-in note, exactly as the correction says.
 

@@ -412,7 +412,13 @@ function stateOfChargeFor(spec: BatterySpec): StateOfChargeRule | null {
     // A rating of zero is not a rating, here as in `energyBand`: read literally it put the
     // mandatory 30% state of charge below the 2.7 Wh threshold and downgraded it to advice,
     // under a line that said "Rated at 0 Wh, at or below the 2.7 Wh threshold".
-    const advisory = spec.wattHours != null && spec.wattHours > 0 && spec.wattHours <= SOC_ADVISORY_WH
+    // Cells only. The relief is written against a cell's watt-hour rating, and read across
+    // to a battery it demoted the whole state-of-charge group — the figure, its basis and
+    // its provenance — from blocking to advice, so a declaration could be generated for a
+    // pack nobody had measured. A battery assembled from cells that each qualify is still
+    // a battery.
+    const advisory =
+      spec.form === 'cell' && spec.wattHours != null && spec.wattHours > 0 && spec.wattHours <= SOC_ADVISORY_WH
     return {
       limitPercent: STATE_OF_CHARGE_LIMIT,
       strength: advisory ? 'should' : 'must',
