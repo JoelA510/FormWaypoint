@@ -147,14 +147,16 @@ export function parseOmronCiWorkbook(
   fileName: string,
   rows: SheetRows,
   /**
-   * Whether a block's compliance row may have been left out of the grid entirely.
+   * Whether these rows came from a workbook rather than from the reshaped PDF.
    *
-   * True of a real workbook, where a writer that omits rows with no content collapses an
-   * empty compliance row away and shifts every following block. False of the PDF path,
-   * which synthesizes exactly one compliance row per block from the drawn text — there is
-   * nothing there to collapse, and looking for one misreads that row's own first cell.
+   * Two things follow from it. A workbook writer that omits rows with no content collapses
+   * an empty compliance row away and shifts every following block, which the PDF path
+   * cannot do — it synthesizes exactly one compliance row per block, and looking for a
+   * collapsed one there misreads that row's own first cell. And a workbook's cells sit in
+   * their real columns, so the totals band can be read from the AMOUNT column; the PDF's
+   * rows are rebuilt from drawn text and only the commodity blocks are column-aligned.
    */
-  collapsedRowsPossible = true,
+  fromWorkbook = true,
 ): ParsedCipl {
   const warnings: string[] = []
 
@@ -173,9 +175,9 @@ export function parseOmronCiWorkbook(
   const field = (label: string): string => fields.get(label) ?? ''
 
   const parties = readParties(rows)
-  const lines = readLines(rows, field('PURCHASE ORDER #'), field('INVOICE #'), warnings, collapsedRowsPossible)
+  const lines = readLines(rows, field('PURCHASE ORDER #'), field('INVOICE #'), warnings, fromWorkbook)
 
-  const subtotal = amountOnRow(rows, 'SUBTOTAL')
+  const subtotal = amountOnRow(rows, 'SUBTOTAL', fromWorkbook ? amountColumnIn(rows) : -1)
   if (subtotal == null) {
     warnings.push(
       'No subtotal could be read from this invoice, so the commodity values cannot be proved against the ' +
@@ -265,7 +267,7 @@ function readLines(
   purchaseOrder: string,
   invoiceNumber: string,
   warnings: string[],
-  collapsedRowsPossible: boolean,
+  fromWorkbook: boolean,
 ): SourceLine[] {
   const headIndex = rows.findIndex(
     (row) => headingAt(row, TOP_COLUMNS.part) >= 0 && headingAt(row, TOP_COLUMNS.qty) >= 0,
@@ -316,6 +318,9 @@ function readLines(
 
   const lines: SourceLine[] = []
   let blanks = 0
+  // The row the table stopped at, so the caller can tell an ordinary end from an early one.
+  // `null` means it ran out of rows, or out of patience with a run of blank ones.
+  let endedAt: string[] | null | undefined
   for (let r = subIndex + 1; r < rows.length; ) {
     const top = rows[r]
     // A row the writer left out entirely. Padding the gap keeps every row's index true,
@@ -323,7 +328,10 @@ function readLines(
     // table, and reading it as the end of the table dropped every line below it without a
     // word. Skipped, up to a run long enough to mean the table really has ended.
     if (isBlankRow(top)) {
-      if (++blanks > MAX_BLANK_ROWS_IN_TABLE) break
+      if (++blanks > MAX_BLANK_ROWS_IN_TABLE) {
+        endedAt = null
+        break
+      }
       r += 1
       continue
     }
@@ -332,7 +340,10 @@ function readLines(
     const lineNumber = parseNumber(top[columns.ln] ?? '')
     // The table ends at the first row that carries something and is not a line (the totals
     // band, or the instructions printed below the form).
-    if (lineNumber == null || !Number.isInteger(lineNumber) || lineNumber < 1) break
+    if (lineNumber == null || !Number.isInteger(lineNumber) || lineNumber < 1) {
+      endedAt = top
+      break
+    }
 
     let bottom = rows[r + 1] ?? []
     let stride = 2
@@ -350,7 +361,7 @@ function readLines(
     // cell is the country of origin, not an LN — a numeric country code read as a line
     // number there, throwing away the line's whole export-control row and filing the
     // compliance row again as goods of its own.
-    if ((collapsedRowsPossible && isLineNumber(bottom[columns.ln] ?? '')) || isTotalsRow(bottom)) {
+    if ((fromWorkbook && isLineNumber(bottom[columns.ln] ?? '')) || isTotalsRow(bottom)) {
       bottom = []
       stride = 1
     }
@@ -403,6 +414,16 @@ function readLines(
     })
     r += stride
   }
+  // An early end is reported. The table stops at its totals band; anything else means the
+  // rows below the stopping point were not read, and a short commodity list that looks
+  // complete is the one failure this reader must not produce silently.
+  if (endedAt !== undefined && !(endedAt && isTotalsRow(endedAt))) {
+    warnings.push(
+      `The commodity table ended before its totals band, after ${lines.length} line(s). Any line printed below ` +
+        'that point was not read — check the form against what was imported before generating anything.',
+    )
+  }
+
   return lines
 }
 
@@ -420,15 +441,37 @@ function isTotalsRow(row: string[]): boolean {
   })
 }
 
-/** The numeric cell on the row carrying `label` — the rightmost number wins. */
-function amountOnRow(rows: SheetRows, label: string): number | null {
+/**
+ * The amount on the row carrying `label`.
+ *
+ * Read from the AMOUNT column where the table's headings gave us one, and only from there.
+ * Taking the rightmost number on the row instead worked by luck of the present layout: the
+ * totals band shares its rows with `# OF PIECES`, `NET WT (KG)` and `GROSS WT (KG)`, and a
+ * shifted template — or simply an empty SUBTOTAL cell — would have handed a piece count or
+ * a weight to the blocking total-value check, which would then reconcile the shipment
+ * against it instead of failing.
+ *
+ * Without the column the rightmost number is still the fallback; the caller warns when no
+ * subtotal could be read at all, and that is the honest outcome of a table nobody could
+ * calibrate.
+ */
+function amountOnRow(rows: SheetRows, label: string, amountColumn: number): number | null {
   const row = rows.find((r) => r.some((c) => normalizeLabel(c) === label))
   if (!row) return null
+  if (amountColumn >= 0) return parseNumber(row[amountColumn] ?? '')
   for (let i = row.length - 1; i >= 0; i--) {
     const value = parseNumber(row[i])
     if (value != null) return value
   }
   return null
+}
+
+/** Where the AMOUNT column sits, from the commodity table's own heading row, or -1. */
+function amountColumnIn(rows: SheetRows): number {
+  const head = rows.find(
+    (row) => headingAt(row, TOP_COLUMNS.part) >= 0 && headingAt(row, TOP_COLUMNS.qty) >= 0,
+  )
+  return head ? headingAt(head, TOP_COLUMNS.amount) : -1
 }
 
 function buildHeader(

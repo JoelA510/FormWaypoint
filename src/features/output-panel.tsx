@@ -87,6 +87,11 @@ export function OutputPanel({
   // not instant, and applying a stored layout over a choice already made would undo it
   // silently — and, because only `changeOptions` writes, would not even be saved.
   const chosen = useRef(false)
+  // Whether the restore has finished, either way. The download is held until it has: the
+  // read is fast but not instant, and a click inside that window produced a sheet in the
+  // default layout while the panel went on to render the saved one — a sheet that does not
+  // match the description of it on screen.
+  const [layoutSettled, setLayoutSettled] = useState(false)
   useEffect(() => {
     void (async () => {
       try {
@@ -96,6 +101,8 @@ export function OutputPanel({
         // The layout is a convenience, not shipment data: falling back to the default is a
         // complete answer, and a banner about column widths over a blocked database would
         // bury the one that matters.
+      } finally {
+        setLayoutSettled(true)
       }
     })()
   }, [])
@@ -310,7 +317,7 @@ export function OutputPanel({
               <option value="fedex-ship-manager">FedEx Ship Manager</option>
               <option value="ups-worldship">UPS WorldShip</option>
             </Select>
-            <Button onClick={() => void downloadKeyingSheet()} disabled={!canGenerate || busy}>
+            <Button onClick={() => void downloadKeyingSheet()} disabled={!canGenerate || busy || !layoutSettled}>
               Download keying sheet
             </Button>
           </div>

@@ -188,6 +188,32 @@ describe('the workbook grid', () => {
     expect(parsed.lines[0]).toMatchObject({ partNumber: '10000-0001', eccn: 'EAR99' })
   })
 
+  it('reads the subtotal from the AMOUNT column, not the rightmost number on the row', () => {
+    // The totals band shares its rows with `# OF PIECES`, `NET WT (KG)` and `GROSS WT (KG)`.
+    // Taking the rightmost number handed one of those to the blocking total-value check,
+    // which then reconciled the shipment against a piece count.
+    const grid = omronCiGrid(simpleOmronCi())
+    const row = grid.find((r) => r.some((c) => c.trim().toUpperCase() === 'SUBTOTAL'))!
+    row.push('2') // a stray value printed further right than the amount
+    const parsed = parseOmronCiWorkbook('ci.xlsx', grid)
+    expect(parsed.headers.FC.totalValue).toBeCloseTo(190, 2)
+  })
+
+  it('says so when the commodity table ends before its totals band', () => {
+    // A blank LN cell mid-table stopped the read and returned a short list that looks
+    // complete. The lines below it are simply gone, and nothing said so.
+    const grid = omronCiGrid(simpleOmronCi())
+    const secondTop = grid.findIndex((row) => row[2] === '20000-0002')
+    grid[secondTop][1] = ''
+    const parsed = parseOmronCiWorkbook('ci.xlsx', grid)
+    expect(parsed.lines).toHaveLength(1)
+    expect(parsed.warnings.some((w) => w.includes('ended before its totals band'))).toBe(true)
+  })
+
+  it('says nothing about the table ending when it ends where it should', () => {
+    expect(parseGrid().warnings.some((w) => w.includes('ended before its totals band'))).toBe(false)
+  })
+
   it('accepts a title-cased revision of the form, as the printed PDF path already does', () => {
     // Every other label on this form is matched uppercased. Matched exactly, a workbook
     // whose headings were re-typed in title case was refused as "not the Commercial Invoice
