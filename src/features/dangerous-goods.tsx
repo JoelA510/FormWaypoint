@@ -1294,7 +1294,11 @@ function RequirementsPanel({
         {!assessment.packages.length ? (
           <EmptyState title="Nothing described yet">Add a package and the batteries in it.</EmptyState>
         ) : (
-          assessment.packages.map((assessed, index) => (
+          // Through `overpackOrder`, like the editor, the declaration and the bench sheet.
+          // This is the panel that says which marks go on which box, so its "Package 2"
+          // being a different box from the editor's is the worst place for the two to
+          // disagree.
+          overpackOrder(assessment.packages, (p) => p.pkg.overpackId).map((assessed, index) => (
             <div key={assessed.pkg.id}>
               <p className="text-sm font-medium">
                 Package {index + 1} — {packageCountInConsignment(assessed.pkg, consignment)} ×{' '}
