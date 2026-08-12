@@ -368,6 +368,20 @@ function limitsFor(pi: number, section: PackingSection, chemistry: Chemistry): Q
           : 'Student Guide figs. 5-26 and 5-27 (Section II — 5 kg net per package on either aircraft)',
     }
   }
+  // A null section this far down means the energy band is unknown — PI 976 was answered
+  // above, and every remaining instruction has both a Section I and a Section II. So the
+  // lower of the two candidates is stated, exactly as the standalone branch does: reading
+  // Section I's 35 kg cargo allowance to an unrated package showed a 20 kg box passing
+  // against a ceiling that may turn out to be 5 kg.
+  if (section === null) {
+    return {
+      passengerKg: 5,
+      cargoKg: 5,
+      source:
+        'Student Guide figs. 5-26 and 5-27 (Section II) — the lower of the two sections this could be, pending ' +
+        'the rating',
+    }
+  }
   // Packed with / contained in, Section I: 5 kg passenger, 35 kg cargo.
   return {
     passengerKg: 5,

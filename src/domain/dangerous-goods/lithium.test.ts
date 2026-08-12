@@ -286,6 +286,21 @@ describe('an unstated rating', () => {
     expect(sodium).not.toContain('Lithium battery mark')
   })
 
+  it('states the lower candidate for equipment too, not the Section I cargo allowance', () => {
+    // Every instruction for batteries with equipment has both a Section I and a Section II,
+    // so an unrated package could be either. Reading Section I's 35 kg to it showed a 20 kg
+    // box passing against a ceiling that may turn out to be 5 kg.
+    const packed = classifyForAir(spec({ configuration: 'packed-with-equipment', wattHours: null }))
+    expect(packed.limits).toMatchObject({ passengerKg: 5, cargoKg: 5 })
+    expect(packed.limits.source).toContain('pending')
+
+    // A rated one still gets its own section's figures.
+    expect(classifyForAir(spec({ configuration: 'packed-with-equipment', wattHours: 300 })).limits).toMatchObject({
+      passengerKg: 5,
+      cargoKg: 35,
+    })
+  })
+
   it('states the lower of the two limits it could be, not the Section IA allowance', () => {
     // A standalone battery has no choice of section: the rating decides between IB and IA,
     // and their ceilings differ by three and a half times. Quoting 35 kg would pass a 20 kg
