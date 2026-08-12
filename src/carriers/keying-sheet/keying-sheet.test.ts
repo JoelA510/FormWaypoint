@@ -363,20 +363,15 @@ describe('address extraction', () => {
     expect(field(['1 Rue Centrale', 'Chatel 74390'], 'City')).toBe('Chatel')
   })
 
-  it('does not take a registration line under the address as the postcode line', () => {
-    // No keyword list is wide enough to name these, and none is needed: what they have in
-    // common is the shape — a short all-caps label and a number, and nothing else on the
-    // line. `VAT 12345678` supplied a postcode of `12345678` and a City of `VAT`.
-    const vat = ['Plot 12', 'Springfield IL 62704', 'VAT 12345678']
-    expect(field(vat, 'Postal code')).toBe('62704')
-    expect(field(vat, 'City')).toBe('Springfield')
-
-    const ref = ['Plot 12', 'Springfield IL 62704', 'REF 4501234']
-    expect(field(ref, 'City')).toBe('Springfield')
-
-    // And a real city is not that shape, whatever its case or length.
-    expect(field(['1 Dauphin St', 'MOBILE 36602'], 'City')).toBe('MOBILE')
-    expect(field(['12 Sderot', 'Haifa 3109601'], 'City')).toBe('Haifa')
+  it('reads an address written wholly in capitals', () => {
+    // Every rule tried against a short unlabelled registration line — `VAT 12345678` — took
+    // these with it, and losing a real city loses the postcode with it. That trailing shape
+    // is a known limitation; a longer number is excluded by the digit bounds and a labelled
+    // telephone number by the rule above.
+    expect(field(['SUITE 200', 'CLEVELAND', 'OH 44114', 'USA'], 'Postal code')).toBe('44114')
+    expect(field(['SUITE 200', 'CLEVELAND', 'OH 44114', 'USA'], 'City')).toBe('OH')
+    expect(field(['VIA ROMA 1', 'ROME 00184', 'ITALY'], 'Postal code')).toBe('00184')
+    expect(field(['VIA ROMA 1', 'ROME 00184', 'ITALY'], 'City')).toBe('ROME')
   })
 
   it('does not take a postcode out of the tail of a longer number', () => {

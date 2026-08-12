@@ -829,17 +829,6 @@ const POSTCODE = /(?<!\d)((?:\d{3,8}-\d{2,4})|\d{4,8})\s*$/
  */
 const CONTACT_LINE = /\b(?:phone|telephone|tel|fax|attn|attention|contact|e-?mail)\.?\s*:?\s*[+(]?\d[\d\s()+.-]*$/i
 
-/**
- * A line that is a short identifier label and a number, and nothing else.
- *
- * `VAT 12345678`, `EIN 951234567`, `REF 4501234` — the registration lines that follow an
- * address. There is no keyword list wide enough to name them, and there does not need to
- * be: what they have in common is the shape. Four characters or fewer, no lowercase, and
- * the whole of the line in front of the number. No city is written that way — `MOBILE`
- * survives on its length, `Tel Aviv` and `Sao Paulo` on their lowercase, and a line that
- * carries a street or a state as well as the label is not this shape at all.
- */
-const IDENTIFIER_LINE = /^[A-Z0-9]{1,4}[.:]?\s+[\d-]+\s*$/
 
 /**
  * The line the postcode is on — the *last* one that ends in one, not the first.
@@ -855,13 +844,19 @@ const IDENTIFIER_LINE = /^[A-Z0-9]{1,4}[.:]?\s+[\d-]+\s*$/
  * printed under the city stops supplying a City of `Phone 5`. It is not a rule about what a
  * postcode is — it is about what a line that is plainly a phone number is not. Nothing
  * bounds the *length* of the digits, because a seven-digit postcode is a real postcode:
- * Israel writes `3109601` and Japan writes `1500001` unhyphenated. A registration line
- * printed under the address is skipped on its shape rather than its wording, for the same
- * reason: `VAT 12345678` otherwise supplied a postcode of `12345678` and a City of `VAT`.
+ * Israel writes `3109601` and Japan writes `1500001` unhyphenated.
+ *
+ * A short *unlabelled* registration line under the address — `VAT 12345678` — is a known
+ * limitation and is deliberately left alone. It is written exactly as `OH 44114` and
+ * `ROME 00184` are, and every rule tried against it took those with it: skipping a real
+ * city loses the postcode and the city together, which is worse and far commoner than
+ * reading a registration number as a postcode. A longer one is already excluded by the
+ * digit bounds, and a labelled telephone number by the rule above; between them the
+ * realistic trailing lines are covered without guessing at the rest.
  */
 function postcodeLineIndex(lines: string[]): number {
   for (let i = lines.length - 1; i >= 0; i--) {
-    if (CONTACT_LINE.test(lines[i]) || IDENTIFIER_LINE.test(lines[i].trim())) continue
+    if (CONTACT_LINE.test(lines[i])) continue
     if (POSTCODE.test(lines[i])) return i
   }
   return -1
