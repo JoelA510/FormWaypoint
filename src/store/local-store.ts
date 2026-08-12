@@ -225,8 +225,14 @@ export interface LocalStore {
    * `dgConsignments` holds the evidence behind a two-year retention obligation, and this
    * used to delete it under a confirmation dialog that read as though it were kept. Records
    * past their `retainUntil` date are owed nothing and are dropped.
+   *
+   * Resolves with the stores that could *not* be cleared, described the way the UI names
+   * them; an empty array means everything went. Rejects only where nothing was deleted at
+   * all, which is the one case the caller may report as "nothing was deleted". Clearing six
+   * stores under a single `Promise.all` gave no way to tell the two apart: one store
+   * rejecting left the other five gone and the caller told the user their data was intact.
    */
-  clearAll(): Promise<void>
+  clearAll(): Promise<string[]>
 }
 
 type Schema = IDBPDatabase<unknown>
@@ -481,11 +487,11 @@ export const indexedDbStore: LocalStore = {
 
   async clearAll() {
     const database = await db()
-    await Promise.all(
-      ['profile', 'consignees', 'overrides', 'shipments', 'partWeights', 'items'].map((name) =>
-        database.clear(name),
-      ),
-    )
+    // Settled rather than all-or-nothing, so what actually happened can be reported. The
+    // stores are independent and one refusing does not put the others back.
+    const outcome = clearOutcome(await Promise.allSettled(CLEARABLE_STORES.map(([name]) => database.clear(name))))
+    if (outcome.failure) throw outcome.failure
+    const remaining = outcome.remaining
     // Dangerous goods records inside their retention window stay — see the interface note.
     //
     // And a failure sweeping the expired ones does not fail the call. The six stores above
@@ -501,7 +507,45 @@ export const indexedDbStore: LocalStore = {
     } catch {
       // Retried the next time this runs; nothing here is owed deletion on a schedule.
     }
+    return remaining
   },
+}
+
+/**
+ * The stores "remove everything from this machine" empties, with the wording the UI uses for
+ * each. `dgConsignments` is deliberately absent — see the interface note.
+ */
+export const CLEARABLE_STORES: readonly (readonly [string, string])[] = [
+  ['profile', 'the exporter profile'],
+  ['consignees', 'the saved consignees'],
+  ['overrides', 'the classification overrides'],
+  ['shipments', 'the shipment history'],
+  ['partWeights', 'the per-part weights'],
+  ['items', 'the item library'],
+]
+
+/**
+ * What a round of store clears amounts to: which are still there, and whether the call
+ * failed outright.
+ *
+ * A partial failure and a total one are different events and the screen says different
+ * things about them, so the distinction is drawn here rather than left to a rejection that
+ * cannot carry it. Separated from the IndexedDB call so it can be tested at all — nothing in
+ * the test environment provides a database.
+ */
+export function clearOutcome(
+  results: readonly PromiseSettledResult<unknown>[],
+): { remaining: string[]; failure: Error | null } {
+  const remaining = CLEARABLE_STORES.filter((_, i) => results[i]?.status === 'rejected').map(([, label]) => label)
+  if (remaining.length < CLEARABLE_STORES.length) return { remaining, failure: null }
+  const first = results.find((r) => r.status === 'rejected')
+  return {
+    remaining,
+    failure:
+      first?.status === 'rejected' && first.reason instanceof Error
+        ? first.reason
+        : new Error('this machine’s stored data could not be reached'),
+  }
 }
 
 /**

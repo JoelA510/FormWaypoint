@@ -236,6 +236,19 @@ export async function buildOmronCiPdf(spec: OmronCiSpec): Promise<ArrayBuffer> {
   at(COLUMNS.ln.left, 745, 'COMMERCIAL INVOICE')
   at(COLUMNS.j.left, 745, 'Doc. # 00004-00202   Rev. C')
 
+  // One printed run drawn as one item per word, the way pdfjs often reports it.
+  const words = (x: number, y: number, text: string, split: boolean) => {
+    if (!split || !text) {
+      at(x, y, text)
+      return
+    }
+    let cursor = x
+    for (const word of text.split(' ')) {
+      at(cursor, y, word)
+      cursor += font.widthOfTextAtSize(word + ' ', size)
+    }
+  }
+
   // Address band: titles and lines all left-aligned at their column's edge.
   const bandX = { shipper: COLUMNS.ln.left, consignee: COLUMNS.e.left, billTo: COLUMNS.h.left }
   at(bandX.shipper, 720, 'SHIPPER (SHIP FROM / EXPORTER)')
@@ -246,9 +259,9 @@ export async function buildOmronCiPdf(spec: OmronCiSpec): Promise<ArrayBuffer> {
   const billTo = spec.billToName ? [spec.billToName, ...(spec.billToLines ?? [])] : []
   for (let i = 0; i < 5; i++) {
     const y = 708 - i * 12
-    at(bandX.shipper, y, shipper[i] ?? '')
-    at(bandX.consignee, y, consignee[i] ?? '')
-    at(bandX.billTo, y, billTo[i] ?? '')
+    words(bandX.shipper, y, shipper[i] ?? '', !!spec.splitValues)
+    words(bandX.consignee, y, consignee[i] ?? '', !!spec.splitValues)
+    words(bandX.billTo, y, billTo[i] ?? '', !!spec.splitValues)
   }
 
   const pairs: [string, string, string, string][] = [
@@ -261,30 +274,10 @@ export async function buildOmronCiPdf(spec: OmronCiSpec): Promise<ArrayBuffer> {
     ['INCOTERMS:', spec.incoterms ?? '', 'PAGE:', '1 of 1'],
   ]
   // With splitValues, a value is drawn one item per word, as pdfjs often reports it.
-  const value = (x: number, y: number, text: string) => {
-    if (!spec.splitValues) {
-      at(x, y, text)
-      return
-    }
-    let cursor = x
-    for (const word of text.split(' ')) {
-      at(cursor, y, word)
-      cursor += font.widthOfTextAtSize(word + ' ', size)
-    }
-  }
+  const value = (x: number, y: number, text: string) => words(x, y, text, !!spec.splitValues)
   // With splitHeaderLabel, the right-hand label of the first pair is drawn one item per
   // word, the way pdfjs reports a run it decided to break.
-  const label = (x: number, y: number, text: string, split: boolean) => {
-    if (!split) {
-      at(x, y, text)
-      return
-    }
-    let cursor = x
-    for (const word of text.split(' ')) {
-      at(cursor, y, word)
-      cursor += font.widthOfTextAtSize(word + ' ', size)
-    }
-  }
+  const label = words
   pairs.forEach(([label1, value1, label2, value2], i) => {
     const y = 640 - i * 12
     at(COLUMNS.ln.left, y, label1)

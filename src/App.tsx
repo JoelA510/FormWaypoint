@@ -548,9 +548,9 @@ export function App() {
     // Reported, not abandoned. `db()` rejects rather than hanging now, so a superseded tab
     // reaches here and threw straight out of the callback: nothing deleted, no panel reset,
     // and a confirmation dialog that had just promised the data was gone.
+    let remaining: string[]
     try {
-      await localStore.clearAll()
-      setWriteError(null)
+      remaining = await localStore.clearAll()
     } catch (e: unknown) {
       setWriteError({
         what: 'The deletion',
@@ -561,11 +561,30 @@ export function App() {
       })
       return
     }
+    // Something was deleted, so the panels are reset whatever else happened — leaving rows
+    // on screen that are gone on disk is the same misreport in the other direction.
     setProfile(EMPTY_PROFILE)
     setOverrides([])
     setPartOverrides([])
     setItems([])
     setShipments([])
+    setWriteError(
+      remaining.length
+        ? {
+            what: 'The deletion',
+            message:
+              `${remaining.join(', ')} could not be cleared and ${remaining.length === 1 ? 'is' : 'are'} still ` +
+              'on this machine; everything else was deleted. Reload the page to see what is left.',
+          }
+        : null,
+    )
+    // These three describe stored data, and there is none of it now. They are deliberately
+    // sticky against writes, so nothing else takes them down: a wiped machine went on
+    // saying it had not recorded a shipment, and that an empty panel was not evidence that
+    // nothing was saved.
+    setRestoreError(null)
+    setUnrecordedShipment(null)
+    setProfileUnavailable(false)
     // The retention records survive `clearAll` by design, so the panel is re-read rather
     // than emptied. A failed read leaves what is on screen, which is still true.
     try {

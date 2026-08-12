@@ -783,20 +783,32 @@ const MAX_LABEL_ITEMS = 3
  * extractor did not split reads exactly as it did before. Both joins are tried because the
  * split can fall between words (`INVOICE` + `DATE:`) or inside one (`INVOICE DA` + `TE:`).
  */
-function labelSpanAt(items: TextRow['items'], start: number): { text: string; end: number } | null {
+function labelSpanAt(
+  items: TextRow['items'],
+  start: number,
+  includeTotalsCells = true,
+): { text: string; end: number } | null {
   const parts: string[] = []
   for (let end = start; end < items.length && end - start < MAX_LABEL_ITEMS; end++) {
     parts.push(items[end].str)
     for (const joined of end === start ? [parts[0]] : [parts.join(' '), parts.join('')]) {
-      if (isLabel(joined) || TOTALS_CELLS.has(normalizeLabel(joined))) return { text: joined, end }
+      if (isLabel(joined) || (includeTotalsCells && TOTALS_CELLS.has(normalizeLabel(joined)))) {
+        return { text: joined, end }
+      }
     }
   }
   return null
 }
 
-/** Whether the row carries a header-grid label, counting one the extractor split. */
+/**
+ * Whether the row carries a header-grid label, counting one the extractor split.
+ *
+ * Header labels only. The totals cells `coalescedRow` also delimits on are ordinary words —
+ * a consignee at `NIPPON EXPRESS FREIGHT KK`, split into word items, ends the address band
+ * on `FREIGHT` and every address in the consignment is dropped.
+ */
 function hasLabel(row: TextRow): boolean {
-  return row.items.some((_, i) => labelSpanAt(row.items, i) !== null)
+  return row.items.some((_, i) => labelSpanAt(row.items, i, false) !== null)
 }
 
 /**
