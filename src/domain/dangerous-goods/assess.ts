@@ -167,7 +167,15 @@ export function applyA181(entries: EntryAssessment[]): EntryAssessment[] {
   return entries.map((e) => {
     if (e.entry.spec.configuration !== 'contained-in-equipment') return e
     const packedWith = packedWithByUn.get(e.classification.unNumber)
-    return packedWith ? { ...e, classification: packedWith.classification } : e
+    if (!packedWith) return e
+    // Never onto a laxer classification. A181 changes a description, not a regulatory
+    // treatment, and relabelling a fully regulated contained-in entry with a Section II
+    // packed-with one took the Class 9 label and the UN and proper shipping name mark off
+    // the marks list for a box that needs them. `dg.mixed-regulation` refuses such a
+    // package — but the marks are read while it is being packed, before anyone has reached
+    // the checks.
+    if (e.classification.fullyRegulated && !packedWith.classification.fullyRegulated) return e
+    return { ...e, classification: packedWith.classification }
   })
 }
 
@@ -718,16 +726,26 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
 
   // --- Aircraft type -----------------------------------------------------
   const forbiddenOnPassenger = entries.filter((e) => e.classification.aircraft === 'cargo-aircraft-only')
+  const passengerProvisions = [
+    ...new Set(
+      forbiddenOnPassenger.map((e) => (e.entry.spec.chemistry === 'lithium-metal' ? 'A201' : 'A334')),
+    ),
+  ].sort()
   if (forbiddenOnPassenger.length) {
     checks.push({
       id: `dg.aircraft.${pkg.id}`,
       severity: 'blocking',
       title: `${label}: aircraft type`,
+      // Naming the provisions these entries actually carry, not both of them. A201 belongs
+      // to lithium metal and A334 to lithium ion and sodium ion, and citing the pair
+      // pointed a UN3480 consignment at the lithium metal provision — the same mismatch
+      // between a check and an entry's own list that A802 was corrected for.
       detail: usingPassenger
         ? `${forbiddenOnPassenger.map((e) => e.classification.unNumber).join(', ')} may not be carried as cargo ` +
           'on a passenger aircraft. Offer the consignment as cargo aircraft only, or an exemption has to be ' +
-          'requested from the States concerned (special provisions A201 and A334). If the routing on offer is a ' +
-          'passenger aircraft, it is the wrong routing.'
+          `requested from the States concerned (special provision${passengerProvisions.length === 1 ? '' : 's'} ` +
+          `${passengerProvisions.join(' and ')}). If the routing on offer is a passenger aircraft, it is the ` +
+          'wrong routing.'
         : 'Standalone cells and batteries are cargo aircraft only, and the consignment is offered as such.',
       passed: !usingPassenger,
       refs: [pkg.id],
@@ -1341,8 +1359,16 @@ function cargoOnlyLabelWording(
 
   return (
     opening +
-    'The passenger aircraft box on the declaration is struck out, and the Cargo Aircraft Only label goes on the ' +
-    'same surface as the Class 9 label' +
+    // Which box is struck out follows the *booking*, because that is what the renderer
+    // draws from and what the declaration therefore says. Written from the goods alone,
+    // this told the shipper the passenger box was struck out while the preview beside it
+    // struck the cargo box — the reverse, on the one consignment where the two differ.
+    (offeredAircraft === 'cargo-aircraft-only'
+      ? 'The passenger aircraft box on the declaration is struck out, and the Cargo Aircraft Only label goes on ' +
+        'the same surface as the Class 9 label'
+      : 'The declaration will strike out the cargo aircraft box while the goods may not travel that way, which ' +
+        'is why this check is failing; offer the consignment as cargo aircraft only. The Cargo Aircraft Only ' +
+        'label goes on the same surface as the Class 9 label') +
     (hasExceptedPackages
       ? ' — on the fully regulated packages only. The Section II packages in this consignment carry no Class 9 ' +
         'label and no Cargo Aircraft Only label; they remain permitted on passenger aircraft whatever routing ' +

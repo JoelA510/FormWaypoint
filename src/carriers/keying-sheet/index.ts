@@ -879,7 +879,9 @@ function cityFrom(lines: string[]): string {
   const withoutPostcode = lines[index].replace(POSTCODE, '').trim()
   const withoutState = withoutPostcode.replace(/[\s,]+[A-Z]{2,}$/, '').trim()
   const city = (withoutState || withoutPostcode).replace(/[,;]+$/, '').trim()
-  return city || (index > 0 ? lines[index - 1] : '')
+  // Trimmed like everything else here: a postcode printed on a line of its own falls back
+  // to the line above, and that line arrives with whatever spacing the document had.
+  return city || (index > 0 ? lines[index - 1].trim() : '')
 }
 
 function describeShipment(rows: KeyingCommodityRow[]): string {

@@ -307,6 +307,37 @@ describe('a rating that decides nothing', () => {
   })
 })
 
+describe('the provisions a check cites', () => {
+  it('names the passenger-aircraft provision of the chemistry in hand', () => {
+    // A201 belongs to lithium metal and A334 to lithium ion; citing the pair pointed a
+    // UN3480 consignment at the provision written for the other one.
+    const ion = assess(
+      consignment([pkg('p1', [entry('e1', { wattHours: 95 })])], { aircraft: 'passenger-and-cargo' }),
+    )
+    const detail = check(ion, 'dg.aircraft')!.detail
+    expect(detail).toContain('A334')
+    expect(detail).not.toContain('A201')
+
+    const metal = assess(
+      consignment([pkg('p1', [entry('e1', { chemistry: 'lithium-metal', lithiumContentG: 1 }, {
+        wattHourMarkedOnCase: false,
+      })])], { aircraft: 'passenger-and-cargo' }),
+    )
+    expect(check(metal, 'dg.aircraft')!.detail).toContain('A201')
+  })
+
+  it('describes the box the declaration will actually strike out', () => {
+    // The renderer strikes whichever box the booking does not select. Written from the
+    // goods alone, this told the shipper the passenger box was struck out while the preview
+    // beside it struck the cargo box.
+    const onPassenger = assess(
+      consignment([pkg('p1', [entry('e1', { wattHours: 95 })])], { aircraft: 'passenger-and-cargo' }),
+    )
+    const wording = onPassenger.checks.find((c) => c.id === 'dg.aircraft')!.detail
+    expect(wording).not.toContain('The passenger aircraft box on the declaration is struck out')
+  })
+})
+
 describe('goods that may not fly at all', () => {
   it('blocks damaged or defective batteries, citing A154', () => {
     const result = assess(
@@ -493,6 +524,27 @@ describe('packages holding more than one entry', () => {
       ]),
     )
     expect(check(result, 'dg.a181')).toMatchObject({ passed: false, actual: '5.5 kg', expected: '≤ 5 kg' })
+  })
+
+  it('does not relabel a fully regulated entry with a Section II description', () => {
+    // A181 changes a description, not a regulatory treatment. Relabelling took the Class 9
+    // label and the UN and proper shipping name mark off the marks list for a box that
+    // needs them — and those are read while the box is being packed, before anyone has
+    // reached the check that refuses the package.
+    const mismatched = consignment([
+      pkg('p1', [
+        entry('e1', { configuration: 'packed-with-equipment', wattHours: 90 }, { netWeightKgPerPackage: 1 }),
+        entry('e2', { configuration: 'contained-in-equipment', wattHours: 300 }, {
+          netWeightKgPerPackage: 1,
+          countPerPackage: 1,
+        }),
+      ]),
+    ])
+    const result = assess(mismatched)
+    const marks = result.packages[0].hazardCommunication.join(' ')
+    expect(marks).toContain('Class 9 lithium battery hazard label')
+    expect(marks).toContain('proper shipping name mark')
+    expect(check(result, 'dg.mixed-regulation.p1')).toMatchObject({ severity: 'blocking', passed: false })
   })
 
   it('does not gather two different UN numbers into one A181 total', () => {
