@@ -196,6 +196,31 @@ describe('the battery mark exemption for equipment', () => {
     expect(check(result, 'dg.test-summary')).toMatchObject({ passed: true })
   })
 
+  it('does not grant the exemption on a count nobody has stated', () => {
+    // The panel stores zero for a cleared overpack box so `dg.overpack-count` can refuse
+    // it, and flooring that back to one undid it in the multiplier: four packages read as
+    // two, and the mark came off the list at the packing bench, above the checks.
+    const cleared = consignment(
+      [
+        pkg(
+          'p1',
+          [
+            entry('e1', { configuration: 'contained-in-equipment', wattHours: 86 }, {
+              netWeightKgPerPackage: 1,
+              countPerPackage: 2,
+              stateOfChargePercent: 20,
+            }),
+          ],
+          { count: 2, overpackId: 'o1' },
+        ),
+      ],
+      { overpacks: [overpack('o1', { count: 0 })] },
+    )
+    const result = assess(cleared)
+    expect(result.packages[0].batteryMarkExemption).toBeNull()
+    expect(result.packages[0].hazardCommunication).toContain('Lithium battery mark bearing UN3481')
+  })
+
   it('does not read a count of zero as an allowance satisfied', () => {
     // Zero is a number nobody typed, not two batteries fewer than two. The package holds a
     // kilogram of batteries and needs the mark.

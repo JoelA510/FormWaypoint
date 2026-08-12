@@ -215,7 +215,12 @@ function a181Groups(entries: EntryAssessment[]): Map<string, EntryAssessment[]> 
  */
 export function packageCountInConsignment(pkg: DgPackage, consignment: DgConsignment): number {
   const overpack = pkg.overpackId ? consignment.overpacks.find((o) => o.id === pkg.overpackId) : null
-  return Math.max(0, pkg.count) * Math.max(1, overpack?.count ?? 1)
+  // No overpack is a multiplier of one. An overpack whose count is *zero* is not: the panel
+  // stores zero for a cleared box so `dg.overpack-count` can refuse it, and flooring it back
+  // to one undid that here — four packages read as two, and the two-package battery mark
+  // exemption came off the marks list at the packing bench, above the checks that refuse it.
+  const multiplier = overpack ? Math.max(0, overpack.count) : 1
+  return Math.max(0, pkg.count) * multiplier
 }
 
 /**
@@ -1547,7 +1552,11 @@ function batteryMarkExemption(entries: EntryAssessment[], totalPackagesInConsign
   // given. The asymmetry decides it: an unnecessary battery mark costs a label, a missing
   // one is an undeclared package, so a mixed package is not offered the exception.
   const withinAllowance = batteries === 0 ? cells <= 4 : cells === 0 && batteries <= 2
-  if (withinAllowance && totalPackagesInConsignment <= 2) {
+  // A positive count, not merely one at or below two. Zero packages is not a consignment of
+  // two of them, and an exemption measured against a number nobody has stated is not an
+  // exemption — the counts it rests on are held by `dg.package-count` and
+  // `dg.overpack-count`, and until those pass this says nothing.
+  if (withinAllowance && totalPackagesInConsignment >= 1 && totalPackagesInConsignment <= 2) {
     const contents =
       batteries === 0
         ? `${cells} cell${cells === 1 ? '' : 's'}`
