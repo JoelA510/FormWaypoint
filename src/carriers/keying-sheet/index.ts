@@ -879,7 +879,10 @@ function cityFrom(lines: string[]): string {
   const index = postcodeLineIndex(lines)
   if (index === -1) return ''
   const withoutPostcode = lines[index].replace(POSTCODE, '').trim()
-  const withoutState = withoutPostcode.replace(/[\s,]+[A-Z]{2,}$/, '').trim()
+  // A state is either comma-separated, at any length, or a short code after a space. Any
+  // trailing all-caps word at all took the last word off every city written in capitals:
+  // `SAO PAULO 01310-100` came out as `SAO`, `LOS ANGELES 90001` as `LOS`.
+  const withoutState = withoutPostcode.replace(/,\s*[A-Z]{2,}$/, '').replace(/\s+[A-Z]{2,3}$/, '').trim()
   const city = (withoutState || withoutPostcode).replace(/[,;]+$/, '').trim()
   if (city) return city
   // A postcode printed on a line of its own falls back to the line above — the nearest one

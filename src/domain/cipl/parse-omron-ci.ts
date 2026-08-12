@@ -178,7 +178,7 @@ export function parseOmronCiWorkbook(
   }
   const field = (label: string): string => fields.get(label) ?? ''
 
-  const parties = readParties(rows)
+  const parties = readParties(rows, warnings)
   const lines = readLines(rows, field('PURCHASE ORDER #'), field('INVOICE #'), warnings, fromWorkbook)
 
   const subtotal = amountOnRow(rows, 'SUBTOTAL', fromWorkbook ? amountColumnIn(rows) : -1)
@@ -227,12 +227,25 @@ function valueAfter(row: string[], index: number): string {
  * and its lines are whatever the following rows hold in that column, until the header grid
  * starts (its first row carries the INVOICE # label).
  */
-function readParties(rows: SheetRows): { shipper: PartyAddress; consignee: PartyAddress; billTo: PartyAddress } {
+function readParties(
+  rows: SheetRows,
+  warnings: string[],
+): { shipper: PartyAddress; consignee: PartyAddress; billTo: PartyAddress } {
   const empty = (): PartyAddress => ({ name: '', lines: [], country: null })
   const bandIndex = rows.findIndex(
     (row) => row.some((c) => isPartyTitle(c, 'SHIPPER')) && row.some((c) => isPartyTitle(c, 'CONSIGNEE')),
   )
-  if (bandIndex === -1) return { shipper: empty(), consignee: empty(), billTo: empty() }
+  // Said out loud. The addresses are the one part of this form nothing downstream demands —
+  // the SLI will fill its consignee box with whatever is there, including nothing — so a
+  // band that could not be read has to report itself or it reads as a blank form.
+  const unreadable = () => {
+    warnings.push(
+      'The shipper, consignee and bill-to blocks could not be read from this document. Enter the consignee by ' +
+        'hand, and check the addresses on the generated form against the invoice before signing.',
+    )
+    return { shipper: empty(), consignee: empty(), billTo: empty() }
+  }
+  if (bandIndex === -1) return unreadable()
 
   const band = rows[bandIndex]
   const columns = {
@@ -256,6 +269,9 @@ function readParties(rows: SheetRows): { shipper: PartyAddress; consignee: Party
     const [name = '', ...rest] = lines
     return { name, lines: rest, country: null }
   }
+  // The band was found and still yielded nothing — on the PDF path, a band whose three
+  // titles could not all be located, which `partyRow` declines to map rather than guess at.
+  if (!collected.shipper.length && !collected.consignee.length && !collected.billTo.length) return unreadable()
   return { shipper: toParty(collected.shipper), consignee: toParty(collected.consignee), billTo: toParty(collected.billTo) }
 }
 

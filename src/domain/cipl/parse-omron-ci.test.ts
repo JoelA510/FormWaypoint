@@ -377,6 +377,18 @@ describe('the printed PDF', () => {
     expect(parsed.lines[1].extendedValue).toBeCloseTo(150, 2)
   })
 
+  it('says so when the address blocks could not be read at all', () => {
+    // Nothing downstream demands a consignee — the SLI fills its box with whatever is
+    // there, including nothing — so a band that could not be read has to report itself or
+    // it reads as a blank form.
+    const grid = omronCiGrid(simpleOmronCi())
+    const band = grid.findIndex((row) => row.includes('SHIPPER (SHIP FROM / EXPORTER)'))
+    grid.splice(band, 1)
+    const parsed = parseOmronCiWorkbook('ci.xlsx', grid)
+    expect(parsed.headers.FC.consignedTo.name).toBe('')
+    expect(parsed.warnings.some((w) => w.includes('could not be read from this document'))).toBe(true)
+  })
+
   it('leaves the address blocks empty rather than folding two into one', () => {
     // The band is located on SHIPPER and CONSIGNEE alone, so an extractor that split the
     // BILL TO heading across items still found it — and every bill-to address item then

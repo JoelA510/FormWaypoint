@@ -355,6 +355,16 @@ describe('address extraction', () => {
     expect(field(['1 Harbour Way', 'Fax Islands 12345'], 'City')).toBe('Fax Islands')
   })
 
+  it('keeps both words of a city written in capitals', () => {
+    // Stripping any trailing all-caps word took the last word off every such city.
+    expect(field(['Rua Example 100', 'SAO PAULO 01310-100'], 'City')).toBe('SAO PAULO')
+    expect(field(['1 Sunset Blvd', 'LOS ANGELES 90001'], 'City')).toBe('LOS ANGELES')
+    // A short code after a space is still a state, and a comma still separates one at any
+    // length — both of which the filed shipments actually print.
+    expect(field(['2nd Floor 40 Alps Avenue', 'Singapore EX 498781'], 'City')).toBe('Singapore')
+    expect(field(['Plot 12', 'Bangalore, KARNATAKA 562123'], 'City')).toBe('Bangalore')
+  })
+
   it('does not read a city whose name ends in one of those words as a phone line', () => {
     // The keyword has to begin a word as well as label the number.
     expect(field(['1 Dauphin St', 'MOBILE 36602'], 'Postal code')).toBe('36602')
