@@ -95,6 +95,19 @@ describe('the unit a commodity row is filed in', () => {
     expect(uom.actual).toBe('NO')
   })
 
+  it('names the missing weight for any weight-derived unit, not just kilograms', async () => {
+    // 2523.10.0000 is reported in `T`. What is wrong with this row is the absent weight, and
+    // the check used to send the filer to the classification instead whenever the required
+    // unit was anything but KG.
+    const parsed = await shipment('2523.10.0000', { netWeightKg: undefined, grossWeightKg: undefined })
+    const { checks } = reconcile(parsed, scheduleB, CONTROLLED)
+    const uom = checks.find((c) => c.id.startsWith('sb-uom:'))!
+    expect(uom.passed).toBe(false)
+    expect(uom.expected).toBe('T')
+    expect(uom.detail).toMatch(/per-part weights/)
+    expect(uom.detail).toMatch(/the T figure/)
+  })
+
   it('publishes every unit the code accepts, so the choice can be offered', async () => {
     const { sliLines } = reconcile(await shipment(BY_WEIGHT), scheduleB, CONTROLLED)
     expect(row(sliLines, BY_WEIGHT).scheduleBUnits).toEqual(['KG'])

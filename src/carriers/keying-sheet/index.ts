@@ -311,10 +311,19 @@ function unitFor(group: MergedLine[]): string {
 function reportingUnits(sliLines: SLILine[]): Map<string, string> {
   const units = new Map<string, string>()
   for (const line of sliLines) {
-    // First seen wins. One commodity number can hold more than one SLI row — the rows are
-    // keyed on D/F and the export-control triplet as well — and the rows are in a settled
-    // order, so taking the first keeps the sheet the same sheet from one run to the next.
+    // Keyed on the commodity number *and* the unit the document reported it in, because
+    // `aggregateLines` splits rows on the canonical unit too: a code invoiced partly in
+    // pieces and partly in kilograms is two SLI rows filing two different units. Keyed on the
+    // code alone, the keying rows built from one of those groups were told they should be
+    // filing the other's unit, and the sheet asserted "this code files in NO and this row has
+    // no figure for it" about goods the SLI files in KG.
+    //
+    // The code-only key is kept alongside as a fallback for a group whose unit matches no row
+    // at all. First seen wins there, and the rows are in a settled order, so the sheet is the
+    // same sheet from one run to the next.
     const code = normalizeScheduleB(line.scheduleB)
+    const keyed = `${code}|${canonicalUnit(line.sourceUom) ?? ''}`
+    if (!units.has(keyed)) units.set(keyed, line.reportingUom)
     if (!units.has(code)) units.set(code, line.reportingUom)
   }
   return units
@@ -344,12 +353,15 @@ function keyedQuantity(
 } {
   const printed = unitFor(group)
   const asPrinted = { quantity: roundTo(quantity, 3), unit: printed, fromNetWeight: false }
-  // Compared canonically, kept in the document's spelling: `PCS` and `NO` are one unit, and
-  // the operator is keying against a document that says `PCS`.
-  if (!wanted || canonicalUnit(wanted) === (canonicalUnit(printed) ?? printed)) return asPrinted
+  if (!wanted) return asPrinted
 
   const restated = restateQuantity({ quantity, uom: printed, weightKg }, wanted)
   if (!restated) return { ...asPrinted, unavailable: wanted }
+  // `source` is the identity restatement — the wanted unit and the printed one are the same
+  // unit written two ways, which `restateQuantity` already decides. The row keeps the
+  // document's own spelling, because the operator is keying against a document that says
+  // `PCS` while the Census file says `NO`.
+  if (restated.basis === 'source') return asPrinted
   // The declaration files no quantity for this code, but the application still needs one, so
   // the row keys what the document counted and says which of the two it is. Writing the
   // literal 0 that "no quantity" restates to would have the operator key nothing at all
@@ -447,7 +459,15 @@ function groupForKeying(
     // applied one part's wording to goods the document does not identify, discarding what it
     // did say about them (`otherDescriptions` is emptied wherever a saved wording wins).
     const partMissing = group.some((l) => !l.partNumber.trim())
-    const keyed = keyedQuantity(group, quantity, weightKg, units.get(normalizeScheduleB(code)))
+    // The row's own unit first, so a code split across units on the SLI matches the group it
+    // actually came from.
+    const codeKey = normalizeScheduleB(code)
+    const keyed = keyedQuantity(
+      group,
+      quantity,
+      weightKg,
+      units.get(`${codeKey}|${canonicalUnit(first.uom) ?? ''}`) ?? units.get(codeKey),
+    )
     const saved = parts.length === 1 && !partMissing ? descriptions[partKey(parts[0])] : undefined
     const chosen = describeGroup(group, options.descriptionSource, scheduleB, code)
     return {
@@ -1149,7 +1169,12 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
   // to kilograms is not a quantity. The review screen leaves its own footer cell blank for
   // the same reason; a figure here that the Notes tab has to describe as "in mixed units" is
   // a number somebody reads off the grid without ever seeing that caveat.
-  const oneUnit = new Set(sheet.commodities.map((c) => c.unitOfMeasure.trim()).filter(Boolean)).size <= 1
+  const oneUnit =
+    new Set(
+      sheet.commodities
+        .map((c) => canonicalUnit(c.unitOfMeasure) ?? c.unitOfMeasure.trim())
+        .filter(Boolean),
+    ).size <= 1
   // The word goes in the leftmost column that is not itself a total, so it never displaces a
   // figure. Where every chosen column carries one it takes the first anyway: an unlabelled
   // row of figures at the foot of a grid is indistinguishable from another commodity, and
@@ -1204,7 +1229,20 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
   // What the quantity column is actually counting. A single unit is named; a mixed sheet
   // says so rather than calling a column of kilograms and pieces "pcs", which is what the
   // TOTAL row read as before any of it could be anything but a count.
-  const keyedUnits = [...new Set(sheet.commodities.map((c) => c.unitOfMeasure.trim()).filter(Boolean))]
+  // Canonically, for the same reason the grid's total is: one group reading `PCS` beside
+  // another reading `EA` is one unit spelled two ways, and calling that sheet "mixed" both
+  // blanks a total it could carry and says something untrue about it.
+  const keyedUnits = [
+    ...sheet.commodities
+      .map((c) => c.unitOfMeasure.trim())
+      .filter(Boolean)
+      .reduce((seen, unit) => {
+        const key = canonicalUnit(unit) ?? unit
+        if (!seen.has(key)) seen.set(key, unit)
+        return seen
+      }, new Map<string, string>())
+      .values(),
+  ]
   const keyedUnitLabel = keyedUnits.length === 1 ? keyedUnits[0] : 'in mixed units'
 
   const notes: CellValue[][] = [

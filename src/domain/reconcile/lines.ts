@@ -240,8 +240,11 @@ export function aggregateLines(lines: MergedLine[], options: AggregationOptions)
         // The document's own unit and count, which is what a row files until the Census
         // dataset says otherwise. `reconcile` is the only thing that knows what a code
         // requires, so it is the only thing that can improve on this — see
-        // `resolveReportingQuantity`.
-        reportingUom: canonicalUnit(line.uom) ?? '',
+        // `resolveReportingQuantity`, which falls back to this same spelling.
+        //
+        // The accumulation below stays true to it: every line in a group shares a canonical
+        // unit, because the grouping key includes one.
+        reportingUom: line.uom.trim().toUpperCase(),
         reportingQuantity: line.quantity,
         reportingBasis: 'source',
         weightKg: line.netWeightKg ?? 0,

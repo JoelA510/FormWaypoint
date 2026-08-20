@@ -260,6 +260,47 @@ describe('the unit each commodity is keyed in', () => {
     expect(keyingSheetToWorkbook(sheet)[0].rows.flat().join(' ')).toMatch(/does not print this figure/)
   })
 
+  it('still totals a sheet whose rows spell one unit two ways', () => {
+    // `unitFor` keeps the document's own spelling, so one group can read PCS and another EA.
+    // They are one unit; calling that sheet "mixed" blanks a total it could carry.
+    const lines = [
+      line({ id: 'a', quantity: 2, uom: 'PCS', netWeightKg: 1 }),
+      line({ id: 'b', quantity: 2, uom: 'EA', netWeightKg: 1 }),
+    ]
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(lines, [sli({})]), draft(), {
+      options: { grouping: 'line', columns: ['quantity', 'unitOfMeasure', 'totalValue'] },
+    })
+    expect(keyingSheetToWorkbook(sheet)[0].rows.at(-1)![0]).toBe(4)
+    const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
+    expect(notes.Check).not.toMatch(/mixed units/)
+  })
+
+  it('reads the unit off the SLI row that matches its own, not the first row for the code', () => {
+    // `aggregateLines` splits rows on the canonical unit too, so one commodity number can be
+    // two SLI rows filing two different units. Keyed on the code alone, the kilogram group
+    // was told it should be filing NO and the sheet claimed it had no figure for it.
+    const lines = [
+      line({ id: 'pcs', classification: '8483.10.5000', quantity: 2, uom: 'PCS', netWeightKg: 1 }),
+      line({ id: 'kg', classification: '8483.10.5000', quantity: 3, uom: 'KG', netWeightKg: 3 }),
+    ]
+    const rows = [
+      sli({ scheduleB: '8483.10.5000', sourceUom: 'PCS', reportingUom: 'NO', reportingBasis: 'source' }),
+      sli({
+        scheduleB: '8483.10.5000',
+        sourceUom: 'KG',
+        scheduleBUnits: ['NO', 'KG'],
+        reportingUom: 'KG',
+        reportingBasis: 'source',
+      }),
+    ]
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(lines, rows), draft(), {
+      options: { grouping: 'line' },
+    })
+    // Neither row is told it cannot state its unit, because both are already stating one.
+    expect(sheet.commodities.map((c) => c.unitOfMeasure)).toEqual(['PCS', 'KG'])
+    expect(sheet.commodities.some((c) => c.unitUnavailable)).toBe(false)
+  })
+
   it('leaves a code reported by the piece alone', () => {
     const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], [sli({})]), draft())
     expect(sheet.commodities[0].unitOfMeasure).toBe('PCS')

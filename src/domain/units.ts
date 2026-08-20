@@ -122,6 +122,19 @@ export function restateQuantity(source: QuantitySource, targetUnit: string): Res
   return null
 }
 
+/**
+ * Whether a row's net weight is what would supply `targetUnit`.
+ *
+ * Asked by the reconciliation so that a row missing the figure can be told what would fix it.
+ * `PER_KILOGRAM` already knows which units come from a weight; a caller re-encoding that as a
+ * hard-coded `'KG'` names the remedy for one of the three and sends the other two to the
+ * classifier instead.
+ */
+export function derivesFromNetWeight(targetUnit: string): boolean {
+  const target = canonicalUnit(targetUnit)
+  return Boolean(target && PER_KILOGRAM[target] != null)
+}
+
 /** Whether a quantity can be stated in `targetUnit` at all, without computing it. */
 export function canRestate(source: QuantitySource, targetUnit: string): boolean {
   return restateQuantity(source, targetUnit) !== null

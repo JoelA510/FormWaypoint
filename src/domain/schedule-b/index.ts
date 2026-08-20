@@ -15,7 +15,7 @@
  * would be exactly the wrong behaviour for an export declaration.
  */
 import type { CheckResult } from '../types'
-import type { QuantityBasis } from '../units'
+import { derivesFromNetWeight, type QuantityBasis } from '../units'
 
 export interface ScheduleBEntry {
   code: string
@@ -349,12 +349,15 @@ export function checkClassification(subject: ClassificationSubject, index: Sched
           ? `Schedule B reports this code in ${required.join(' and ')}, ${worked}.`
           : `Schedule B reports this code in ${required.join(' and ')}, matching the invoice.`
         : `Schedule B requires this code to be reported in ${required.join(' or ')}, but this row files ${filed}. ` +
-          (wanted === 'KG'
+          // Asked of the conversion rules rather than hard-coded to `KG`: tonnes and grams
+          // come from the net weight too, and telling the filer to fix the classification
+          // when what is missing is a weight sends them to the wrong place.
+          (derivesFromNetWeight(wanted)
             ? subject.hasNetWeight === false
-              ? 'Nothing on this shipment gives a net weight for these goods, so the kilogram figure the code ' +
+              ? `Nothing on this shipment gives a net weight for these goods, so the ${wanted} figure the code ` +
                 'requires cannot be worked out — supply the per-part weights, or correct the classification.'
-              : 'This row does have a net weight, so it can be filed in KG; the unit was changed by hand. Put it ' +
-                'back to the Schedule B unit, or correct the classification.'
+              : `This row does have a net weight, so it can be filed in ${wanted}; the unit was changed by hand. ` +
+                'Put it back to the Schedule B unit, or correct the classification.'
             : `The ${printed ?? 'invoice'} figure the document prints cannot be converted to ` +
               `${wanted}, so the classification or the unit needs correcting before this is filed.`),
       passed: ok,

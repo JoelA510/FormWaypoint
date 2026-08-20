@@ -347,7 +347,11 @@ function ReportingUnitPicker({
 function basisNote(line: SLILine, byChoice: boolean): string {
   if (!line.scheduleBUnits.length) return 'Schedule B unit unknown — filing the invoice figure.'
   if (line.reportingBasis === 'none') return 'Schedule B reports this code with no quantity.'
-  if (!line.scheduleBUnits.includes(line.reportingUom)) {
+  // Compared canonically. `PCS` and `NO` are one unit, and a row filing the document's
+  // spelling of the unit its code requires has not departed from Schedule B — the check
+  // beside this panel compares the same way and would say the row passes.
+  const filed = canonicalUnit(line.reportingUom)
+  if (!line.scheduleBUnits.some((unit) => canonicalUnit(unit) === filed)) {
     const required = line.scheduleBUnits.join(' or ')
     return byChoice
       ? `Filed in ${line.reportingUom} by your choice; Schedule B requires ${required}.`

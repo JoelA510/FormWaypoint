@@ -3,12 +3,13 @@ import {
   createContext,
   findMissingFields,
   formatDateMMDDYYYY,
+  formatQuantity,
   joinLines,
   loadForm,
   selectRadio,
   setText,
 } from '../form-utils'
-import { isNamedPlace, parseIncoterm, RETIRED_INCOTERMS } from '../../domain/incoterms'
+import { namedPlaceFrom, parseIncoterm, RETIRED_INCOTERMS } from '../../domain/incoterms'
 import {
   NIPPON_CONSIGNEE_TYPE,
   NIPPON_HEADER_FIELDS as F,
@@ -112,16 +113,20 @@ export function createNipponExpressAdapter(options: NipponOptions = {}): Carrier
       setText(ctx, F.pointOfOrigin, draft.pointOfOrigin)
       setText(ctx, F.destinationCountry, draft.destinationCountry)
       setText(ctx, F.shipmentReference, draft.shipmentReference)
+
+      // Read as a *rule* rather than matched literally: what reaches here is `DAP Singapore`
+      // or `FOB Origin - Collect` as often as it is a bare code, and neither of those is an
+      // option on this form's list. Parsed once, for the named place here and the rule below.
+      const stated = parseIncoterm(draft.incoterm)
       // The place that qualifies the Incoterm. Taken from the term itself when the operator
       // left the box alone: an `omron-ci` invoice reading `DAP Singapore` names its place in
       // the same string as the rule, and dropping it files a delivery term that does not say
       // where delivery happens.
       //
-      // Only where what follows the rule is actually a place. A trade-terms line is a
-      // composite, and `FOB Origin - Collect` leaves `Origin - Collect` behind — writing that
-      // into a box captioned "NAMED PLACE/PORT" would state a freight term as a port.
-      const statedPlace = parseIncoterm(draft.incoterm)?.namedPlace ?? ''
-      setText(ctx, F.namedPlace, draft.namedPlace || (isNamedPlace(statedPlace) ? statedPlace : ''))
+      // Only the part of it that is a place, though. A trade-terms line is a composite, and
+      // `FOB Origin - Collect` carries the freight term in the same string — writing that into
+      // a box captioned "NAMED PLACE/PORT" would state who pays as where delivery happens.
+      setText(ctx, F.namedPlace, draft.namedPlace || namedPlaceFrom(stated?.namedPlace ?? ''))
 
       const mode = NIPPON_MODE[draft.mode]
       selectRadio(ctx, mode.field, mode.option)
@@ -136,10 +141,6 @@ export function createNipponExpressAdapter(options: NipponOptions = {}): Carrier
         ctx.warnings.push(`Service term "${draft.term}" is not on this form; left blank.`)
       }
 
-      // Read as a *rule* rather than matched literally: what reaches here is `DAP Singapore`
-      // or `FOB Origin - Collect` as often as it is a bare code, and neither of those is an
-      // option on this form's list.
-      const stated = parseIncoterm(draft.incoterm)
       const option = stated ? formOption(stated.code) : null
       if (option) selectRadio(ctx, R.incoterm.field, option)
       else if (draft.incoterm?.trim()) {
@@ -214,9 +215,4 @@ function formOption(code: string): string | null {
   const aliases: Record<string, string> = { FAS: 'FSA', FCA: 'FCP' }
   const mapped = aliases[code] ?? code
   return (NIPPON_INCOTERM_OPTIONS as readonly string[]).includes(mapped) ? mapped : null
-}
-
-/** Whole numbers print without a decimal point; kilogram quantities keep three places. */
-function formatQuantity(quantity: number): string {
-  return Number.isInteger(quantity) ? String(quantity) : quantity.toFixed(3)
 }

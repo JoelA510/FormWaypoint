@@ -9,7 +9,7 @@ import { createScheduleBIndex, type ScheduleBIndex } from '../domain/schedule-b'
 import { reconcile } from '../domain/reconcile'
 import { buildDraft, defaultShipmentSettings, summariseReferences, type CompanyProfile } from '../domain/draft'
 import { getAdapter, detectCarrier } from './registry'
-import { isNamedPlace, parseIncoterm } from '../domain/incoterms'
+import { namedPlaceFrom, parseIncoterm } from '../domain/incoterms'
 import { buildSyntheticCipl, simpleShipment } from '../test/synthetic/cipl'
 import { buildKeyingSheet, keyingSheetToWorkbook } from './keying-sheet'
 import type { ParsedCipl, ShipmentHeader, SLILine } from '../domain/types'
@@ -521,16 +521,22 @@ describe('reading an Incoterm off a document', () => {
     expect(parseIncoterm('DDU')?.retired).toBe(true)
   })
 
-  it('tells a named place from a freight term', () => {
-    // A trade-terms line is a composite. What follows the rule is a place on `DAP Singapore`
-    // and a payment term on `FOB Origin - Collect`, and only the first belongs in a box
-    // captioned "NAMED PLACE/PORT".
-    expect(isNamedPlace('Singapore')).toBe(true)
-    expect(isNamedPlace('Long Beach')).toBe(true)
-    expect(isNamedPlace('Origin - Collect')).toBe(false)
-    expect(isNamedPlace('Prepaid')).toBe(false)
-    expect(isNamedPlace('DUTY PAID BY CONSIGNEE')).toBe(false)
-    expect(isNamedPlace('')).toBe(false)
+  it('takes the place out of a composite trade-terms line', () => {
+    // A trade-terms line carries the rule, sometimes a place, and the freight term. Only the
+    // place belongs in a box captioned "NAMED PLACE/PORT" — and it is taken out of the
+    // string rather than the whole remainder being thrown away because a payment term
+    // follows it.
+    expect(namedPlaceFrom('Singapore')).toBe('Singapore')
+    expect(namedPlaceFrom('Long Beach')).toBe('Long Beach')
+    expect(namedPlaceFrom('Rotterdam Prepaid')).toBe('Rotterdam')
+    expect(namedPlaceFrom('Singapore, Freight Collect')).toBe('Singapore')
+    expect(namedPlaceFrom('Origin - Collect')).toBe('Origin')
+    expect(namedPlaceFrom('Prepaid')).toBe('')
+    expect(namedPlaceFrom('DUTY PAID BY CONSIGNEE')).toBe('')
+    expect(namedPlaceFrom('')).toBe('')
+    // Punctuation alone is not a place; a box reading "." is worse than an empty one.
+    expect(namedPlaceFrom('.')).toBe('')
+    expect(parseIncoterm('EXW.')?.namedPlace).toBe('')
   })
 
   it('answers nothing for what is not an Incoterm', () => {
@@ -602,11 +608,35 @@ describe('Nippon Express — quantity, its unit, and the named place', () => {
   })
 
   it('does not write a freight term into the named-place box', async () => {
-    // `FOB Origin - Collect` is the Vendor A trade-terms wording. "Origin - Collect" is who
-    // pays the freight, not a port, and box 15 is captioned "NAMED PLACE/PORT".
+    // `FOB Origin - Collect` is the Vendor A trade-terms wording. "Collect" is who pays the
+    // freight, not a port, and box 15 is captioned "NAMED PLACE/PORT". The FOB point itself
+    // is kept.
     const { values } = await fillWith({}, { incoterm: 'FOB Origin - Collect', namedPlace: '' })
     expect(values.INCOTERM).toBe('FOB')
-    expect(values['NAMED PLACE/PORT']).toBeUndefined()
+    expect(values['NAMED PLACE/PORT']).toBe('Origin')
+  })
+
+  it('keeps a place that a payment term follows', async () => {
+    // The place is right there in the string; discarding it because "Prepaid" comes after
+    // loses the one thing box 15 exists for.
+    const { values } = await fillWith({}, { incoterm: 'CIF Rotterdam Prepaid', namedPlace: '' })
+    expect(values.INCOTERM).toBe('CIF')
+    expect(values['NAMED PLACE/PORT']).toBe('Rotterdam')
+  })
+
+  it('writes a restated quantity at the precision it was worked out to', async () => {
+    // Box 24 used to hard-round to three places, undoing the extra precision a down-scaling
+    // conversion needs: `0.004` tonnes declares 4 kg where the shipment weighs 4.263.
+    const { values } = await fillWith({
+      scheduleB: '2523.10.0000',
+      scheduleBUnit: 'T',
+      scheduleBUnits: ['T'],
+      reportingUom: 'T',
+      reportingQuantity: 0.004263,
+      reportingBasis: 'net-weight',
+    })
+    expect(values['22.03 sB UNIT1']).toBe('0.004263')
+    expect(values['22.04 UOM1']).toBe('T')
   })
 
   it('says what a retired rule has become rather than selecting nothing quietly', async () => {
@@ -695,6 +725,21 @@ describe('CEVA — recording the Incoterm', () => {
     expect(values['Special Instructions']).toBe('Incoterm: DAP Singapore')
   })
 
+  it('keeps a named place the operator typed against a term it could not read', async () => {
+    // This form has no named-place box, so the special instructions are the only route to
+    // paper. `SFO` used to be dropped whenever the term itself did not parse.
+    const { values } = await fillWith({ incoterm: 'Ex Factory', namedPlace: 'SFO' })
+    expect(values['Special Instructions']).toBe('Incoterm: Ex Factory SFO')
+  })
+
+  it('does not raise a conflict against a freight term', async () => {
+    // "Collect" is who pays, already written into the freight-payment box. It is not a rival
+    // named place, and warning about it would cry wolf on every shipment of this shape.
+    const { values, warnings } = await fillWith({ incoterm: 'FOB Origin', namedPlace: 'Origin' })
+    expect(values.FOB).toBe('checked')
+    expect(warnings).toEqual([])
+  })
+
   it('lets the operator’s named place win, as the Nippon form does', async () => {
     // The two forms disagreeing about whose place wins is how one shipment gets filed two
     // ways. Typing one is a deliberate act; the document is the default.
@@ -741,6 +786,33 @@ describe('CEVA — the quantity box carries the Schedule B unit', () => {
   it('writes a count bare, as the filed SLIs do', async () => {
     const values = await fillRows([{ ...ROW, reportingUom: 'NO', reportingQuantity: 10, reportingBasis: 'source' }])
     expect(values['Quantity Schedule B Unit']).toBe('10')
+  })
+
+  it('writes a count bare whichever spelling the unit has', async () => {
+    // The Census file reports 51 commodity numbers in `PCS`, and a fallback row carries the
+    // document's own spelling. None of those should append a unit to a plain piece count.
+    for (const unit of ['NO', 'PCS', 'EA']) {
+      const values = await fillRows([
+        { ...ROW, reportingUom: unit, reportingQuantity: 12, reportingBasis: 'source' },
+      ])
+      expect(values['Quantity Schedule B Unit'], unit).toBe('12')
+    }
+  })
+
+  it('writes a restated quantity at the precision it was worked out to', async () => {
+    // Three decimals is the floor. `0.004 T` against a 4.263 kg row under-declares by 6%.
+    const values = await fillRows([
+      {
+        ...ROW,
+        scheduleB: '2523.10.0000',
+        scheduleBUnit: 'T',
+        scheduleBUnits: ['T'],
+        reportingUom: 'T',
+        reportingQuantity: 0.004263,
+        reportingBasis: 'net-weight',
+      },
+    ])
+    expect(values['Quantity Schedule B Unit']).toBe('0.004263 T')
   })
 
   it('names the unit beside a figure that is not a count', async () => {

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { canRestate, resolveReportingQuantity, restateQuantity, type QuantitySource } from './units'
+import {
+  canRestate,
+  derivesFromNetWeight,
+  resolveReportingQuantity,
+  restateQuantity,
+  type QuantitySource,
+} from './units'
 
 /** A cable line: 12 pieces weighing 4.263 kg, which is the shape the KG codes arrive in. */
 const CABLES: QuantitySource = { quantity: 12, uom: 'PCS', weightKg: 4.263 }
@@ -81,6 +87,20 @@ describe('restating a quantity in the unit Schedule B requires', () => {
     expect(restateQuantity(area, 'M2')).toEqual({ unit: 'M2', quantity: 3.5, basis: 'source' })
     expect(canRestate(area, 'M2')).toBe(true)
     expect(canRestate(area, 'L')).toBe(false)
+  })
+})
+
+describe('which units come from the net weight', () => {
+  it('names every weight-derived unit, not just kilograms', () => {
+    // The reconciliation asks this to tell a filer that a missing weight is what is wrong.
+    // Hard-coded to `KG`, it sent the 247 tonne codes and the gram codes to the classifier
+    // instead.
+    expect(derivesFromNetWeight('KG')).toBe(true)
+    expect(derivesFromNetWeight('T')).toBe(true)
+    expect(derivesFromNetWeight('GM')).toBe(true)
+    expect(derivesFromNetWeight('NO')).toBe(false)
+    expect(derivesFromNetWeight('CKG')).toBe(false)
+    expect(derivesFromNetWeight('')).toBe(false)
   })
 })
 

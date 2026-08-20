@@ -78,7 +78,7 @@ export function parseIncoterm(raw: string | null | undefined): ParsedIncoterm | 
     code,
     // Leading separators belong to the join, not to the place: `FOB - Long Beach` names
     // Long Beach.
-    namedPlace: rest.replace(/^[\s,:;/|–—-]+/, '').trim(),
+    namedPlace: rest.replace(/^[\s,:;/|.–—-]+/, '').trim(),
     retired: code in RETIRED_INCOTERMS,
   })
 
@@ -107,7 +107,19 @@ export function parseIncoterm(raw: string | null | undefined): ParsedIncoterm | 
  */
 const FREIGHT_QUALIFIER = /\b(COLLECT|PREPAID|PPD|P\.?P\.?|C\.?C\.?|FREIGHT|DUTY\s+(UN)?PAID)\b/i
 
-/** Whether `namedPlace` can be written into a form's named-place box as it stands. */
-export function isNamedPlace(namedPlace: string): boolean {
-  return Boolean(namedPlace.trim()) && !FREIGHT_QUALIFIER.test(namedPlace)
+/**
+ * The part of `namedPlace` that actually names a place, or `''`.
+ *
+ * Truncates at the freight qualifier rather than rejecting the whole remainder: on
+ * `CIF Rotterdam Prepaid` the place is right there in the string, and throwing it away
+ * because a payment term follows it loses the very thing this is for. `FOB Origin - Collect`
+ * keeps `Origin`, which is what that trade term names as the FOB point.
+ *
+ * Punctuation alone is not a place. `EXW.` leaves a full stop behind, and a box reading `.`
+ * is worse than an empty one.
+ */
+export function namedPlaceFrom(namedPlace: string): string {
+  const match = namedPlace.match(FREIGHT_QUALIFIER)
+  const place = (match ? namedPlace.slice(0, match.index) : namedPlace).replace(/[\s,:;/|.–—-]+$/, '').trim()
+  return /[A-Za-z0-9]/.test(place) ? place : ''
 }

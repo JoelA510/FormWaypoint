@@ -4,12 +4,14 @@ import {
   createContext,
   findMissingFields,
   formatDateMMDDYYYY,
+  formatQuantity,
   joinLines,
   loadForm,
   setCheckBox,
   setText,
 } from '../form-utils'
-import { parseIncoterm, RETIRED_INCOTERMS } from '../../domain/incoterms'
+import { namedPlaceFrom, parseIncoterm, RETIRED_INCOTERMS } from '../../domain/incoterms'
+import { canonicalUnit } from '../../domain/schedule-b'
 import { CEVA_CHECKBOXES, CEVA_CONSIGNEE_TYPE, CEVA_FIELDS as F, CEVA_INCOTERMS, CEVA_MAX_ROWS, CEVA_REQUIRED_FIELDS } from './fields'
 
 /**
@@ -133,9 +135,18 @@ export function createCevaAdapter(): CarrierAdapter {
       // default, which is the same precedence the Nippon form's box 15 uses; the two forms
       // disagreeing about whose place wins is how one shipment gets filed two ways.
       const operatorPlace = (draft.namedPlace ?? '').trim()
-      const statedPlace = incoterm?.namedPlace ?? ''
+      // Only the part of the stated term that is a place — `FOB Origin - Collect` carries the
+      // freight term in the same string, and it is already written into the freight-payment
+      // box. Comparing against the whole remainder raised a conflict against a payment term.
+      const statedPlace = namedPlaceFrom(incoterm?.namedPlace ?? '')
       const namedPlace = operatorPlace || statedPlace
-      const fullTerm = operatorPlace && incoterm ? `${incoterm.code} ${operatorPlace}` : stated
+      // The term as the form will carry it. Built rather than echoed, so that a place the
+      // operator typed survives a term this app could not parse — `Ex Factory` with a place of
+      // `SFO` used to write the term alone and drop `SFO` on a form that has no other box for
+      // it.
+      const fullTerm = incoterm
+        ? `${incoterm.code} ${namedPlace}`.trim()
+        : [stated, operatorPlace].filter(Boolean).join(' ')
       const incotermNote = stated && (!ticked || namedPlace) ? `Incoterm: ${fullTerm}` : ''
       // Overriding a place the document states is a decision, not a typo, so it is made
       // visible rather than applied quietly.
@@ -242,10 +253,11 @@ export function createCevaAdapter(): CarrierAdapter {
  */
 function formatReportedQuantity(line: SLILine): string {
   if (line.reportingBasis === 'none') return line.reportingUom
-  const quantity = Number.isInteger(line.reportingQuantity)
-    ? String(line.reportingQuantity)
-    : line.reportingQuantity.toFixed(3)
-  return line.reportingUom && line.reportingUom !== 'NO' ? `${quantity} ${line.reportingUom}` : quantity
+  const quantity = formatQuantity(line.reportingQuantity)
+  // Compared canonically. `PCS`, `EA` and `NO` are one unit written three ways — the Census
+  // file itself reports 51 commodity numbers in `PCS` — and appending any of those spellings
+  // to a plain piece count is exactly what this branch exists to avoid.
+  return canonicalUnit(line.reportingUom) !== 'NO' && line.reportingUom ? `${quantity} ${line.reportingUom}` : quantity
 }
 
 /**
