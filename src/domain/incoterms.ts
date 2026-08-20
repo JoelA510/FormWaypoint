@@ -100,7 +100,13 @@ export function parseIncoterm(raw: string | null | undefined): ParsedIncoterm | 
  * Wording that means "who pays the freight", not "where delivery happens".
  *
  * The optional `BY <party>` tail is part of the clause, not a place left behind by it:
- * `DUTY PAID BY CONSIGNEE` names nowhere.
+ * `DUTY PAID BY CONSIGNEE` names nowhere. The party can be more than one word
+ * (`BY ULTIMATE CONSIGNEE`), so the tail runs to the next comma rather than taking one word
+ * and leaving the rest to be read as a port.
+ *
+ * Held as a source string and compiled per call: a shared `g`-flagged regex carries a
+ * `lastIndex` between calls, and the next person to reach for `.test()` gets alternating
+ * answers on the same input.
  *
  * The trade-terms line on these documents is a composite — the rule, sometimes a place, and
  * the freight term — so what follows the rule is not always a place. `FOB Origin - Collect`
@@ -108,8 +114,7 @@ export function parseIncoterm(raw: string | null | undefined): ParsedIncoterm | 
  * states a freight term as a port. A caller filling such a box asks this first; a caller
  * transcribing the term verbatim does not need to.
  */
-const FREIGHT_QUALIFIER =
-  /\b(COLLECT|PREPAID|PPD|P\.?P\.?|C\.?C\.?|FREIGHT|DUTY\s+(UN)?PAID)(\s+BY\s+[A-Za-z]+)?\b/gi
+const FREIGHT_QUALIFIER = String.raw`\b(COLLECT|PREPAID|PPD|P\.?P\.?|C\.?C\.?|FREIGHT|DUTY\s+(UN)?PAID)(\s+BY\s+[A-Za-z][A-Za-z\s]*)?\b`
 
 /**
  * The part of `namedPlace` that actually names a place, or `''`.
@@ -128,12 +133,13 @@ export function namedPlaceFrom(namedPlace: string): string {
   // term *before* the place, and truncating at it discarded the place — the exact loss this
   // function exists to prevent, just for the other word order.
   const place = namedPlace
-    .replace(FREIGHT_QUALIFIER, ' ')
+    .replace(new RegExp(FREIGHT_QUALIFIER, 'gi'), ' ')
     .replace(/\s+/g, ' ')
-    // Separators orphaned by the words that sat between them. Not `.`, which ends an
-    // abbreviated place name (`Washington, D.C.`) — a residue that is punctuation only is
-    // caught by the test below instead.
-    .replace(/^[\s,:;/|–—-]+|[\s,:;/|–—-]+$/g, '')
+    // Separators orphaned by the words that sat between them, and a full stop left standing
+    // on its own — but not one that ends an abbreviated place name, where it belongs to the
+    // name (`Washington, D.C.`). The difference is whether a space precedes it.
+    .replace(/^[\s,:;/|–—-]+/, '')
+    .replace(/(\s+\.|[\s,:;/|–—-])+$/, '')
     .trim()
   return /[A-Za-z0-9]/.test(place) ? place : ''
 }

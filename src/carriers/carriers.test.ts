@@ -543,6 +543,13 @@ describe('reading an Incoterm off a document', () => {
     // The `by <party>` tail belongs to the payment clause; it is not a place left behind.
     expect(namedPlaceFrom('DUTY PAID BY CONSIGNEE')).toBe('')
     expect(namedPlaceFrom('Freight Collect by Shipper, Hamburg')).toBe('Hamburg')
+    // The party can be more than one word; taking only the first left the rest to be read
+    // as a port, so a signed SLI named the consignee as the place of delivery.
+    expect(namedPlaceFrom('DUTY PAID BY ULTIMATE CONSIGNEE')).toBe('')
+    expect(namedPlaceFrom('Freight Collect by CEVA Logistics, Hamburg')).toBe('Hamburg')
+    // A full stop ending the whole term is punctuation, not part of the place.
+    expect(namedPlaceFrom('Rotterdam Prepaid.')).toBe('Rotterdam')
+    expect(namedPlaceFrom('Singapore, Freight Collect.')).toBe('Singapore')
     expect(namedPlaceFrom('')).toBe('')
     // Punctuation alone is not a place; a box reading "." is worse than an empty one.
     expect(namedPlaceFrom('.')).toBe('')
@@ -768,6 +775,15 @@ describe('CEVA — recording the Incoterm', () => {
     expect(values['Special Instructions']).toBe('Incoterm: FOB Collect')
   })
 
+  it('says nothing extra for a rule spelled out in words', async () => {
+    // The `omron-ci` box is hand-typed. `Ex Works` is the same bare rule as `EXW`, and the
+    // tick already states it — comparing the text to the code wrote a redundant instruction.
+    for (const term of ['Ex Works', 'Free On Board', 'Cost and Freight']) {
+      const { values } = await fillWith({ incoterm: term })
+      expect(values['Special Instructions'], term).toBeUndefined()
+    }
+  })
+
   it('warns when the term’s payment wording contradicts the freight box', async () => {
     // Box 20 is filled from `header.freightTerms`, which is null on a document stating its
     // freight terms only inside the Incoterm — so the box carries this adapter's COLLECT
@@ -892,6 +908,28 @@ describe('CEVA — the quantity box carries the Schedule B unit', () => {
       },
     ])
     expect(values['Quantity Schedule B Unit']).toBe('4.263 KG')
+  })
+
+  it('says so rather than printing a blank when a row has no usable figure', async () => {
+    // A quantity that is not a number is a fault upstream, and box 24 is signed. It used to
+    // print a bare leading space with nothing in the warnings.
+    const adapter = getAdapter('ceva')
+    const draft = buildDraft(
+      {
+        header: BLANK_HEADER,
+        sliLines: [{ ...ROW, reportingQuantity: Number.NaN }],
+        mergedLines: [],
+        checks: [],
+        selectedSet: 'FC',
+        canGenerate: true,
+      },
+      VENDOR,
+      defaultShipmentSettings(adapter),
+      adapter,
+    )
+    const filled = await adapter.fill(template('ceva-sli.pdf'), draft)
+    expect((await readBack(filled.bytes))['Quantity Schedule B Unit']).toBe('NO')
+    expect(filled.warnings.join(' ')).toMatch(/no usable quantity/)
   })
 
   it('keeps the columns aligned when the units are mixed', async () => {

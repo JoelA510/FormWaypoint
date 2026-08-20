@@ -171,10 +171,16 @@ export function resolveReportingQuantity(
 }
 
 export function roundTo(value: number, decimals: number): number {
-  const factor = 10 ** decimals
-  // Nudge before rounding so binary representation error (0.544 + 0.544 = 1.0879999…)
-  // does not round the wrong way.
-  return Math.round((value + Number.EPSILON * Math.sign(value) * factor) * factor) / factor
+  const scaled = value * 10 ** decimals
+  // Nudge before rounding so binary representation error (0.544 + 0.544 = 1.0879999…) does
+  // not round the wrong way.
+  //
+  // Proportional to the figure, not to the number of places. The nudge used to be
+  // `EPSILON * 10 ** decimals`, which is a fixed 2.2e-16 of the *factor* — fine at three
+  // places and ruinous past six, where it grows larger than the precision it is protecting:
+  // `roundTo(2, 9)` came back as 2.000000222, and `restateQuantity` reaches nine places on a
+  // gram-to-tonne conversion. Scaled to the value, it stays four ulps whatever the precision.
+  return Math.round(scaled + Math.sign(scaled) * Math.abs(scaled) * Number.EPSILON * 4) / 10 ** decimals
 }
 
 /**

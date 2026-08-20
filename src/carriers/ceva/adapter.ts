@@ -162,27 +162,37 @@ export function createCevaAdapter(): CarrierAdapter {
       // Written whenever the ticked box does not say the whole term: a place it has no room
       // for, a rule it has no box for, or any other wording the document put in the term —
       // `FOB Collect` says something about who pays that a tick on `FOB` does not.
-      const saysMoreThanTheRule = Boolean(incoterm) && stated.toUpperCase() !== incoterm?.code
+      //
+      // Measured by what follows the rule, not by whether the text equals the code. The
+      // `omron-ci` box is hand-typed and `Ex Works` is the same bare rule as `EXW`; comparing
+      // strings wrote a special instruction repeating a term the tick already stated.
+      const saysMoreThanTheRule = Boolean(incoterm?.namedPlace)
       const incotermNote =
         stated && (!ticked || namedPlace || saysMoreThanTheRule) ? `Incoterm: ${fullTerm}` : ''
-      // Overriding a place the document states is a decision, not a typo, so it is made
-      // visible rather than applied quietly.
       // The term can carry its own payment wording, and box 20 is filled from a different
-      // field entirely — `header.freightTerms`, which is null on a document that states its
-      // freight terms only inside the Incoterm. The box then falls back to this adapter's
-      // COLLECT default, and a form saying COLLECT over an invoice saying Prepaid is a
-      // contradiction nobody reading either one would spot.
+      // field entirely — `header.freightTerms`, or this adapter's default where the document
+      // states none. Either way the two can end up saying opposite things, and a form saying
+      // COLLECT over an invoice saying Prepaid is a contradiction nobody reading one of them
+      // would spot.
+      //
+      // Which of the two the box is carrying is not knowable here: `draft.freight` has
+      // already collapsed "the document said so" and "nothing said so, use the default" into
+      // one value. So the warning states the disagreement and leaves the diagnosis open,
+      // rather than asserting a cause it cannot check.
       const saysPrepaid = /\bPRE-?PAID\b|\bPPD\b/i.test(stated)
       const saysCollect = /\bCOLLECT\b/i.test(stated)
       const boxSaysPrepaid = draft.freight === 'PREPAID'
       if ((saysPrepaid && !boxSaysPrepaid) || (saysCollect && boxSaysPrepaid)) {
         ctx.warnings.push(
           `The Incoterm reads "${stated}", but the freight payment box says ` +
-            `${boxSaysPrepaid ? 'PREPAID' : 'COLLECT'}. The document states no freight terms of its own, so that ` +
-            'box carries a default — check which is right before signing.',
+            `${boxSaysPrepaid ? 'PREPAID' : 'COLLECT'}. Those disagree; the box is filled from the document's own ` +
+            'freight terms where it states any, and from a default where it does not. Check which is right ' +
+            'before signing.',
         )
       }
 
+      // Overriding a place the document states is a decision, not a typo, so it is made
+      // visible rather than applied quietly.
       if (operatorPlace && statedPlace && operatorPlace.toLowerCase() !== statedPlace.toLowerCase()) {
         ctx.warnings.push(
           `The document states the Incoterm as "${stated}", but the named place entered for this shipment is ` +
@@ -208,6 +218,17 @@ export function createCevaAdapter(): CarrierAdapter {
         ctx.warnings.push(
           `This shipment has ${draft.lines.length} commodity rows but the table holds ${CEVA_MAX_ROWS}. ` +
             `Rows ${CEVA_MAX_ROWS + 1}+ were not written and need a continuation sheet.`,
+        )
+      }
+
+      // A quantity that is not a number is a fault upstream, and the box it would have filled
+      // is one somebody signs. Said out loud rather than left as an empty cell.
+      const unwritable = rows.filter((l) => l.reportingBasis !== 'none' && !Number.isFinite(l.reportingQuantity))
+      if (unwritable.length) {
+        ctx.warnings.push(
+          `${unwritable.length} commodity row(s) have no usable quantity (${unwritable
+            .map((l) => l.scheduleB)
+            .join(', ')}), so box 24 carries the unit alone. Correct the figures before signing.`,
         )
       }
 
@@ -287,6 +308,9 @@ export function createCevaAdapter(): CarrierAdapter {
 function formatReportedQuantity(line: SLILine): string {
   if (line.reportingBasis === 'none') return line.reportingUom
   const quantity = formatQuantity(line.reportingQuantity)
+  // No figure at all. The unit alone is what the box can honestly carry, and the adapter
+  // warns — `${''} ${unit}` would print a leading space and read as an oversight.
+  if (!quantity) return line.reportingUom
   if (!line.reportingUom) return quantity
 
   // A count under a code that is reported by the count is written bare, which is what the

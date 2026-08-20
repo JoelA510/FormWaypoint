@@ -523,7 +523,9 @@ function groupForKeying(
       // A row with no origin at all, or only some of one, needs one as much as a row with an
       // unrecognised name.
       needsCountryCode: originMissing || !origins.length || origins.some((o) => !toIsoAlpha2(o).known),
-      quantity: String(keyed.quantity),
+      // Guarded like the form boxes are: `String(NaN)` is the word "NaN", and a cell reading
+      // that is keyed into Ship Manager by somebody who assumes the sheet knows better.
+      quantity: Number.isFinite(keyed.quantity) ? String(keyed.quantity) : '',
       unitOfMeasure: keyed.unit,
       quantityFromNetWeight: keyed.fromNetWeight,
       quantityConverted: keyed.converted,
@@ -896,11 +898,11 @@ export function buildKeyingSheet(
       // last row of the grid disagree with the column above it while the Notes tab asserted
       // the two were equal.
       //
-      // Not through `roundTo`: its epsilon nudge scales with the number of places, so at the
-      // nine `roundScaled` allows it adds 2.2e-7 — larger than the precision it is there to
-      // protect, and enough to turn a total of 2 into 2.000000222.
-      quantity: Number(
-        commodities.reduce((sum, c) => sum + Number(c.quantity || 0), 0).toPrecision(12),
+      // Nine places, which is where `roundScaled` caps a row's own precision, so the total can
+      // never be less precise than the column it adds up.
+      quantity: roundTo(
+        commodities.reduce((sum, c) => sum + Number(c.quantity || 0), 0),
+        9,
       ),
       customsValue: customsValue.toFixed(2),
       // Summed from the printed pounds rather than converted from the summed kilograms.
@@ -1104,6 +1106,10 @@ function describeShipment(rows: KeyingCommodityRow[]): string {
  * which copy of it, and how the weights were converted.
  */
 export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
+  // Once, above both readers. The grid blanks its quantity total from this and the Notes tab
+  // names the units from it; computed twice, a later edit to one call diverges from the other
+  // and the sheet contradicts its own notes.
+  const units = keyedUnits(sheet)
   const columns = sheet.options.columns
 
   /** One row's value for one column. Numbers stay numbers so a column sums. */
@@ -1183,7 +1189,7 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
   //
   // The same list the Notes tab names the units from, so the grid and the note cannot
   // contradict each other about whether this sheet is mixed.
-  const oneUnit = keyedUnits(sheet).length <= 1
+  const oneUnit = units.length <= 1
   // The word goes in the leftmost column that is not itself a total, so it never displaces a
   // figure. Where every chosen column carries one it takes the first anyway: an unlabelled
   // row of figures at the foot of a grid is indistinguishable from another commodity, and
@@ -1238,7 +1244,6 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
   // What the quantity column is actually counting. A single unit is named; a mixed sheet
   // says so rather than calling a column of kilograms and pieces "pcs", which is what the
   // TOTAL row read as before any of it could be anything but a count.
-  const units = keyedUnits(sheet)
   const keyedUnitLabel = units.length === 1 ? units[0] : 'in mixed units'
 
   const notes: CellValue[][] = [

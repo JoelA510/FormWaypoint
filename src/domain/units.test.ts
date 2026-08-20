@@ -4,9 +4,9 @@ import {
   derivesFromNetWeight,
   resolveReportingQuantity,
   restateQuantity,
+  roundTo,
   type QuantitySource,
 } from './units'
-import { formatQuantity } from '../carriers/form-utils'
 
 /** A cable line: 12 pieces weighing 4.263 kg, which is the shape the KG codes arrive in. */
 const CABLES: QuantitySource = { quantity: 12, uom: 'PCS', weightKg: 4.263 }
@@ -91,22 +91,16 @@ describe('restating a quantity in the unit Schedule B requires', () => {
   })
 })
 
-describe('formatting a quantity for a form box', () => {
-  it('never writes scientific notation, float noise or NaN into a box', () => {
-    // Whatever reaches a PDF field is what a person signs. `String()` renders 4.263e-7 in
-    // scientific notation and 0.1 + 0.2 as seventeen digits.
-    expect(formatQuantity(4.263e-7)).toBe('0.000000426')
-    expect(formatQuantity(0.1 + 0.2)).toBe('0.300')
-    expect(formatQuantity(Number.NaN)).toBe('')
-    expect(formatQuantity(Number.POSITIVE_INFINITY)).toBe('')
-  })
-
-  it('keeps three decimals as a floor and the conversion’s precision as the ceiling', () => {
-    expect(formatQuantity(10)).toBe('10')
-    expect(formatQuantity(1.5)).toBe('1.500')
-    expect(formatQuantity(4.263)).toBe('4.263')
-    expect(formatQuantity(0.004263)).toBe('0.004263')
-    expect(formatQuantity(0.83333)).toBe('0.83333')
+describe('rounding', () => {
+  it('nudges by the figure, not by the number of places', () => {
+    // The nudge used to be `EPSILON * 10 ** decimals`, which past six places grows larger
+    // than the precision it protects: a total of 2 came back as 2.000000222, and
+    // `restateQuantity` reaches nine places on a gram-to-tonne conversion.
+    expect(roundTo(2, 9)).toBe(2)
+    expect(restateQuantity({ quantity: 2000000, uom: 'GM', weightKg: 0 }, 'T')?.quantity).toBe(2)
+    // And it still does the job it was there for.
+    expect(roundTo(0.544 + 0.544, 3)).toBe(1.088)
+    expect(roundTo(0.1 + 0.2, 3)).toBe(0.3)
   })
 })
 

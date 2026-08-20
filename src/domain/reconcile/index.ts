@@ -803,9 +803,16 @@ function classificationChecks(
         hasNetWeight: line.weightKg > 0,
         // Answered by the conversion rules rather than inferred from the unit's name, so the
         // check can tell "the figure does not exist" from "somebody chose otherwise".
-        requiredReachable: line.scheduleBUnits.some((unit) =>
-          canRestate({ quantity: line.quantity, uom: line.sourceUom, weightKg: line.weightKg }, unit),
-        ),
+        //
+        // For the *first* accepted unit, which is the one the check's advice names. Asked
+        // across the whole set, a code accepting KG then NO on a weightless row answered yes
+        // — and the filer was told to put the row back to KG, the one unit it cannot state.
+        requiredReachable:
+          line.scheduleBUnits.length > 0 &&
+          canRestate(
+            { quantity: line.quantity, uom: line.sourceUom, weightKg: line.weightKg },
+            line.scheduleBUnits[0],
+          ),
         ref: `row-${i + 1}`,
       },
       index,
