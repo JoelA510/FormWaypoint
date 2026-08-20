@@ -15,7 +15,7 @@
  * would be exactly the wrong behaviour for an export declaration.
  */
 import type { CheckResult } from '../types'
-import type { QuantityBasis } from '../units'
+import { derivesFromNetWeight, type QuantityBasis } from '../units'
 
 export interface ScheduleBEntry {
   code: string
@@ -272,8 +272,19 @@ export interface ClassificationSubject {
   reportingUom?: string
   /** How the filed quantity was obtained — the invoice's own count, or the net weight. */
   reportingBasis?: QuantityBasis
-  /** Whether the row has a net weight at all, which decides whether a kilogram unit is reachable. */
+  /** Whether the row has a net weight at all. */
   hasNetWeight?: boolean
+  /**
+   * Which of the units this code accepts the row could actually be stated in.
+   *
+   * Asked of the conversion rules by the caller rather than guessed here. A row that can
+   * reach one of them and is not in it was changed by hand; one that can reach none is
+   * missing a figure — and the two want opposite advice. It is a list rather than a flag
+   * because the advice has to name a unit that is genuinely available: a code accepting
+   * `KG` or `DOZ` on a weightless row can only be filed in `DOZ`, and sending the filer back
+   * to `KG` sends them to the one unit that cannot be produced.
+   */
+  reachableUnits?: string[]
   /** Reference for the UI, e.g. an SLI line index. */
   ref?: string
 }
@@ -330,7 +341,11 @@ export function checkClassification(subject: ClassificationSubject, index: Sched
   const filed = canonicalUnit(subject.reportingUom) ?? printed
   if (required.length && filed) {
     const ok = required.includes(filed)
-    const wanted = required[0]
+    // The unit the advice names: one this row can actually state, where any of them is, and
+    // otherwise the code's first — which is then the subject of the "cannot be worked out"
+    // branch rather than something the filer is told to restore.
+    const reachable = (subject.reachableUnits ?? []).map((unit) => canonicalUnit(unit)).filter(Boolean)
+    const wanted = required.find((unit) => reachable.includes(unit)) ?? required[0]
     // How the figure was arrived at, where that is not simply "off the invoice". Both cases
     // put a number on the form that the document does not print, and a check that called
     // either of them "matching the invoice" would vouch for a figure nobody transcribed.
@@ -349,14 +364,18 @@ export function checkClassification(subject: ClassificationSubject, index: Sched
           ? `Schedule B reports this code in ${required.join(' and ')}, ${worked}.`
           : `Schedule B reports this code in ${required.join(' and ')}, matching the invoice.`
         : `Schedule B requires this code to be reported in ${required.join(' or ')}, but this row files ${filed}. ` +
-          (wanted === 'KG'
-            ? subject.hasNetWeight === false
-              ? 'Nothing on this shipment gives a net weight for these goods, so the kilogram figure the code ' +
+          // Three different faults, three different fixes. Whether the required unit is
+          // reachable is asked of the conversion rules by the caller, not guessed from the
+          // unit's family here — a row invoiced in kilograms can reach tonnes with no net
+          // weight at all, and telling its filer to supply weights sends them nowhere.
+          (reachable.includes(wanted)
+            ? `This row can be filed in ${wanted}; the unit was changed by hand. Put it back to the Schedule B ` +
+              'unit, or correct the classification.'
+            : derivesFromNetWeight(wanted) && subject.hasNetWeight === false
+              ? `Nothing on this shipment gives a net weight for these goods, so the ${wanted} figure the code ` +
                 'requires cannot be worked out — supply the per-part weights, or correct the classification.'
-              : 'This row does have a net weight, so it can be filed in KG; the unit was changed by hand. Put it ' +
-                'back to the Schedule B unit, or correct the classification.'
-            : `The ${printed ?? 'invoice'} figure the document prints cannot be converted to ` +
-              `${wanted}, so the classification or the unit needs correcting before this is filed.`),
+              : `The ${printed ?? 'invoice'} figure the document prints cannot be converted to ` +
+                `${wanted}, so the classification or the unit needs correcting before this is filed.`),
       passed: ok,
       expected: required.join(' or '),
       actual: filed,

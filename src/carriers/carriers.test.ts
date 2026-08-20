@@ -467,7 +467,9 @@ describe('the reported unit from document to form', () => {
   it('carries a chosen unit all the way to the form and the sheet', async () => {
     const { adapter, result, draft } = run({ '9031900000': 'NO' })
     const values = await readBack((await adapter.fill(template('ceva-sli.pdf'), draft)).bytes)
-    expect(values['Quantity Schedule B Unit']).toBe('10\r12')
+    // `12 NO`, not a bare `12`: NO is not a unit this code accepts, and on a box captioned
+    // "Quantity — Schedule B Unit" the unit is the only thing saying the figure is not in it.
+    expect(values['Quantity Schedule B Unit']).toBe('10\r12 NO')
 
     const sheet = buildKeyingSheet('fedex-ship-manager', result, draft)
     const keyed = sheet.commodities.find((c) => c.harmonizedCode === CODE_BY_WEIGHT)!
@@ -521,16 +523,25 @@ describe('reading an Incoterm off a document', () => {
     expect(parseIncoterm('DDU')?.retired).toBe(true)
   })
 
-  it('tells a named place from a freight term', () => {
-    // A trade-terms line is a composite. What follows the rule is a place on `DAP Singapore`
-    // and a payment term on `FOB Origin - Collect`, and only the first belongs in a box
-    // captioned "NAMED PLACE/PORT".
+  it('refuses a remainder that mixes the place with freight wording', () => {
+    // A trade-terms line carries the rule, sometimes a place, and the freight term, and the
+    // document does not mark which words are which. Taking the place out of it was tried
+    // three ways and got it wrong three ways — `Prepaid, Long Beach` lost the place,
+    // `DUTY PAID BY ULTIMATE CONSIGNEE` produced a port called CONSIGNEE, and bounding the
+    // party clause swallowed the Hamburg in `Collect by Shipper Hamburg`. So a remainder
+    // that carries freight wording supplies no place, and the adapter says so.
     expect(isNamedPlace('Singapore')).toBe(true)
     expect(isNamedPlace('Long Beach')).toBe(true)
+    expect(isNamedPlace('Washington, D.C.')).toBe(true)
     expect(isNamedPlace('Origin - Collect')).toBe(false)
-    expect(isNamedPlace('Prepaid')).toBe(false)
-    expect(isNamedPlace('DUTY PAID BY CONSIGNEE')).toBe(false)
+    expect(isNamedPlace('Rotterdam Prepaid')).toBe(false)
+    expect(isNamedPlace('Prepaid, Long Beach')).toBe(false)
+    expect(isNamedPlace('DUTY PAID BY ULTIMATE CONSIGNEE')).toBe(false)
+    expect(isNamedPlace('Collect by Shipper Hamburg')).toBe(false)
+    // Punctuation alone is not a place; a box reading "." is worse than an empty one.
+    expect(isNamedPlace('.')).toBe(false)
     expect(isNamedPlace('')).toBe(false)
+    expect(parseIncoterm('EXW.')?.namedPlace).toBe('')
   })
 
   it('answers nothing for what is not an Incoterm', () => {
@@ -601,12 +612,35 @@ describe('Nippon Express — quantity, its unit, and the named place', () => {
     expect(values['NAMED PLACE/PORT']).toBe('SFO')
   })
 
-  it('does not write a freight term into the named-place box', async () => {
-    // `FOB Origin - Collect` is the Vendor A trade-terms wording. "Origin - Collect" is who
-    // pays the freight, not a port, and box 15 is captioned "NAMED PLACE/PORT".
-    const { values } = await fillWith({}, { incoterm: 'FOB Origin - Collect', namedPlace: '' })
+  it('leaves the named-place box blank, and says so, rather than guessing', async () => {
+    // `FOB Origin - Collect` is the Vendor A trade-terms wording. Which of those words is the
+    // port is not knowable, so box 15 is left for the operator and they are told why.
+    const { values, warnings } = await fillWith({}, { incoterm: 'FOB Origin - Collect', namedPlace: '' })
     expect(values.INCOTERM).toBe('FOB')
     expect(values['NAMED PLACE/PORT']).toBeUndefined()
+    expect(warnings.join(' ')).toMatch(/enter the place by hand/)
+  })
+
+  it('fills the box where the term names a place and nothing else', async () => {
+    const { values, warnings } = await fillWith({}, { incoterm: 'CIF Rotterdam', namedPlace: '' })
+    expect(values.INCOTERM).toBe('CIF')
+    expect(values['NAMED PLACE/PORT']).toBe('Rotterdam')
+    expect(warnings).toEqual([])
+  })
+
+  it('writes a restated quantity at the precision it was worked out to', async () => {
+    // Box 24 used to hard-round to three places, undoing the extra precision a down-scaling
+    // conversion needs: `0.004` tonnes declares 4 kg where the shipment weighs 4.263.
+    const { values } = await fillWith({
+      scheduleB: '2523.10.0000',
+      scheduleBUnit: 'T',
+      scheduleBUnits: ['T'],
+      reportingUom: 'T',
+      reportingQuantity: 0.004263,
+      reportingBasis: 'net-weight',
+    })
+    expect(values['22.03 sB UNIT1']).toBe('0.004263')
+    expect(values['22.04 UOM1']).toBe('T')
   })
 
   it('says what a retired rule has become rather than selecting nothing quietly', async () => {
@@ -695,12 +729,68 @@ describe('CEVA — recording the Incoterm', () => {
     expect(values['Special Instructions']).toBe('Incoterm: DAP Singapore')
   })
 
+  it('keeps a named place the operator typed against a term it could not read', async () => {
+    // This form has no named-place box, so the special instructions are the only route to
+    // paper. `SFO` used to be dropped whenever the term itself did not parse.
+    const { values } = await fillWith({ incoterm: 'Ex Factory', namedPlace: 'SFO' })
+    expect(values['Special Instructions']).toBe('Incoterm: Ex Factory SFO')
+  })
+
+  it('does not raise a place conflict against freight wording', async () => {
+    // "Origin - Collect" is not a rival named place — it is a composite the app declines to
+    // read — so an operator-entered place does not contradict it.
+    const { values, warnings } = await fillWith({ incoterm: 'FOB Origin - Collect', namedPlace: 'Long Beach' })
+    expect(values.FOB).toBe('checked')
+    expect(warnings.join(' ')).not.toMatch(/named place entered for this shipment/)
+  })
+
+  it('never drops what the document stated from the instructions', async () => {
+    // Rebuilding the term from its parsed parts lost the freight wording, and box 20 falls
+    // back to this adapter's COLLECT default whenever the document states no freight terms —
+    // so the form said COLLECT while the invoice said Prepaid, with nothing to show it.
+    const { values } = await fillWith({ incoterm: 'CIF Rotterdam Prepaid' })
+    expect(values.CIF).toBe('checked')
+    expect(values['Special Instructions']).toBe('Incoterm: CIF Rotterdam Prepaid')
+  })
+
+  it('records a term that is only a rule and a payment instruction', async () => {
+    // The tick on FOB says nothing about who pays, so "Collect" would be lost with it.
+    const { values } = await fillWith({ incoterm: 'FOB Collect' })
+    expect(values.FOB).toBe('checked')
+    expect(values['Special Instructions']).toBe('Incoterm: FOB Collect')
+  })
+
+  it('says nothing extra for a rule spelled out in words', async () => {
+    // The `omron-ci` box is hand-typed. `Ex Works` is the same bare rule as `EXW`, and the
+    // tick already states it — comparing the text to the code wrote a redundant instruction.
+    for (const term of ['Ex Works', 'Free On Board', 'Cost and Freight']) {
+      const { values } = await fillWith({ incoterm: term })
+      expect(values['Special Instructions'], term).toBeUndefined()
+    }
+  })
+
+  it('warns when the term’s payment wording contradicts the freight box', async () => {
+    // Box 20 is filled from `header.freightTerms`, which is null on a document stating its
+    // freight terms only inside the Incoterm — so the box carries this adapter's COLLECT
+    // default while the invoice says Prepaid.
+    const { values, warnings } = await fillWith({ incoterm: 'CIF Rotterdam Prepaid', freight: 'COLLECT' })
+    expect(values.Location).toBe('COLLECT')
+    expect(warnings.join(' ')).toMatch(/freight payment box says COLLECT/)
+  })
+
+  it('says nothing when the term and the freight box agree', async () => {
+    const { warnings } = await fillWith({ incoterm: 'FOB Collect', freight: 'COLLECT' })
+    expect(warnings).toEqual([])
+  })
+
   it('lets the operator’s named place win, as the Nippon form does', async () => {
     // The two forms disagreeing about whose place wins is how one shipment gets filed two
     // ways. Typing one is a deliberate act; the document is the default.
     const { values, warnings } = await fillWith({ incoterm: 'DAP Singapore', namedPlace: 'Rotterdam' })
     expect(values.DAP).toBe('checked')
-    expect(values['Special Instructions']).toBe('Incoterm: DAP Rotterdam')
+    // Both places are written. The operator's governs the shipment; erasing what the
+    // document said would leave the disagreement the warning describes invisible on paper.
+    expect(values['Special Instructions']).toBe('Incoterm: DAP Singapore — named place: Rotterdam')
     // And the disagreement is said out loud rather than applied quietly.
     expect(warnings.join(' ')).toMatch(/DAP Singapore/)
   })
@@ -743,6 +833,51 @@ describe('CEVA — the quantity box carries the Schedule B unit', () => {
     expect(values['Quantity Schedule B Unit']).toBe('10')
   })
 
+  it('writes a count bare whichever spelling the unit has', async () => {
+    // The Census file reports 51 commodity numbers in `PCS`, and a fallback row carries the
+    // document's own spelling. None of those should append a unit to a plain piece count.
+    for (const unit of ['NO', 'PCS', 'EA']) {
+      const values = await fillRows([
+        { ...ROW, reportingUom: unit, reportingQuantity: 12, reportingBasis: 'source' },
+      ])
+      expect(values['Quantity Schedule B Unit'], unit).toBe('12')
+    }
+  })
+
+  it('writes a restated quantity at the precision it was worked out to', async () => {
+    // Three decimals is the floor. `0.004 T` against a 4.263 kg row under-declares by 6%.
+    const values = await fillRows([
+      {
+        ...ROW,
+        scheduleB: '2523.10.0000',
+        scheduleBUnit: 'T',
+        scheduleBUnits: ['T'],
+        reportingUom: 'T',
+        reportingQuantity: 0.004263,
+        reportingBasis: 'net-weight',
+      },
+    ])
+    expect(values['Quantity Schedule B Unit']).toBe('0.004263 T')
+  })
+
+  it('names the unit on a row that fell back off the required one', async () => {
+    // 9031.90.0000 is reported in KG. A row with no weight files the invoice's own count, and
+    // a bare figure in a box captioned "Quantity — Schedule B Unit" asserts it is in that
+    // unit. The unit beside it is the only thing on the paper saying otherwise.
+    const values = await fillRows([
+      {
+        ...ROW,
+        scheduleB: '9031.90.0000',
+        scheduleBUnit: 'KG',
+        scheduleBUnits: ['KG'],
+        reportingUom: 'PCS',
+        reportingQuantity: 12,
+        reportingBasis: 'source',
+      },
+    ])
+    expect(values['Quantity Schedule B Unit']).toBe('12 PCS')
+  })
+
   it('names the unit beside a figure that is not a count', async () => {
     // `4.263` on its own, in a column that has held piece counts on every form before it,
     // reads as four cables to everybody who has ever filled this in.
@@ -758,6 +893,28 @@ describe('CEVA — the quantity box carries the Schedule B unit', () => {
       },
     ])
     expect(values['Quantity Schedule B Unit']).toBe('4.263 KG')
+  })
+
+  it('says so rather than printing a blank when a row has no usable figure', async () => {
+    // A quantity that is not a number is a fault upstream, and box 24 is signed. It used to
+    // print a bare leading space with nothing in the warnings.
+    const adapter = getAdapter('ceva')
+    const draft = buildDraft(
+      {
+        header: BLANK_HEADER,
+        sliLines: [{ ...ROW, reportingQuantity: Number.NaN }],
+        mergedLines: [],
+        checks: [],
+        selectedSet: 'FC',
+        canGenerate: true,
+      },
+      VENDOR,
+      defaultShipmentSettings(adapter),
+      adapter,
+    )
+    const filled = await adapter.fill(template('ceva-sli.pdf'), draft)
+    expect((await readBack(filled.bytes))['Quantity Schedule B Unit']).toBe('NO')
+    expect(filled.warnings.join(' ')).toMatch(/no usable quantity/)
   })
 
   it('keeps the columns aligned when the units are mixed', async () => {

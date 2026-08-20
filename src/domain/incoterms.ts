@@ -78,7 +78,7 @@ export function parseIncoterm(raw: string | null | undefined): ParsedIncoterm | 
     code,
     // Leading separators belong to the join, not to the place: `FOB - Long Beach` names
     // Long Beach.
-    namedPlace: rest.replace(/^[\s,:;/|–—-]+/, '').trim(),
+    namedPlace: rest.replace(/^[\s,:;/|.–—-]+/, '').trim(),
     retired: code in RETIRED_INCOTERMS,
   })
 
@@ -102,12 +102,27 @@ export function parseIncoterm(raw: string | null | undefined): ParsedIncoterm | 
  * The trade-terms line on these documents is a composite — the rule, sometimes a place, and
  * the freight term — so what follows the rule is not always a place. `FOB Origin - Collect`
  * leaves `Origin - Collect` behind, and writing that into a box captioned "NAMED PLACE/PORT"
- * states a freight term as a port. A caller filling such a box asks this first; a caller
- * transcribing the term verbatim does not need to.
+ * states a freight term as a port.
  */
 const FREIGHT_QUALIFIER = /\b(COLLECT|PREPAID|PPD|P\.?P\.?|C\.?C\.?|FREIGHT|DUTY\s+(UN)?PAID)\b/i
 
-/** Whether `namedPlace` can be written into a form's named-place box as it stands. */
+/**
+ * Whether `namedPlace` can be written into a form's named-place box as it stands.
+ *
+ * All or nothing, deliberately. Taking the place *out* of a composite line is guesswork that
+ * this codebase tried three ways and got wrong three times: truncating at the qualifier lost
+ * `Prepaid, Long Beach`; removing qualifiers wherever they sat turned `DUTY PAID BY ULTIMATE
+ * CONSIGNEE` into a port called `CONSIGNEE`; bounding the party clause then swallowed the
+ * `Hamburg` in `Collect by Shipper Hamburg`. Each fix opened the next hole, because the
+ * document does not mark which words are the place and the app cannot know.
+ *
+ * So a remainder carrying freight wording supplies no place, and the caller says so instead
+ * of guessing — the same trade the destination-country box makes, for the same reason: a
+ * blank box a reviewer is told about beats a wrong one they are not.
+ *
+ * Punctuation alone is not a place either. `EXW.` leaves a full stop behind, and a box
+ * reading `.` is worse than an empty one.
+ */
 export function isNamedPlace(namedPlace: string): boolean {
-  return Boolean(namedPlace.trim()) && !FREIGHT_QUALIFIER.test(namedPlace)
+  return /[A-Za-z0-9]/.test(namedPlace) && !FREIGHT_QUALIFIER.test(namedPlace)
 }

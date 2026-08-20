@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { canRestate, resolveReportingQuantity, restateQuantity, type QuantitySource } from './units'
+import {
+  canRestate,
+  derivesFromNetWeight,
+  resolveReportingQuantity,
+  restateQuantity,
+  roundPrecise,
+  roundTo,
+  type QuantitySource,
+} from './units'
 
 /** A cable line: 12 pieces weighing 4.263 kg, which is the shape the KG codes arrive in. */
 const CABLES: QuantitySource = { quantity: 12, uom: 'PCS', weightKg: 4.263 }
@@ -81,6 +89,45 @@ describe('restating a quantity in the unit Schedule B requires', () => {
     expect(restateQuantity(area, 'M2')).toEqual({ unit: 'M2', quantity: 3.5, basis: 'source' })
     expect(canRestate(area, 'M2')).toBe(true)
     expect(canRestate(area, 'L')).toBe(false)
+  })
+})
+
+describe('rounding', () => {
+  it('rounds cleanly past six decimal places', () => {
+    // `roundTo`'s nudge is a fixed fraction of the factor, which past six places grows larger
+    // than the precision it protects: `roundTo(2, 9)` is 2.000000222, and `restateQuantity`
+    // reaches nine places on a gram-to-tonne conversion.
+    expect(roundPrecise(2, 9)).toBe(2)
+    expect(restateQuantity({ quantity: 2000000, uom: 'GM', weightKg: 0 }, 'T')?.quantity).toBe(2)
+    // And at the magnitudes where a relative nudge would itself grow past a whole unit.
+    expect(roundPrecise(563000, 9)).toBe(563000)
+    expect(roundPrecise(12345678, 9)).toBe(12345678)
+    // While still doing the job the nudge is there for.
+    expect(roundPrecise(0.544 + 0.544, 3)).toBe(1.088)
+    expect(roundPrecise(0.1 + 0.2, 3)).toBe(0.3)
+  })
+
+  it('leaves `roundTo` alone, because it rounds money', () => {
+    // Every customs value and every reconciled total goes through `roundTo`. Changing how it
+    // breaks a tie moves a line's value by a cent, which is enough to put it a cent away from
+    // the total printed on the document it is being proved against — so the quantity
+    // restatement got its own function rather than editing this one.
+    expect(roundTo(256.025, 2)).toBe(256.02)
+    expect(roundTo(0.544 + 0.544, 3)).toBe(1.088)
+  })
+})
+
+describe('which units come from the net weight', () => {
+  it('names every weight-derived unit, not just kilograms', () => {
+    // The reconciliation asks this to tell a filer that a missing weight is what is wrong.
+    // Hard-coded to `KG`, it sent the 247 tonne codes and the gram codes to the classifier
+    // instead.
+    expect(derivesFromNetWeight('KG')).toBe(true)
+    expect(derivesFromNetWeight('T')).toBe(true)
+    expect(derivesFromNetWeight('GM')).toBe(true)
+    expect(derivesFromNetWeight('NO')).toBe(false)
+    expect(derivesFromNetWeight('CKG')).toBe(false)
+    expect(derivesFromNetWeight('')).toBe(false)
   })
 })
 

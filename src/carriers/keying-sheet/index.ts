@@ -19,7 +19,7 @@
  * or, worse, transposes values.
  */
 import type { MergedLine, Reconciliation, SLILine } from '../../domain/types'
-import { KG_PER_LB, kgToLb as kilogramsToPounds, restateQuantity } from '../../domain/units'
+import { KG_PER_LB, kgToLb as kilogramsToPounds, restateQuantity, roundPrecise } from '../../domain/units'
 import { buildXlsx, type CellValue, type Sheet } from '../../lib/xlsx'
 import type { SliDraft } from '../types'
 import { canonicalUnit, formatScheduleB, normalizeScheduleB, type ScheduleBIndex } from '../../domain/schedule-b'
@@ -311,10 +311,19 @@ function unitFor(group: MergedLine[]): string {
 function reportingUnits(sliLines: SLILine[]): Map<string, string> {
   const units = new Map<string, string>()
   for (const line of sliLines) {
-    // First seen wins. One commodity number can hold more than one SLI row — the rows are
-    // keyed on D/F and the export-control triplet as well — and the rows are in a settled
-    // order, so taking the first keeps the sheet the same sheet from one run to the next.
+    // Keyed on the commodity number *and* the unit the document reported it in, because
+    // `aggregateLines` splits rows on the canonical unit too: a code invoiced partly in
+    // pieces and partly in kilograms is two SLI rows filing two different units. Keyed on the
+    // code alone, the keying rows built from one of those groups were told they should be
+    // filing the other's unit, and the sheet asserted "this code files in NO and this row has
+    // no figure for it" about goods the SLI files in KG.
+    //
+    // The code-only key is kept alongside as a fallback for a group whose unit matches no row
+    // at all. First seen wins there, and the rows are in a settled order, so the sheet is the
+    // same sheet from one run to the next.
     const code = normalizeScheduleB(line.scheduleB)
+    const keyed = `${code}|${canonicalUnit(line.sourceUom) ?? ''}`
+    if (!units.has(keyed)) units.set(keyed, line.reportingUom)
     if (!units.has(code)) units.set(code, line.reportingUom)
   }
   return units
@@ -344,12 +353,15 @@ function keyedQuantity(
 } {
   const printed = unitFor(group)
   const asPrinted = { quantity: roundTo(quantity, 3), unit: printed, fromNetWeight: false }
-  // Compared canonically, kept in the document's spelling: `PCS` and `NO` are one unit, and
-  // the operator is keying against a document that says `PCS`.
-  if (!wanted || canonicalUnit(wanted) === (canonicalUnit(printed) ?? printed)) return asPrinted
+  if (!wanted) return asPrinted
 
   const restated = restateQuantity({ quantity, uom: printed, weightKg }, wanted)
   if (!restated) return { ...asPrinted, unavailable: wanted }
+  // `source` is the identity restatement — the wanted unit and the printed one are the same
+  // unit written two ways, which `restateQuantity` already decides. The row keeps the
+  // document's own spelling, because the operator is keying against a document that says
+  // `PCS` while the Census file says `NO`.
+  if (restated.basis === 'source') return asPrinted
   // The declaration files no quantity for this code, but the application still needs one, so
   // the row keys what the document counted and says which of the two it is. Writing the
   // literal 0 that "no quantity" restates to would have the operator key nothing at all
@@ -385,7 +397,11 @@ function groupForKeying(
   options: KeyingOptions,
   scheduleB: ScheduleBIndex | null,
   corrections: CodeCorrections,
-  /** The unit each commodity number is filed in, keyed by normalised code. See `reportingUnits`. */
+  /**
+   * The unit each commodity number is filed in, keyed by `code|canonical-unit` *and* by code
+   * alone as a fallback. Look up the composite key first — see `reportingUnits` for why the
+   * code alone is not enough.
+   */
   units: Map<string, string>,
 ): KeyingCommodityRow[] {
   const groups = new Map<string, MergedLine[]>()
@@ -447,7 +463,15 @@ function groupForKeying(
     // applied one part's wording to goods the document does not identify, discarding what it
     // did say about them (`otherDescriptions` is emptied wherever a saved wording wins).
     const partMissing = group.some((l) => !l.partNumber.trim())
-    const keyed = keyedQuantity(group, quantity, weightKg, units.get(normalizeScheduleB(code)))
+    // The row's own unit first, so a code split across units on the SLI matches the group it
+    // actually came from.
+    const codeKey = normalizeScheduleB(code)
+    const keyed = keyedQuantity(
+      group,
+      quantity,
+      weightKg,
+      units.get(`${codeKey}|${canonicalUnit(first.uom) ?? ''}`) ?? units.get(codeKey),
+    )
     const saved = parts.length === 1 && !partMissing ? descriptions[partKey(parts[0])] : undefined
     const chosen = describeGroup(group, options.descriptionSource, scheduleB, code)
     return {
@@ -499,7 +523,9 @@ function groupForKeying(
       // A row with no origin at all, or only some of one, needs one as much as a row with an
       // unrecognised name.
       needsCountryCode: originMissing || !origins.length || origins.some((o) => !toIsoAlpha2(o).known),
-      quantity: String(keyed.quantity),
+      // Guarded like the form boxes are: `String(NaN)` is the word "NaN", and a cell reading
+      // that is keyed into Ship Manager by somebody who assumes the sheet knows better.
+      quantity: Number.isFinite(keyed.quantity) ? String(keyed.quantity) : '',
       unitOfMeasure: keyed.unit,
       quantityFromNetWeight: keyed.fromNetWeight,
       quantityConverted: keyed.converted,
@@ -867,9 +893,17 @@ export function buildKeyingSheet(
       commodities: commodities.length,
       // Rounded like the figures beside it. A fractional UOM sums to a binary tail —
       // 0.1 + 0.2 — and this one is written into the workbook as a number, not a string.
-      quantity: roundTo(
+      // Trimmed of its binary tail, not clamped to three places. The rows can now carry more
+      // than three — a tonne figure is `0.004263` — and rounding the total to three made the
+      // last row of the grid disagree with the column above it while the Notes tab asserted
+      // the two were equal.
+      //
+      // Nine places, which is where `roundScaled` caps a row's own precision, so the total can
+      // never be less precise than the column it adds up. Through `roundPrecise`, not
+      // `roundTo`, whose nudge is unusable past six places — see the note on it.
+      quantity: roundPrecise(
         commodities.reduce((sum, c) => sum + Number(c.quantity || 0), 0),
-        3,
+        9,
       ),
       customsValue: customsValue.toFixed(2),
       // Summed from the printed pounds rather than converted from the summed kilograms.
@@ -1073,6 +1107,10 @@ function describeShipment(rows: KeyingCommodityRow[]): string {
  * which copy of it, and how the weights were converted.
  */
 export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
+  // Once, above both readers. The grid blanks its quantity total from this and the Notes tab
+  // names the units from it; computed twice, a later edit to one call diverges from the other
+  // and the sheet contradicts its own notes.
+  const units = keyedUnits(sheet)
   const columns = sheet.options.columns
 
   /** One row's value for one column. Numbers stay numbers so a column sums. */
@@ -1149,7 +1187,10 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
   // to kilograms is not a quantity. The review screen leaves its own footer cell blank for
   // the same reason; a figure here that the Notes tab has to describe as "in mixed units" is
   // a number somebody reads off the grid without ever seeing that caveat.
-  const oneUnit = new Set(sheet.commodities.map((c) => c.unitOfMeasure.trim()).filter(Boolean)).size <= 1
+  //
+  // The same list the Notes tab names the units from, so the grid and the note cannot
+  // contradict each other about whether this sheet is mixed.
+  const oneUnit = units.length <= 1
   // The word goes in the leftmost column that is not itself a total, so it never displaces a
   // figure. Where every chosen column carries one it takes the first anyway: an unlabelled
   // row of figures at the foot of a grid is indistinguishable from another commodity, and
@@ -1204,8 +1245,9 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
   // What the quantity column is actually counting. A single unit is named; a mixed sheet
   // says so rather than calling a column of kilograms and pieces "pcs", which is what the
   // TOTAL row read as before any of it could be anything but a count.
-  const keyedUnits = [...new Set(sheet.commodities.map((c) => c.unitOfMeasure.trim()).filter(Boolean))]
-  const keyedUnitLabel = keyedUnits.length === 1 ? keyedUnits[0] : 'in mixed units'
+  // Derived from the same test the grid's total uses, so the two cannot describe one sheet
+  // differently — a sheet whose rows print no unit at all has one total and one label.
+  const keyedUnitLabel = units.length <= 1 ? (units[0] ?? 'units') : 'in mixed units'
 
   const notes: CellValue[][] = [
     ['Note', 'Detail'],
@@ -1252,7 +1294,7 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
       `This sheet: ${sheet.totals.commodities} commodities · ${sheet.totals.quantity} ${keyedUnitLabel} · ` +
         `${sheet.totals.customsValue} USD · ${sheet.totals.shipmentWeightLb} lb · ${sheet.totals.shipmentWeightKg} kg. ` +
         'Those are the printed rows added up. ' +
-        (keyedUnits.length > 1
+        (units.length > 1
           ? 'The rows are in more than one unit, so the grid leaves its quantity total blank — the figure ' +
             'above is what those quantities add up to, and it is only meaningful as a cross-check that no ' +
             'row was dropped. '
@@ -1330,6 +1372,25 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
     { name: 'Shipment details', rows: details },
     { name: 'Notes', rows: notes, columnWidths: [22, 100] },
   ]
+}
+
+/**
+ * The distinct units this sheet keys in, in the spelling each was printed in.
+ *
+ * Canonical for the comparison: one group reading `PCS` beside another reading `EA` is one
+ * unit spelled two ways, and calling that sheet "mixed" both blanks a quantity total it could
+ * carry and says something untrue about it in the notes. One definition, because the grid
+ * cell and the note are written from it separately and must not disagree.
+ */
+function keyedUnits(sheet: KeyingSheet): string[] {
+  const seen = new Map<string, string>()
+  for (const row of sheet.commodities) {
+    const unit = row.unitOfMeasure.trim()
+    if (!unit) continue
+    const key = canonicalUnit(unit) ?? unit
+    if (!seen.has(key)) seen.set(key, unit)
+  }
+  return [...seen.values()]
 }
 
 /** Two note fragments in one cell, with the empty ones dropped. */

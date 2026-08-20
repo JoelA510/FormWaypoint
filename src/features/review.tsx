@@ -3,6 +3,7 @@ import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Field, Input, Pr
 import { resolveDestinationCountry } from '../domain/reconcile'
 import { canonicalUnit, formatScheduleB, normalizeScheduleB } from '../domain/schedule-b'
 import { canRestate, resolveReportingQuantity, type QuantitySource } from '../domain/units'
+import { formatQuantity } from '../carriers/form-utils'
 import { partKey } from '../domain/part-key'
 import type { OverrideRecord } from '../store/local-store'
 import type { CheckResult, MergedLine, ParsedCipl, Reconciliation, SLILine } from '../domain/types'
@@ -302,8 +303,11 @@ function ReportingUnitPicker({
   // than echoing whatever is selected — "Schedule B default (NO)" beside a row that has been
   // switched off the Schedule B unit is the one label that must never appear here.
   const fallback = resolveReportingQuantity(source, line.scheduleBUnits).unit
+  // Through the same formatter the form boxes use. Rendered raw, this screen showed
+  // `4.263e-7` for a gram-to-tonne restatement and the word `NaN` for a figure the forms
+  // guard against — on the one surface an operator checks before generating anything.
   const figure =
-    line.reportingBasis === 'none' ? '—' : `${line.reportingQuantity} ${line.reportingUom}`.trim()
+    line.reportingBasis === 'none' ? '—' : `${formatQuantity(line.reportingQuantity)} ${line.reportingUom}`.trim()
 
   return (
     <div className="space-y-1">
@@ -347,7 +351,11 @@ function ReportingUnitPicker({
 function basisNote(line: SLILine, byChoice: boolean): string {
   if (!line.scheduleBUnits.length) return 'Schedule B unit unknown — filing the invoice figure.'
   if (line.reportingBasis === 'none') return 'Schedule B reports this code with no quantity.'
-  if (!line.scheduleBUnits.includes(line.reportingUom)) {
+  // Compared canonically. `PCS` and `NO` are one unit, and a row filing the document's
+  // spelling of the unit its code requires has not departed from Schedule B — the check
+  // beside this panel compares the same way and would say the row passes.
+  const filed = canonicalUnit(line.reportingUom)
+  if (!line.scheduleBUnits.some((unit) => canonicalUnit(unit) === filed)) {
     const required = line.scheduleBUnits.join(' or ')
     return byChoice
       ? `Filed in ${line.reportingUom} by your choice; Schedule B requires ${required}.`

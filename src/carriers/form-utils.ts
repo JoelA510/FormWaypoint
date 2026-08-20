@@ -162,3 +162,26 @@ function pad(n: number): string {
 function truncate(value: string, max = 40): string {
   return value.length <= max ? value : `${value.slice(0, max)}…`
 }
+
+/**
+ * A commodity quantity as a form's quantity box carries it.
+ *
+ * Three decimals is the floor, not the ceiling. It is the precision the filed SLIs use for a
+ * kilogram figure, and it is nowhere near enough for a unit that is a large multiple of the
+ * one being converted from: `0.004263` tonnes truncated to three places is `0.004`, which
+ * declares 4 kg where the shipment weighs 4.263, and a 0.4 kg row would declare nothing at
+ * all. `restateQuantity` has already rounded to a precision that suits the conversion, so
+ * anything beyond three places is significant and is kept.
+ */
+export function formatQuantity(quantity: number): string {
+  // A figure that is not a number is a fault upstream. Writing the word "NaN" into a
+  // quantity box on a signed declaration is the one response worse than leaving it blank.
+  if (!Number.isFinite(quantity)) return ''
+  if (Number.isInteger(quantity)) return String(quantity)
+  // Fixed notation, never the float's own shortest form. `String()` renders 4.263e-7 in
+  // scientific notation — which a PDF box would carry verbatim — and 0.1 + 0.2 as seventeen
+  // digits. Nine places is what `roundScaled` caps its precision at, so nothing significant
+  // is beyond it; the trailing zeros it adds come back off, down to the three the filed
+  // forms use for a kilogram figure.
+  return quantity.toFixed(9).replace(/(\.\d{3}\d*?)0+$/, '$1')
+}

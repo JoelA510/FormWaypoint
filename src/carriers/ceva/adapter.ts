@@ -4,12 +4,14 @@ import {
   createContext,
   findMissingFields,
   formatDateMMDDYYYY,
+  formatQuantity,
   joinLines,
   loadForm,
   setCheckBox,
   setText,
 } from '../form-utils'
-import { parseIncoterm, RETIRED_INCOTERMS } from '../../domain/incoterms'
+import { isNamedPlace, parseIncoterm, RETIRED_INCOTERMS } from '../../domain/incoterms'
+import { canonicalUnit } from '../../domain/schedule-b'
 import { CEVA_CHECKBOXES, CEVA_CONSIGNEE_TYPE, CEVA_FIELDS as F, CEVA_INCOTERMS, CEVA_MAX_ROWS, CEVA_REQUIRED_FIELDS } from './fields'
 
 /**
@@ -133,10 +135,64 @@ export function createCevaAdapter(): CarrierAdapter {
       // default, which is the same precedence the Nippon form's box 15 uses; the two forms
       // disagreeing about whose place wins is how one shipment gets filed two ways.
       const operatorPlace = (draft.namedPlace ?? '').trim()
-      const statedPlace = incoterm?.namedPlace ?? ''
+      // Only the part of the stated term that is a place — `FOB Origin - Collect` carries the
+      // freight term in the same string, and it is already written into the freight-payment
+      // box. Comparing against the whole remainder raised a conflict against a payment term.
+      const statedPlace = isNamedPlace(incoterm?.namedPlace ?? '') ? (incoterm?.namedPlace ?? '') : ''
       const namedPlace = operatorPlace || statedPlace
-      const fullTerm = operatorPlace && incoterm ? `${incoterm.code} ${operatorPlace}` : stated
-      const incotermNote = stated && (!ticked || namedPlace) ? `Incoterm: ${fullTerm}` : ''
+      // The document's own words, with anything the operator added beside them — never a
+      // rebuild from the parsed parts.
+      //
+      // Rebuilding dropped whatever the parse did not keep. `CIF Rotterdam Prepaid` came out
+      // as `CIF Rotterdam`, and box 20 is filled from `draft.freight`, which falls back to
+      // this adapter's `COLLECT` default whenever the document states no freight terms of its
+      // own — so the one form said COLLECT while the invoice said Prepaid, with nothing
+      // anywhere to show the disagreement.
+      // Where the document named no place of its own, the operator's simply completes the
+      // term. Where it named a different one, both are written: the operator's choice governs
+      // the shipment, and erasing what the document said would leave the disagreement the
+      // warning below describes invisible on the paper itself.
+      const fullTerm = !operatorPlace
+        ? stated
+        : !statedPlace
+          ? `${stated} ${operatorPlace}`
+          : operatorPlace.toLowerCase() === statedPlace.toLowerCase()
+            ? stated
+            : `${stated} — named place: ${operatorPlace}`
+      // Written whenever the ticked box does not say the whole term: a place it has no room
+      // for, a rule it has no box for, or any other wording the document put in the term —
+      // `FOB Collect` says something about who pays that a tick on `FOB` does not.
+      //
+      // Measured by what follows the rule, not by whether the text equals the code. The
+      // `omron-ci` box is hand-typed and `Ex Works` is the same bare rule as `EXW`; comparing
+      // strings wrote a special instruction repeating a term the tick already stated.
+      // Anything the document put after the rule. The tick states the rule and nothing else,
+      // so a place, a payment instruction or any other qualifier has to be written out.
+      const saysMoreThanTheRule = Boolean(incoterm?.namedPlace)
+      const incotermNote =
+        stated && (!ticked || namedPlace || saysMoreThanTheRule) ? `Incoterm: ${fullTerm}` : ''
+      // The term can carry its own payment wording, and box 20 is filled from a different
+      // field entirely — `header.freightTerms`, or this adapter's default where the document
+      // states none. Either way the two can end up saying opposite things, and a form saying
+      // COLLECT over an invoice saying Prepaid is a contradiction nobody reading one of them
+      // would spot.
+      //
+      // Which of the two the box is carrying is not knowable here: `draft.freight` has
+      // already collapsed "the document said so" and "nothing said so, use the default" into
+      // one value. So the warning states the disagreement and leaves the diagnosis open,
+      // rather than asserting a cause it cannot check.
+      const saysPrepaid = /\bPRE-?PAID\b|\bPPD\b/i.test(stated)
+      const saysCollect = /\bCOLLECT\b/i.test(stated)
+      const boxSaysPrepaid = draft.freight === 'PREPAID'
+      if ((saysPrepaid && !boxSaysPrepaid) || (saysCollect && boxSaysPrepaid)) {
+        ctx.warnings.push(
+          `The Incoterm reads "${stated}", but the freight payment box says ` +
+            `${boxSaysPrepaid ? 'PREPAID' : 'COLLECT'}. Those disagree; the box is filled from the document's own ` +
+            'freight terms where it states any, and from a default where it does not. Check which is right ' +
+            'before signing.',
+        )
+      }
+
       // Overriding a place the document states is a decision, not a typo, so it is made
       // visible rather than applied quietly.
       if (operatorPlace && statedPlace && operatorPlace.toLowerCase() !== statedPlace.toLowerCase()) {
@@ -164,6 +220,17 @@ export function createCevaAdapter(): CarrierAdapter {
         ctx.warnings.push(
           `This shipment has ${draft.lines.length} commodity rows but the table holds ${CEVA_MAX_ROWS}. ` +
             `Rows ${CEVA_MAX_ROWS + 1}+ were not written and need a continuation sheet.`,
+        )
+      }
+
+      // A quantity that is not a number is a fault upstream, and the box it would have filled
+      // is one somebody signs. Said out loud rather than left as an empty cell.
+      const unwritable = rows.filter((l) => l.reportingBasis !== 'none' && !Number.isFinite(l.reportingQuantity))
+      if (unwritable.length) {
+        ctx.warnings.push(
+          `${unwritable.length} commodity row(s) have no usable quantity (${unwritable
+            .map((l) => l.scheduleB)
+            .join(', ')}), so box 24 carries the unit alone. Correct the figures before signing.`,
         )
       }
 
@@ -242,10 +309,23 @@ export function createCevaAdapter(): CarrierAdapter {
  */
 function formatReportedQuantity(line: SLILine): string {
   if (line.reportingBasis === 'none') return line.reportingUom
-  const quantity = Number.isInteger(line.reportingQuantity)
-    ? String(line.reportingQuantity)
-    : line.reportingQuantity.toFixed(3)
-  return line.reportingUom && line.reportingUom !== 'NO' ? `${quantity} ${line.reportingUom}` : quantity
+  const quantity = formatQuantity(line.reportingQuantity)
+  // No figure at all. The unit alone is what the box can honestly carry, and the adapter
+  // warns — `${''} ${unit}` would print a leading space and read as an oversight.
+  if (!quantity) return line.reportingUom
+  if (!line.reportingUom) return quantity
+
+  // A count under a code that is reported by the count is written bare, which is what the
+  // filed vendorA3 SLI does. Compared canonically: `PCS`, `EA` and `NO` are one unit written
+  // three ways — the Census file itself reports 51 commodity numbers in `PCS` — and
+  // appending any of those spellings to a plain piece count is noise.
+  const filed = canonicalUnit(line.reportingUom)
+  // Unless the row is not in a unit this code accepts at all, in which case the unit is the
+  // only thing on the paper that says so. The box is captioned "Quantity — Schedule B Unit",
+  // and a bare count in it asserts that is what the figure is.
+  const offRequiredUnit =
+    line.scheduleBUnits.length > 0 && !line.scheduleBUnits.some((unit) => canonicalUnit(unit) === filed)
+  return filed !== 'NO' || offRequiredUnit ? `${quantity} ${line.reportingUom}` : quantity
 }
 
 /**
