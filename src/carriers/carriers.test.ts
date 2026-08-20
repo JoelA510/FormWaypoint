@@ -9,7 +9,7 @@ import { createScheduleBIndex, type ScheduleBIndex } from '../domain/schedule-b'
 import { reconcile } from '../domain/reconcile'
 import { buildDraft, defaultShipmentSettings, summariseReferences, type CompanyProfile } from '../domain/draft'
 import { getAdapter, detectCarrier } from './registry'
-import { namedPlaceFrom, parseIncoterm } from '../domain/incoterms'
+import { isNamedPlace, parseIncoterm } from '../domain/incoterms'
 import { buildSyntheticCipl, simpleShipment } from '../test/synthetic/cipl'
 import { buildKeyingSheet, keyingSheetToWorkbook } from './keying-sheet'
 import type { ParsedCipl, ShipmentHeader, SLILine } from '../domain/types'
@@ -523,36 +523,24 @@ describe('reading an Incoterm off a document', () => {
     expect(parseIncoterm('DDU')?.retired).toBe(true)
   })
 
-  it('takes the place out of a composite trade-terms line', () => {
-    // A trade-terms line carries the rule, sometimes a place, and the freight term. Only the
-    // place belongs in a box captioned "NAMED PLACE/PORT" — and it is taken out of the
-    // string rather than the whole remainder being thrown away because a payment term
-    // follows it.
-    expect(namedPlaceFrom('Singapore')).toBe('Singapore')
-    expect(namedPlaceFrom('Long Beach')).toBe('Long Beach')
-    expect(namedPlaceFrom('Rotterdam Prepaid')).toBe('Rotterdam')
-    expect(namedPlaceFrom('Singapore, Freight Collect')).toBe('Singapore')
-    expect(namedPlaceFrom('Origin - Collect')).toBe('Origin')
-    // The payment term can come *before* the place, which truncating at it used to discard.
-    expect(namedPlaceFrom('Prepaid, Long Beach')).toBe('Long Beach')
-    expect(namedPlaceFrom('Freight Prepaid, Chicago')).toBe('Chicago')
-    expect(namedPlaceFrom('Duty Unpaid Hamburg')).toBe('Hamburg')
-    // A full stop that ends an abbreviated place name is part of the name.
-    expect(namedPlaceFrom('Washington, D.C.')).toBe('Washington, D.C.')
-    expect(namedPlaceFrom('Prepaid')).toBe('')
-    // The `by <party>` tail belongs to the payment clause; it is not a place left behind.
-    expect(namedPlaceFrom('DUTY PAID BY CONSIGNEE')).toBe('')
-    expect(namedPlaceFrom('Freight Collect by Shipper, Hamburg')).toBe('Hamburg')
-    // The party can be more than one word; taking only the first left the rest to be read
-    // as a port, so a signed SLI named the consignee as the place of delivery.
-    expect(namedPlaceFrom('DUTY PAID BY ULTIMATE CONSIGNEE')).toBe('')
-    expect(namedPlaceFrom('Freight Collect by CEVA Logistics, Hamburg')).toBe('Hamburg')
-    // A full stop ending the whole term is punctuation, not part of the place.
-    expect(namedPlaceFrom('Rotterdam Prepaid.')).toBe('Rotterdam')
-    expect(namedPlaceFrom('Singapore, Freight Collect.')).toBe('Singapore')
-    expect(namedPlaceFrom('')).toBe('')
+  it('refuses a remainder that mixes the place with freight wording', () => {
+    // A trade-terms line carries the rule, sometimes a place, and the freight term, and the
+    // document does not mark which words are which. Taking the place out of it was tried
+    // three ways and got it wrong three ways — `Prepaid, Long Beach` lost the place,
+    // `DUTY PAID BY ULTIMATE CONSIGNEE` produced a port called CONSIGNEE, and bounding the
+    // party clause swallowed the Hamburg in `Collect by Shipper Hamburg`. So a remainder
+    // that carries freight wording supplies no place, and the adapter says so.
+    expect(isNamedPlace('Singapore')).toBe(true)
+    expect(isNamedPlace('Long Beach')).toBe(true)
+    expect(isNamedPlace('Washington, D.C.')).toBe(true)
+    expect(isNamedPlace('Origin - Collect')).toBe(false)
+    expect(isNamedPlace('Rotterdam Prepaid')).toBe(false)
+    expect(isNamedPlace('Prepaid, Long Beach')).toBe(false)
+    expect(isNamedPlace('DUTY PAID BY ULTIMATE CONSIGNEE')).toBe(false)
+    expect(isNamedPlace('Collect by Shipper Hamburg')).toBe(false)
     // Punctuation alone is not a place; a box reading "." is worse than an empty one.
-    expect(namedPlaceFrom('.')).toBe('')
+    expect(isNamedPlace('.')).toBe(false)
+    expect(isNamedPlace('')).toBe(false)
     expect(parseIncoterm('EXW.')?.namedPlace).toBe('')
   })
 
@@ -624,21 +612,20 @@ describe('Nippon Express — quantity, its unit, and the named place', () => {
     expect(values['NAMED PLACE/PORT']).toBe('SFO')
   })
 
-  it('does not write a freight term into the named-place box', async () => {
-    // `FOB Origin - Collect` is the Vendor A trade-terms wording. "Collect" is who pays the
-    // freight, not a port, and box 15 is captioned "NAMED PLACE/PORT". The FOB point itself
-    // is kept.
-    const { values } = await fillWith({}, { incoterm: 'FOB Origin - Collect', namedPlace: '' })
+  it('leaves the named-place box blank, and says so, rather than guessing', async () => {
+    // `FOB Origin - Collect` is the Vendor A trade-terms wording. Which of those words is the
+    // port is not knowable, so box 15 is left for the operator and they are told why.
+    const { values, warnings } = await fillWith({}, { incoterm: 'FOB Origin - Collect', namedPlace: '' })
     expect(values.INCOTERM).toBe('FOB')
-    expect(values['NAMED PLACE/PORT']).toBe('Origin')
+    expect(values['NAMED PLACE/PORT']).toBeUndefined()
+    expect(warnings.join(' ')).toMatch(/enter the place by hand/)
   })
 
-  it('keeps a place that a payment term follows', async () => {
-    // The place is right there in the string; discarding it because "Prepaid" comes after
-    // loses the one thing box 15 exists for.
-    const { values } = await fillWith({}, { incoterm: 'CIF Rotterdam Prepaid', namedPlace: '' })
+  it('fills the box where the term names a place and nothing else', async () => {
+    const { values, warnings } = await fillWith({}, { incoterm: 'CIF Rotterdam', namedPlace: '' })
     expect(values.INCOTERM).toBe('CIF')
     expect(values['NAMED PLACE/PORT']).toBe('Rotterdam')
+    expect(warnings).toEqual([])
   })
 
   it('writes a restated quantity at the precision it was worked out to', async () => {
@@ -749,14 +736,12 @@ describe('CEVA — recording the Incoterm', () => {
     expect(values['Special Instructions']).toBe('Incoterm: Ex Factory SFO')
   })
 
-  it('does not raise a conflict against a freight term', async () => {
-    // "Collect" is who pays, already written into the freight-payment box. It is not a rival
-    // named place, and warning about it would cry wolf on every shipment of this shape.
-    // The term itself carries "Origin - Collect", so this only passes because the comparison
-    // goes through `namedPlaceFrom`.
-    const { values, warnings } = await fillWith({ incoterm: 'FOB Origin - Collect', namedPlace: 'Origin' })
+  it('does not raise a place conflict against freight wording', async () => {
+    // "Origin - Collect" is not a rival named place — it is a composite the app declines to
+    // read — so an operator-entered place does not contradict it.
+    const { values, warnings } = await fillWith({ incoterm: 'FOB Origin - Collect', namedPlace: 'Long Beach' })
     expect(values.FOB).toBe('checked')
-    expect(warnings).toEqual([])
+    expect(warnings.join(' ')).not.toMatch(/named place entered for this shipment/)
   })
 
   it('never drops what the document stated from the instructions', async () => {

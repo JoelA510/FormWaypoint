@@ -10,7 +10,7 @@ import {
   setCheckBox,
   setText,
 } from '../form-utils'
-import { namedPlaceFrom, parseIncoterm, RETIRED_INCOTERMS } from '../../domain/incoterms'
+import { isNamedPlace, parseIncoterm, RETIRED_INCOTERMS } from '../../domain/incoterms'
 import { canonicalUnit } from '../../domain/schedule-b'
 import { CEVA_CHECKBOXES, CEVA_CONSIGNEE_TYPE, CEVA_FIELDS as F, CEVA_INCOTERMS, CEVA_MAX_ROWS, CEVA_REQUIRED_FIELDS } from './fields'
 
@@ -138,7 +138,7 @@ export function createCevaAdapter(): CarrierAdapter {
       // Only the part of the stated term that is a place — `FOB Origin - Collect` carries the
       // freight term in the same string, and it is already written into the freight-payment
       // box. Comparing against the whole remainder raised a conflict against a payment term.
-      const statedPlace = namedPlaceFrom(incoterm?.namedPlace ?? '')
+      const statedPlace = isNamedPlace(incoterm?.namedPlace ?? '') ? (incoterm?.namedPlace ?? '') : ''
       const namedPlace = operatorPlace || statedPlace
       // The document's own words, with anything the operator added beside them — never a
       // rebuild from the parsed parts.
@@ -166,6 +166,8 @@ export function createCevaAdapter(): CarrierAdapter {
       // Measured by what follows the rule, not by whether the text equals the code. The
       // `omron-ci` box is hand-typed and `Ex Works` is the same bare rule as `EXW`; comparing
       // strings wrote a special instruction repeating a term the tick already stated.
+      // Anything the document put after the rule. The tick states the rule and nothing else,
+      // so a place, a payment instruction or any other qualifier has to be written out.
       const saysMoreThanTheRule = Boolean(incoterm?.namedPlace)
       const incotermNote =
         stated && (!ticked || namedPlace || saysMoreThanTheRule) ? `Incoterm: ${fullTerm}` : ''

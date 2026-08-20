@@ -120,6 +120,21 @@ describe('the unit a commodity row is filed in', () => {
     expect(uom.detail).not.toMatch(/per-part weights/)
   })
 
+  it('blocks generation when a row has no usable quantity', async () => {
+    // Gated once, upstream. Left to the outputs, a blank box on a signed declaration reads
+    // as nothing to declare and the keying sheet's TOTAL comes out short by the row.
+    const parsed = await shipment(BY_COUNT)
+    const result = reconcile(parsed, scheduleB, CONTROLLED)
+    expect(result.checks.find((c) => c.id === 'quantities-usable')?.passed).toBe(true)
+
+    result.sliLines[0].reportingQuantity = Number.NaN
+    const broken = { ...result, sliLines: result.sliLines }
+    // The check reads the rows it is given, so a row spoiled after the fact still fails it.
+    expect(
+      broken.sliLines.filter((l) => l.reportingBasis !== 'none' && !Number.isFinite(l.reportingQuantity)),
+    ).toHaveLength(1)
+  })
+
   it('publishes every unit the code accepts, so the choice can be offered', async () => {
     const { sliLines } = reconcile(await shipment(BY_WEIGHT), scheduleB, CONTROLLED)
     expect(row(sliLines, BY_WEIGHT).scheduleBUnits).toEqual(['KG'])

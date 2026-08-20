@@ -275,13 +275,16 @@ export interface ClassificationSubject {
   /** Whether the row has a net weight at all. */
   hasNetWeight?: boolean
   /**
-   * Whether the row *could* be stated in the unit its code requires.
+   * Which of the units this code accepts the row could actually be stated in.
    *
    * Asked of the conversion rules by the caller rather than guessed here. A row that can
-   * reach the required unit and is not in it was changed by hand; one that cannot is missing
-   * a figure — and the two want opposite advice.
+   * reach one of them and is not in it was changed by hand; one that can reach none is
+   * missing a figure — and the two want opposite advice. It is a list rather than a flag
+   * because the advice has to name a unit that is genuinely available: a code accepting
+   * `KG` or `DOZ` on a weightless row can only be filed in `DOZ`, and sending the filer back
+   * to `KG` sends them to the one unit that cannot be produced.
    */
-  requiredReachable?: boolean
+  reachableUnits?: string[]
   /** Reference for the UI, e.g. an SLI line index. */
   ref?: string
 }
@@ -338,7 +341,11 @@ export function checkClassification(subject: ClassificationSubject, index: Sched
   const filed = canonicalUnit(subject.reportingUom) ?? printed
   if (required.length && filed) {
     const ok = required.includes(filed)
-    const wanted = required[0]
+    // The unit the advice names: one this row can actually state, where any of them is, and
+    // otherwise the code's first — which is then the subject of the "cannot be worked out"
+    // branch rather than something the filer is told to restore.
+    const reachable = (subject.reachableUnits ?? []).map((unit) => canonicalUnit(unit)).filter(Boolean)
+    const wanted = required.find((unit) => reachable.includes(unit)) ?? required[0]
     // How the figure was arrived at, where that is not simply "off the invoice". Both cases
     // put a number on the form that the document does not print, and a check that called
     // either of them "matching the invoice" would vouch for a figure nobody transcribed.
@@ -361,7 +368,7 @@ export function checkClassification(subject: ClassificationSubject, index: Sched
           // reachable is asked of the conversion rules by the caller, not guessed from the
           // unit's family here — a row invoiced in kilograms can reach tonnes with no net
           // weight at all, and telling its filer to supply weights sends them nowhere.
-          (subject.requiredReachable
+          (reachable.includes(wanted)
             ? `This row can be filed in ${wanted}; the unit was changed by hand. Put it back to the Schedule B ` +
               'unit, or correct the classification.'
             : derivesFromNetWeight(wanted) && subject.hasNetWeight === false

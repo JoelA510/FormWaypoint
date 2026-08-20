@@ -213,8 +213,27 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
     line.reportingBasis = restated.basis
   }
 
+  // A figure that is not a number is a fault upstream, and it reaches three outputs — two
+  // form boxes and a keying sheet cell. Gated once here rather than papered over at each:
+  // blank boxes and an empty cell all read as "nothing to declare", and the keying sheet's
+  // TOTAL would quietly come out short by the missing row.
+  const unusable = sliLines.filter(
+    (line) => line.reportingBasis !== 'none' && !Number.isFinite(line.reportingQuantity),
+  )
+
   const checks: CheckResult[] = [
     { id: 'set-selection', severity: 'info', title: 'Controlling document set', detail: reason, passed: true },
+    {
+      id: 'quantities-usable',
+      severity: 'blocking',
+      title: 'Every commodity row has a usable quantity',
+      detail: unusable.length
+        ? `${unusable.length} row(s) have no usable quantity (${unusable.map((l) => l.scheduleB).join(', ')}). ` +
+          'A quantity box left blank on a signed declaration reads as nothing to declare, and the keying ' +
+          'sheet would total short by those rows.'
+        : 'Every row carries a figure that can be written.',
+      passed: unusable.length === 0,
+    },
     ...currencyCheck(currency),
     {
       id: 'header-readable',
@@ -807,12 +826,13 @@ function classificationChecks(
         // For the *first* accepted unit, which is the one the check's advice names. Asked
         // across the whole set, a code accepting KG then NO on a weightless row answered yes
         // — and the filer was told to put the row back to KG, the one unit it cannot state.
-        requiredReachable:
-          line.scheduleBUnits.length > 0 &&
-          canRestate(
-            { quantity: line.quantity, uom: line.sourceUom, weightKg: line.weightKg },
-            line.scheduleBUnits[0],
-          ),
+          // Every accepted unit this row could actually state, so the check can name the one it
+        // is telling the filer to go back to. Asked across the set but reported as a list:
+        // taking the first accepted unit alone told a filer to restore `KG` on a code
+        // accepting `KG` or `DOZ` where only `DOZ` was reachable.
+        reachableUnits: line.scheduleBUnits.filter((unit) =>
+          canRestate({ quantity: line.quantity, uom: line.sourceUom, weightKg: line.weightKg }, unit),
+        ),
         ref: `row-${i + 1}`,
       },
       index,

@@ -19,7 +19,7 @@
  * or, worse, transposes values.
  */
 import type { MergedLine, Reconciliation, SLILine } from '../../domain/types'
-import { KG_PER_LB, kgToLb as kilogramsToPounds, restateQuantity } from '../../domain/units'
+import { KG_PER_LB, kgToLb as kilogramsToPounds, restateQuantity, roundPrecise } from '../../domain/units'
 import { buildXlsx, type CellValue, type Sheet } from '../../lib/xlsx'
 import type { SliDraft } from '../types'
 import { canonicalUnit, formatScheduleB, normalizeScheduleB, type ScheduleBIndex } from '../../domain/schedule-b'
@@ -899,8 +899,9 @@ export function buildKeyingSheet(
       // the two were equal.
       //
       // Nine places, which is where `roundScaled` caps a row's own precision, so the total can
-      // never be less precise than the column it adds up.
-      quantity: roundTo(
+      // never be less precise than the column it adds up. Through `roundPrecise`, not
+      // `roundTo`, whose nudge is unusable past six places — see the note on it.
+      quantity: roundPrecise(
         commodities.reduce((sum, c) => sum + Number(c.quantity || 0), 0),
         9,
       ),
@@ -1244,7 +1245,9 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
   // What the quantity column is actually counting. A single unit is named; a mixed sheet
   // says so rather than calling a column of kilograms and pieces "pcs", which is what the
   // TOTAL row read as before any of it could be anything but a count.
-  const keyedUnitLabel = units.length === 1 ? units[0] : 'in mixed units'
+  // Derived from the same test the grid's total uses, so the two cannot describe one sheet
+  // differently — a sheet whose rows print no unit at all has one total and one label.
+  const keyedUnitLabel = units.length <= 1 ? (units[0] ?? 'units') : 'in mixed units'
 
   const notes: CellValue[][] = [
     ['Note', 'Detail'],

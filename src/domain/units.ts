@@ -102,7 +102,7 @@ export function restateQuantity(source: QuantitySource, targetUnit: string): Res
   // Already in the unit asked for. Ahead of the family tables so that a unit neither table
   // knows — square metres, litres, barrels — still restates onto itself, and `canRestate`
   // does not report the row's own unit as unavailable.
-  if (target === from) return { unit, quantity: roundTo(source.quantity, 3), basis: 'source' }
+  if (target === from) return { unit, quantity: roundPrecise(source.quantity, 3), basis: 'source' }
 
   // An exact multiple within the same family. Preferred over the net weight even for weight
   // units: the document's own figure is the stated one.
@@ -167,20 +167,37 @@ export function resolveReportingQuantity(
   }
   // The document's own spelling, not its canonical form: this row is filing what the
   // document said, and saying so in the document's words is the honest label for it.
-  return { unit: source.uom.trim().toUpperCase(), quantity: roundTo(source.quantity, 3), basis: 'source' }
+  return { unit: source.uom.trim().toUpperCase(), quantity: roundPrecise(source.quantity, 3), basis: 'source' }
 }
 
 export function roundTo(value: number, decimals: number): number {
+  const factor = 10 ** decimals
+  // Nudge before rounding so binary representation error (0.544 + 0.544 = 1.0879999…)
+  // does not round the wrong way.
+  return Math.round((value + Number.EPSILON * Math.sign(value) * factor) * factor) / factor
+}
+
+/**
+ * `roundTo`, but safe past six decimal places.
+ *
+ * `roundTo`'s nudge is a fixed fraction of the *factor*, which is right for the two and three
+ * decimal places every other caller uses and ruinous at nine: it grows to 2.2e-7, larger than
+ * the precision it is protecting, and `roundTo(2, 9)` comes back as 2.000000222.
+ *
+ * This lives here, and `roundTo` is left exactly as it was, deliberately. `roundTo` rounds
+ * every customs value and every reconciled total in the application, and changing how it
+ * breaks a tie moves money: a value of `256.025` rounds to `256.02` under one nudge and
+ * `256.03` under another, which is enough to put a line's value a cent away from the total
+ * printed on the document it is being proved against. A quantity restatement is not a reason
+ * to take that on.
+ */
+export function roundPrecise(value: number, decimals: number): number {
   const scaled = value * 10 ** decimals
-  // Nudge before rounding so binary representation error (0.544 + 0.544 = 1.0879999…) does
-  // not round the wrong way.
-  //
-  // Proportional to the figure, not to the number of places. The nudge used to be
-  // `EPSILON * 10 ** decimals`, which is a fixed 2.2e-16 of the *factor* — fine at three
-  // places and ruinous past six, where it grows larger than the precision it is protecting:
-  // `roundTo(2, 9)` came back as 2.000000222, and `restateQuantity` reaches nine places on a
-  // gram-to-tonne conversion. Scaled to the value, it stays four ulps whatever the precision.
-  return Math.round(scaled + Math.sign(scaled) * Math.abs(scaled) * Number.EPSILON * 4) / 10 ** decimals
+  // Relative to the figure, so it stays below the last place whatever the precision — and
+  // capped, so that at magnitudes where four ulps grow past a whole unit it cannot reach a
+  // genuine rounding boundary and carry the figure over it.
+  const nudge = Math.min(Math.abs(scaled) * Number.EPSILON * 4, 1e-6)
+  return Math.round(scaled + Math.sign(scaled) * nudge) / 10 ** decimals
 }
 
 /**
@@ -195,5 +212,5 @@ export function roundTo(value: number, decimals: number): number {
  */
 function roundScaled(value: number, factor: number): number {
   const extra = factor > 0 && factor < 1 ? Math.ceil(-Math.log10(factor)) : 0
-  return roundTo(value, Math.min(3 + extra, 9))
+  return roundPrecise(value, Math.min(3 + extra, 9))
 }

@@ -99,47 +99,30 @@ export function parseIncoterm(raw: string | null | undefined): ParsedIncoterm | 
 /**
  * Wording that means "who pays the freight", not "where delivery happens".
  *
- * The optional `BY <party>` tail is part of the clause, not a place left behind by it:
- * `DUTY PAID BY CONSIGNEE` names nowhere. The party can be more than one word
- * (`BY ULTIMATE CONSIGNEE`), so the tail runs to the next comma rather than taking one word
- * and leaving the rest to be read as a port.
- *
- * Held as a source string and compiled per call: a shared `g`-flagged regex carries a
- * `lastIndex` between calls, and the next person to reach for `.test()` gets alternating
- * answers on the same input.
- *
  * The trade-terms line on these documents is a composite — the rule, sometimes a place, and
  * the freight term — so what follows the rule is not always a place. `FOB Origin - Collect`
  * leaves `Origin - Collect` behind, and writing that into a box captioned "NAMED PLACE/PORT"
- * states a freight term as a port. A caller filling such a box asks this first; a caller
- * transcribing the term verbatim does not need to.
+ * states a freight term as a port.
  */
-const FREIGHT_QUALIFIER = String.raw`\b(COLLECT|PREPAID|PPD|P\.?P\.?|C\.?C\.?|FREIGHT|DUTY\s+(UN)?PAID)(\s+BY\s+[A-Za-z][A-Za-z\s]*)?\b`
+const FREIGHT_QUALIFIER = /\b(COLLECT|PREPAID|PPD|P\.?P\.?|C\.?C\.?|FREIGHT|DUTY\s+(UN)?PAID)\b/i
 
 /**
- * The part of `namedPlace` that actually names a place, or `''`.
+ * Whether `namedPlace` can be written into a form's named-place box as it stands.
  *
- * Truncates at the freight qualifier rather than rejecting the whole remainder: on
- * `CIF Rotterdam Prepaid` the place is right there in the string, and throwing it away
- * because a payment term follows it loses the very thing this is for. `FOB Origin - Collect`
- * keeps `Origin`, which is what that trade term names as the FOB point.
+ * All or nothing, deliberately. Taking the place *out* of a composite line is guesswork that
+ * this codebase tried three ways and got wrong three times: truncating at the qualifier lost
+ * `Prepaid, Long Beach`; removing qualifiers wherever they sat turned `DUTY PAID BY ULTIMATE
+ * CONSIGNEE` into a port called `CONSIGNEE`; bounding the party clause then swallowed the
+ * `Hamburg` in `Collect by Shipper Hamburg`. Each fix opened the next hole, because the
+ * document does not mark which words are the place and the app cannot know.
  *
- * Punctuation alone is not a place. `EXW.` leaves a full stop behind, and a box reading `.`
- * is worse than an empty one.
+ * So a remainder carrying freight wording supplies no place, and the caller says so instead
+ * of guessing — the same trade the destination-country box makes, for the same reason: a
+ * blank box a reviewer is told about beats a wrong one they are not.
+ *
+ * Punctuation alone is not a place either. `EXW.` leaves a full stop behind, and a box
+ * reading `.` is worse than an empty one.
  */
-export function namedPlaceFrom(namedPlace: string): string {
-  // Every qualifier is removed wherever it sits, rather than the string being cut at the
-  // first one. `FOB Freight Prepaid, Chicago` and `DDP Duty Paid Rotterdam` put the payment
-  // term *before* the place, and truncating at it discarded the place — the exact loss this
-  // function exists to prevent, just for the other word order.
-  const place = namedPlace
-    .replace(new RegExp(FREIGHT_QUALIFIER, 'gi'), ' ')
-    .replace(/\s+/g, ' ')
-    // Separators orphaned by the words that sat between them, and a full stop left standing
-    // on its own — but not one that ends an abbreviated place name, where it belongs to the
-    // name (`Washington, D.C.`). The difference is whether a space precedes it.
-    .replace(/^[\s,:;/|–—-]+/, '')
-    .replace(/(\s+\.|[\s,:;/|–—-])+$/, '')
-    .trim()
-  return /[A-Za-z0-9]/.test(place) ? place : ''
+export function isNamedPlace(namedPlace: string): boolean {
+  return /[A-Za-z0-9]/.test(namedPlace) && !FREIGHT_QUALIFIER.test(namedPlace)
 }

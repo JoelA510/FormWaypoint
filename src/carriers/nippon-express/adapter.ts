@@ -9,7 +9,7 @@ import {
   selectRadio,
   setText,
 } from '../form-utils'
-import { namedPlaceFrom, parseIncoterm, RETIRED_INCOTERMS } from '../../domain/incoterms'
+import { isNamedPlace, parseIncoterm, RETIRED_INCOTERMS } from '../../domain/incoterms'
 import {
   NIPPON_CONSIGNEE_TYPE,
   NIPPON_HEADER_FIELDS as F,
@@ -123,10 +123,20 @@ export function createNipponExpressAdapter(options: NipponOptions = {}): Carrier
       // the same string as the rule, and dropping it files a delivery term that does not say
       // where delivery happens.
       //
-      // Only the part of it that is a place, though. A trade-terms line is a composite, and
-      // `FOB Origin - Collect` carries the freight term in the same string — writing that into
-      // a box captioned "NAMED PLACE/PORT" would state who pays as where delivery happens.
-      setText(ctx, F.namedPlace, draft.namedPlace || namedPlaceFrom(stated?.namedPlace ?? ''))
+      // Only where what follows the rule is a place and nothing else. A trade-terms line is a
+      // composite, and `FOB Origin - Collect` carries the freight term in the same string —
+      // writing that into a box captioned "NAMED PLACE/PORT" would state who pays as where
+      // delivery happens. Where it cannot be told apart, the box is left for the operator and
+      // they are told why, rather than the app guessing which words are the port.
+      const statedPlace = stated?.namedPlace ?? ''
+      const usablePlace = isNamedPlace(statedPlace) ? statedPlace : ''
+      setText(ctx, F.namedPlace, draft.namedPlace || usablePlace)
+      if (!draft.namedPlace && statedPlace && !usablePlace) {
+        ctx.warnings.push(
+          `The Incoterm reads "${draft.incoterm.trim()}", whose "${statedPlace}" mixes the named place with ` +
+            'freight wording. Box 15 is left blank rather than filled with a guess — enter the place by hand.',
+        )
+      }
 
       const mode = NIPPON_MODE[draft.mode]
       selectRadio(ctx, mode.field, mode.option)
