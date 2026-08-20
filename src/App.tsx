@@ -74,6 +74,14 @@ export function App() {
   const [carrierId, setCarrierId] = useState<ShipmentCarrierId>('nippon-express')
   const [profile, setProfile] = useState<CompanyProfile>(EMPTY_PROFILE)
   const [settings, setSettings] = useState<ShipmentSettings>(() => defaultShipmentSettings(getAdapter('nippon-express')))
+  /**
+   * The unit of quantity to file each commodity number in, keyed by normalised code.
+   *
+   * Per shipment rather than saved, and empty unless somebody changes something: the default
+   * already follows Schedule B wherever these documents can state it, and a unit remembered
+   * from a previous shipment would quietly file goods that were measured differently.
+   */
+  const [reportingUnits, setReportingUnits] = useState<Record<string, string>>({})
   const [overrides, setOverrides] = useState<OverrideRecord[]>([])
   const [partOverrides, setPartOverrides] = useState<PartOverrideRecord[]>([])
   const [items, setItems] = useState<ItemLibraryEntry[]>([])
@@ -255,6 +263,10 @@ export function App() {
       setBusy(true)
       setParsed(next)
       setError(null)
+      // A unit was chosen for the commodity numbers on the *last* document. These goods are
+      // measured however this document says they are, so the choice starts again from the
+      // Schedule B default rather than carrying over onto codes that happen to repeat.
+      setReportingUnits({})
 
       try {
         const header = next.headers[next.availableSets[0]]
@@ -338,9 +350,10 @@ export function App() {
       // Only consulted for formats that state no weights; a printed weight always wins.
       unitWeightsByPart,
       itemsByPart,
+      reportingUnits,
       maxRows: adapter.maxCommodityRows,
     })
-  }, [parsed, scheduleB, settings.eccn, settings.sme, settings.license, overrides, codesByPart, unitWeightsByPart, itemsByPart, adapter])
+  }, [parsed, scheduleB, settings.eccn, settings.sme, settings.license, overrides, codesByPart, unitWeightsByPart, itemsByPart, reportingUnits, adapter])
 
   const draft = useMemo(
     () => (reconciliation ? buildDraft(reconciliation, profile, settings, adapter) : null),
@@ -829,7 +842,21 @@ export function App() {
                 onSaveDescription={(part, description, text) => void savePartDescription(part, description, text)}
                 onClearCode={(part) => void clearPartCode(part)}
               />
-              <CommodityTable reconciliation={reconciliation} />
+              <CommodityTable
+                reconciliation={reconciliation}
+                reportingUnits={reportingUnits}
+                onReportingUnitChange={(code, unit) =>
+                  setReportingUnits((current) => {
+                    // An empty choice is "use the Schedule B default", which is the absence of
+                    // an entry rather than an entry saying nothing — otherwise the blank sits
+                    // in the record and reads later as a unit somebody picked.
+                    const next = { ...current }
+                    if (unit) next[code] = unit
+                    else delete next[code]
+                    return next
+                  })
+                }
+              />
               <ChecksPanel checks={checks} canGenerate={canGenerate} />
               <OverridesPanel
                 reconciliation={reconciliation}

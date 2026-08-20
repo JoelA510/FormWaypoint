@@ -57,9 +57,12 @@ of defaulting to zero.
 6. **Validates every Schedule B number** against the U.S. Census Bureau AES commodity file:
    ten digits, currently active, reported in the required unit of quantity, and plausibly
    describing the goods.
-7. **Proves the arithmetic** before generating anything. Quantities, weights and values must
+7. **Files each row in the unit its commodity number is reported in.** Where Schedule B
+   reports a code by weight and the invoice counts pieces, the row carries the net weight
+   instead — and the review screen lets you change the unit before anything is generated.
+8. **Proves the arithmetic** before generating anything. Quantities, weights and values must
    sum back to the totals printed on the source document.
-8. **Fills the carrier's real blank form** and downloads it, still editable and unsigned.
+9. **Fills the carrier's real blank form** and downloads it, still editable and unsigned.
 
 ## Supported carriers
 
@@ -282,7 +285,33 @@ This is desktop-only because it has to be: census.gov serves the file with no
 The dataset is the authority on three things the CIPL cannot tell you: whether a code is
 currently valid, its official description, and the unit of quantity AES requires. That last
 one matters more than it looks — `9031.90.0000` and `8483.10.5000` are reported in
-kilograms, not pieces, and the tool flags a piece count filed against them.
+kilograms, not pieces, and a piece count filed against them is a reporting error even when
+every other number on the form is right.
+
+## Unit of quantity
+
+Each commodity row is filed in the unit its Schedule B number requires, wherever the
+shipment can state it. A code reported in kilograms carries the row's net weight rather than
+the invoice's piece count; a code reported by the piece is unchanged. Both carrier forms and
+both keying sheets take the same figure from the same place, so the paperwork prepared for
+one shipment cannot disagree with itself.
+
+Where a code accepts more than one unit — `NO+KG` — only the filer knows how the goods are
+actually measured, so the review screen offers the choice per commodity number. Units the
+shipment cannot state are listed and disabled with the reason, rather than hidden: "there is
+no net weight for these goods" is the answer somebody is looking for. Where nothing supports
+the required unit at all, the document's own figure is filed and the reconciliation says so —
+no quantity is ever invented to fit a unit.
+
+## Incoterms
+
+The rule is read off whatever the document or the operator supplied, not matched literally:
+`DAP Singapore`, `FOB Origin - Collect`, `cif rotterdam` and `Ex Works` all resolve to the
+rule the form has a box for. The named place is kept — an Incoterm without one does not say
+which port — and written into the CEVA form's special instructions, which is the only place
+that form can record it. A rule withdrawn since Incoterms 2020 (`DAT`, `DDU`) is reported
+with its replacement rather than silently mapped onto it: reclassifying a delivery term is
+the filer's decision.
 
 ## Local data
 

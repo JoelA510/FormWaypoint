@@ -15,7 +15,14 @@ import type {
   ShipmentHeader,
   SourceLine,
 } from '../types'
-import { checkClassification, formatScheduleB, normalizeScheduleB, screenCode, type ScheduleBIndex } from '../schedule-b'
+import {
+  checkClassification,
+  formatScheduleB,
+  normalizeScheduleB,
+  screenCode,
+  type ScheduleBIndex,
+} from '../schedule-b'
+import { resolveReportingQuantity } from '../units'
 import type { ItemLibraryEntry } from '../item-library'
 import { partKey } from '../part-key'
 import {
@@ -46,6 +53,18 @@ export interface ReconcileOptions extends AggregationOptions {
    * what `codesByPart` is, and it only ever holds what a person typed.
    */
   itemsByPart?: Map<string, ItemLibraryEntry>
+  /**
+   * The unit of quantity to file a commodity row in, keyed by normalised Schedule B number.
+   *
+   * Keyed by code rather than by row because that is what the choice is *about*: the Census
+   * file requires a unit per commodity number, so "file 9031.90.0000 in kilograms" holds for
+   * every row carrying that code and survives a regrouping that splits or merges them.
+   *
+   * Empty by default, and it should usually stay that way — the default already aligns with
+   * Schedule B wherever the shipment can state it. This exists for the codes that accept more
+   * than one unit, where only the filer can say which the goods are actually measured in.
+   */
+  reportingUnits?: Record<string, string>
 }
 
 /**
@@ -168,10 +187,30 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
       : joined
   const sliLines = aggregateLines(mergedLines, options)
 
-  if (index) {
-    for (const line of sliLines) {
-      line.scheduleBUnit = index.lookup(line.scheduleB)?.units[0] ?? null
-    }
+  // The unit each row is filed in, and its quantity restated into that unit.
+  //
+  // Here rather than in `aggregateLines` because only the Census dataset knows what a code
+  // requires, and at all because a piece count filed against a code reported in kilograms is
+  // a reporting error that nothing else on the form gives any sign of. The document's own
+  // figure is never overwritten — `quantity` and `sourceUom` still say what was printed.
+  for (const line of sliLines) {
+    // The Census file's own spellings, not their canonical forms. `canonicalUnit` exists to
+    // make what a *document* prints comparable with what the file requires; using it on the
+    // file's side too would file `NO` against the 51 commodity numbers the file reports in
+    // `PCS`, which is a unit it does not list for them.
+    const accepted = (index?.lookup(line.scheduleB)?.units ?? [])
+      .map((unit) => unit.trim().toUpperCase())
+      .filter(Boolean)
+    line.scheduleBUnit = accepted[0] ?? null
+    line.scheduleBUnits = accepted
+    const restated = resolveReportingQuantity(
+      { quantity: line.quantity, uom: line.sourceUom, weightKg: line.weightKg },
+      accepted,
+      options.reportingUnits?.[normalizeScheduleB(line.scheduleB)],
+    )
+    line.reportingUom = restated.unit
+    line.reportingQuantity = restated.quantity
+    line.reportingBasis = restated.basis
   }
 
   const checks: CheckResult[] = [
@@ -754,7 +793,18 @@ function classificationChecks(
       .filter(Boolean)
       .join(' ')
 
-    return checkClassification({ code: line.scheduleB, sourceText, sourceUom: line.sourceUom, ref: `row-${i + 1}` }, index)
+    return checkClassification(
+      {
+        code: line.scheduleB,
+        sourceText,
+        sourceUom: line.sourceUom,
+        reportingUom: line.reportingUom,
+        reportingBasis: line.reportingBasis,
+        hasNetWeight: line.weightKg > 0,
+        ref: `row-${i + 1}`,
+      },
+      index,
+    )
   })
 }
 

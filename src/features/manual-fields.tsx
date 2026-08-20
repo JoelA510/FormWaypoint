@@ -153,18 +153,24 @@ export function ManualFieldsPanel({
             </Field>
           ) : null}
 
-          {isNippon ? (
-            <Field label="Named place / port" hint="Qualifies the incoterm, e.g. the port in FOB SFO.">
-              {(id) => (
-                <Input
-                  id={id}
-                  value={settings.namedPlace}
-                  onChange={(e) => setSetting('namedPlace', e.target.value)}
-                  placeholder="e.g. SFO"
-                />
-              )}
-            </Field>
-          ) : null}
+          <Field
+            label="Named place / port"
+            hint={
+              isNippon
+                ? 'Qualifies the incoterm, e.g. the port in FOB SFO.'
+                : 'Qualifies the incoterm, e.g. the port in FOB SFO. This form has no box for it, so it goes ' +
+                  'into the special instructions. Leave blank where the document already names one.'
+            }
+          >
+            {(id) => (
+              <Input
+                id={id}
+                value={settings.namedPlace}
+                onChange={(e) => setSetting('namedPlace', e.target.value)}
+                placeholder="e.g. SFO"
+              />
+            )}
+          </Field>
 
           <Field label="Pieces and dimensions" hint="Dimensions are not on the CIPL. Package count and gross weight are pre-filled.">
             {(id) => (

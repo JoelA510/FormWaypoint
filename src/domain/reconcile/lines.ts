@@ -3,6 +3,7 @@
  */
 import type { MergedLine, SLILine, SourceLine } from '../types'
 import { canonicalUnit, formatScheduleB, normalizeScheduleB } from '../schedule-b'
+import { roundTo } from '../units'
 import { partKey } from '../part-key'
 
 /** Values that mean "made in the USA" on these documents. */
@@ -27,12 +28,9 @@ function capitaliseFirst(text: string): string {
   return trimmed ? trimmed[0].toUpperCase() + trimmed.slice(1) : trimmed
 }
 
-export function roundTo(value: number, decimals: number): number {
-  const factor = 10 ** decimals
-  // Nudge before rounding so binary representation error (0.544 + 0.544 = 1.0879999…)
-  // does not round the wrong way.
-  return Math.round((value + Number.EPSILON * Math.sign(value) * factor) * factor) / factor
-}
+// Re-exported from its home in `units`, where the quantity restatement needs it too. One
+// definition, for the reason that module's header gives.
+export { roundTo } from '../units'
 
 // ---------------------------------------------------------------------------
 // Join
@@ -219,6 +217,7 @@ export function aggregateLines(lines: MergedLine[], options: AggregationOptions)
     if (existing) {
       existing.sourceLineIds.push(line.id)
       existing.quantity += line.quantity
+      existing.reportingQuantity += line.quantity
       existing.weightKg += line.netWeightKg ?? 0
       existing.valueUsd += line.extendedValue ?? 0
       if (!existing.countriesOfOrigin.includes(line.countryOfOrigin)) {
@@ -236,7 +235,15 @@ export function aggregateLines(lines: MergedLine[], options: AggregationOptions)
         description: capitaliseFirst(line.commodityGroup || line.description),
         quantity: line.quantity,
         scheduleBUnit: null,
+        scheduleBUnits: [],
         sourceUom: line.uom,
+        // The document's own unit and count, which is what a row files until the Census
+        // dataset says otherwise. `reconcile` is the only thing that knows what a code
+        // requires, so it is the only thing that can improve on this — see
+        // `resolveReportingQuantity`.
+        reportingUom: canonicalUnit(line.uom) ?? '',
+        reportingQuantity: line.quantity,
+        reportingBasis: 'source',
         weightKg: line.netWeightKg ?? 0,
         valueUsd: line.extendedValue ?? 0,
         eccn,
@@ -251,6 +258,7 @@ export function aggregateLines(lines: MergedLine[], options: AggregationOptions)
     .map((line) => ({
       ...line,
       quantity: roundTo(line.quantity, 3),
+      reportingQuantity: roundTo(line.reportingQuantity, 3),
       weightKg: roundTo(line.weightKg, 3),
       valueUsd: roundTo(line.valueUsd, 2),
     }))

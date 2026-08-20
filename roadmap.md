@@ -27,6 +27,8 @@ B refresh, which cannot work in a browser.
 | **Second CIPL format** | ✅ Done | The SAP-style `SHIPMENT#` layout behind a format registry: single currency, stated ECCNs, no weights, two-digit dates. |
 | **Reconciliation** | ✅ Done | USD set selection, invoice↔packing-list join, grouping by Schedule B + D/F, blocking totals checks. |
 | **Schedule B validation** | ✅ Done | Census AES dataset: 10 digits, currently active, required unit of quantity, description plausibility. Staleness warning once a January/July revision passes the dataset's date. |
+| **Unit of quantity** | ✅ Done | Each row filed in the unit its commodity number requires — the net weight where Schedule B reports a code by weight — with the unit changeable per code on the review screen, carried identically into both SLIs and both keying sheets. Never invents a figure a shipment cannot state. |
+| **Incoterms** | ✅ Done | The rule read off `DAP Singapore`, `FOB Origin - Collect` or `Ex Works` rather than matched literally, with the named place preserved and written where a form has no box for it. Rules withdrawn since Incoterms 2020 reported, never remapped. |
 | **Item library** | ✅ Done | Item-master import (.xlsx/.csv/.tsv, columns matched by heading, explicit weight unit) supplying per-part weights, with the `####.##.####` + concordance filter flagging codes to fix by part number. |
 | **Nippon Express adapter** | ✅ Done | Blank form 01/04/2022, 8 commodity rows, per-cell fields. |
 | **CEVA adapter** | ✅ Done | Blank form 11201-C3 rev. 8/2023, multiline column fields, whole-dollar values. |

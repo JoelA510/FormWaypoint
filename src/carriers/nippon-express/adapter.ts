@@ -8,6 +8,7 @@ import {
   selectRadio,
   setText,
 } from '../form-utils'
+import { isNamedPlace, parseIncoterm, RETIRED_INCOTERMS } from '../../domain/incoterms'
 import {
   NIPPON_CONSIGNEE_TYPE,
   NIPPON_HEADER_FIELDS as F,
@@ -111,7 +112,16 @@ export function createNipponExpressAdapter(options: NipponOptions = {}): Carrier
       setText(ctx, F.pointOfOrigin, draft.pointOfOrigin)
       setText(ctx, F.destinationCountry, draft.destinationCountry)
       setText(ctx, F.shipmentReference, draft.shipmentReference)
-      setText(ctx, F.namedPlace, draft.namedPlace)
+      // The place that qualifies the Incoterm. Taken from the term itself when the operator
+      // left the box alone: an `omron-ci` invoice reading `DAP Singapore` names its place in
+      // the same string as the rule, and dropping it files a delivery term that does not say
+      // where delivery happens.
+      //
+      // Only where what follows the rule is actually a place. A trade-terms line is a
+      // composite, and `FOB Origin - Collect` leaves `Origin - Collect` behind — writing that
+      // into a box captioned "NAMED PLACE/PORT" would state a freight term as a port.
+      const statedPlace = parseIncoterm(draft.incoterm)?.namedPlace ?? ''
+      setText(ctx, F.namedPlace, draft.namedPlace || (isNamedPlace(statedPlace) ? statedPlace : ''))
 
       const mode = NIPPON_MODE[draft.mode]
       selectRadio(ctx, mode.field, mode.option)
@@ -126,10 +136,19 @@ export function createNipponExpressAdapter(options: NipponOptions = {}): Carrier
         ctx.warnings.push(`Service term "${draft.term}" is not on this form; left blank.`)
       }
 
-      const incoterm = normaliseIncoterm(draft.incoterm)
-      if (incoterm) selectRadio(ctx, R.incoterm.field, incoterm)
-      else if (draft.incoterm) {
-        ctx.warnings.push(`Incoterm "${draft.incoterm}" is not one of the form's options; left blank.`)
+      // Read as a *rule* rather than matched literally: what reaches here is `DAP Singapore`
+      // or `FOB Origin - Collect` as often as it is a bare code, and neither of those is an
+      // option on this form's list.
+      const stated = parseIncoterm(draft.incoterm)
+      const option = stated ? formOption(stated.code) : null
+      if (option) selectRadio(ctx, R.incoterm.field, option)
+      else if (draft.incoterm?.trim()) {
+        ctx.warnings.push(
+          stated?.retired
+            ? `Incoterm "${draft.incoterm.trim()}" is ${stated.code}, which Incoterms 2020 no longer has and this ` +
+                `form does not list. The current rule is ${RETIRED_INCOTERMS[stated.code]}; left blank.`
+            : `Incoterm "${draft.incoterm.trim()}" is not one of the form's options; left blank.`,
+        )
       }
 
       selectRadio(
@@ -162,9 +181,13 @@ export function createNipponExpressAdapter(options: NipponOptions = {}): Carrier
 
         setText(ctx, row.df, line.domesticForeign)
         setText(ctx, row.scheduleB, line.scheduleB)
-        setText(ctx, row.quantity, formatQuantity(line.quantity))
+        // The quantity in the unit the commodity number is reported in, which is not always
+        // the invoice's piece count — several codes are reported by weight — and box 25
+        // beside it names that unit, so the two have to be resolved together or the form
+        // states a count under a kilogram heading.
+        setText(ctx, row.quantity, line.reportingBasis === 'none' ? '' : formatQuantity(line.reportingQuantity))
         // Box 25. See the note at the top of this file.
-        setText(ctx, row.ddtcUom, line.scheduleBUnit ?? 'NO')
+        setText(ctx, row.ddtcUom, line.reportingUom || line.scheduleBUnit || 'NO')
         setText(ctx, row.weight, weight.toFixed(3))
         // The form applies its own currency formatting, so a plain number is written here.
         setText(ctx, row.value, line.valueUsd.toFixed(2))
@@ -186,12 +209,10 @@ export function createNipponExpressAdapter(options: NipponOptions = {}): Carrier
   }
 }
 
-/** Maps standard Incoterms onto the form's option names, including its `FAS`/`FCA` typos. */
-function normaliseIncoterm(incoterm: string): string | null {
-  const upper = (incoterm ?? '').trim().toUpperCase()
-  if (!upper) return null
+/** Maps a standard Incoterm onto the form's option name, including its `FAS`/`FCA` typos. */
+function formOption(code: string): string | null {
   const aliases: Record<string, string> = { FAS: 'FSA', FCA: 'FCP' }
-  const mapped = aliases[upper] ?? upper
+  const mapped = aliases[code] ?? code
   return (NIPPON_INCOTERM_OPTIONS as readonly string[]).includes(mapped) ? mapped : null
 }
 
