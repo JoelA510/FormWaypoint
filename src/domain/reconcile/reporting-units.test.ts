@@ -83,13 +83,15 @@ describe('the unit a commodity row is filed in', () => {
     const parsed = await shipment(BY_WEIGHT, { netWeightKg: undefined, grossWeightKg: undefined })
     const { sliLines, checks } = reconcile(parsed, scheduleB, CONTROLLED)
     const line = row(sliLines, BY_WEIGHT)
-    expect(line.reportingUom).toBe('NO')
+    // In the document's own words, because that is what the row is filing.
+    expect(line.reportingUom).toBe('PCS')
     expect(line.reportingQuantity).toBe(12)
 
     const uom = checks.find((c) => c.id.startsWith('sb-uom:'))!
     expect(uom.passed).toBe(false)
     expect(uom.severity).toBe('warning')
     expect(uom.expected).toBe('KG')
+    // Compared canonically, so the check reads the same whichever spelling was filed.
     expect(uom.actual).toBe('NO')
   })
 
@@ -126,7 +128,7 @@ describe('the unit a commodity row is filed in', () => {
     const { sliLines } = reconcile(await shipment(BY_WEIGHT), null, CONTROLLED)
     const line = row(sliLines, BY_WEIGHT)
     expect(line.scheduleBUnits).toEqual([])
-    expect(line.reportingUom).toBe('NO')
+    expect(line.reportingUom).toBe('PCS')
     expect(line.reportingQuantity).toBe(12)
   })
 })

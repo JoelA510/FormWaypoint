@@ -18,6 +18,7 @@
  * so minor layout drift between document revisions does not silently drop data.
  */
 import type { DocumentKind, DocumentSet, ParsedCipl, PartyAddress, ShipmentHeader, SourceLine } from '../types'
+import { parseIncoterm } from '../incoterms'
 import {
   extractTextPages,
   findLabelRow,
@@ -327,10 +328,19 @@ function tradeTermsValue(rows: TextRow[]): string | null {
   return labelValue(rows, 'TRADE TERMS:') ?? null
 }
 
-/** `FOB Origin - Collect` -> `FOB`. */
+/**
+ * `FOB Origin - Collect` -> `FOB`.
+ *
+ * Through the shared reader rather than its own regex. A bare leading-three-letters match
+ * accepted anything in that position — `PPD Collect` yielded an Incoterm of `PPD`, which no
+ * form has a box for and nothing downstream would have questioned.
+ *
+ * The rule alone, without what follows it. On this layout the remainder is the freight term
+ * (`Origin - Collect`), which `freightFromTradeTerms` reads separately — carrying it along as
+ * though it were a named place would put a payment term in a box that names a port.
+ */
 export function incotermFromTradeTerms(tradeTerms: string): string | null {
-  const match = tradeTerms.trim().match(/^([A-Z]{3})\b/)
-  return match ? match[1] : null
+  return parseIncoterm(tradeTerms)?.code ?? null
 }
 
 /** `FOB Origin - Collect` -> `COLLECT`. */

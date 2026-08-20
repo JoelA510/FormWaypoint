@@ -9,7 +9,7 @@ import { createScheduleBIndex, type ScheduleBIndex } from '../domain/schedule-b'
 import { reconcile } from '../domain/reconcile'
 import { buildDraft, defaultShipmentSettings, summariseReferences, type CompanyProfile } from '../domain/draft'
 import { getAdapter, detectCarrier } from './registry'
-import { parseIncoterm } from './form-utils'
+import { isNamedPlace, parseIncoterm } from '../domain/incoterms'
 import { buildSyntheticCipl, simpleShipment } from '../test/synthetic/cipl'
 import { buildKeyingSheet, keyingSheetToWorkbook } from './keying-sheet'
 import type { ParsedCipl, ShipmentHeader, SLILine } from '../domain/types'
@@ -521,6 +521,18 @@ describe('reading an Incoterm off a document', () => {
     expect(parseIncoterm('DDU')?.retired).toBe(true)
   })
 
+  it('tells a named place from a freight term', () => {
+    // A trade-terms line is a composite. What follows the rule is a place on `DAP Singapore`
+    // and a payment term on `FOB Origin - Collect`, and only the first belongs in a box
+    // captioned "NAMED PLACE/PORT".
+    expect(isNamedPlace('Singapore')).toBe(true)
+    expect(isNamedPlace('Long Beach')).toBe(true)
+    expect(isNamedPlace('Origin - Collect')).toBe(false)
+    expect(isNamedPlace('Prepaid')).toBe(false)
+    expect(isNamedPlace('DUTY PAID BY CONSIGNEE')).toBe(false)
+    expect(isNamedPlace('')).toBe(false)
+  })
+
   it('answers nothing for what is not an Incoterm', () => {
     expect(parseIncoterm('')).toBeNull()
     expect(parseIncoterm(null)).toBeNull()
@@ -587,6 +599,14 @@ describe('Nippon Express — quantity, its unit, and the named place', () => {
     const { values } = await fillWith({}, { incoterm: 'FOB Origin - Collect', namedPlace: 'SFO' })
     expect(values.INCOTERM).toBe('FOB')
     expect(values['NAMED PLACE/PORT']).toBe('SFO')
+  })
+
+  it('does not write a freight term into the named-place box', async () => {
+    // `FOB Origin - Collect` is the Vendor A trade-terms wording. "Origin - Collect" is who
+    // pays the freight, not a port, and box 15 is captioned "NAMED PLACE/PORT".
+    const { values } = await fillWith({}, { incoterm: 'FOB Origin - Collect', namedPlace: '' })
+    expect(values.INCOTERM).toBe('FOB')
+    expect(values['NAMED PLACE/PORT']).toBeUndefined()
   })
 
   it('says what a retired rule has become rather than selecting nothing quietly', async () => {
@@ -673,6 +693,16 @@ describe('CEVA — recording the Incoterm', () => {
   it('does not repeat a place the term already names', async () => {
     const { values } = await fillWith({ incoterm: 'DAP Singapore', namedPlace: 'Singapore' })
     expect(values['Special Instructions']).toBe('Incoterm: DAP Singapore')
+  })
+
+  it('lets the operator’s named place win, as the Nippon form does', async () => {
+    // The two forms disagreeing about whose place wins is how one shipment gets filed two
+    // ways. Typing one is a deliberate act; the document is the default.
+    const { values, warnings } = await fillWith({ incoterm: 'DAP Singapore', namedPlace: 'Rotterdam' })
+    expect(values.DAP).toBe('checked')
+    expect(values['Special Instructions']).toBe('Incoterm: DAP Rotterdam')
+    // And the disagreement is said out loud rather than applied quietly.
+    expect(warnings.join(' ')).toMatch(/DAP Singapore/)
   })
 
   it('keeps the operator’s own instructions and the EORI beside it', async () => {

@@ -16,7 +16,6 @@ import type {
   SourceLine,
 } from '../types'
 import {
-  canonicalUnit,
   checkClassification,
   formatScheduleB,
   normalizeScheduleB,
@@ -195,9 +194,13 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
   // a reporting error that nothing else on the form gives any sign of. The document's own
   // figure is never overwritten — `quantity` and `sourceUom` still say what was printed.
   for (const line of sliLines) {
+    // The Census file's own spellings, not their canonical forms. `canonicalUnit` exists to
+    // make what a *document* prints comparable with what the file requires; using it on the
+    // file's side too would file `NO` against the 51 commodity numbers the file reports in
+    // `PCS`, which is a unit it does not list for them.
     const accepted = (index?.lookup(line.scheduleB)?.units ?? [])
-      .map((unit) => canonicalUnit(unit))
-      .filter((unit): unit is string => Boolean(unit))
+      .map((unit) => unit.trim().toUpperCase())
+      .filter(Boolean)
     line.scheduleBUnit = accepted[0] ?? null
     line.scheduleBUnits = accepted
     const restated = resolveReportingQuantity(

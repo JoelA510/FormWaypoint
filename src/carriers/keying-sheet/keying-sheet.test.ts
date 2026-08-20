@@ -186,6 +186,80 @@ describe('the unit each commodity is keyed in', () => {
     expect(keyingSheetToWorkbook(sheet)[0].rows.flat().join(' ')).toMatch(/no figure for it/)
   })
 
+  it('leaves the quantity total blank when the rows are in different units', () => {
+    // Pieces added to kilograms is not a quantity. The review screen makes the same call for
+    // the same column; a figure here that only the Notes tab qualifies is one somebody reads
+    // straight off the grid.
+    const lines = [
+      line({ id: 'a', classification: '8544.42.0000', quantity: 2, netWeightKg: 7.438 }),
+      line({ id: 'b', classification: '9031.90.0000', quantity: 4, netWeightKg: 4.263 }),
+    ]
+    const sheet = buildKeyingSheet(
+      'fedex-ship-manager',
+      fixture(lines, [sli({}), byWeight({ scheduleB: '9031.90.0000' })]),
+      draft(),
+      { options: { columns: ['quantity', 'unitOfMeasure', 'totalValue'] } },
+    )
+    // Columns are Qty, UOM, Total Customs Value; UOM is not totalled, so it takes the label
+    // and the quantity column keeps its own cell.
+    const rows = keyingSheetToWorkbook(sheet)[0].rows
+    expect(rows.at(-1)).toEqual(['', 'TOTAL', 568])
+
+    const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
+    expect(notes.Check).toMatch(/leaves its quantity total blank/)
+  })
+
+  it('still totals the quantity when every row shares a unit', () => {
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], [sli({})]), draft(), {
+      options: { columns: ['quantity', 'unitOfMeasure', 'totalValue'] },
+    })
+    expect(keyingSheetToWorkbook(sheet)[0].rows.at(-1)).toEqual([2, 'TOTAL', 284])
+  })
+
+  it('keys the document’s own count for a code Schedule B files no quantity for', () => {
+    // Eight commodity numbers carry unit `X`. The SLI leaves the box blank; a commodity
+    // record in Ship Manager still needs a figure, and keying a literal 0 against goods worth
+    // $284 is how a shipment gets entered as nothing at all.
+    const lines = [line({ classification: '9801.10.0000', quantity: 2, netWeightKg: 7.438 })]
+    const noQuantity = sli({
+      scheduleB: '9801.10.0000',
+      scheduleBUnit: 'X',
+      scheduleBUnits: ['X'],
+      reportingUom: 'X',
+      reportingQuantity: 0,
+      reportingBasis: 'none',
+    })
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(lines, [noQuantity]), draft(), {
+      options: { columns: ['quantity', 'unitOfMeasure', 'note'] },
+    })
+    const [row] = sheet.commodities
+    expect(row.quantity).toBe('2')
+    expect(row.unitOfMeasure).toBe('PCS')
+    expect(row.quantityNotFiled).toBe(true)
+    expect(keyingSheetToWorkbook(sheet)[0].rows.flat().join(' ')).toMatch(/files no quantity/)
+  })
+
+  it('marks a converted figure as one the document does not print', () => {
+    // 2 pieces keyed as 0.16667 dozen. Neither the figure nor the unit is on the invoice.
+    const lines = [line({ classification: '6116.10.1300', quantity: 2, netWeightKg: 7.438 })]
+    const inDozens = sli({
+      scheduleB: '6116.10.1300',
+      scheduleBUnit: 'DOZ',
+      scheduleBUnits: ['DOZ'],
+      reportingUom: 'DOZ',
+      reportingQuantity: 0.16667,
+      reportingBasis: 'converted',
+    })
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(lines, [inDozens]), draft(), {
+      options: { columns: ['quantity', 'unitOfMeasure', 'note'] },
+    })
+    const [row] = sheet.commodities
+    expect(row.quantity).toBe('0.16667')
+    expect(row.unitOfMeasure).toBe('DOZ')
+    expect(row.quantityConverted).toBe(true)
+    expect(keyingSheetToWorkbook(sheet)[0].rows.flat().join(' ')).toMatch(/does not print this figure/)
+  })
+
   it('leaves a code reported by the piece alone', () => {
     const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], [sli({})]), draft())
     expect(sheet.commodities[0].unitOfMeasure).toBe('PCS')

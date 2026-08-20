@@ -285,8 +285,19 @@ function ReportingUnitPicker({
   onChange?: (unit: string) => void
 }) {
   const source: QuantitySource = { quantity: line.quantity, uom: line.sourceUom, weightKg: line.weightKg }
-  const sourceUnit = canonicalUnit(line.sourceUom) ?? ''
-  const offered = [...new Set([...line.scheduleBUnits, sourceUnit].filter(Boolean))]
+  // Deduped by canonical form, listed in the spelling that will be filed. The Census file
+  // says `PCS` where an invoice says `PCS` and the alias table calls both `NO`; offering all
+  // three would be three options for one unit.
+  const offered = [...
+    [...line.scheduleBUnits, line.sourceUom.trim().toUpperCase()]
+      .filter(Boolean)
+      .reduce((seen, unit) => {
+        const key = canonicalUnit(unit) ?? unit
+        if (!seen.has(key)) seen.set(key, unit)
+        return seen
+      }, new Map<string, string>())
+      .values(),
+  ]
   // Resolved without the current choice, so the option names what the default *is* rather
   // than echoing whatever is selected — "Schedule B default (NO)" beside a row that has been
   // switched off the Schedule B unit is the one label that must never appear here.
@@ -315,7 +326,13 @@ function ReportingUnitPicker({
         </Select>
       ) : null}
       <p className="tabular text-[var(--color-ink)]">{figure}</p>
-      <p className="text-xs text-[var(--color-ink-faint)]">{basisNote(line, Boolean(chosen))}</p>
+      {/* Whether the choice was *honoured*, not merely made. One commodity number can carry
+          more than one row — they are keyed on D/F and the export-control triplet too — so a
+          unit chosen for the code can be reachable on one row and not on another, and the
+          row that fell back must point at the missing figure rather than at a decision. */}
+      <p className="text-xs text-[var(--color-ink-faint)]">
+        {basisNote(line, Boolean(chosen) && canonicalUnit(chosen) === canonicalUnit(line.reportingUom))}
+      </p>
     </div>
   )
 }
@@ -336,8 +353,12 @@ function basisNote(line: SLILine, byChoice: boolean): string {
       ? `Filed in ${line.reportingUom} by your choice; Schedule B requires ${required}.`
       : `Schedule B requires ${required}; this row can only state ${line.reportingUom}.`
   }
-  return line.reportingBasis === 'net-weight'
-    ? 'Net weight — this code is reported by weight, not by the piece.'
+  if (line.reportingBasis === 'net-weight') {
+    return 'Net weight — this code is reported by weight, not by the piece.'
+  }
+  // Not "as invoiced": the document carries neither this figure nor this unit.
+  return line.reportingBasis === 'converted'
+    ? `Converted from ${line.quantity} ${line.sourceUom}.`
     : 'As invoiced.'
 }
 

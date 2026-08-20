@@ -3,6 +3,7 @@
  */
 import type { MergedLine, SLILine, SourceLine } from '../types'
 import { canonicalUnit, formatScheduleB, normalizeScheduleB } from '../schedule-b'
+import { roundTo } from '../units'
 import { partKey } from '../part-key'
 
 /** Values that mean "made in the USA" on these documents. */
@@ -27,12 +28,9 @@ function capitaliseFirst(text: string): string {
   return trimmed ? trimmed[0].toUpperCase() + trimmed.slice(1) : trimmed
 }
 
-export function roundTo(value: number, decimals: number): number {
-  const factor = 10 ** decimals
-  // Nudge before rounding so binary representation error (0.544 + 0.544 = 1.0879999…)
-  // does not round the wrong way.
-  return Math.round((value + Number.EPSILON * Math.sign(value) * factor) * factor) / factor
-}
+// Re-exported from its home in `units`, where the quantity restatement needs it too. One
+// definition, for the reason that module's header gives.
+export { roundTo } from '../units'
 
 // ---------------------------------------------------------------------------
 // Join

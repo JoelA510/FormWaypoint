@@ -5,11 +5,10 @@ import {
   formatDateMMDDYYYY,
   joinLines,
   loadForm,
-  parseIncoterm,
-  RETIRED_INCOTERMS,
   selectRadio,
   setText,
 } from '../form-utils'
+import { isNamedPlace, parseIncoterm, RETIRED_INCOTERMS } from '../../domain/incoterms'
 import {
   NIPPON_CONSIGNEE_TYPE,
   NIPPON_HEADER_FIELDS as F,
@@ -117,7 +116,12 @@ export function createNipponExpressAdapter(options: NipponOptions = {}): Carrier
       // left the box alone: an `omron-ci` invoice reading `DAP Singapore` names its place in
       // the same string as the rule, and dropping it files a delivery term that does not say
       // where delivery happens.
-      setText(ctx, F.namedPlace, draft.namedPlace || parseIncoterm(draft.incoterm)?.namedPlace)
+      //
+      // Only where what follows the rule is actually a place. A trade-terms line is a
+      // composite, and `FOB Origin - Collect` leaves `Origin - Collect` behind — writing that
+      // into a box captioned "NAMED PLACE/PORT" would state a freight term as a port.
+      const statedPlace = parseIncoterm(draft.incoterm)?.namedPlace ?? ''
+      setText(ctx, F.namedPlace, draft.namedPlace || (isNamedPlace(statedPlace) ? statedPlace : ''))
 
       const mode = NIPPON_MODE[draft.mode]
       selectRadio(ctx, mode.field, mode.option)

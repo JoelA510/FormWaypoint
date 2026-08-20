@@ -22,9 +22,37 @@ describe('restating a quantity in the unit Schedule B requires', () => {
     // 2 kg stated as 2 kg is 2000 g. The net weight is not consulted: the printed figure is
     // the one the document asserts, and the two can disagree on a line the join missed.
     const byWeight: QuantitySource = { quantity: 2, uom: 'KG', weightKg: 9.9 }
-    expect(restateQuantity(byWeight, 'GM')).toEqual({ unit: 'GM', quantity: 2000, basis: 'source' })
-    expect(restateQuantity(byWeight, 'T')).toEqual({ unit: 'T', quantity: 0.002, basis: 'source' })
+    expect(restateQuantity(byWeight, 'GM')).toEqual({ unit: 'GM', quantity: 2000, basis: 'converted' })
+    expect(restateQuantity(byWeight, 'T')).toEqual({ unit: 'T', quantity: 0.002, basis: 'converted' })
     expect(restateQuantity({ quantity: 24, uom: 'PCS', weightKg: 1 }, 'DOZ')?.quantity).toBe(2)
+  })
+
+  it('calls a converted figure converted, never "as invoiced"', () => {
+    // The document carries neither 0.83333 nor the word DOZ. Every surface that explains a
+    // filed quantity reads this field to decide whether to vouch for it as transcribed.
+    expect(restateQuantity({ quantity: 10, uom: 'PCS', weightKg: 1 }, 'DOZ')?.basis).toBe('converted')
+    // An identity restatement genuinely is the invoice's own figure.
+    expect(restateQuantity({ quantity: 10, uom: 'PCS', weightKg: 1 }, 'NO')?.basis).toBe('source')
+  })
+
+  it('keeps enough decimals that a down-scaled figure is still the same quantity', () => {
+    // Three decimals is right for kilograms and wrong for every unit that is a large
+    // multiple of the one being converted from. `0.004` tonnes is 4 kg — a 4.263 kg shipment
+    // would lose 6% of its declared weight on the way into the box.
+    expect(restateQuantity({ quantity: 12, uom: 'PCS', weightKg: 4.263 }, 'T')?.quantity).toBe(0.004263)
+    expect(restateQuantity({ quantity: 10, uom: 'PCS', weightKg: 1 }, 'DOZ')?.quantity).toBe(0.83333)
+    expect(restateQuantity({ quantity: 5, uom: 'PCS', weightKg: 1 }, 'GRS')?.quantity).toBe(0.034722)
+    expect(restateQuantity({ quantity: 5, uom: 'PCS', weightKg: 1 }, 'THS')?.quantity).toBe(0.005)
+    // Scaling a figure up needs no extra places.
+    expect(restateQuantity({ quantity: 2, uom: 'KG', weightKg: 2 }, 'GM')?.quantity).toBe(2000)
+  })
+
+  it('files the unit in the spelling it was asked for, not its canonical form', () => {
+    // The Census file lists both `NO` and `PCS`, and 51 commodity numbers are reported in
+    // `PCS`. Filing `NO` against one of those states a unit the file does not list for it —
+    // the alias table exists to normalise what a *document* prints, not what the file requires.
+    expect(restateQuantity({ quantity: 5, uom: 'EA', weightKg: 1 }, 'PCS')?.unit).toBe('PCS')
+    expect(restateQuantity({ quantity: 5, uom: 'PCS', weightKg: 1 }, 'NO')?.unit).toBe('NO')
   })
 
   it('refuses rather than inventing a figure nothing on the row supports', () => {
@@ -89,11 +117,12 @@ describe('choosing the unit a commodity row is filed in', () => {
   })
 
   it('falls back to what the document printed when no required unit is reachable', () => {
-    // The reconciliation warns about this row; it does not get a fabricated figure.
-    expect(resolveReportingQuantity(WEIGHTLESS, ['KG'])).toEqual({ unit: 'NO', quantity: 12, basis: 'source' })
+    // The reconciliation warns about this row; it does not get a fabricated figure. And it
+    // falls back in the document's own words — `PCS`, which is what it says.
+    expect(resolveReportingQuantity(WEIGHTLESS, ['KG'])).toEqual({ unit: 'PCS', quantity: 12, basis: 'source' })
   })
 
   it('falls back when the code is not in the Census file at all', () => {
-    expect(resolveReportingQuantity(CABLES, [])).toEqual({ unit: 'NO', quantity: 12, basis: 'source' })
+    expect(resolveReportingQuantity(CABLES, [])).toEqual({ unit: 'PCS', quantity: 12, basis: 'source' })
   })
 })

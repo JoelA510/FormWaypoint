@@ -6,11 +6,10 @@ import {
   formatDateMMDDYYYY,
   joinLines,
   loadForm,
-  parseIncoterm,
-  RETIRED_INCOTERMS,
   setCheckBox,
   setText,
 } from '../form-utils'
+import { parseIncoterm, RETIRED_INCOTERMS } from '../../domain/incoterms'
 import { CEVA_CHECKBOXES, CEVA_CONSIGNEE_TYPE, CEVA_FIELDS as F, CEVA_INCOTERMS, CEVA_MAX_ROWS, CEVA_REQUIRED_FIELDS } from './fields'
 
 /**
@@ -97,17 +96,18 @@ export function createCevaAdapter(): CarrierAdapter {
       const ticked = Boolean(incoterm && (CEVA_INCOTERMS as readonly string[]).includes(incoterm.code))
       if (incoterm && ticked) {
         setCheckBox(ctx, incoterm.code, true)
-      } else if (incoterm?.retired) {
-        ctx.warnings.push(
-          `Incoterm "${stated}" is ${incoterm.code}, which Incoterms 2020 no longer has and this revision of the ` +
-            `form has no box for. It is written into the special instructions; the current rule is ` +
-            `${RETIRED_INCOTERMS[incoterm.code]} — reclassify the term and tick the box by hand if that is what ` +
-            'the sale actually is.',
-        )
       } else if (incoterm) {
+        // Every current rule has a box on rev. 8/2023, so in practice this is a rule that was
+        // withdrawn. The other half of the message is kept for the revision that drops one:
+        // `CEVA_INCOTERMS` tracks the printed form, and it has lost a box before.
         ctx.warnings.push(
-          `Incoterm "${incoterm.code}" has no box on this revision of the form; it is written into the special ` +
-            'instructions instead of being lost, but no box was ticked.',
+          incoterm.retired
+            ? `Incoterm "${stated}" is ${incoterm.code}, which Incoterms 2020 no longer has and this revision of ` +
+                `the form has no box for. It is written into the special instructions; the current rule is ` +
+                `${RETIRED_INCOTERMS[incoterm.code]} — reclassify the term and tick the box by hand if that is ` +
+                'what the sale actually is.'
+            : `Incoterm "${incoterm.code}" has no box on this revision of the form; it is written into the ` +
+                'special instructions instead of being lost, but no box was ticked.',
         )
       } else if (stated) {
         ctx.warnings.push(
@@ -127,12 +127,24 @@ export function createCevaAdapter(): CarrierAdapter {
       // `FOB` does not say which port, and a term no box covers. A bare rule that was ticked
       // is already stated, and repeating it would only add noise to a box people read.
       //
-      // The place comes from the term itself where the document stated one (`DAP Singapore`),
-      // and from the operator otherwise — this form has no named-place box, so that field is
-      // only ever going to reach the paper through here.
-      const namedPlace = incoterm?.namedPlace || (draft.namedPlace ?? '').trim()
-      const fullTerm = incoterm?.namedPlace ? stated : [stated, namedPlace].filter(Boolean).join(' ')
+      // The place comes from the operator where they gave one, and from the term itself
+      // otherwise — this form has no named-place box, so that field is only ever going to
+      // reach the paper through here. Typing one is a deliberate act and the document is a
+      // default, which is the same precedence the Nippon form's box 15 uses; the two forms
+      // disagreeing about whose place wins is how one shipment gets filed two ways.
+      const operatorPlace = (draft.namedPlace ?? '').trim()
+      const statedPlace = incoterm?.namedPlace ?? ''
+      const namedPlace = operatorPlace || statedPlace
+      const fullTerm = operatorPlace && incoterm ? `${incoterm.code} ${operatorPlace}` : stated
       const incotermNote = stated && (!ticked || namedPlace) ? `Incoterm: ${fullTerm}` : ''
+      // Overriding a place the document states is a decision, not a typo, so it is made
+      // visible rather than applied quietly.
+      if (operatorPlace && statedPlace && operatorPlace.toLowerCase() !== statedPlace.toLowerCase()) {
+        ctx.warnings.push(
+          `The document states the Incoterm as "${stated}", but the named place entered for this shipment is ` +
+            `"${operatorPlace}". The form carries "${fullTerm}"; check which is right before signing.`,
+        )
+      }
       const instructions = [
         draft.specialInstructions,
         incotermNote,

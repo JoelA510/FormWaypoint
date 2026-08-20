@@ -102,10 +102,24 @@ export interface KeyingCommodityRow {
    */
   quantityFromNetWeight?: boolean
   /**
+   * Set when the figure is the document's own quantity restated into another unit — ten
+   * pieces keyed as `0.83333` dozen. A derived number, and the row says so rather than
+   * letting it pass as something the document printed.
+   */
+  quantityConverted?: boolean
+  /**
    * Set when this row could not be stated in the unit its commodity number requires — the
    * SLI files that unit and this row cannot, so the two disagree and the sheet says which.
    */
   unitUnavailable?: string
+  /**
+   * Set for the eight commodity numbers Schedule B files with no quantity at all.
+   *
+   * The row still carries the document's own count, because a commodity record in Ship
+   * Manager or WorldShip needs one whatever AES asks for — but the sheet says the figure is
+   * for the application rather than for the declaration, which the SLI leaves blank.
+   */
+  quantityNotFiled?: boolean
   /** Six decimal places, as Ship Manager displays and stores it. */
   unitValue: string
   totalValue: string
@@ -320,14 +334,33 @@ function keyedQuantity(
   quantity: number,
   weightKg: number,
   wanted: string | undefined,
-): { quantity: number; unit: string; fromNetWeight: boolean; unavailable?: string } {
+): {
+  quantity: number
+  unit: string
+  fromNetWeight: boolean
+  converted?: boolean
+  unavailable?: string
+  notFiled?: boolean
+} {
   const printed = unitFor(group)
-  if (!wanted || wanted === (canonicalUnit(printed) ?? printed)) {
-    return { quantity: roundTo(quantity, 3), unit: printed, fromNetWeight: false }
-  }
+  const asPrinted = { quantity: roundTo(quantity, 3), unit: printed, fromNetWeight: false }
+  // Compared canonically, kept in the document's spelling: `PCS` and `NO` are one unit, and
+  // the operator is keying against a document that says `PCS`.
+  if (!wanted || canonicalUnit(wanted) === (canonicalUnit(printed) ?? printed)) return asPrinted
+
   const restated = restateQuantity({ quantity, uom: printed, weightKg }, wanted)
-  if (!restated) return { quantity: roundTo(quantity, 3), unit: printed, fromNetWeight: false, unavailable: wanted }
-  return { quantity: restated.quantity, unit: restated.unit, fromNetWeight: restated.basis === 'net-weight' }
+  if (!restated) return { ...asPrinted, unavailable: wanted }
+  // The declaration files no quantity for this code, but the application still needs one, so
+  // the row keys what the document counted and says which of the two it is. Writing the
+  // literal 0 that "no quantity" restates to would have the operator key nothing at all
+  // against a commodity that has a value.
+  if (restated.basis === 'none') return { ...asPrinted, notFiled: true }
+  return {
+    quantity: restated.quantity,
+    unit: restated.unit,
+    fromNetWeight: restated.basis === 'net-weight',
+    converted: restated.basis === 'converted',
+  }
 }
 
 /** `MY - Malaysia`, or the name and a prompt where no code could be found for it. */
@@ -469,7 +502,9 @@ function groupForKeying(
       quantity: String(keyed.quantity),
       unitOfMeasure: keyed.unit,
       quantityFromNetWeight: keyed.fromNetWeight,
+      quantityConverted: keyed.converted,
       unitUnavailable: keyed.unavailable,
+      quantityNotFiled: keyed.notFiled,
       // Derived from the group's own total rather than copied off one line, so the unit
       // price and the total beside it can never disagree. Per *keyed* unit, so that
       // quantity x unit price still comes back to the customs value on a row filed by
@@ -1077,9 +1112,15 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
         const unitNote = row.unitUnavailable
           ? `quantity is the ${row.unitOfMeasure} the document prints; this code files in ` +
             `${row.unitUnavailable} and this row has no figure for it`
-          : row.quantityFromNetWeight
-            ? `quantity is the net weight in ${row.unitOfMeasure} — this code is reported by weight, not by the piece`
-            : ''
+          : row.quantityNotFiled
+            ? `Schedule B files no quantity for this code; the ${row.unitOfMeasure} figure is the document's own, ` +
+              'for this application only'
+            : row.quantityFromNetWeight
+              ? `quantity is the net weight in ${row.unitOfMeasure} — this code is reported by weight, not by the piece`
+              : row.quantityConverted
+                ? `quantity is restated in ${row.unitOfMeasure}, the unit this code is reported in — the document ` +
+                  'does not print this figure'
+                : ''
         if (row.describedByOperator) return join(unitNote, 'your wording')
         // "also" only where the description itself came from the document. Beside Census
         // wording it would assert the CIPL had used the official text, which it did not.
@@ -1103,6 +1144,12 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
    * summing unit prices down a column is a figure that means nothing.
    */
   const TOTALLED = new Set<CommodityColumnId>(['quantity', 'totalValue', 'weightLb', 'weightKg'])
+  // Whether the quantity column can be totalled at all. Rows are filed in the unit their own
+  // commodity number requires, so a sheet can hold pieces beside kilograms — and pieces added
+  // to kilograms is not a quantity. The review screen leaves its own footer cell blank for
+  // the same reason; a figure here that the Notes tab has to describe as "in mixed units" is
+  // a number somebody reads off the grid without ever seeing that caveat.
+  const oneUnit = new Set(sheet.commodities.map((c) => c.unitOfMeasure.trim()).filter(Boolean)).size <= 1
   // The word goes in the leftmost column that is not itself a total, so it never displaces a
   // figure. Where every chosen column carries one it takes the first anyway: an unlabelled
   // row of figures at the foot of a grid is indistinguishable from another commodity, and
@@ -1114,7 +1161,7 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
     if (labelDisplacesAFigure && id === labelColumn) return 'TOTAL'
     switch (id) {
       case 'quantity':
-        return sheet.totals.quantity
+        return oneUnit ? sheet.totals.quantity : ''
       case 'totalValue':
         return numberOr(sheet.totals.customsValue)
       case 'weightLb':
@@ -1151,6 +1198,8 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
   const printed = new Set(sheet.options.columns)
   const alternatives = sheet.commodities.some((c) => c.otherDescriptions.length || c.describedByOperator)
   const byWeight = sheet.commodities.filter((c) => c.quantityFromNetWeight).length
+  const converted = sheet.commodities.filter((c) => c.quantityConverted).length
+  const notFiled = sheet.commodities.filter((c) => c.quantityNotFiled).length
   const unstatable = sheet.commodities.filter((c) => c.unitUnavailable)
   // What the quantity column is actually counting. A single unit is named; a mixed sheet
   // says so rather than calling a column of kilograms and pieces "pcs", which is what the
@@ -1203,6 +1252,11 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
       `This sheet: ${sheet.totals.commodities} commodities · ${sheet.totals.quantity} ${keyedUnitLabel} · ` +
         `${sheet.totals.customsValue} USD · ${sheet.totals.shipmentWeightLb} lb · ${sheet.totals.shipmentWeightKg} kg. ` +
         'Those are the printed rows added up. ' +
+        (keyedUnits.length > 1
+          ? 'The rows are in more than one unit, so the grid leaves its quantity total blank — the figure ' +
+            'above is what those quantities add up to, and it is only meaningful as a cross-check that no ' +
+            'row was dropped. '
+          : '') +
         (labelDisplacesAFigure
           ? 'Every chosen column carries a total, so the word TOTAL sits in the first of them and that ' +
             'one figure is only stated here.'
@@ -1217,7 +1271,7 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
     ],
   ]
 
-  if (byWeight || unstatable.length) {
+  if (byWeight || converted || notFiled || unstatable.length) {
     notes.push([
       'Unit of quantity',
       (byWeight
@@ -1225,6 +1279,14 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
           'count, because the Census Bureau reports those commodity numbers by weight. The SLI for this ' +
           'shipment files the same figures, so the two agree. '
         : '') +
+        (converted
+          ? `${converted} row(s) carry the document's own figure restated into the unit their commodity number ` +
+            'is reported in. The document does not print those figures; they were worked out from the ones it does. '
+          : '') +
+        (notFiled
+          ? `${notFiled} row(s) are under a commodity number Schedule B files with no quantity at all. Their ` +
+            'figure is the document\'s own count, carried because the application needs one — the SLI leaves it blank. '
+          : '') +
         (unstatable.length
           ? `${unstatable.length} row(s) could not be stated in the unit their commodity number requires ` +
             `(${[...new Set(unstatable.map((c) => c.unitUnavailable))].join(', ')}) and carry the document's own ` +

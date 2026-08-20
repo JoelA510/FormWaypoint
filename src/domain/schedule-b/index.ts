@@ -330,16 +330,23 @@ export function checkClassification(subject: ClassificationSubject, index: Sched
   const filed = canonicalUnit(subject.reportingUom) ?? printed
   if (required.length && filed) {
     const ok = required.includes(filed)
-    const restated = subject.reportingBasis === 'net-weight'
     const wanted = required[0]
+    // How the figure was arrived at, where that is not simply "off the invoice". Both cases
+    // put a number on the form that the document does not print, and a check that called
+    // either of them "matching the invoice" would vouch for a figure nobody transcribed.
+    const worked =
+      subject.reportingBasis === 'net-weight'
+        ? `so the row files the net weight in ${filed} rather than the ${printed ?? 'invoice'} count the invoice prints`
+        : subject.reportingBasis === 'converted'
+          ? `so the row files the invoice's ${printed ?? 'own'} figure restated as ${filed}`
+          : ''
     results.push({
       id: `sb-uom:${subject.ref ?? digits}`,
       severity: ok ? 'info' : 'warning',
       title: `${pretty} quantity is reported in the required unit`,
       detail: ok
-        ? restated
-          ? `Schedule B reports this code in ${required.join(' and ')}, so the row files the net weight in ` +
-            `${filed} rather than the ${printed ?? 'invoice'} count the invoice prints.`
+        ? worked
+          ? `Schedule B reports this code in ${required.join(' and ')}, ${worked}.`
           : `Schedule B reports this code in ${required.join(' and ')}, matching the invoice.`
         : `Schedule B requires this code to be reported in ${required.join(' or ')}, but this row files ${filed}. ` +
           (wanted === 'KG'
