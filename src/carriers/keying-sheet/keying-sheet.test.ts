@@ -55,7 +55,11 @@ const sli = (over: Partial<SLILine>): SLILine =>
     description: 'Electrical Conductors',
     quantity: 6,
     scheduleBUnit: 'NO',
+    scheduleBUnits: ['NO'],
     sourceUom: 'PCS',
+    reportingUom: 'NO',
+    reportingQuantity: 6,
+    reportingBasis: 'source',
     weightKg: 8.118,
     valueUsd: 749.4,
     eccn: 'EAR99',
@@ -122,6 +126,80 @@ const draft = (over: Partial<SliDraft> = {}): SliDraft =>
     shipmentReference: '',
     ...over,
   }) as SliDraft
+
+/**
+ * The sheet and the SLI describe one shipment. If the form files a commodity number by
+ * weight and the sheet keys it by the piece, the two documents state different quantities
+ * for the same goods and neither says which is meant — so the sheet follows the unit
+ * `reconcile` resolved for that commodity number.
+ */
+describe('the unit each commodity is keyed in', () => {
+  /** The SLI row for a code the Census Bureau reports in kilograms. */
+  const byWeight = (over: Partial<SLILine> = {}) =>
+    sli({
+      scheduleB: '9031.90.0000',
+      scheduleBUnit: 'KG',
+      scheduleBUnits: ['KG'],
+      reportingUom: 'KG',
+      reportingQuantity: 8.118,
+      reportingBasis: 'net-weight',
+      ...over,
+    })
+
+  it('keys the net weight where the SLI files the net weight', () => {
+    const lines = [line({ classification: '9031.90.0000', quantity: 2, netWeightKg: 7.438 })]
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(lines, [byWeight()]), draft())
+    const [row] = sheet.commodities
+    expect(row.unitOfMeasure).toBe('KG')
+    expect(row.quantity).toBe('7.438')
+    expect(row.quantityFromNetWeight).toBe(true)
+    // Per kilogram, so quantity x unit price still returns the customs value the row prints.
+    expect(Number(row.unitValue) * Number(row.quantity)).toBeCloseTo(Number(row.totalValue), 2)
+  })
+
+  it('restates each keying row from its own figures, not from the SLI row’s', () => {
+    // The default grouping splits one commodity number across parts, so the rows are not the
+    // SLI's rows and cannot take its total.
+    const lines = [
+      line({ id: 'a', partNumber: 'AAA-1', classification: '9031.90.0000', quantity: 2, netWeightKg: 3 }),
+      line({ id: 'b', partNumber: 'BBB-2', classification: '9031.90.0000', quantity: 4, netWeightKg: 5.118 }),
+    ]
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(lines, [byWeight()]), draft())
+    expect(sheet.commodities.map((c) => c.quantity)).toEqual(['3', '5.118'])
+    expect(sheet.commodities.every((c) => c.unitOfMeasure === 'KG')).toBe(true)
+  })
+
+  it('keeps the document’s own figure where the row has no weight, and says so', () => {
+    // `vendor-b` prints no weights at all. A kilogram figure cannot be produced for these
+    // goods, and inventing one would be a misdeclaration.
+    const lines = [line({ classification: '9031.90.0000', quantity: 2, netWeightKg: undefined })]
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(lines, [byWeight()]), draft(), {
+      options: { columns: ['quantity', 'unitOfMeasure', 'note'] },
+    })
+    const [row] = sheet.commodities
+    expect(row.quantity).toBe('2')
+    expect(row.unitOfMeasure).toBe('PCS')
+    expect(row.unitUnavailable).toBe('KG')
+
+    const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
+    expect(notes['Unit of quantity']).toMatch(/KG/)
+    expect(keyingSheetToWorkbook(sheet)[0].rows.flat().join(' ')).toMatch(/no figure for it/)
+  })
+
+  it('leaves a code reported by the piece alone', () => {
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], [sli({})]), draft())
+    expect(sheet.commodities[0].unitOfMeasure).toBe('PCS')
+    expect(sheet.commodities[0].quantityFromNetWeight).toBe(false)
+  })
+
+  it('marks a weight-keyed row on the Commodities tab', () => {
+    const lines = [line({ classification: '9031.90.0000', quantity: 2, netWeightKg: 7.438 })]
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(lines, [byWeight()]), draft(), {
+      options: { columns: ['quantity', 'unitOfMeasure', 'note'] },
+    })
+    expect(keyingSheetToWorkbook(sheet)[0].rows.flat().join(' ')).toMatch(/net weight in KG/)
+  })
+})
 
 describe('unit conversion', () => {
   it('converts kilograms to pounds, which is what both applications ask for', () => {
@@ -1084,7 +1162,10 @@ describe('a grid that says what its last row is', () => {
       options: { columns: ['quantity', 'totalValue'] },
     })
     const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
-    expect(notes.Check).toContain('2 pcs')
+    // The unit the rows are actually keyed in, not a blanket "pcs": a sheet whose quantity
+    // column holds kilograms — several Schedule B numbers are reported that way — cannot have
+    // its total described as a piece count.
+    expect(notes.Check).toContain('2 PCS')
     expect(notes.Check).toContain('284.00 USD')
   })
 })

@@ -1,5 +1,16 @@
+import type { SLILine } from '../../domain/types'
 import type { CarrierAdapter, FillResult, SliDraft, TemplateVerification } from '../types'
-import { createContext, findMissingFields, formatDateMMDDYYYY, joinLines, loadForm, setCheckBox, setText } from '../form-utils'
+import {
+  createContext,
+  findMissingFields,
+  formatDateMMDDYYYY,
+  joinLines,
+  loadForm,
+  parseIncoterm,
+  RETIRED_INCOTERMS,
+  setCheckBox,
+  setText,
+} from '../form-utils'
 import { CEVA_CHECKBOXES, CEVA_CONSIGNEE_TYPE, CEVA_FIELDS as F, CEVA_INCOTERMS, CEVA_MAX_ROWS, CEVA_REQUIRED_FIELDS } from './fields'
 
 /**
@@ -74,11 +85,35 @@ export function createCevaAdapter(): CarrierAdapter {
       // Air / ocean is marked in a per-column text box rather than a checkbox.
       setText(ctx, draft.mode === 'OCEAN' ? F.ocean : F.air, 'X')
 
-      const incoterm = (draft.incoterm ?? '').trim().toUpperCase()
-      if ((CEVA_INCOTERMS as readonly string[]).includes(incoterm)) {
-        setCheckBox(ctx, incoterm, true)
+      // --- Incoterm --------------------------------------------------------
+      //
+      // The box is ticked from the *rule*, not from the raw string. What arrives here is
+      // rarely the bare code: the `omron-ci` INCOTERMS box says `DAP Singapore` and the
+      // Vendor A trade terms say `FOB Origin - Collect`, and an exact-match test against the
+      // box names left both of those unticked — a form filed with no delivery term on it at
+      // all, which is what this section exists to prevent.
+      const stated = (draft.incoterm ?? '').trim()
+      const incoterm = parseIncoterm(stated)
+      const ticked = Boolean(incoterm && (CEVA_INCOTERMS as readonly string[]).includes(incoterm.code))
+      if (incoterm && ticked) {
+        setCheckBox(ctx, incoterm.code, true)
+      } else if (incoterm?.retired) {
+        ctx.warnings.push(
+          `Incoterm "${stated}" is ${incoterm.code}, which Incoterms 2020 no longer has and this revision of the ` +
+            `form has no box for. It is written into the special instructions; the current rule is ` +
+            `${RETIRED_INCOTERMS[incoterm.code]} — reclassify the term and tick the box by hand if that is what ` +
+            'the sale actually is.',
+        )
       } else if (incoterm) {
-        ctx.warnings.push(`Incoterm "${incoterm}" has no box on this revision of the form; left unticked.`)
+        ctx.warnings.push(
+          `Incoterm "${incoterm.code}" has no box on this revision of the form; it is written into the special ` +
+            'instructions instead of being lost, but no box was ticked.',
+        )
+      } else if (stated) {
+        ctx.warnings.push(
+          `"${stated}" was not recognised as an Incoterm, so no box was ticked. It is written into the special ` +
+            'instructions; correct it before signing.',
+        )
       }
 
       setCheckBox(ctx, draft.routedExport ? CEVA_CHECKBOXES.routedExportYes : CEVA_CHECKBOXES.routedExportNo, true)
@@ -86,8 +121,21 @@ export function createCevaAdapter(): CarrierAdapter {
 
       // The EU/China consignee registration number has no dedicated box here, so it goes in
       // special instructions — which is where the filed example puts it.
+      //
+      // The Incoterm joins it in two cases, both of them "the ticked box does not say the
+      // whole term": a named place, which this form has nowhere to record and without which
+      // `FOB` does not say which port, and a term no box covers. A bare rule that was ticked
+      // is already stated, and repeating it would only add noise to a box people read.
+      //
+      // The place comes from the term itself where the document stated one (`DAP Singapore`),
+      // and from the operator otherwise — this form has no named-place box, so that field is
+      // only ever going to reach the paper through here.
+      const namedPlace = incoterm?.namedPlace || (draft.namedPlace ?? '').trim()
+      const fullTerm = incoterm?.namedPlace ? stated : [stated, namedPlace].filter(Boolean).join(' ')
+      const incotermNote = stated && (!ticked || namedPlace) ? `Incoterm: ${fullTerm}` : ''
       const instructions = [
         draft.specialInstructions,
+        incotermNote,
         draft.ultimateConsignee.consigneeId ? `EORI # ${draft.ultimateConsignee.consigneeId}` : '',
       ]
         .filter(Boolean)
@@ -110,7 +158,11 @@ export function createCevaAdapter(): CarrierAdapter {
       // Every column gets the same number of lines so the rows stay visually aligned.
       setText(ctx, F.df, rows.map((l) => l.domesticForeign).join('\r'))
       setText(ctx, F.scheduleB, rows.map((l) => `${l.scheduleB} (${l.description})`).join('\r'))
-      setText(ctx, F.quantity, rows.map((l) => formatQuantity(l.quantity)).join('\r'))
+      // Box 24 is captioned "Quantity — Schedule B Unit", so the figure is the one the
+      // commodity number is reported in rather than the invoice's piece count. The unit is
+      // spelled out beside anything that is not a count, because `4.263` against a cable
+      // reads as four cables to everyone who has ever filled this form in.
+      setText(ctx, F.quantity, rows.map(formatReportedQuantity).join('\r'))
       setText(ctx, F.weight, rows.map((l) => l.weightKg.toFixed(3)).join('\r'))
       // "U.S. dollar, omit cents" — rounded to the nearest dollar.
       setText(ctx, F.value, rows.map((l) => String(Math.round(l.valueUsd))).join('\r'))
@@ -167,8 +219,21 @@ export function createCevaAdapter(): CarrierAdapter {
   }
 }
 
-function formatQuantity(quantity: number): string {
-  return Number.isInteger(quantity) ? String(quantity) : quantity.toFixed(3)
+/**
+ * The quantity as box 24 carries it: the figure, and the unit whenever it is not a plain
+ * count.
+ *
+ * A count is written bare, which is what the filed vendorA3 SLI does and what anyone reading
+ * this column expects. A kilogram figure is not: `4.263` beside a Schedule B number, in a
+ * column that has held piece counts on every form before it, is a number nobody can place.
+ * The eight codes that require no quantity at all get the unit alone.
+ */
+function formatReportedQuantity(line: SLILine): string {
+  if (line.reportingBasis === 'none') return line.reportingUom
+  const quantity = Number.isInteger(line.reportingQuantity)
+    ? String(line.reportingQuantity)
+    : line.reportingQuantity.toFixed(3)
+  return line.reportingUom && line.reportingUom !== 'NO' ? `${quantity} ${line.reportingUom}` : quantity
 }
 
 /**

@@ -219,6 +219,7 @@ export function aggregateLines(lines: MergedLine[], options: AggregationOptions)
     if (existing) {
       existing.sourceLineIds.push(line.id)
       existing.quantity += line.quantity
+      existing.reportingQuantity += line.quantity
       existing.weightKg += line.netWeightKg ?? 0
       existing.valueUsd += line.extendedValue ?? 0
       if (!existing.countriesOfOrigin.includes(line.countryOfOrigin)) {
@@ -236,7 +237,15 @@ export function aggregateLines(lines: MergedLine[], options: AggregationOptions)
         description: capitaliseFirst(line.commodityGroup || line.description),
         quantity: line.quantity,
         scheduleBUnit: null,
+        scheduleBUnits: [],
         sourceUom: line.uom,
+        // The document's own unit and count, which is what a row files until the Census
+        // dataset says otherwise. `reconcile` is the only thing that knows what a code
+        // requires, so it is the only thing that can improve on this — see
+        // `resolveReportingQuantity`.
+        reportingUom: canonicalUnit(line.uom) ?? '',
+        reportingQuantity: line.quantity,
+        reportingBasis: 'source',
         weightKg: line.netWeightKg ?? 0,
         valueUsd: line.extendedValue ?? 0,
         eccn,
@@ -251,6 +260,7 @@ export function aggregateLines(lines: MergedLine[], options: AggregationOptions)
     .map((line) => ({
       ...line,
       quantity: roundTo(line.quantity, 3),
+      reportingQuantity: roundTo(line.reportingQuantity, 3),
       weightKg: roundTo(line.weightKg, 3),
       valueUsd: roundTo(line.valueUsd, 2),
     }))

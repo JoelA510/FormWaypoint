@@ -15,6 +15,7 @@
  * would be exactly the wrong behaviour for an export declaration.
  */
 import type { CheckResult } from '../types'
+import type { QuantityBasis } from '../units'
 
 export interface ScheduleBEntry {
   code: string
@@ -174,6 +175,14 @@ export function loadScheduleB(fetchJson?: () => Promise<RawPayload>): Promise<Sc
 /**
  * Unit names used on the CIPL mapped onto the Census vocabulary. `PCS` on an the vendor invoice
  * and `NO` in the Census file both mean "a count of items".
+ *
+ * The table runs in both directions on purpose: the same function canonicalises what a
+ * document printed *and* what the Census file requires, so `restateQuantity` can compare the
+ * two without either side having its own spelling rules.
+ *
+ * Deliberately absent: `GR` (grams or gross, and the document does not say which) and `TON`
+ * (a short ton in US trade, a tonne elsewhere). An ambiguous alias here would silently
+ * convert a quantity by a factor of 144 or 1.1, which is worse than not converting it.
  */
 const UNIT_ALIASES: Record<string, string> = {
   PCS: 'NO',
@@ -186,6 +195,18 @@ const UNIT_ALIASES: Record<string, string> = {
   KG: 'KG',
   KGS: 'KG',
   KGM: 'KG',
+  G: 'GM',
+  GM: 'GM',
+  GRAM: 'GM',
+  GRAMS: 'GM',
+  T: 'T',
+  MT: 'T',
+  DOZ: 'DOZ',
+  DZ: 'DOZ',
+  DOZEN: 'DOZ',
+  GRS: 'GRS',
+  HUN: 'HUN',
+  THS: 'THS',
 }
 
 export function canonicalUnit(raw: string | null | undefined): string | null {
@@ -244,6 +265,15 @@ export interface ClassificationSubject {
   sourceText: string
   /** Unit the quantity is expressed in on the CIPL. */
   sourceUom: string
+  /**
+   * Unit the row will actually be filed in. Defaults to `sourceUom` when the caller has not
+   * resolved one, which is what a row files when nothing can restate it.
+   */
+  reportingUom?: string
+  /** How the filed quantity was obtained — the invoice's own count, or the net weight. */
+  reportingBasis?: QuantityBasis
+  /** Whether the row has a net weight at all, which decides whether a kilogram unit is reachable. */
+  hasNetWeight?: boolean
   /** Reference for the UI, e.g. an SLI line index. */
   ref?: string
 }
@@ -290,22 +320,39 @@ export function checkClassification(subject: ClassificationSubject, index: Sched
   if (!entry) return results
 
   // --- 3. Unit of quantity ------------------------------------------------
+  //
+  // Judged on the unit the row is *filed* in, not the one the invoice printed. Those are the
+  // same thing only until a code reported in kilograms meets an invoice counted in pieces —
+  // and that case is now restated from the net weight rather than merely complained about, so
+  // a check that went on reading the invoice unit would warn about a form that is correct.
   const required = entry.units.map((u) => canonicalUnit(u)).filter((u): u is string => Boolean(u))
-  const supplied = canonicalUnit(subject.sourceUom)
-  if (required.length && supplied) {
-    const ok = required.includes(supplied)
+  const printed = canonicalUnit(subject.sourceUom)
+  const filed = canonicalUnit(subject.reportingUom) ?? printed
+  if (required.length && filed) {
+    const ok = required.includes(filed)
+    const restated = subject.reportingBasis === 'net-weight'
+    const wanted = required[0]
     results.push({
       id: `sb-uom:${subject.ref ?? digits}`,
       severity: ok ? 'info' : 'warning',
       title: `${pretty} quantity is reported in the required unit`,
       detail: ok
-        ? `Schedule B reports this code in ${required.join(' and ')}, matching the invoice.`
-        : `Schedule B requires this code to be reported in ${required.join(' or ')}, but the invoice ` +
-          `quantity is in ${supplied}. Box 24 should carry the ${required[0] === 'KG' ? 'net weight in kilograms' : `quantity in ${required[0]}`}, ` +
-          `not the piece count.`,
+        ? restated
+          ? `Schedule B reports this code in ${required.join(' and ')}, so the row files the net weight in ` +
+            `${filed} rather than the ${printed ?? 'invoice'} count the invoice prints.`
+          : `Schedule B reports this code in ${required.join(' and ')}, matching the invoice.`
+        : `Schedule B requires this code to be reported in ${required.join(' or ')}, but this row files ${filed}. ` +
+          (wanted === 'KG'
+            ? subject.hasNetWeight === false
+              ? 'Nothing on this shipment gives a net weight for these goods, so the kilogram figure the code ' +
+                'requires cannot be worked out — supply the per-part weights, or correct the classification.'
+              : 'This row does have a net weight, so it can be filed in KG; the unit was changed by hand. Put it ' +
+                'back to the Schedule B unit, or correct the classification.'
+            : `The ${printed ?? 'invoice'} figure the document prints cannot be converted to ` +
+              `${wanted}, so the classification or the unit needs correcting before this is filed.`),
       passed: ok,
       expected: required.join(' or '),
-      actual: supplied,
+      actual: filed,
       refs,
     })
   }

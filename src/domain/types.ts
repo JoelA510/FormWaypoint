@@ -11,6 +11,7 @@
  * page and a line of the original CIPL, and so that a human override is always
  * distinguishable from an extracted value.
  */
+import type { QuantityBasis } from './units'
 
 /**
  * Vendor A CIPLs contain the same shipment twice: an `FC` set priced in USD and a `TP1` set
@@ -251,11 +252,33 @@ export interface SLILine {
   scheduleB: string
   /** Description shown alongside the code. */
   description: string
+  /** Quantity as the source documents report it, in `sourceUom`. Never restated. */
   quantity: number
   /** Unit of quantity that Schedule B requires for this code (from the Census file). */
   scheduleBUnit: string | null
+  /**
+   * Every unit of quantity the Census file accepts for this code, canonicalised.
+   *
+   * A code may accept more than one (`NO+KG`), and which of them a shipment can actually
+   * state depends on what its documents carry — so the choice is offered rather than assumed.
+   */
+  scheduleBUnits: string[]
   /** The UOM the CIPL actually reported the quantity in. */
   sourceUom: string
+  /**
+   * The unit this row is filed in, canonicalised.
+   *
+   * Defaults to the Schedule B unit wherever the row can state one, which is the point:
+   * several codes are reported in kilograms and filing a piece count against them is a
+   * reporting error even when every other figure on the form is right. Falls back to
+   * `sourceUom` when nothing on the row supports the required unit, and the reconciliation
+   * says so rather than leaving the fallback silent.
+   */
+  reportingUom: string
+  /** `quantity` restated in `reportingUom`. This is the figure the form and the sheet carry. */
+  reportingQuantity: number
+  /** Where `reportingQuantity` came from — the invoice's own count, or the net weight. */
+  reportingBasis: QuantityBasis
   weightKg: number
   valueUsd: number
   eccn: string | null

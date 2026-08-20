@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Field, Input, ProvenanceRow, Select, type Tone } from '../components/ui'
 import { resolveDestinationCountry } from '../domain/reconcile'
-import { formatScheduleB, normalizeScheduleB } from '../domain/schedule-b'
+import { canonicalUnit, formatScheduleB, normalizeScheduleB } from '../domain/schedule-b'
+import { canRestate, resolveReportingQuantity, type QuantitySource } from '../domain/units'
 import { partKey } from '../domain/part-key'
 import type { OverrideRecord } from '../store/local-store'
-import type { CheckResult, MergedLine, ParsedCipl, Reconciliation } from '../domain/types'
+import type { CheckResult, MergedLine, ParsedCipl, Reconciliation, SLILine } from '../domain/types'
 
 const SEVERITY_TONE: Record<CheckResult['severity'], Tone> = {
   blocking: 'block',
@@ -163,7 +164,17 @@ function CheckRow({ check }: { check: CheckResult }) {
 }
 
 /** The commodity rows that will be written to the form, with full source lineage. */
-export function CommodityTable({ reconciliation }: { reconciliation: Reconciliation }) {
+export function CommodityTable({
+  reconciliation,
+  reportingUnits = {},
+  onReportingUnitChange,
+}: {
+  reconciliation: Reconciliation
+  /** The unit chosen for each commodity number, keyed by normalised code. */
+  reportingUnits?: Record<string, string>
+  /** Omitted where the table is read-only. */
+  onReportingUnitChange?: (code: string, unit: string) => void
+}) {
   const { sliLines, mergedLines } = reconciliation
   const byId = new Map(mergedLines.map((l) => [l.id, l]))
 
@@ -181,7 +192,8 @@ export function CommodityTable({ reconciliation }: { reconciliation: Reconciliat
                 <th className="px-4 py-2.5 font-semibold">D/F</th>
                 <th className="px-4 py-2.5 font-semibold">Schedule B</th>
                 <th className="px-4 py-2.5 font-semibold">Description</th>
-                <th className="px-4 py-2.5 text-right font-semibold">Qty</th>
+                <th className="px-4 py-2.5 text-right font-semibold">Invoice qty</th>
+                <th className="px-4 py-2.5 font-semibold">Filed qty &amp; unit</th>
                 <th className="px-4 py-2.5 text-right font-semibold">Net kg</th>
                 <th className="px-4 py-2.5 text-right font-semibold">Value USD</th>
               </tr>
@@ -211,6 +223,17 @@ export function CommodityTable({ reconciliation }: { reconciliation: Reconciliat
                   <td className="tabular px-4 py-3 text-right">
                     {line.quantity} {line.sourceUom}
                   </td>
+                  <td className="px-4 py-3">
+                    <ReportingUnitPicker
+                      line={line}
+                      chosen={reportingUnits[normalizeScheduleB(line.scheduleB)] ?? ''}
+                      onChange={
+                        onReportingUnitChange
+                          ? (unit) => onReportingUnitChange(normalizeScheduleB(line.scheduleB), unit)
+                          : undefined
+                      }
+                    />
+                  </td>
                   <td className="tabular px-4 py-3 text-right">{line.weightKg.toFixed(3)}</td>
                   <td className="tabular px-4 py-3 text-right">{line.valueUsd.toFixed(2)}</td>
                 </tr>
@@ -222,6 +245,9 @@ export function CommodityTable({ reconciliation }: { reconciliation: Reconciliat
                   Total
                 </td>
                 <td className="tabular px-4 py-2.5 text-right">{sum(sliLines.map((l) => l.quantity))}</td>
+                {/* No total under the filed quantity: those figures can be in different units,
+                    and a column of pieces added to a column of kilograms is not a number. */}
+                <td className="px-4 py-2.5" />
                 <td className="tabular px-4 py-2.5 text-right">{sum(sliLines.map((l) => l.weightKg)).toFixed(3)}</td>
                 <td className="tabular px-4 py-2.5 text-right">{sum(sliLines.map((l) => l.valueUsd)).toFixed(2)}</td>
               </tr>
@@ -235,6 +261,84 @@ export function CommodityTable({ reconciliation }: { reconciliation: Reconciliat
 
 function sum(values: number[]): number {
   return Math.round(values.reduce((a, b) => a + b, 0) * 1000) / 1000
+}
+
+/**
+ * The unit a commodity row is filed in, and the figure that goes with it.
+ *
+ * The choice is offered rather than merely reported because several Schedule B numbers are
+ * reported in kilograms while the invoice counts pieces, and a code that accepts both
+ * (`NO+KG`) has no answer this app can work out — only the filer knows how the goods are
+ * actually measured. The default already follows Schedule B; this is for the rest.
+ *
+ * Options the shipment cannot state are listed and disabled rather than hidden. "There is no
+ * net weight for these goods, so the kilogram figure this code needs cannot be produced" is
+ * the answer somebody is looking for, and an absent option does not give it.
+ */
+function ReportingUnitPicker({
+  line,
+  chosen,
+  onChange,
+}: {
+  line: SLILine
+  chosen: string
+  onChange?: (unit: string) => void
+}) {
+  const source: QuantitySource = { quantity: line.quantity, uom: line.sourceUom, weightKg: line.weightKg }
+  const sourceUnit = canonicalUnit(line.sourceUom) ?? ''
+  const offered = [...new Set([...line.scheduleBUnits, sourceUnit].filter(Boolean))]
+  // Resolved without the current choice, so the option names what the default *is* rather
+  // than echoing whatever is selected — "Schedule B default (NO)" beside a row that has been
+  // switched off the Schedule B unit is the one label that must never appear here.
+  const fallback = resolveReportingQuantity(source, line.scheduleBUnits).unit
+  const figure =
+    line.reportingBasis === 'none' ? '—' : `${line.reportingQuantity} ${line.reportingUom}`.trim()
+
+  return (
+    <div className="space-y-1">
+      {onChange && offered.length > 1 ? (
+        <Select
+          aria-label={`Unit of quantity for ${line.scheduleB}`}
+          value={chosen}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          <option value="">
+            Schedule B default ({fallback || '—'})
+          </option>
+          {offered.map((unit) => (
+            <option key={unit} value={unit} disabled={!canRestate(source, unit)}>
+              {unit}
+              {line.scheduleBUnits.includes(unit) ? '' : ' (as invoiced)'}
+              {canRestate(source, unit) ? '' : ' — no figure available'}
+            </option>
+          ))}
+        </Select>
+      ) : null}
+      <p className="tabular text-[var(--color-ink)]">{figure}</p>
+      <p className="text-xs text-[var(--color-ink-faint)]">{basisNote(line, Boolean(chosen))}</p>
+    </div>
+  )
+}
+
+/**
+ * Why the filed figure is what it is, in one line beside it.
+ *
+ * A row off the required unit says whether that was a choice or a limit, because the two
+ * need different things done about them: one is somebody's decision to reconsider, the other
+ * is a missing weight or a wrong classification.
+ */
+function basisNote(line: SLILine, byChoice: boolean): string {
+  if (!line.scheduleBUnits.length) return 'Schedule B unit unknown — filing the invoice figure.'
+  if (line.reportingBasis === 'none') return 'Schedule B reports this code with no quantity.'
+  if (!line.scheduleBUnits.includes(line.reportingUom)) {
+    const required = line.scheduleBUnits.join(' or ')
+    return byChoice
+      ? `Filed in ${line.reportingUom} by your choice; Schedule B requires ${required}.`
+      : `Schedule B requires ${required}; this row can only state ${line.reportingUom}.`
+  }
+  return line.reportingBasis === 'net-weight'
+    ? 'Net weight — this code is reported by weight, not by the piece.'
+    : 'As invoiced.'
 }
 
 /**
