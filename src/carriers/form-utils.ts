@@ -174,8 +174,14 @@ function truncate(value: string, max = 40): string {
  * anything beyond three places is significant and is kept.
  */
 export function formatQuantity(quantity: number): string {
+  // A figure that is not a number is a fault upstream. Writing the word "NaN" into a
+  // quantity box on a signed declaration is the one response worse than leaving it blank.
+  if (!Number.isFinite(quantity)) return ''
   if (Number.isInteger(quantity)) return String(quantity)
-  const plain = String(quantity)
-  const decimals = (plain.split('.')[1] ?? '').length
-  return decimals <= 3 ? quantity.toFixed(3) : plain
+  // Fixed notation, never the float's own shortest form. `String()` renders 4.263e-7 in
+  // scientific notation — which a PDF box would carry verbatim — and 0.1 + 0.2 as seventeen
+  // digits. Nine places is what `roundScaled` caps its precision at, so nothing significant
+  // is beyond it; the trailing zeros it adds come back off, down to the three the filed
+  // forms use for a kilogram figure.
+  return quantity.toFixed(9).replace(/(\.\d{3}\d*?)0+$/, '$1')
 }

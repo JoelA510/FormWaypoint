@@ -99,13 +99,17 @@ export function parseIncoterm(raw: string | null | undefined): ParsedIncoterm | 
 /**
  * Wording that means "who pays the freight", not "where delivery happens".
  *
+ * The optional `BY <party>` tail is part of the clause, not a place left behind by it:
+ * `DUTY PAID BY CONSIGNEE` names nowhere.
+ *
  * The trade-terms line on these documents is a composite — the rule, sometimes a place, and
  * the freight term — so what follows the rule is not always a place. `FOB Origin - Collect`
  * leaves `Origin - Collect` behind, and writing that into a box captioned "NAMED PLACE/PORT"
  * states a freight term as a port. A caller filling such a box asks this first; a caller
  * transcribing the term verbatim does not need to.
  */
-const FREIGHT_QUALIFIER = /\b(COLLECT|PREPAID|PPD|P\.?P\.?|C\.?C\.?|FREIGHT|DUTY\s+(UN)?PAID)\b/i
+const FREIGHT_QUALIFIER =
+  /\b(COLLECT|PREPAID|PPD|P\.?P\.?|C\.?C\.?|FREIGHT|DUTY\s+(UN)?PAID)(\s+BY\s+[A-Za-z]+)?\b/gi
 
 /**
  * The part of `namedPlace` that actually names a place, or `''`.
@@ -119,7 +123,17 @@ const FREIGHT_QUALIFIER = /\b(COLLECT|PREPAID|PPD|P\.?P\.?|C\.?C\.?|FREIGHT|DUTY
  * is worse than an empty one.
  */
 export function namedPlaceFrom(namedPlace: string): string {
-  const match = namedPlace.match(FREIGHT_QUALIFIER)
-  const place = (match ? namedPlace.slice(0, match.index) : namedPlace).replace(/[\s,:;/|.–—-]+$/, '').trim()
+  // Every qualifier is removed wherever it sits, rather than the string being cut at the
+  // first one. `FOB Freight Prepaid, Chicago` and `DDP Duty Paid Rotterdam` put the payment
+  // term *before* the place, and truncating at it discarded the place — the exact loss this
+  // function exists to prevent, just for the other word order.
+  const place = namedPlace
+    .replace(FREIGHT_QUALIFIER, ' ')
+    .replace(/\s+/g, ' ')
+    // Separators orphaned by the words that sat between them. Not `.`, which ends an
+    // abbreviated place name (`Washington, D.C.`) — a residue that is punctuation only is
+    // caught by the test below instead.
+    .replace(/^[\s,:;/|–—-]+|[\s,:;/|–—-]+$/g, '')
+    .trim()
   return /[A-Za-z0-9]/.test(place) ? place : ''
 }

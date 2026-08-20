@@ -272,8 +272,16 @@ export interface ClassificationSubject {
   reportingUom?: string
   /** How the filed quantity was obtained — the invoice's own count, or the net weight. */
   reportingBasis?: QuantityBasis
-  /** Whether the row has a net weight at all, which decides whether a kilogram unit is reachable. */
+  /** Whether the row has a net weight at all. */
   hasNetWeight?: boolean
+  /**
+   * Whether the row *could* be stated in the unit its code requires.
+   *
+   * Asked of the conversion rules by the caller rather than guessed here. A row that can
+   * reach the required unit and is not in it was changed by hand; one that cannot is missing
+   * a figure — and the two want opposite advice.
+   */
+  requiredReachable?: boolean
   /** Reference for the UI, e.g. an SLI line index. */
   ref?: string
 }
@@ -349,17 +357,18 @@ export function checkClassification(subject: ClassificationSubject, index: Sched
           ? `Schedule B reports this code in ${required.join(' and ')}, ${worked}.`
           : `Schedule B reports this code in ${required.join(' and ')}, matching the invoice.`
         : `Schedule B requires this code to be reported in ${required.join(' or ')}, but this row files ${filed}. ` +
-          // Asked of the conversion rules rather than hard-coded to `KG`: tonnes and grams
-          // come from the net weight too, and telling the filer to fix the classification
-          // when what is missing is a weight sends them to the wrong place.
-          (derivesFromNetWeight(wanted)
-            ? subject.hasNetWeight === false
+          // Three different faults, three different fixes. Whether the required unit is
+          // reachable is asked of the conversion rules by the caller, not guessed from the
+          // unit's family here — a row invoiced in kilograms can reach tonnes with no net
+          // weight at all, and telling its filer to supply weights sends them nowhere.
+          (subject.requiredReachable
+            ? `This row can be filed in ${wanted}; the unit was changed by hand. Put it back to the Schedule B ` +
+              'unit, or correct the classification.'
+            : derivesFromNetWeight(wanted) && subject.hasNetWeight === false
               ? `Nothing on this shipment gives a net weight for these goods, so the ${wanted} figure the code ` +
                 'requires cannot be worked out — supply the per-part weights, or correct the classification.'
-              : `This row does have a net weight, so it can be filed in ${wanted}; the unit was changed by hand. ` +
-                'Put it back to the Schedule B unit, or correct the classification.'
-            : `The ${printed ?? 'invoice'} figure the document prints cannot be converted to ` +
-              `${wanted}, so the classification or the unit needs correcting before this is filed.`),
+              : `The ${printed ?? 'invoice'} figure the document prints cannot be converted to ` +
+                `${wanted}, so the classification or the unit needs correcting before this is filed.`),
       passed: ok,
       expected: required.join(' or '),
       actual: filed,

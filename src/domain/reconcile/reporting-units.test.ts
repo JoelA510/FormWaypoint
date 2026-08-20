@@ -108,6 +108,18 @@ describe('the unit a commodity row is filed in', () => {
     expect(uom.detail).toMatch(/the T figure/)
   })
 
+  it('tells a unit that was chosen away from one that cannot be reached', async () => {
+    // The row has a weight, so KG is reachable and the only reason it is filing pieces is
+    // that somebody picked them. Sending that filer to go and supply per-part weights — the
+    // advice for a row that genuinely has none — points at the wrong fix.
+    const parsed = await shipment(BY_WEIGHT)
+    const { checks } = reconcile(parsed, scheduleB, { ...CONTROLLED, reportingUnits: { '9031900000': 'NO' } })
+    const uom = checks.find((c) => c.id.startsWith('sb-uom:'))!
+    expect(uom.passed).toBe(false)
+    expect(uom.detail).toMatch(/changed by hand/)
+    expect(uom.detail).not.toMatch(/per-part weights/)
+  })
+
   it('publishes every unit the code accepts, so the choice can be offered', async () => {
     const { sliLines } = reconcile(await shipment(BY_WEIGHT), scheduleB, CONTROLLED)
     expect(row(sliLines, BY_WEIGHT).scheduleBUnits).toEqual(['KG'])

@@ -301,6 +301,39 @@ describe('the unit each commodity is keyed in', () => {
     expect(sheet.commodities.some((c) => c.unitUnavailable)).toBe(false)
   })
 
+  it('totals the quantity column at the precision the rows carry', () => {
+    // The TOTAL row is the column above it added up. Clamped to three places it read
+    // `0.004` under a row of `0.004263` — the same 6% under-declaration `formatQuantity`
+    // was added to stop on the forms — while the Notes tab asserted the two were equal.
+    const lines = [line({ classification: '2523.10.0000', quantity: 2, netWeightKg: 4.263 })]
+    const inTonnes = sli({
+      scheduleB: '2523.10.0000',
+      scheduleBUnit: 'T',
+      scheduleBUnits: ['T'],
+      reportingUom: 'T',
+      reportingBasis: 'net-weight',
+    })
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(lines, [inTonnes]), draft(), {
+      options: { columns: ['quantity', 'unitOfMeasure', 'totalValue'] },
+    })
+    const rows = keyingSheetToWorkbook(sheet)[0].rows
+    expect(rows[1][0]).toBe(0.004263)
+    expect(rows.at(-1)![0]).toBe(0.004263)
+  })
+
+  it('does not let the binary tail of a sum leak into the total', () => {
+    // `roundTo`'s epsilon nudge scales with the number of places, so trimming at nine turned
+    // a total of 2 into 2.000000222.
+    const lines = [
+      line({ id: 'a', quantity: 1, netWeightKg: 1 }),
+      line({ id: 'b', quantity: 1, netWeightKg: 1 }),
+    ]
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(lines, [sli({})]), draft(), {
+      options: { grouping: 'line', columns: ['quantity', 'unitOfMeasure', 'totalValue'] },
+    })
+    expect(keyingSheetToWorkbook(sheet)[0].rows.at(-1)![0]).toBe(2)
+  })
+
   it('leaves a code reported by the piece alone', () => {
     const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], [sli({})]), draft())
     expect(sheet.commodities[0].unitOfMeasure).toBe('PCS')

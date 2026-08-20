@@ -6,6 +6,7 @@ import {
   restateQuantity,
   type QuantitySource,
 } from './units'
+import { formatQuantity } from '../carriers/form-utils'
 
 /** A cable line: 12 pieces weighing 4.263 kg, which is the shape the KG codes arrive in. */
 const CABLES: QuantitySource = { quantity: 12, uom: 'PCS', weightKg: 4.263 }
@@ -87,6 +88,25 @@ describe('restating a quantity in the unit Schedule B requires', () => {
     expect(restateQuantity(area, 'M2')).toEqual({ unit: 'M2', quantity: 3.5, basis: 'source' })
     expect(canRestate(area, 'M2')).toBe(true)
     expect(canRestate(area, 'L')).toBe(false)
+  })
+})
+
+describe('formatting a quantity for a form box', () => {
+  it('never writes scientific notation, float noise or NaN into a box', () => {
+    // Whatever reaches a PDF field is what a person signs. `String()` renders 4.263e-7 in
+    // scientific notation and 0.1 + 0.2 as seventeen digits.
+    expect(formatQuantity(4.263e-7)).toBe('0.000000426')
+    expect(formatQuantity(0.1 + 0.2)).toBe('0.300')
+    expect(formatQuantity(Number.NaN)).toBe('')
+    expect(formatQuantity(Number.POSITIVE_INFINITY)).toBe('')
+  })
+
+  it('keeps three decimals as a floor and the conversion’s precision as the ceiling', () => {
+    expect(formatQuantity(10)).toBe('10')
+    expect(formatQuantity(1.5)).toBe('1.500')
+    expect(formatQuantity(4.263)).toBe('4.263')
+    expect(formatQuantity(0.004263)).toBe('0.004263')
+    expect(formatQuantity(0.83333)).toBe('0.83333')
   })
 })
 

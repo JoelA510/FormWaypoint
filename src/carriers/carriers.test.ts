@@ -467,7 +467,9 @@ describe('the reported unit from document to form', () => {
   it('carries a chosen unit all the way to the form and the sheet', async () => {
     const { adapter, result, draft } = run({ '9031900000': 'NO' })
     const values = await readBack((await adapter.fill(template('ceva-sli.pdf'), draft)).bytes)
-    expect(values['Quantity Schedule B Unit']).toBe('10\r12')
+    // `12 NO`, not a bare `12`: NO is not a unit this code accepts, and on a box captioned
+    // "Quantity — Schedule B Unit" the unit is the only thing saying the figure is not in it.
+    expect(values['Quantity Schedule B Unit']).toBe('10\r12 NO')
 
     const sheet = buildKeyingSheet('fedex-ship-manager', result, draft)
     const keyed = sheet.commodities.find((c) => c.harmonizedCode === CODE_BY_WEIGHT)!
@@ -531,8 +533,16 @@ describe('reading an Incoterm off a document', () => {
     expect(namedPlaceFrom('Rotterdam Prepaid')).toBe('Rotterdam')
     expect(namedPlaceFrom('Singapore, Freight Collect')).toBe('Singapore')
     expect(namedPlaceFrom('Origin - Collect')).toBe('Origin')
+    // The payment term can come *before* the place, which truncating at it used to discard.
+    expect(namedPlaceFrom('Prepaid, Long Beach')).toBe('Long Beach')
+    expect(namedPlaceFrom('Freight Prepaid, Chicago')).toBe('Chicago')
+    expect(namedPlaceFrom('Duty Unpaid Hamburg')).toBe('Hamburg')
+    // A full stop that ends an abbreviated place name is part of the name.
+    expect(namedPlaceFrom('Washington, D.C.')).toBe('Washington, D.C.')
     expect(namedPlaceFrom('Prepaid')).toBe('')
+    // The `by <party>` tail belongs to the payment clause; it is not a place left behind.
     expect(namedPlaceFrom('DUTY PAID BY CONSIGNEE')).toBe('')
+    expect(namedPlaceFrom('Freight Collect by Shipper, Hamburg')).toBe('Hamburg')
     expect(namedPlaceFrom('')).toBe('')
     // Punctuation alone is not a place; a box reading "." is worse than an empty one.
     expect(namedPlaceFrom('.')).toBe('')
@@ -735,8 +745,40 @@ describe('CEVA — recording the Incoterm', () => {
   it('does not raise a conflict against a freight term', async () => {
     // "Collect" is who pays, already written into the freight-payment box. It is not a rival
     // named place, and warning about it would cry wolf on every shipment of this shape.
-    const { values, warnings } = await fillWith({ incoterm: 'FOB Origin', namedPlace: 'Origin' })
+    // The term itself carries "Origin - Collect", so this only passes because the comparison
+    // goes through `namedPlaceFrom`.
+    const { values, warnings } = await fillWith({ incoterm: 'FOB Origin - Collect', namedPlace: 'Origin' })
     expect(values.FOB).toBe('checked')
+    expect(warnings).toEqual([])
+  })
+
+  it('never drops what the document stated from the instructions', async () => {
+    // Rebuilding the term from its parsed parts lost the freight wording, and box 20 falls
+    // back to this adapter's COLLECT default whenever the document states no freight terms —
+    // so the form said COLLECT while the invoice said Prepaid, with nothing to show it.
+    const { values } = await fillWith({ incoterm: 'CIF Rotterdam Prepaid' })
+    expect(values.CIF).toBe('checked')
+    expect(values['Special Instructions']).toBe('Incoterm: CIF Rotterdam Prepaid')
+  })
+
+  it('records a term that is only a rule and a payment instruction', async () => {
+    // The tick on FOB says nothing about who pays, so "Collect" would be lost with it.
+    const { values } = await fillWith({ incoterm: 'FOB Collect' })
+    expect(values.FOB).toBe('checked')
+    expect(values['Special Instructions']).toBe('Incoterm: FOB Collect')
+  })
+
+  it('warns when the term’s payment wording contradicts the freight box', async () => {
+    // Box 20 is filled from `header.freightTerms`, which is null on a document stating its
+    // freight terms only inside the Incoterm — so the box carries this adapter's COLLECT
+    // default while the invoice says Prepaid.
+    const { values, warnings } = await fillWith({ incoterm: 'CIF Rotterdam Prepaid', freight: 'COLLECT' })
+    expect(values.Location).toBe('COLLECT')
+    expect(warnings.join(' ')).toMatch(/freight payment box says COLLECT/)
+  })
+
+  it('says nothing when the term and the freight box agree', async () => {
+    const { warnings } = await fillWith({ incoterm: 'FOB Collect', freight: 'COLLECT' })
     expect(warnings).toEqual([])
   })
 
@@ -745,7 +787,9 @@ describe('CEVA — recording the Incoterm', () => {
     // ways. Typing one is a deliberate act; the document is the default.
     const { values, warnings } = await fillWith({ incoterm: 'DAP Singapore', namedPlace: 'Rotterdam' })
     expect(values.DAP).toBe('checked')
-    expect(values['Special Instructions']).toBe('Incoterm: DAP Rotterdam')
+    // Both places are written. The operator's governs the shipment; erasing what the
+    // document said would leave the disagreement the warning describes invisible on paper.
+    expect(values['Special Instructions']).toBe('Incoterm: DAP Singapore — named place: Rotterdam')
     // And the disagreement is said out loud rather than applied quietly.
     expect(warnings.join(' ')).toMatch(/DAP Singapore/)
   })
@@ -813,6 +857,24 @@ describe('CEVA — the quantity box carries the Schedule B unit', () => {
       },
     ])
     expect(values['Quantity Schedule B Unit']).toBe('0.004263 T')
+  })
+
+  it('names the unit on a row that fell back off the required one', async () => {
+    // 9031.90.0000 is reported in KG. A row with no weight files the invoice's own count, and
+    // a bare figure in a box captioned "Quantity — Schedule B Unit" asserts it is in that
+    // unit. The unit beside it is the only thing on the paper saying otherwise.
+    const values = await fillRows([
+      {
+        ...ROW,
+        scheduleB: '9031.90.0000',
+        scheduleBUnit: 'KG',
+        scheduleBUnits: ['KG'],
+        reportingUom: 'PCS',
+        reportingQuantity: 12,
+        reportingBasis: 'source',
+      },
+    ])
+    expect(values['Quantity Schedule B Unit']).toBe('12 PCS')
   })
 
   it('names the unit beside a figure that is not a count', async () => {

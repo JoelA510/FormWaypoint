@@ -397,7 +397,11 @@ function groupForKeying(
   options: KeyingOptions,
   scheduleB: ScheduleBIndex | null,
   corrections: CodeCorrections,
-  /** The unit each commodity number is filed in, keyed by normalised code. See `reportingUnits`. */
+  /**
+   * The unit each commodity number is filed in, keyed by `code|canonical-unit` *and* by code
+   * alone as a fallback. Look up the composite key first — see `reportingUnits` for why the
+   * code alone is not enough.
+   */
   units: Map<string, string>,
 ): KeyingCommodityRow[] {
   const groups = new Map<string, MergedLine[]>()
@@ -887,9 +891,16 @@ export function buildKeyingSheet(
       commodities: commodities.length,
       // Rounded like the figures beside it. A fractional UOM sums to a binary tail —
       // 0.1 + 0.2 — and this one is written into the workbook as a number, not a string.
-      quantity: roundTo(
-        commodities.reduce((sum, c) => sum + Number(c.quantity || 0), 0),
-        3,
+      // Trimmed of its binary tail, not clamped to three places. The rows can now carry more
+      // than three — a tonne figure is `0.004263` — and rounding the total to three made the
+      // last row of the grid disagree with the column above it while the Notes tab asserted
+      // the two were equal.
+      //
+      // Not through `roundTo`: its epsilon nudge scales with the number of places, so at the
+      // nine `roundScaled` allows it adds 2.2e-7 — larger than the precision it is there to
+      // protect, and enough to turn a total of 2 into 2.000000222.
+      quantity: Number(
+        commodities.reduce((sum, c) => sum + Number(c.quantity || 0), 0).toPrecision(12),
       ),
       customsValue: customsValue.toFixed(2),
       // Summed from the printed pounds rather than converted from the summed kilograms.
@@ -1169,12 +1180,10 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
   // to kilograms is not a quantity. The review screen leaves its own footer cell blank for
   // the same reason; a figure here that the Notes tab has to describe as "in mixed units" is
   // a number somebody reads off the grid without ever seeing that caveat.
-  const oneUnit =
-    new Set(
-      sheet.commodities
-        .map((c) => canonicalUnit(c.unitOfMeasure) ?? c.unitOfMeasure.trim())
-        .filter(Boolean),
-    ).size <= 1
+  //
+  // The same list the Notes tab names the units from, so the grid and the note cannot
+  // contradict each other about whether this sheet is mixed.
+  const oneUnit = keyedUnits(sheet).length <= 1
   // The word goes in the leftmost column that is not itself a total, so it never displaces a
   // figure. Where every chosen column carries one it takes the first anyway: an unlabelled
   // row of figures at the foot of a grid is indistinguishable from another commodity, and
@@ -1229,21 +1238,8 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
   // What the quantity column is actually counting. A single unit is named; a mixed sheet
   // says so rather than calling a column of kilograms and pieces "pcs", which is what the
   // TOTAL row read as before any of it could be anything but a count.
-  // Canonically, for the same reason the grid's total is: one group reading `PCS` beside
-  // another reading `EA` is one unit spelled two ways, and calling that sheet "mixed" both
-  // blanks a total it could carry and says something untrue about it.
-  const keyedUnits = [
-    ...sheet.commodities
-      .map((c) => c.unitOfMeasure.trim())
-      .filter(Boolean)
-      .reduce((seen, unit) => {
-        const key = canonicalUnit(unit) ?? unit
-        if (!seen.has(key)) seen.set(key, unit)
-        return seen
-      }, new Map<string, string>())
-      .values(),
-  ]
-  const keyedUnitLabel = keyedUnits.length === 1 ? keyedUnits[0] : 'in mixed units'
+  const units = keyedUnits(sheet)
+  const keyedUnitLabel = units.length === 1 ? units[0] : 'in mixed units'
 
   const notes: CellValue[][] = [
     ['Note', 'Detail'],
@@ -1290,7 +1286,7 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
       `This sheet: ${sheet.totals.commodities} commodities · ${sheet.totals.quantity} ${keyedUnitLabel} · ` +
         `${sheet.totals.customsValue} USD · ${sheet.totals.shipmentWeightLb} lb · ${sheet.totals.shipmentWeightKg} kg. ` +
         'Those are the printed rows added up. ' +
-        (keyedUnits.length > 1
+        (units.length > 1
           ? 'The rows are in more than one unit, so the grid leaves its quantity total blank — the figure ' +
             'above is what those quantities add up to, and it is only meaningful as a cross-check that no ' +
             'row was dropped. '
@@ -1368,6 +1364,25 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
     { name: 'Shipment details', rows: details },
     { name: 'Notes', rows: notes, columnWidths: [22, 100] },
   ]
+}
+
+/**
+ * The distinct units this sheet keys in, in the spelling each was printed in.
+ *
+ * Canonical for the comparison: one group reading `PCS` beside another reading `EA` is one
+ * unit spelled two ways, and calling that sheet "mixed" both blanks a quantity total it could
+ * carry and says something untrue about it in the notes. One definition, because the grid
+ * cell and the note are written from it separately and must not disagree.
+ */
+function keyedUnits(sheet: KeyingSheet): string[] {
+  const seen = new Map<string, string>()
+  for (const row of sheet.commodities) {
+    const unit = row.unitOfMeasure.trim()
+    if (!unit) continue
+    const key = canonicalUnit(unit) ?? unit
+    if (!seen.has(key)) seen.set(key, unit)
+  }
+  return [...seen.values()]
 }
 
 /** Two note fragments in one cell, with the empty ones dropped. */

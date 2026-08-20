@@ -140,16 +140,49 @@ export function createCevaAdapter(): CarrierAdapter {
       // box. Comparing against the whole remainder raised a conflict against a payment term.
       const statedPlace = namedPlaceFrom(incoterm?.namedPlace ?? '')
       const namedPlace = operatorPlace || statedPlace
-      // The term as the form will carry it. Built rather than echoed, so that a place the
-      // operator typed survives a term this app could not parse — `Ex Factory` with a place of
-      // `SFO` used to write the term alone and drop `SFO` on a form that has no other box for
-      // it.
-      const fullTerm = incoterm
-        ? `${incoterm.code} ${namedPlace}`.trim()
-        : [stated, operatorPlace].filter(Boolean).join(' ')
-      const incotermNote = stated && (!ticked || namedPlace) ? `Incoterm: ${fullTerm}` : ''
+      // The document's own words, with anything the operator added beside them — never a
+      // rebuild from the parsed parts.
+      //
+      // Rebuilding dropped whatever the parse did not keep. `CIF Rotterdam Prepaid` came out
+      // as `CIF Rotterdam`, and box 20 is filled from `draft.freight`, which falls back to
+      // this adapter's `COLLECT` default whenever the document states no freight terms of its
+      // own — so the one form said COLLECT while the invoice said Prepaid, with nothing
+      // anywhere to show the disagreement.
+      // Where the document named no place of its own, the operator's simply completes the
+      // term. Where it named a different one, both are written: the operator's choice governs
+      // the shipment, and erasing what the document said would leave the disagreement the
+      // warning below describes invisible on the paper itself.
+      const fullTerm = !operatorPlace
+        ? stated
+        : !statedPlace
+          ? `${stated} ${operatorPlace}`
+          : operatorPlace.toLowerCase() === statedPlace.toLowerCase()
+            ? stated
+            : `${stated} — named place: ${operatorPlace}`
+      // Written whenever the ticked box does not say the whole term: a place it has no room
+      // for, a rule it has no box for, or any other wording the document put in the term —
+      // `FOB Collect` says something about who pays that a tick on `FOB` does not.
+      const saysMoreThanTheRule = Boolean(incoterm) && stated.toUpperCase() !== incoterm?.code
+      const incotermNote =
+        stated && (!ticked || namedPlace || saysMoreThanTheRule) ? `Incoterm: ${fullTerm}` : ''
       // Overriding a place the document states is a decision, not a typo, so it is made
       // visible rather than applied quietly.
+      // The term can carry its own payment wording, and box 20 is filled from a different
+      // field entirely — `header.freightTerms`, which is null on a document that states its
+      // freight terms only inside the Incoterm. The box then falls back to this adapter's
+      // COLLECT default, and a form saying COLLECT over an invoice saying Prepaid is a
+      // contradiction nobody reading either one would spot.
+      const saysPrepaid = /\bPRE-?PAID\b|\bPPD\b/i.test(stated)
+      const saysCollect = /\bCOLLECT\b/i.test(stated)
+      const boxSaysPrepaid = draft.freight === 'PREPAID'
+      if ((saysPrepaid && !boxSaysPrepaid) || (saysCollect && boxSaysPrepaid)) {
+        ctx.warnings.push(
+          `The Incoterm reads "${stated}", but the freight payment box says ` +
+            `${boxSaysPrepaid ? 'PREPAID' : 'COLLECT'}. The document states no freight terms of its own, so that ` +
+            'box carries a default — check which is right before signing.',
+        )
+      }
+
       if (operatorPlace && statedPlace && operatorPlace.toLowerCase() !== statedPlace.toLowerCase()) {
         ctx.warnings.push(
           `The document states the Incoterm as "${stated}", but the named place entered for this shipment is ` +
@@ -254,10 +287,19 @@ export function createCevaAdapter(): CarrierAdapter {
 function formatReportedQuantity(line: SLILine): string {
   if (line.reportingBasis === 'none') return line.reportingUom
   const quantity = formatQuantity(line.reportingQuantity)
-  // Compared canonically. `PCS`, `EA` and `NO` are one unit written three ways — the Census
-  // file itself reports 51 commodity numbers in `PCS` — and appending any of those spellings
-  // to a plain piece count is exactly what this branch exists to avoid.
-  return canonicalUnit(line.reportingUom) !== 'NO' && line.reportingUom ? `${quantity} ${line.reportingUom}` : quantity
+  if (!line.reportingUom) return quantity
+
+  // A count under a code that is reported by the count is written bare, which is what the
+  // filed vendorA3 SLI does. Compared canonically: `PCS`, `EA` and `NO` are one unit written
+  // three ways — the Census file itself reports 51 commodity numbers in `PCS` — and
+  // appending any of those spellings to a plain piece count is noise.
+  const filed = canonicalUnit(line.reportingUom)
+  // Unless the row is not in a unit this code accepts at all, in which case the unit is the
+  // only thing on the paper that says so. The box is captioned "Quantity — Schedule B Unit",
+  // and a bare count in it asserts that is what the figure is.
+  const offRequiredUnit =
+    line.scheduleBUnits.length > 0 && !line.scheduleBUnits.some((unit) => canonicalUnit(unit) === filed)
+  return filed !== 'NO' || offRequiredUnit ? `${quantity} ${line.reportingUom}` : quantity
 }
 
 /**

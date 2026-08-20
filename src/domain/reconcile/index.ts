@@ -22,7 +22,7 @@ import {
   screenCode,
   type ScheduleBIndex,
 } from '../schedule-b'
-import { resolveReportingQuantity } from '../units'
+import { canRestate, resolveReportingQuantity } from '../units'
 import type { ItemLibraryEntry } from '../item-library'
 import { partKey } from '../part-key'
 import {
@@ -801,6 +801,11 @@ function classificationChecks(
         reportingUom: line.reportingUom,
         reportingBasis: line.reportingBasis,
         hasNetWeight: line.weightKg > 0,
+        // Answered by the conversion rules rather than inferred from the unit's name, so the
+        // check can tell "the figure does not exist" from "somebody chose otherwise".
+        requiredReachable: line.scheduleBUnits.some((unit) =>
+          canRestate({ quantity: line.quantity, uom: line.sourceUom, weightKg: line.weightKg }, unit),
+        ),
         ref: `row-${i + 1}`,
       },
       index,
