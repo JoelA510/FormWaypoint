@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { PDFDict, PDFDocument, PDFName } from 'pdf-lib'
+import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRawStream, decodePDFRawStream } from 'pdf-lib'
 import { pagesNeeded, paginateForm, rowsByPage, stampPageNumbers } from './paginate'
 import { NIPPON_ROW_ROOTS } from './nippon-express/fields'
 import { CEVA_COMMODITY_FIELDS } from './ceva/fields'
@@ -18,6 +18,31 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const template = (name: string) => new Uint8Array(fs.readFileSync(path.join(ROOT, 'public/templates', name)))
 
 const names = (doc: PDFDocument) => doc.getForm().getFields().map((f) => f.getName())
+
+/**
+ * The page numbers actually drawn on the sheets, read back off the content streams.
+ *
+ * `drawText` appends a stream of its own and writes the label as a hex string, so this looks
+ * for `<hex> Tj` and keeps what reads as a page number. Counting pages proves the sheets
+ * exist; this proves they say which of them the reader is holding.
+ */
+function stamps(doc: PDFDocument): string[] {
+  const found: string[] = []
+  for (const page of doc.getPages()) {
+    const contents = page.node.Contents()
+    const entries = contents instanceof PDFArray ? contents.asArray() : contents ? [contents] : []
+    for (const entry of entries) {
+      const stream = doc.context.lookup(entry)
+      if (!(stream instanceof PDFRawStream)) continue
+      const text = new TextDecoder('latin1').decode(decodePDFRawStream(stream).decode())
+      for (const [, hex] of text.matchAll(/<([0-9A-Fa-f]+)>\s*Tj/g)) {
+        const label = (hex.match(/../g) ?? []).map((byte) => String.fromCharCode(parseInt(byte, 16))).join('')
+        if (label.startsWith('Page ')) found.push(label)
+      }
+    }
+  }
+  return found
+}
 
 async function reload(doc: PDFDocument): Promise<PDFDocument> {
   const bytes = await doc.save({ updateFieldAppearances: true })
@@ -151,9 +176,11 @@ describe('what the form needs to render itself', () => {
     expect(acro.get(PDFName.of('SigFlags'))).toBeDefined()
   })
 
-  it('leaves a single-sheet form byte-for-byte the template’s own structure', async () => {
+  it('leaves a single-sheet form’s field tree exactly as the template names it', async () => {
     // Nothing restructures when the rows fit, so a one-page shipment is filled exactly as it
-    // was before continuation pages existed.
+    // was before continuation pages existed: the same fields, in the same order, each still
+    // owning the widgets the template gave it. (Not byte-for-byte — `stripActiveContent`
+    // runs on every form. That is asserted separately below.)
     const single = await paginateForm(template('nippon-express-sli.pdf'), 1, NIPPON_ROW_ROOTS)
     const direct = await PDFDocument.load(template('nippon-express-sli.pdf'), {
       ignoreEncryption: true,
@@ -161,22 +188,114 @@ describe('what the form needs to render itself', () => {
     })
     expect(names(single.doc)).toEqual(names(direct))
     expect(single.doc.getPageCount()).toBe(1)
+
+    const widgets = (doc: PDFDocument) =>
+      doc.getForm().getFields().map((f) => [f.getName(), f.acroField.getWidgets().length])
+    expect(widgets(single.doc)).toEqual(widgets(direct))
+  })
+
+  it('asks for no more sheets than it can count', async () => {
+    // `Math.max(1, NaN)` is `NaN`. A page count that arrived as one — a row total divided by
+    // a template's row capacity, where the capacity was missing — clamped to nothing at all,
+    // and the loop that adds sheets ran zero times while the result claimed however many.
+    for (const count of [Number.NaN, 0, -3]) {
+      const { doc, pageCount } = await paginateForm(template('ceva-sli.pdf'), count, CEVA_COMMODITY_FIELDS)
+      expect(pageCount, String(count)).toBe(1)
+      expect(doc.getPageCount(), String(count)).toBe(1)
+    }
+  })
+
+  it('numbers the sheet it just appended, not the template’s own second page', async () => {
+    // The paginated document *is* the template, so a sheet is appended after whatever pages
+    // the template already had. Indexing by the loop counter instead walked one of those and
+    // left the copy just made unprocessed — its rows unnamed, its widgets in no field.
+    const twoPage = await PDFDocument.load(template('nippon-express-sli.pdf'), {
+      ignoreEncryption: true,
+      updateMetadata: false,
+    })
+    twoPage.insertPage(1)
+    const { doc, form, fieldName } = await paginateForm(
+      new Uint8Array(await twoPage.save()),
+      2,
+      NIPPON_ROW_ROOTS,
+    )
+    // The template's two pages, and the continuation sheet after them.
+    expect(doc.getPageCount()).toBe(3)
+    form.getTextField(fieldName('22.02 SB1', 0)).setText('8544.42.0000')
+    form.getTextField(fieldName('22.02 SB1', 1)).setText('9031.90.0000')
+
+    const back = (await reload(doc)).getForm()
+    expect(back.getTextField(fieldName('22.02 SB1', 0)).getText()).toBe('8544.42.0000')
+    expect(back.getTextField(fieldName('22.02 SB1', 1)).getText()).toBe('9031.90.0000')
+  })
+})
+
+describe('what the template carries that a filed form should not', () => {
+  const javaScript = (doc: PDFDocument): PDFDict | undefined => {
+    const names = doc.context.lookupMaybe(doc.catalog.get(PDFName.of('Names')), PDFDict)
+    return names && doc.context.lookupMaybe(names.get(PDFName.of('JavaScript')), PDFDict)
+  }
+
+  it('the CEVA template really does carry document-level JavaScript', async () => {
+    // Asserted about the blank template so that the removal below is proved to remove
+    // something. A template revision that arrives without it should not quietly turn the
+    // next test into one that passes by having nothing to do.
+    const blank = await PDFDocument.load(template('ceva-sli.pdf'), {
+      ignoreEncryption: true,
+      updateMetadata: false,
+    })
+    expect(javaScript(blank)).toBeInstanceOf(PDFDict)
+  })
+
+  it('leaves no document-level JavaScript in a form it produces', async () => {
+    // One of the four scripts is Adobe's version check, which ends in
+    // `this.getURL("http://cgi.adobe.com/special/acrobat/update" + …)` on a reader older
+    // than 6.02. A filed SLI is a signed declaration this tool promises stays on the
+    // machine; it should not ship with an outbound path in it whatever the reader.
+    for (const sheets of [1, 2]) {
+      const { doc } = await paginateForm(template('ceva-sli.pdf'), sheets, CEVA_COMMODITY_FIELDS)
+      expect(javaScript(doc), `${sheets} sheet(s)`).toBeUndefined()
+      expect(javaScript(await reload(doc)), `${sheets} sheet(s), saved`).toBeUndefined()
+      expect(doc.catalog.get(PDFName.of('OpenAction'))).toBeUndefined()
+    }
+  })
+
+  it('drops the page labels once there is more than one sheet', async () => {
+    // The CEVA template labels its pages with the literal `1` and no numbering style, so
+    // every sheet would be page "1" in the reader's page box while the corner of the paper
+    // says 2 of 3.
+    const single = await paginateForm(template('ceva-sli.pdf'), 1, CEVA_COMMODITY_FIELDS)
+    expect(single.doc.catalog.get(PDFName.of('PageLabels'))).toBeDefined()
+    const paged = await paginateForm(template('ceva-sli.pdf'), 2, CEVA_COMMODITY_FIELDS)
+    expect(paged.doc.catalog.get(PDFName.of('PageLabels'))).toBeUndefined()
+  })
+
+  it('does not let a continuation sheet claim the first sheet’s tagging index', async () => {
+    // A copied page carries the `/StructParents` of the page it came from, and two pages
+    // cannot both be structure element 0. Nothing re-tags the copy, so it says it is
+    // untagged, which is what it is.
+    const { doc } = await paginateForm(template('nippon-express-sli.pdf'), 2, NIPPON_ROW_ROOTS)
+    expect(doc.getPage(0).node.get(PDFName.of('StructParents'))).toBeDefined()
+    expect(doc.getPage(1).node.get(PDFName.of('StructParents'))).toBeUndefined()
   })
 })
 
 describe('numbering the sheets', () => {
+  it('numbers each sheet where there is more than one', async () => {
+    const { doc } = await paginateForm(template('ceva-sli.pdf'), 3, CEVA_COMMODITY_FIELDS)
+    await stampPageNumbers(doc)
+    const reloaded = await reload(doc)
+    expect(reloaded.getPageCount()).toBe(3)
+    expect(stamps(reloaded)).toEqual(['Page 1 of 3', 'Page 2 of 3', 'Page 3 of 3'])
+  })
+
   it('says nothing on a single-page form', async () => {
+    // A one-page form is the form the carrier issued, and "Page 1 of 1" printed on it is this
+    // tool leaving a mark for no reason. Nothing drawn, so nothing embedded either.
     const { doc } = await paginateForm(template('ceva-sli.pdf'), 1, CEVA_COMMODITY_FIELDS)
     const before = (await doc.save()).length
     await stampPageNumbers(doc)
-    // Nothing drawn, so nothing embedded — a form the carrier issued is left as issued.
+    expect(stamps(await reload(doc))).toEqual([])
     expect((await doc.save()).length).toBeLessThanOrEqual(before + 64)
-  })
-
-  it('numbers each sheet where there is more than one', async () => {
-    const { doc } = await paginateForm(template('ceva-sli.pdf'), 2, CEVA_COMMODITY_FIELDS)
-    await stampPageNumbers(doc)
-    const reloaded = await reload(doc)
-    expect(reloaded.getPageCount()).toBe(2)
   })
 })

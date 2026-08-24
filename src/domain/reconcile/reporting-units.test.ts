@@ -13,6 +13,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseCipl } from '../cipl'
 import { buildSyntheticCipl, simpleShipment } from '../../test/synthetic/cipl'
+import { buildOmronCiPdf, simpleOmronCi } from '../../test/synthetic/omron-ci'
 import { createScheduleBIndex, type ScheduleBIndex } from '../schedule-b'
 import { reconcile } from '.'
 import type { ParsedCipl, SLILine } from '../types'
@@ -175,7 +176,7 @@ describe('the unit a commodity row is filed in', () => {
 })
 
 describe('a row that rounds away to nothing', () => {
-  it('warns whether or not the document states a weight', async () => {
+  it('warns when the weight it files rounds away, and names that weight', async () => {
     // A quantity box reading `0` on a signed declaration says the goods are not there.
     // 4016.93.0000 is reported in KG; a fifth of a kilo has nowhere to land.
     const parsed = await shipment('4016.93.0000', { netWeightKg: 0.2, grossWeightKg: 0.3 })
@@ -185,7 +186,31 @@ describe('a row that rounds away to nothing', () => {
     const zero = checks.find((c) => c.id === 'quantities-nonzero')!
     expect(zero.passed).toBe(false)
     expect(zero.severity).toBe('warning')
-    expect(zero.detail).toMatch(/4016\.93\.0000/)
+    expect(zero.detail).toMatch(/4016\.93\.0000 at 0\.2 kg/)
+  })
+
+  it('warns with no weight anywhere, and names the figure that did round away', async () => {
+    // The Omron invoice states a unit per line and no weights at all, so a line invoiced as
+    // `0.3 KG` files its own figure — rounded whole, to nothing — with no weight behind it.
+    // Sending that filer to look at `0 kg` points them at a number the document has not got
+    // and is never going to have.
+    const spec = simpleOmronCi()
+    const bytes = await buildOmronCiPdf({
+      ...spec,
+      netWeightKg: undefined,
+      grossWeightKg: undefined,
+      lines: [{ ...spec.lines[0], hts: '4016.93.0000', quantity: 0.3, uom: 'KG' }],
+    })
+    const parsed = await parseCipl('ci.pdf', bytes)
+    const { sliLines, checks } = reconcile(parsed, scheduleB, CONTROLLED)
+    const line = row(sliLines, '4016.93.0000')
+    expect(line.weightKg).toBe(0)
+    expect(line.reportingQuantity).toBe(0)
+
+    const zero = checks.find((c) => c.id === 'quantities-nonzero')!
+    expect(zero.passed).toBe(false)
+    expect(zero.detail).toMatch(/4016\.93\.0000 at 0\.3 KG/)
+    expect(zero.detail).not.toMatch(/0 kg/)
   })
 
   it('says nothing when every row files at least one', async () => {

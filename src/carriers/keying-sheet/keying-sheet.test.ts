@@ -157,16 +157,70 @@ describe('the unit each commodity is keyed in', () => {
     expect(Number(row.unitValue) * Number(row.quantity)).toBeCloseTo(Number(row.totalValue), 2)
   })
 
-  it('restates each keying row from its own figures, not from the SLI row’s', () => {
+  it('restates each keying row from its own figures', () => {
     // The default grouping splits one commodity number across parts, so the rows are not the
-    // SLI's rows and cannot take its total.
+    // SLI's rows and do not take its total.
     const lines = [
       line({ id: 'a', partNumber: 'AAA-1', classification: '9031.90.0000', quantity: 2, netWeightKg: 3 }),
       line({ id: 'b', partNumber: 'BBB-2', classification: '9031.90.0000', quantity: 4, netWeightKg: 5.118 }),
     ]
-    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(lines, [byWeight()]), draft())
+    const row = byWeight({ sourceLineIds: ['a', 'b'], weightKg: 8.118, reportingQuantity: 8 })
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(lines, [row]), draft())
     expect(sheet.commodities.map((c) => c.quantity)).toEqual(['3', '5'])
     expect(sheet.commodities.every((c) => c.unitOfMeasure === 'KG')).toBe(true)
+  })
+
+  it('shares the commodity row’s whole figure out across the rows that make it up', () => {
+    // Rounded independently these are 4 and 4 against a form filing 7, and the sheet and the
+    // declaration prepared for one shipment then state different quantities for the same
+    // goods. Largest remainder: both groups take their whole 3, and the spare kilogram goes
+    // to the larger fraction — a tie here, so to the earlier row.
+    const lines = [
+      line({ id: 'a', partNumber: 'AAA-1', classification: '9031.90.0000', quantity: 2, netWeightKg: 3.719 }),
+      line({ id: 'b', partNumber: 'BBB-2', classification: '9031.90.0000', quantity: 4, netWeightKg: 3.719 }),
+    ]
+    const row = byWeight({ sourceLineIds: ['a', 'b'], weightKg: 7.438, reportingQuantity: 7 })
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(lines, [row]), draft())
+    expect(sheet.commodities.map((c) => c.quantity)).toEqual(['4', '3'])
+    // The property being bought, stated as such: the sheet totals what the form files.
+    expect(sheet.commodities.reduce((sum, c) => sum + Number(c.quantity), 0)).toBe(7)
+  })
+
+  it('shares out nothing across a group that spans two commodity rows', () => {
+    // `part-code` merges origins, so one group here holds lines the form files as separate
+    // D and F rows. Such a group is not a subdivision of either, and handing it a share of
+    // one would key the other's goods twice.
+    const lines = [
+      line({ id: 'a', countryOfOrigin: 'United States', classification: '9031.90.0000', netWeightKg: 3.719 }),
+      line({ id: 'b', countryOfOrigin: 'Japan', classification: '9031.90.0000', netWeightKg: 3.719 }),
+    ]
+    const rows = [
+      byWeight({ sourceLineIds: ['a'], domesticForeign: 'D', weightKg: 3.719, reportingQuantity: 4 }),
+      byWeight({ sourceLineIds: ['b'], domesticForeign: 'F', weightKg: 3.719, reportingQuantity: 4 }),
+    ]
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(lines, rows), draft(), {
+      options: { grouping: 'part-code' },
+    })
+    expect(sheet.commodities).toHaveLength(1)
+    // Its own 7.438 kg, rounded whole, rather than a share of either row.
+    expect(sheet.commodities[0].quantity).toBe('7')
+  })
+
+  it('keeps a row’s unit price where its share rounds to nothing', () => {
+    // A row that shares out to zero still carries a customs value, and the total beside it is
+    // what the operator keys. Blanking the price as well leaves a row nothing can be checked
+    // against.
+    const lines = [
+      line({ id: 'a', partNumber: 'AAA-1', classification: '9031.90.0000', netWeightKg: 0.9, extendedValue: 100 }),
+      line({ id: 'b', partNumber: 'BBB-2', classification: '9031.90.0000', netWeightKg: 0.1, extendedValue: 20 }),
+    ]
+    const row = byWeight({ sourceLineIds: ['a', 'b'], weightKg: 1, reportingQuantity: 1 })
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(lines, [row]), draft())
+    expect(sheet.commodities.map((c) => c.quantity)).toEqual(['1', '0'])
+    expect(sheet.commodities[0].unitValue).toBe('100.000000')
+    // No units to divide by, so no per-unit price — and the value is still on the row.
+    expect(sheet.commodities[1].unitValue).toBe('')
+    expect(sheet.commodities[1].totalValue).toBe('20.00')
   })
 
   it('keeps the document’s own figure where the row has no weight, and says so', () => {

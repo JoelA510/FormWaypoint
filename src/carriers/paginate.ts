@@ -171,6 +171,38 @@ export interface PaginatedForm {
 }
 
 /**
+ * Remove the document-level active content the blank templates were authored with.
+ *
+ * The CEVA form carries Adobe's "Please Migrate Document" boilerplate as document-level
+ * JavaScript, and one of its four scripts ends in
+ * `this.getURL("http://cgi.adobe.com/special/acrobat/update" + platform/version/language)`
+ * on a reader older than 6.02. It takes an old reader and a click to fire, so nothing has
+ * ever gone out — but a filed SLI is a signed declaration this tool promises stays on the
+ * machine, and shipping one with a live outbound path in it is not a promise worth relying
+ * on somebody's Acrobat version to keep.
+ *
+ * Not new to continuation pages: the adapters have always loaded these templates as the
+ * document, so this has been in every SLI the tool has produced. It is removed here because
+ * this is now the single door every filled form comes through.
+ *
+ * The scripts are Adobe's own version check and a barcode initialiser for readers before
+ * version 5. Neither computes a field, so nothing on either form depends on them.
+ */
+function stripActiveContent(doc: PDFDocument): void {
+  const names = doc.context.lookupMaybe(doc.catalog.get(PDFName.of('Names')), PDFDict)
+  if (names) {
+    names.delete(PDFName.of('JavaScript'))
+    // An empty name dictionary is a name dictionary; the catalog entry goes with its content.
+    if (names.keys().length === 0) doc.catalog.delete(PDFName.of('Names'))
+  }
+  // Neither template carries these today. They are the other two places a PDF runs something
+  // of its own on open, and a template revision that acquired one would arrive silently.
+  doc.catalog.delete(PDFName.of('OpenAction'))
+  doc.catalog.delete(PDFName.of('AA'))
+  for (const page of doc.getPages()) page.node.delete(PDFName.of('AA'))
+}
+
+/**
  * The template, extended to `pageCount` sheets, with `perPageRoots` renamed per sheet and
  * everything else shared.
  *
@@ -195,7 +227,10 @@ export async function paginateForm(
   // Starting from the template also means a shipment that fits one sheet is filled exactly as
   // it was before any of this existed: nothing below runs.
   const doc = await PDFDocument.load(templateBytes, { ignoreEncryption: true, updateMetadata: false })
-  const sheets = Math.max(1, pageCount)
+  stripActiveContent(doc)
+  // `Math.max(1, NaN)` is `NaN`, which would run the loop below zero times and hand back a
+  // one-sheet form claiming however many sheets the caller asked for.
+  const sheets = Number.isFinite(pageCount) ? Math.max(1, Math.floor(pageCount)) : 1
   const roots = new Set(perPageRoots)
 
   const fieldName = (templateName: string, pageIndex: number): string => {
@@ -210,6 +245,12 @@ export async function paginateForm(
   const ctx = doc.context
   const acro = doc.getForm().acroForm
 
+  // The CEVA template labels its pages with the literal string `1` and no numbering style, so
+  // every sheet of a paginated form would be page "1" in the reader's page box while the
+  // corner of the paper says 2 of 3. Dropped rather than rewritten: without it the reader
+  // numbers the sheets itself, which is what the stamp says too.
+  doc.catalog.delete(PDFName.of('PageLabels'))
+
   /** Page 1's terminal fields, which the later sheets hand their widgets to. */
   const shared = new Map<string, Node>()
   for (const root of rootsOnPage(ctx, doc, 0)) {
@@ -223,8 +264,16 @@ export async function paginateForm(
     const source = await PDFDocument.load(templateBytes, { ignoreEncryption: true, updateMetadata: false })
     const [page] = await doc.copyPages(source, [0])
     doc.addPage(page)
+    // The index `addPage` put it at, not `pageIndex`. The template is the document now, so a
+    // sheet is appended *after* whatever pages the template already had; on a template that
+    // ever gains a second page, `pageIndex` would walk one of those and leave the copy this
+    // iteration just made unprocessed — its widgets unregistered, its rows unnamed.
+    const sheet = doc.getPageCount() - 1
+    // A copy carries the tagging index of the page it came from, and two pages cannot both be
+    // structure element 0. Nothing re-tags the copy, so it says it is untagged, which it is.
+    page.node.delete(PDFName.of('StructParents'))
 
-    for (const root of rootsOnPage(ctx, doc, pageIndex)) {
+    for (const root of rootsOnPage(ctx, doc, sheet)) {
       if (roots.has(root.name)) {
         root.dict.set(PDFName.of('T'), PDFString.of(pageSuffixed(root.name, pageIndex)))
         acro.addField(root.ref)
@@ -246,7 +295,15 @@ export async function paginateForm(
           relink(ctx, acro, field.replaced, field)
           shared.set(name, { ref: field.ref, dict: field.dict })
         }
-        const kids = ctx.lookup(field.dict.get(PDFName.of('Kids')), PDFArray)
+        // `splitMergedWidget` hands back a node with `/Kids` in every case it acts on, but it
+        // declines a dictionary that is neither a widget (no `/Rect`) nor already a parent.
+        // Looking that up unconditionally threw on the whole document rather than adopting
+        // the one odd field.
+        let kids = kidsOf(ctx, field.dict)
+        if (!kids) {
+          kids = ctx.obj([]) as PDFArray
+          field.dict.set(PDFName.of('Kids'), kids)
+        }
         const incoming = kidsOf(ctx, node.dict)
         if (incoming) {
           for (let i = 0; i < incoming.size(); i++) {

@@ -255,7 +255,10 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
       title: 'No commodity row files a quantity of zero',
       detail: roundedAway.length
         ? `${roundedAway.length} row(s) round to a quantity of 0 in the unit they are filed in ` +
-          `(${roundedAway.map((l) => `${l.scheduleB} at ${l.weightKg} kg`).join(', ')}). A kilogram quantity is ` +
+          // Whichever figure actually rounded away. A row invoiced in grams under a kilogram
+          // code converts without a stated weight, and printing `at 0 kg` about it sent the
+          // filer to look for a weight the document was never going to have.
+          `(${roundedAway.map(roundedAwayFrom).join(', ')}). A kilogram quantity is ` +
           'filed as whole kilograms, so goods under half a kilo have nowhere to land. Decide what the box ' +
           'should say before signing — a zero declares the goods absent.'
         : 'Every row files a quantity of at least one.',
@@ -311,6 +314,20 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
  * document and blocks; a currency that could not be read is a fact about the parse, and
  * blocking on it would stop a shipment whose figures may be perfectly correct.
  */
+/**
+ * A row that rounded to nothing, named alongside the figure that did the rounding.
+ *
+ * The weight where there is one, because a kilogram row is filed off the net weight and that
+ * is the number to go and look at. Where there is none the row converted from what the
+ * invoice counted, and saying `at 0 kg` about it points the filer at a figure the document
+ * does not carry and never will.
+ */
+function roundedAwayFrom(line: SLILine): string {
+  return line.weightKg > 0
+    ? `${line.scheduleB} at ${line.weightKg} kg`
+    : `${line.scheduleB} at ${line.quantity} ${line.sourceUom}`
+}
+
 function currencyCheck(currency: string): CheckResult[] {
   const code = currency.trim().toUpperCase()
   if (code === 'USD') return []

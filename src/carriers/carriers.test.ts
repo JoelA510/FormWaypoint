@@ -9,6 +9,8 @@ import { createScheduleBIndex, type ScheduleBIndex } from '../domain/schedule-b'
 import { reconcile } from '../domain/reconcile'
 import { buildDraft, defaultShipmentSettings, summariseReferences, type CompanyProfile } from '../domain/draft'
 import { getAdapter, detectCarrier } from './registry'
+import { paginateForm } from './paginate'
+import { NIPPON_ROWS, NIPPON_ROW_ROOTS } from './nippon-express/fields'
 import { isNamedPlace, parseIncoterm } from '../domain/incoterms'
 import { buildSyntheticCipl, simpleShipment } from '../test/synthetic/cipl'
 import { buildKeyingSheet, keyingSheetToWorkbook } from './keying-sheet'
@@ -320,16 +322,38 @@ describe.skipIf(!hasFixtures())('CEVA — vendorA3', () => {
   })
 })
 
-describe.skipIf(!hasFixtures())('overflow handling', () => {
-  it('warns rather than silently dropping rows beyond the form capacity', async () => {
+describe.skipIf(!hasFixtures())('more rows than a sheet holds', () => {
+  it('continues onto a second sheet rather than warning and stopping at eight', async () => {
     const adapter = getAdapter('nippon-express')
     const result = reconcile(parsed.vendorA3, scheduleB, CONTROLLED)
     const draft = buildDraft(result, VENDOR, defaultShipmentSettings(adapter), adapter)
     // Nine rows against an eight-row form.
     const overflowing = { ...draft, lines: [...draft.lines, ...draft.lines, ...draft.lines] }
+    expect(overflowing.lines).toHaveLength(9)
     const filled = await adapter.fill(template('nippon-express-sli.pdf'), overflowing)
-    expect(filled.warnings.join(' ')).toMatch(/holds 8/)
-    expect(filled.warnings.join(' ')).toMatch(/continuation sheet/)
+    expect(filled.warnings).toEqual([])
+
+    const doc = await PDFDocument.load(filled.bytes, { ignoreEncryption: true, updateMetadata: false })
+    expect(doc.getPageCount()).toBe(2)
+
+    // Eight rows on the first sheet and the ninth on the second, none of them dropped.
+    // The names are asked for rather than guessed at: the template spells its own row fields
+    // inconsistently (`22.03 sB UNIT1` beside `23.03 SB UNI2`), so a pattern would quietly
+    // check fewer rows than it looked like it was checking.
+    const { fieldName } = await paginateForm(template('nippon-express-sli.pdf'), 2, NIPPON_ROW_ROOTS)
+    const values = await readBack(filled.bytes)
+    NIPPON_ROWS.forEach((row, i) => {
+      expect(values[fieldName(row.scheduleB, 0)], `row ${i + 1}`).toBe(overflowing.lines[i].scheduleB)
+    })
+    expect(values[fieldName(NIPPON_ROWS[0].scheduleB, 1)]).toBe(overflowing.lines[8].scheduleB)
+    // And the second sheet's row 2 is empty, not a copy of the first sheet's.
+    expect(values[fieldName(NIPPON_ROWS[1].scheduleB, 1)]).toBeUndefined()
+
+    // One shipment, so the boxes that describe it are one field the reader shows on both
+    // sheets — a correction on either is a correction on both.
+    const usppi = doc.getForm().getTextField('1a. USPPI')
+    expect(usppi.getText()).toBe(values['1a. USPPI'])
+    expect(usppi.acroField.getWidgets()).toHaveLength(2)
   })
 })
 
@@ -487,6 +511,85 @@ describe('the reported unit from document to form', () => {
     const values = await readBack(filled.bytes)
     expect(values.FOB).toBe('checked')
     expect(filled.warnings).toEqual([])
+  })
+})
+
+/**
+ * A shipment that does not fit one sheet, end to end on a document.
+ *
+ * The Nippon form holds eight commodity rows and shipments in this trade regularly need more.
+ * That used to be a blocking check — the form was refused and nothing came out, over a
+ * situation the paper has always handled by being filed as several sheets.
+ */
+describe('a shipment filed on more than one sheet', () => {
+  /** Nine commodity numbers, all reported in NO, so nine rows survive aggregation. */
+  const CODES = [
+    '8501.10.3000', '8501.10.4040', '8501.10.4060', '8501.10.4080', '8501.10.6020',
+    '8501.10.6040', '8501.10.6060', '8501.10.6080', '8501.20.2000',
+  ]
+
+  let nineRows: ParsedCipl
+
+  beforeAll(async () => {
+    const spec = simpleShipment()
+    nineRows = await parseCipl(
+      'synthetic.pdf',
+      await buildSyntheticCipl({
+        ...spec,
+        lines: CODES.map((classification, i) => ({
+          ...spec.lines[0],
+          lineNumber: String(i + 1).padStart(4, '0'),
+          partNumber: `P-${i + 1}`,
+          classification,
+          quantity: i + 1,
+          netWeightKg: 1 + i / 10,
+          grossWeightKg: 1.5 + i / 10,
+        })),
+      }),
+    )
+  }, 60_000)
+
+  it('puts the first eight rows on sheet one and the ninth on sheet two', async () => {
+    const adapter = getAdapter('nippon-express')
+    const result = reconcile(nineRows, scheduleB, { ...CONTROLLED, maxRows: adapter.maxCommodityRows })
+    expect(result.sliLines).toHaveLength(9)
+    // Reported, not refused.
+    expect(result.canGenerate).toBe(true)
+    expect(result.checks.find((c) => c.id === 'row-capacity')?.detail).toMatch(/2 pages/)
+
+    const draft = buildDraft(result, VENDOR, defaultShipmentSettings(adapter), adapter)
+    const filled = await adapter.fill(template('nippon-express-sli.pdf'), draft)
+    expect(filled.warnings).toEqual([])
+
+    const doc = await PDFDocument.load(filled.bytes, { ignoreEncryption: true, updateMetadata: false })
+    expect(doc.getPageCount()).toBe(2)
+
+    // Asked for rather than guessed at: the template spells its own row fields inconsistently
+    // (`22.03 sB UNIT1` beside `23.03 SB UNI2`), so a pattern over the names would quietly
+    // check fewer rows than it looked like it was checking.
+    const { fieldName } = await paginateForm(template('nippon-express-sli.pdf'), 2, NIPPON_ROW_ROOTS)
+    const values = await readBack(filled.bytes)
+    NIPPON_ROWS.forEach((row, i) => {
+      expect(values[fieldName(row.scheduleB, 0)], `sheet 1 row ${i + 1}`).toBe(CODES[i])
+    })
+    expect(values[fieldName(NIPPON_ROWS[0].scheduleB, 1)]).toBe(CODES[8])
+    // The second sheet's remaining rows are empty, not copies of the first sheet's.
+    expect(values[fieldName(NIPPON_ROWS[1].scheduleB, 1)]).toBeUndefined()
+
+    // One shipment, so every box but the commodity table is one field the reader shows on
+    // both sheets — correcting the consignee on either sheet corrects it on both.
+    const usppi = doc.getForm().getTextField('1a. USPPI')
+    expect(usppi.getText()).toBe(values['1a. USPPI'])
+    expect(usppi.acroField.getWidgets()).toHaveLength(2)
+
+  })
+
+  it('keys the same nine rows on the sheet that goes with the form', async () => {
+    const adapter = getAdapter('nippon-express')
+    const result = reconcile(nineRows, scheduleB, { ...CONTROLLED, maxRows: adapter.maxCommodityRows })
+    const draft = buildDraft(result, VENDOR, defaultShipmentSettings(adapter), adapter)
+    const sheet = buildKeyingSheet('fedex-ship-manager', result, draft)
+    expect(sheet.commodities.map((c) => c.harmonizedCode).sort()).toEqual([...CODES].sort())
   })
 })
 

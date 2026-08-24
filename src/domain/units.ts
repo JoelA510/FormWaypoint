@@ -111,6 +111,28 @@ export interface QuantitySource {
  * The caller keeps what the document said and the reconciliation says why.
  */
 export function restateQuantity(source: QuantitySource, targetUnit: string): RestatedQuantity | null {
+  return restate(source, targetUnit, asFiled)
+}
+
+/**
+ * The same restatement with its unit's whole-number rule left off.
+ *
+ * One caller: the keying sheet, which shares a commodity row's whole figure out across the
+ * finer rows it prints. Sharing out needs the exact figure each of those rows contributes —
+ * rounding them first is what makes 3.719 and 3.719 into 4 and 4 under a row filing 7.
+ *
+ * Never write this to a form or a sheet. It is the input to a decision about whole units, not
+ * a quantity anything files.
+ */
+export function restateExact(source: QuantitySource, targetUnit: string): RestatedQuantity | null {
+  return restate(source, targetUnit, (value) => value)
+}
+
+function restate(
+  source: QuantitySource,
+  targetUnit: string,
+  applyUnitRule: (value: number, unit: string) => number,
+): RestatedQuantity | null {
   const target = canonicalUnit(targetUnit)
   if (!target) return null
   const from = canonicalUnit(source.uom) ?? ''
@@ -123,7 +145,7 @@ export function restateQuantity(source: QuantitySource, targetUnit: string): Res
 
   if (target === NO_QUANTITY_UNIT) return { unit, quantity: 0, basis: 'none' }
 
-  const filed = (value: number): number => asFiled(value, target)
+  const filed = (value: number): number => applyUnitRule(value, target)
 
   // Already in the unit asked for. Ahead of the family tables so that a unit neither table
   // knows — square metres, litres, barrels — still restates onto itself, and `canRestate`

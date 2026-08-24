@@ -19,7 +19,14 @@
  * or, worse, transposes values.
  */
 import type { MergedLine, Reconciliation, SLILine } from '../../domain/types'
-import { KG_PER_LB, kgToLb as kilogramsToPounds, restateQuantity, roundPrecise } from '../../domain/units'
+import {
+  KG_PER_LB,
+  filedWhole,
+  kgToLb as kilogramsToPounds,
+  restateExact,
+  restateQuantity,
+  roundPrecise,
+} from '../../domain/units'
 import { buildXlsx, type CellValue, type Sheet } from '../../lib/xlsx'
 import type { SliDraft } from '../types'
 import { canonicalUnit, formatScheduleB, normalizeScheduleB, type ScheduleBIndex } from '../../domain/schedule-b'
@@ -338,19 +345,21 @@ function reportingUnits(sliLines: SLILine[]): Map<string, string> {
  * reported by weight), the document's own figure is kept and the row says so, because a
  * blank quantity keys as nothing and an invented one keys as a lie.
  */
-function keyedQuantity(
-  group: MergedLine[],
-  quantity: number,
-  weightKg: number,
-  wanted: string | undefined,
-): {
+interface KeyedQuantity {
   quantity: number
   unit: string
   fromNetWeight: boolean
   converted?: boolean
   unavailable?: string
   notFiled?: boolean
-} {
+}
+
+function keyedQuantity(
+  group: MergedLine[],
+  quantity: number,
+  weightKg: number,
+  wanted: string | undefined,
+): KeyedQuantity {
   const printed = unitFor(group)
   const asPrinted = { quantity: roundTo(quantity, 3), unit: printed, fromNetWeight: false }
   if (!wanted) return asPrinted
@@ -376,6 +385,83 @@ function keyedQuantity(
     unit: restated.unit,
     fromNetWeight: restated.basis === 'net-weight',
     converted: restated.basis === 'converted',
+  }
+}
+
+/**
+ * Whole-unit quantities shared out across the keying rows that make up one commodity row.
+ *
+ * A keying group is finer than an SLI row — the default grouping splits a code by part and
+ * origin — and a unit filed as a whole number does not survive being rounded twice. Two
+ * groups of 3.719 kg under one row round to 4 and 4 while the form, rounding their sum,
+ * files 7. The sheet and the declaration prepared from one shipment would then state
+ * different quantities for the same goods, which is the failure this sheet exists to prevent.
+ *
+ * So the row's own figure is shared out rather than recomputed. Largest remainder: each group
+ * takes the whole part of its exact share, and the units left over go to the groups with the
+ * largest fractions, ties to the earlier row. The shares sum to the form's figure by
+ * construction — that is the property being bought, and it is why this cannot be decided one
+ * group at a time.
+ *
+ * Only where the groups are an exact partition of one commodity row. `part-code` merges
+ * origins, so a group there can span two rows of a form that files D and F separately;
+ * nothing about such a group is a share of anything, and it keeps its own restatement.
+ */
+function apportionWholeUnits(
+  groups: MergedLine[][],
+  keyed: Map<MergedLine[], KeyedQuantity>,
+  /** Each group's restated figure before its unit's whole-number rule, or NaN where it has none. */
+  exact: Map<MergedLine[], number>,
+  sliLines: SLILine[],
+): void {
+  const rowOf = new Map<string, SLILine>()
+  for (const row of sliLines) for (const id of row.sourceLineIds) rowOf.set(id, row)
+
+  const buckets = new Map<SLILine, MergedLine[][]>()
+  for (const group of groups) {
+    const share = keyed.get(group)
+    // `unavailable` and `notFiled` rows keep the document's own figure and say so; neither is
+    // a share of the form's, and rounding is not what is wrong with them.
+    if (!share || share.unavailable || share.notFiled || !filedWhole(share.unit)) continue
+    if (!Number.isFinite(exact.get(group) ?? Number.NaN)) continue
+    const rows = new Set(group.map((line) => rowOf.get(line.id)))
+    const [row] = [...rows]
+    // One row, and a real one: a group spanning rows, or holding a line no row claims, is not
+    // a subdivision of anything.
+    if (rows.size !== 1 || !row) continue
+    const bucket = buckets.get(row)
+    if (bucket) bucket.push(group)
+    else buckets.set(row, [group])
+  }
+
+  for (const [row, bucket] of buckets) {
+    // Whole, not merely finite. There is nothing whole to share out of a row that is not
+    // filing a whole figure, and a fractional remainder would hand a spare unit to whichever
+    // group happened to sort first.
+    if (!filedWhole(row.reportingUom) || !Number.isInteger(row.reportingQuantity)) continue
+    // Every line of the row accounted for. A bucket holding only some of them is a share of
+    // part of the row, and handing it the whole row's figure would key the missing lines twice.
+    const ids = new Set(bucket.flatMap((group) => group.map((line) => line.id)))
+    if (ids.size !== new Set(row.sourceLineIds).size) continue
+
+    const shares = bucket.map((group) => exact.get(group) as number)
+    const whole = shares.map((value) => Math.floor(value))
+    // Bounded rather than trusted. The shares are rounded to three places on the way out of
+    // `restateExact` and the row's figure is rounded from its own sum, so the two can differ
+    // in the last place; a remainder outside `[0, one each]` would mean they disagree about
+    // something larger than rounding, and there is nothing to share out if they do.
+    const remainder = Math.min(
+      Math.max(row.reportingQuantity - whole.reduce((sum, value) => sum + value, 0), 0),
+      bucket.length,
+    )
+    const byFraction = shares
+      .map((value, index) => ({ index, fraction: value - Math.floor(value) }))
+      .sort((a, b) => b.fraction - a.fraction || a.index - b.index)
+    for (let taken = 0; taken < remainder; taken++) whole[byFraction[taken].index] += 1
+
+    bucket.forEach((group, index) => {
+      keyed.set(group, { ...(keyed.get(group) as KeyedQuantity), quantity: whole[index] })
+    })
   }
 }
 
@@ -407,6 +493,8 @@ function groupForKeying(
    * code alone is not enough.
    */
   units: Map<string, string>,
+  /** The SLI's own commodity rows, whose whole-unit figures these rows are shared out of. */
+  sliLines: SLILine[],
 ): KeyingCommodityRow[] {
   const groups = new Map<string, MergedLine[]>()
   lines.forEach((line, index) => {
@@ -429,9 +517,23 @@ function groupForKeying(
           .map(([, lines]) => lines)
       : [...groups.values()]
 
+  // Restated once, up front, because a unit filed as a whole number cannot be decided one
+  // group at a time — see `apportionWholeUnits`.
+  const keyedByGroup = new Map<MergedLine[], KeyedQuantity>()
+  const exactByGroup = new Map<MergedLine[], number>()
+  for (const group of ordered) {
+    const quantity = group.reduce((sum, l) => sum + l.quantity, 0)
+    const weightKg = group.reduce((sum, l) => sum + (l.netWeightKg ?? 0), 0)
+    const codeKey = normalizeScheduleB(codeFor(group[0], corrections))
+    const wanted = units.get(`${codeKey}|${canonicalUnit(group[0].uom) ?? ''}`) ?? units.get(codeKey)
+    keyedByGroup.set(group, keyedQuantity(group, quantity, weightKg, wanted))
+    const exact = wanted ? restateExact({ quantity, uom: unitFor(group), weightKg }, wanted) : null
+    exactByGroup.set(group, exact ? exact.quantity : Number.NaN)
+  }
+  apportionWholeUnits(ordered, keyedByGroup, exactByGroup, sliLines)
+
   return ordered.map((group) => {
     const first = group[0]
-    const quantity = group.reduce((sum, l) => sum + l.quantity, 0)
     const total = group.reduce((sum, l) => sum + (l.extendedValue ?? 0), 0)
     // Summed in kilograms and converted once. Converting each line and adding the rounded
     // pounds accumulates the rounding: the same shipment came out 0.005 lb heavy that way.
@@ -467,15 +569,9 @@ function groupForKeying(
     // applied one part's wording to goods the document does not identify, discarding what it
     // did say about them (`otherDescriptions` is emptied wherever a saved wording wins).
     const partMissing = group.some((l) => !l.partNumber.trim())
-    // The row's own unit first, so a code split across units on the SLI matches the group it
-    // actually came from.
-    const codeKey = normalizeScheduleB(code)
-    const keyed = keyedQuantity(
-      group,
-      quantity,
-      weightKg,
-      units.get(`${codeKey}|${canonicalUnit(first.uom) ?? ''}`) ?? units.get(codeKey),
-    )
+    // Restated in the pass above, where a whole unit's figure was shared out across the rows
+    // that make up one commodity row on the form.
+    const keyed = keyedByGroup.get(group)!
     const saved = parts.length === 1 && !partMissing ? descriptions[partKey(parts[0])] : undefined
     const chosen = describeGroup(group, options.descriptionSource, scheduleB, code)
     return {
@@ -540,7 +636,12 @@ function groupForKeying(
       // quantity x unit price still comes back to the customs value on a row filed by
       // weight — both applications compute it that way and would otherwise disagree with
       // the total printed beside it.
-      unitValue: keyed.quantity ? (total / keyed.quantity).toFixed(6) : '',
+      //
+      // Stated only where there are units to divide by. A row that files no quantity — a
+      // `X`-unit code, or one that shared out to nothing — has no per-unit price, and the
+      // total beside it is the figure to key. Written as a comparison rather than leaning on
+      // `0` being falsy, because the guard has to catch `NaN` on purpose and not by accident.
+      unitValue: Number.isFinite(keyed.quantity) && keyed.quantity > 0 ? (total / keyed.quantity).toFixed(6) : '',
       totalValue: total.toFixed(2),
       weightLb: weightKg ? kgToLb(weightKg).toFixed(2) : '',
       weightKg: weightKg ? roundTo(weightKg, 3).toFixed(3) : '',
@@ -716,6 +817,7 @@ export function buildKeyingSheet(
       sme: inputs.sme,
     },
     reportingUnits(reconciliation.sliLines),
+    reconciliation.sliLines,
   )
 
   // Two different weights, because they answer two different questions.
