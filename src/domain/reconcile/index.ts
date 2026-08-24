@@ -301,6 +301,20 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
 // ---------------------------------------------------------------------------
 
 /**
+ * A row that rounded to nothing, named alongside the figure that did the rounding.
+ *
+ * Told by the basis, not by whether a weight happens to be on the row. A line invoiced as
+ * 400 g under a kilogram code converts from its own quantity and rounds away there — and a
+ * packing list that also states a 0.45 kg net weight for it would have the filer inspecting
+ * a figure that had nothing to do with it.
+ */
+function roundedAwayFrom(line: SLILine): string {
+  return line.reportingBasis === 'net-weight'
+    ? `${line.scheduleB} at ${line.weightKg} kg`
+    : `${line.scheduleB} at ${line.quantity} ${line.sourceUom}`
+}
+
+/**
  * The controlling set has to be priced in US dollars.
  *
  * Box 31 is "value at the port of export in US dollars", and every figure downstream — the
@@ -314,20 +328,6 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
  * document and blocks; a currency that could not be read is a fact about the parse, and
  * blocking on it would stop a shipment whose figures may be perfectly correct.
  */
-/**
- * A row that rounded to nothing, named alongside the figure that did the rounding.
- *
- * The weight where there is one, because a kilogram row is filed off the net weight and that
- * is the number to go and look at. Where there is none the row converted from what the
- * invoice counted, and saying `at 0 kg` about it points the filer at a figure the document
- * does not carry and never will.
- */
-function roundedAwayFrom(line: SLILine): string {
-  return line.weightKg > 0
-    ? `${line.scheduleB} at ${line.weightKg} kg`
-    : `${line.scheduleB} at ${line.quantity} ${line.sourceUom}`
-}
-
 function currencyCheck(currency: string): CheckResult[] {
   const code = currency.trim().toUpperCase()
   if (code === 'USD') return []
@@ -1001,9 +1001,9 @@ function capacityCheck(sliLines: SLILine[], rowsPerPage?: number): CheckResult[]
           : `${sliLines.length} rows at ${rowsPerPage} to a sheet, so the form is generated as ${pages} pages. ` +
             'Every box but the commodity table is one field across the sheets — correcting the consignee on ' +
             'any page corrects it on all of them.',
+      // No `expected`/`actual`: the checks panel renders those only for a check that failed,
+      // and this one reports rather than judges.
       passed: true,
-      expected: `${rowsPerPage} per sheet`,
-      actual: `${sliLines.length} rows, ${pages} sheet${pages === 1 ? '' : 's'}`,
     },
   ]
 }

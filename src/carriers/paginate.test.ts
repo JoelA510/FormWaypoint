@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRawStream, decodePDFRawStream } from 'pdf-lib'
+import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFRawStream, PDFString, decodePDFRawStream } from 'pdf-lib'
 import { pagesNeeded, paginateForm, rowsByPage, stampPageNumbers } from './paginate'
 import { NIPPON_ROW_ROOTS } from './nippon-express/fields'
 import { CEVA_COMMODITY_FIELDS } from './ceva/fields'
@@ -230,6 +230,40 @@ describe('what the form needs to render itself', () => {
   })
 })
 
+/**
+ * Field dictionaries nothing in the document can reach: not `/Fields`, not any page's
+ * `/Annots`, not any widget's `/Parent`. pdf-lib writes unreachable objects, so these ship
+ * inside the filed PDF.
+ *
+ * A field is told from the rest by its `/T` being a *name* — the template's linearization
+ * dictionary has a `/T` too, and it is a byte offset.
+ */
+function strandedFields(doc: PDFDocument): string[] {
+  const reachable = new Set<string>()
+  const walk = (ref: unknown) => {
+    const key = String(ref)
+    if (reachable.has(key)) return
+    reachable.add(key)
+    const dict = doc.context.lookupMaybe(ref as never, PDFDict)
+    const kids = dict && doc.context.lookupMaybe(dict.get(PDFName.of('Kids')), PDFArray)
+    if (kids) for (let i = 0; i < kids.size(); i++) walk(kids.get(i))
+  }
+  const fields = doc.context.lookup(doc.getForm().acroForm.dict.get(PDFName.of('Fields')), PDFArray)
+  for (let i = 0; i < fields.size(); i++) walk(fields.get(i))
+  for (const page of doc.getPages()) {
+    const annots = page.node.Annots()
+    if (annots) for (let i = 0; i < annots.size(); i++) walk(annots.get(i))
+  }
+
+  const named: string[] = []
+  for (const [ref, object] of doc.context.enumerateIndirectObjects()) {
+    if (!(object instanceof PDFDict) || reachable.has(String(ref))) continue
+    const title = object.get(PDFName.of('T'))
+    if (title instanceof PDFString || title instanceof PDFHexString) named.push(title.decodeText())
+  }
+  return named
+}
+
 describe('what the template carries that a filed form should not', () => {
   const javaScript = (doc: PDFDocument): PDFDict | undefined => {
     const names = doc.context.lookupMaybe(doc.catalog.get(PDFName.of('Names')), PDFDict)
@@ -268,6 +302,40 @@ describe('what the template carries that a filed form should not', () => {
     expect(single.doc.catalog.get(PDFName.of('PageLabels'))).toBeDefined()
     const paged = await paginateForm(template('ceva-sli.pdf'), 2, CEVA_COMMODITY_FIELDS)
     expect(paged.doc.catalog.get(PDFName.of('PageLabels'))).toBeUndefined()
+  })
+
+  it('keeps a radio group’s export values as long as its widgets', async () => {
+    // `/Opt[i]` is the export value of `Kids[i]` (PDF 32000-1 §12.7.4.2.1). A field that gains
+    // widgets without gaining entries leaves every widget on a continuation sheet without one,
+    // and a reader resolving a tick by kid index gets nothing back for a selection made there.
+    const { doc } = await paginateForm(template('nippon-express-sli.pdf'), 3, NIPPON_ROW_ROOTS)
+    const withOptions = doc
+      .getForm()
+      .getFields()
+      .map((field) => ({
+        name: field.getName(),
+        widgets: field.acroField.getWidgets().length,
+        options: doc.context.lookupMaybe(field.acroField.dict.get(PDFName.of('Opt')), PDFArray)?.size(),
+      }))
+      .filter((field) => field.options !== undefined)
+
+    // The template has two of them; if a revision drops both, this test stops testing anything.
+    expect(withOptions.length).toBeGreaterThan(0)
+    for (const field of withOptions) expect(field.options, field.name).toBe(field.widgets)
+  })
+
+  it('leaves no field dictionary behind that nothing can reach', async () => {
+    // A continuation sheet arrives with its own copy of every shared field. Those copies hand
+    // their widgets to page 1's fields and are then referenced by nothing — not `/Fields`, not
+    // `/Annots`, not any widget's `/Parent` — and pdf-lib writes unreachable objects, so left
+    // alone they ship inside the filed PDF.
+    const paged = await paginateForm(template('nippon-express-sli.pdf'), 3, NIPPON_ROW_ROOTS)
+    const single = await paginateForm(template('nippon-express-sli.pdf'), 1, NIPPON_ROW_ROOTS)
+    // Against the one-sheet form rather than against zero, so the template's own housekeeping
+    // is not read as this code's litter: it carries a linearization dictionary whose `/T` is a
+    // byte offset, not a name.
+    expect(strandedFields(paged.doc)).toEqual(strandedFields(single.doc))
+    expect(strandedFields(single.doc)).toEqual([])
   })
 
   it('does not let a continuation sheet claim the first sheet’s tagging index', async () => {

@@ -6,7 +6,7 @@
  * testing directly, and a component file that exports a function loses fast refresh.
  */
 import { canonicalUnit } from '../domain/schedule-b'
-import { filedWhole } from '../domain/units'
+import { filedWhole, restateExact } from '../domain/units'
 import type { SLILine } from '../domain/types'
 
 /**
@@ -29,24 +29,42 @@ export function basisNote(line: SLILine, byChoice: boolean): string {
       ? `Filed in ${line.reportingUom} by your choice; Schedule B requires ${required}.`
       : `Schedule B requires ${required}; this row can only state ${line.reportingUom}.`
   }
-  // Named alongside the figure wherever the two differ, on every basis and not just the
-  // weight-derived one. A row showing `4 KG` beside a document reading 4.499 looks like one
-  // of them is a typo until the line beside it says which is which — and that is as true of
-  // an invoice already counting kilograms, which files its own figure rounded whole, as it
-  // is of one whose kilograms were read off the net weight.
-  const whole = filedWhole(line.reportingUom)
+  // Whether the box was rounded, asked of the rule that would have rounded it rather than
+  // inferred from the figures on either side. The two are not comparable on a converted row —
+  // 4000 GM and 4 KG differ in every digit and in the unit — so comparing them said "filed as
+  // whole KG" about a conversion that came out exact.
+  const rounded = wasRounded(line)
   if (line.reportingBasis === 'net-weight') {
-    return whole && line.weightKg !== line.reportingQuantity
+    // Named alongside the figure where the two differ. A row showing `4 KG` beside a net
+    // weight of 4.499 kg looks like one of them is a typo until this says which is which.
+    return rounded
       ? `Net weight ${line.weightKg} kg, filed as whole ${line.reportingUom}.`
       : 'Net weight — this code is reported by weight, not by the piece.'
   }
   // Not "as invoiced": the document carries neither this figure nor this unit.
   if (line.reportingBasis === 'converted') {
-    return whole
+    return rounded
       ? `Converted from ${line.quantity} ${line.sourceUom}, filed as whole ${line.reportingUom}.`
       : `Converted from ${line.quantity} ${line.sourceUom}.`
   }
-  return whole && line.quantity !== line.reportingQuantity
+  // And as true of an invoice already counting kilograms, which files its own figure rounded
+  // whole, as of one whose kilograms were read off the net weight.
+  return rounded
     ? `Invoiced as ${line.quantity} ${line.sourceUom}, filed as whole ${line.reportingUom}.`
     : 'As invoiced.'
+}
+
+/**
+ * Whether the filed figure is the restated one or a rounded form of it.
+ *
+ * `restateExact` is the same restatement with only its unit's whole-number rule left off, so
+ * the difference between the two *is* the rounding and nothing else.
+ */
+function wasRounded(line: SLILine): boolean {
+  if (!filedWhole(line.reportingUom)) return false
+  const exact = restateExact(
+    { quantity: line.quantity, uom: line.sourceUom, weightKg: line.weightKg },
+    line.reportingUom,
+  )
+  return exact !== null && exact.quantity !== line.reportingQuantity
 }

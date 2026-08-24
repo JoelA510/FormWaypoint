@@ -7,9 +7,21 @@
  * pages the form comes out with.
  */
 
-/** How many sheets `rowCount` rows need at `rowsPerPage` each. Never fewer than one. */
+/**
+ * How many sheets `rowCount` rows need at `rowsPerPage` each. Never fewer than one.
+ *
+ * "Never fewer than one" has to survive a figure that is not a number. `Math.max(1, NaN)` is
+ * `NaN`, and a NaN sheet count runs the loop below zero times: the adapter is handed no pages
+ * at all and files a form with a complete header and an empty commodity table, silently.
+ */
 export function pagesNeeded(rowCount: number, rowsPerPage: number): number {
-  return Math.max(1, Math.ceil(rowCount / Math.max(1, rowsPerPage)))
+  const rows = Number.isFinite(rowCount) ? Math.max(0, rowCount) : 0
+  return Math.max(1, Math.ceil(rows / perPage(rowsPerPage)))
+}
+
+/** At least one row to a sheet, whatever was asked for. */
+function perPage(rowsPerPage: number): number {
+  return Number.isFinite(rowsPerPage) ? Math.max(1, Math.floor(rowsPerPage)) : 1
 }
 
 /**
@@ -19,10 +31,10 @@ export function pagesNeeded(rowCount: number, rowsPerPage: number): number {
  * the checks — not this — decide whether it should have been produced.
  */
 export function rowsByPage<T>(rows: T[], rowsPerPage: number): T[][] {
-  const perPage = Math.max(1, rowsPerPage)
+  const size = perPage(rowsPerPage)
   const pages: T[][] = []
-  for (let i = 0; i < pagesNeeded(rows.length, perPage); i++) {
-    pages.push(rows.slice(i * perPage, (i + 1) * perPage))
+  for (let i = 0; i < pagesNeeded(rows.length, size); i++) {
+    pages.push(rows.slice(i * size, (i + 1) * size))
   }
   return pages
 }

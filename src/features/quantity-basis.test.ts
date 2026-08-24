@@ -47,6 +47,13 @@ describe('why a filed quantity is what it is', () => {
       .toBe('Converted from 7438 GM, filed as whole KG.')
   })
 
+  it('claims no rounding where the conversion came out exact', () => {
+    // 4000 g is 4 kg on the nose. `4000` and `4` differ in every digit and in the unit, so a
+    // comparison between them reported a rounding that never happened.
+    expect(basisNote(row({ sourceUom: 'GM', quantity: 4000, reportingBasis: 'converted', reportingQuantity: 4 }), false))
+      .toBe('Converted from 4000 GM.')
+  })
+
   it('leaves a unit that is not filed whole alone', () => {
     const grams = row({ scheduleBUnits: ['GM'], reportingUom: 'GM', sourceUom: 'KG', quantity: 7.438, reportingBasis: 'converted', reportingQuantity: 7438 })
     expect(basisNote(grams, false)).toBe('Converted from 7.438 KG.')

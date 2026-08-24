@@ -157,6 +157,33 @@ function relink(ctx: PDFContext, acro: PDFAcroForm, oldRef: PDFRef, replacement:
   }
 }
 
+/** Every field-tree node at or below `ref`, the node itself included. */
+function refsUnder(ctx: PDFContext, ref: PDFRef, out: PDFRef[]): PDFRef[] {
+  out.push(ref)
+  const kids = kidsOf(ctx, ctx.lookup(ref, PDFDict))
+  if (kids) for (let i = 0; i < kids.size(); i++) refsUnder(ctx, asRef(kids.get(i)), out)
+  return out
+}
+
+/**
+ * Keep a radio group's `/Opt` array as long as its `/Kids`.
+ *
+ * `/Opt[i]` is defined as the export value of `Kids[i]` (PDF 32000-1 §12.7.4.2.1), so a field
+ * that gains widgets without gaining entries leaves every widget on a continuation sheet
+ * without one — and a reader that resolves a tick by kid index gets nothing back for a
+ * selection made on page 2. The incoming field is a copy of this one, so its own entries are
+ * the right ones to append; the field's own are the fallback.
+ */
+function extendOptions(ctx: PDFContext, field: PDFDict, incoming: PDFDict, count: number): void {
+  const options = ctx.lookupMaybe(field.get(PDFName.of('Opt')), PDFArray)
+  if (!options) return
+  const source = ctx.lookupMaybe(incoming.get(PDFName.of('Opt')), PDFArray) ?? options
+  for (let i = 0; i < count; i++) {
+    const entry = i < source.size() ? source.get(i) : undefined
+    if (entry !== undefined) options.push(entry)
+  }
+}
+
 export interface PaginatedForm {
   doc: PDFDocument
   form: PDFForm
@@ -258,10 +285,14 @@ export async function paginateForm(
     for (const [name, node] of terminalsUnder(ctx, root.ref, '', new Map())) shared.set(name, node)
   }
 
+  // Loaded once. Each `copyPages` call builds its own object copier, so two calls against one
+  // source produce independent copies — the sheets do not share annotations, and renaming one
+  // sheet's rows cannot rename another's. (This used to re-parse the whole template per sheet
+  // on the belief that they would: 1.1 MB of PDF, parsed again for every extra page, in the
+  // browser's generate path.)
+  const source = await PDFDocument.load(templateBytes, { ignoreEncryption: true, updateMetadata: false })
+
   for (let pageIndex = 1; pageIndex < sheets; pageIndex++) {
-    // A fresh load per sheet. Copying the same source page twice would hand both copies the
-    // same annotation objects, and renaming one sheet's rows would rename the other's.
-    const source = await PDFDocument.load(templateBytes, { ignoreEncryption: true, updateMetadata: false })
     const [page] = await doc.copyPages(source, [0])
     doc.addPage(page)
     // The index `addPage` put it at, not `pageIndex`. The template is the document now, so a
@@ -282,15 +313,24 @@ export async function paginateForm(
 
       // A later sheet's copy of a shared field. Each of its terminals hands its widgets to
       // page 1's field of the same name, and the copy itself is left unregistered.
-      for (const [name, node] of terminalsUnder(ctx, root.ref, '', new Map())) {
-        const target = shared.get(name)
-        if (!target) {
-          // A field page 1 does not have. Registered under its own name rather than dropped,
-          // so nothing the template carries goes missing.
-          acro.addField(root.ref)
-          break
-        }
-        const field = splitMergedWidget(ctx, target)
+      const terminals = [...terminalsUnder(ctx, root.ref, '', new Map())]
+      // Decided before anything moves. Adopting the terminals this root shares with page 1 and
+      // then registering the root for one it does not would leave the adopted terminals in two
+      // parents' `/Kids` under a name the document now holds twice.
+      if (terminals.some(([name]) => !shared.has(name))) {
+        // A field page 1 does not have. Registered under its own name rather than dropped, so
+        // nothing the template carries goes missing.
+        acro.addField(root.ref)
+        continue
+      }
+
+      // Collected before the tree is taken apart: what is left of it afterwards is decided by
+      // what did *not* move.
+      const wasUnder = refsUnder(ctx, root.ref, [])
+      const adopted = new Set<string>()
+
+      for (const [name, node] of terminals) {
+        const field = splitMergedWidget(ctx, shared.get(name) as Node)
         if (field.replaced) {
           relink(ctx, acro, field.replaced, field)
           shared.set(name, { ref: field.ref, dict: field.dict })
@@ -309,12 +349,27 @@ export async function paginateForm(
           for (let i = 0; i < incoming.size(); i++) {
             ctx.lookup(incoming.get(i), PDFDict).set(PDFName.of('Parent'), field.ref)
             kids.push(incoming.get(i))
+            adopted.add(incoming.get(i).toString())
           }
+          extendOptions(ctx, field.dict, node.dict, incoming.size())
         } else {
           for (const key of FIELD_ONLY) node.dict.delete(PDFName.of(key))
           node.dict.set(PDFName.of('Parent'), field.ref)
           kids.push(node.ref)
+          adopted.add(node.ref.toString())
+          extendOptions(ctx, field.dict, node.dict, 1)
         }
+      }
+
+      // The copied root and the namespace nodes beneath it are referenced by nothing now:
+      // not by `/Fields`, not by the page's `/Annots`, not by any widget's `/Parent`. pdf-lib
+      // writes unreachable objects, so left alone they ship in the filed PDF — around fifty
+      // dead field dictionaries per continuation sheet.
+      for (const ref of wasUnder) {
+        // Never a widget, whatever the field tree says about it: those are on the page.
+        if (adopted.has(ref.toString())) continue
+        if (ctx.lookup(ref, PDFDict).has(PDFName.of('Rect'))) continue
+        ctx.delete(ref)
       }
     }
   }
