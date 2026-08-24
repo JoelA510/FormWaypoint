@@ -171,8 +171,8 @@ export interface PaginatedForm {
 }
 
 /**
- * Build a document of `pageCount` copies of a one-page form, with `perPageRoots` renamed per
- * page and everything else shared.
+ * The template, extended to `pageCount` sheets, with `perPageRoots` renamed per sheet and
+ * everything else shared.
  *
  * `perPageRoots` are *root* field names: the row nodes on a hierarchical form, or the fields
  * themselves on a flat one. A template field is page-specific when its name is one of them
@@ -183,64 +183,61 @@ export async function paginateForm(
   pageCount: number,
   perPageRoots: readonly string[],
 ): Promise<PaginatedForm> {
+  // The template *is* the document, rather than a page copied into a new one.
+  //
+  // Its AcroForm carries the resource dictionary the fields render with, the default
+  // appearance and the signature flags, and every reference inside those points at an object
+  // in the template's own numbering. Copying that dictionary into a document built from
+  // scratch carries the references without the objects, so `/Arial 15 0 R` resolves to
+  // whatever object 15 happens to be there — and a reader regenerating an appearance, which
+  // is what happens the moment somebody edits the shared consignee box, finds no font.
+  //
+  // Starting from the template also means a shipment that fits one sheet is filled exactly as
+  // it was before any of this existed: nothing below runs.
+  const doc = await PDFDocument.load(templateBytes, { ignoreEncryption: true, updateMetadata: false })
+  const sheets = Math.max(1, pageCount)
   const roots = new Set(perPageRoots)
-  const doc = await PDFDocument.create()
 
-  // A fresh load per page. Copying the same source page twice would hand both copies the
-  // same annotation objects, and renaming one page's rows would rename the other's.
-  for (let i = 0; i < pageCount; i++) {
-    const source = await PDFDocument.load(templateBytes, { ignoreEncryption: true, updateMetadata: false })
-    const [page] = await doc.copyPages(source, [0])
-    doc.addPage(page)
+  const fieldName = (templateName: string, pageIndex: number): string => {
+    if (pageIndex === 0) return templateName
+    const root = [...roots].find((r) => templateName === r || templateName.startsWith(`${r}.`))
+    if (!root) return templateName
+    return pageSuffixed(root, pageIndex) + templateName.slice(root.length)
   }
+
+  if (sheets === 1) return { doc, form: doc.getForm(), pageCount: 1, fieldName }
 
   const ctx = doc.context
   const acro = doc.getForm().acroForm
 
-  // The template's resource dictionary and default appearance. Without them a filled field
-  // has no font to render itself in.
-  const template = await PDFDocument.load(templateBytes, { ignoreEncryption: true, updateMetadata: false })
-  for (const key of ['DR', 'DA']) {
-    const value = template.getForm().acroForm.dict.get(PDFName.of(key))
-    if (value) acro.dict.set(PDFName.of(key), value)
+  /** Page 1's terminal fields, which the later sheets hand their widgets to. */
+  const shared = new Map<string, Node>()
+  for (const root of rootsOnPage(ctx, doc, 0)) {
+    if (roots.has(root.name)) continue
+    for (const [name, node] of terminalsUnder(ctx, root.ref, '', new Map())) shared.set(name, node)
   }
 
-  /** Terminal fields registered from page 1, which later pages fold their widgets into. */
-  const shared = new Map<string, Node>()
+  for (let pageIndex = 1; pageIndex < sheets; pageIndex++) {
+    // A fresh load per sheet. Copying the same source page twice would hand both copies the
+    // same annotation objects, and renaming one sheet's rows would rename the other's.
+    const source = await PDFDocument.load(templateBytes, { ignoreEncryption: true, updateMetadata: false })
+    const [page] = await doc.copyPages(source, [0])
+    doc.addPage(page)
 
-  for (let pageIndex = 0; pageIndex < pageCount; pageIndex++) {
-    const annots = doc.getPage(pageIndex).node.Annots()
-    if (!annots) continue
-
-    // Collected before anything is changed. Re-parenting a widget rewrites the chain the
-    // next widget would walk, so a pass that mutates as it goes reaches page 1's field from
-    // page 2's second widget and folds an array into itself.
-    const pageRoots = new Map<string, ReturnType<typeof rootOf>>()
-    for (let i = 0; i < annots.size(); i++) {
-      const root = rootOf(ctx, asRef(annots.get(i)))
-      if (!pageRoots.has(root.ref.toString())) pageRoots.set(root.ref.toString(), root)
-    }
-
-    for (const root of pageRoots.values()) {
+    for (const root of rootsOnPage(ctx, doc, pageIndex)) {
       if (roots.has(root.name)) {
-        if (pageIndex > 0) root.dict.set(PDFName.of('T'), PDFString.of(pageSuffixed(root.name, pageIndex)))
+        root.dict.set(PDFName.of('T'), PDFString.of(pageSuffixed(root.name, pageIndex)))
         acro.addField(root.ref)
         continue
       }
 
-      if (pageIndex === 0) {
-        acro.addField(root.ref)
-        for (const [name, node] of terminalsUnder(ctx, root.ref, '', new Map())) shared.set(name, node)
-        continue
-      }
-
-      // A later page's copy of a shared field. Each of its terminals hands its widgets to
+      // A later sheet's copy of a shared field. Each of its terminals hands its widgets to
       // page 1's field of the same name, and the copy itself is left unregistered.
       for (const [name, node] of terminalsUnder(ctx, root.ref, '', new Map())) {
         const target = shared.get(name)
         if (!target) {
-          // A field the first page did not have. Registered under its own name rather than
-          // dropped, so nothing the template carries goes missing.
+          // A field page 1 does not have. Registered under its own name rather than dropped,
+          // so nothing the template carries goes missing.
           acro.addField(root.ref)
           break
         }
@@ -265,18 +262,25 @@ export async function paginateForm(
     }
   }
 
-  const form = doc.getForm()
-  return {
-    doc,
-    form,
-    pageCount,
-    fieldName(templateName, pageIndex) {
-      if (pageIndex === 0) return templateName
-      const root = [...roots].find((r) => templateName === r || templateName.startsWith(`${r}.`))
-      if (!root) return templateName
-      return pageSuffixed(root, pageIndex) + templateName.slice(root.length)
-    },
+  return { doc, form: doc.getForm(), pageCount: sheets, fieldName }
+}
+
+/**
+ * The distinct field-tree roots a page's annotations hang from.
+ *
+ * Collected before the caller changes anything. Re-parenting a widget rewrites the chain the
+ * next widget would walk, so a pass that mutates as it goes reaches page 1's field from
+ * page 2's second widget and folds an array into itself.
+ */
+function rootsOnPage(ctx: PDFContext, doc: PDFDocument, pageIndex: number): ReturnType<typeof rootOf>[] {
+  const annots = doc.getPage(pageIndex).node.Annots()
+  if (!annots) return []
+  const found = new Map<string, ReturnType<typeof rootOf>>()
+  for (let i = 0; i < annots.size(); i++) {
+    const root = rootOf(ctx, asRef(annots.get(i)))
+    if (!found.has(root.ref.toString())) found.set(root.ref.toString(), root)
   }
+  return [...found.values()]
 }
 
 /**

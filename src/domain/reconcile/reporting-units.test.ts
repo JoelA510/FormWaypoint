@@ -174,6 +174,26 @@ describe('the unit a commodity row is filed in', () => {
   })
 })
 
+describe('a row that rounds away to nothing', () => {
+  it('warns whether or not the document states a weight', async () => {
+    // A quantity box reading `0` on a signed declaration says the goods are not there.
+    // 4016.93.0000 is reported in KG; a fifth of a kilo has nowhere to land.
+    const parsed = await shipment('4016.93.0000', { netWeightKg: 0.2, grossWeightKg: 0.3 })
+    const { sliLines, checks } = reconcile(parsed, scheduleB, CONTROLLED)
+    expect(row(sliLines, '4016.93.0000').reportingQuantity).toBe(0)
+
+    const zero = checks.find((c) => c.id === 'quantities-nonzero')!
+    expect(zero.passed).toBe(false)
+    expect(zero.severity).toBe('warning')
+    expect(zero.detail).toMatch(/4016\.93\.0000/)
+  })
+
+  it('says nothing when every row files at least one', async () => {
+    const { checks } = reconcile(await shipment(BY_WEIGHT), scheduleB, CONTROLLED)
+    expect(checks.find((c) => c.id === 'quantities-nonzero')?.passed).toBe(true)
+  })
+})
+
 describe('a shipment with more rows than a sheet holds', () => {
   it('reports the sheet count instead of refusing the shipment', async () => {
     // This was a blocking check: the form was refused and nothing came out, over a situation

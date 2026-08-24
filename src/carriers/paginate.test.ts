@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { PDFDocument } from 'pdf-lib'
+import { PDFDict, PDFDocument, PDFName } from 'pdf-lib'
 import { pagesNeeded, paginateForm, rowsByPage, stampPageNumbers } from './paginate'
 import { NIPPON_ROW_ROOTS } from './nippon-express/fields'
 import { CEVA_COMMODITY_FIELDS } from './ceva/fields'
@@ -124,6 +124,43 @@ describe('the CEVA form across pages', () => {
     const back = (await reload(doc)).getForm()
     expect(back.getCheckBox('FOB').isChecked()).toBe(true)
     expect(back.getCheckBox('FOB').acroField.getWidgets()).toHaveLength(2)
+  })
+})
+
+describe('what the form needs to render itself', () => {
+  it('keeps the template’s own resources, so an edited field still has a font', async () => {
+    // The paginated document *is* the template rather than a page copied into a new one.
+    // Copying the resource dictionary across contexts carries its references without the
+    // objects — `/Helv 16 0 R` then resolves to whatever object 16 happens to be — and a
+    // reader regenerating an appearance, which is what happens the moment somebody edits the
+    // shared consignee box, finds no font. That is this feature's headline behaviour.
+    const { doc, form } = await paginateForm(template('nippon-express-sli.pdf'), 2, NIPPON_ROW_ROOTS)
+    form.getTextField('1a. USPPI').setText('Edited on either page')
+    const back = await reload(doc)
+
+    const acro = back.getForm().acroForm.dict
+    const resources = back.context.lookup(acro.get(PDFName.of('DR')), PDFDict)
+    const fonts = back.context.lookup(resources.get(PDFName.of('Font')), PDFDict)
+    expect(fonts.entries().length).toBeGreaterThan(0)
+    for (const [name] of fonts.entries()) {
+      const resolved = back.context.lookup(fonts.get(name))
+      expect(resolved, name.decodeText()).toBeInstanceOf(PDFDict)
+    }
+    // And the flags the template carried are still on it.
+    expect(acro.get(PDFName.of('DA'))).toBeDefined()
+    expect(acro.get(PDFName.of('SigFlags'))).toBeDefined()
+  })
+
+  it('leaves a single-sheet form byte-for-byte the template’s own structure', async () => {
+    // Nothing restructures when the rows fit, so a one-page shipment is filled exactly as it
+    // was before continuation pages existed.
+    const single = await paginateForm(template('nippon-express-sli.pdf'), 1, NIPPON_ROW_ROOTS)
+    const direct = await PDFDocument.load(template('nippon-express-sli.pdf'), {
+      ignoreEncryption: true,
+      updateMetadata: false,
+    })
+    expect(names(single.doc)).toEqual(names(direct))
+    expect(single.doc.getPageCount()).toBe(1)
   })
 })
 

@@ -114,6 +114,14 @@ describe('units that are filed whole', () => {
     expect(filedWhole('KG')).toBe(true)
   })
 
+  it('files whole on the fallback path too', () => {
+    // A code the Census file has never heard of still files a row of kilograms. One row
+    // filing 7.438 beside a neighbour filing 7 contradicts both the policy and the note the
+    // review screen puts under the figure.
+    const inKg: QuantitySource = { quantity: 7.438, uom: 'KG', weightKg: 7.438 }
+    expect(resolveReportingQuantity(inKg, [])).toEqual({ unit: 'KG', quantity: 7, basis: 'source' })
+  })
+
   it('does not round the units that whole numbers would destroy', () => {
     // A tonne quantity rounded whole would file almost every shipment in this trade as 0,
     // and a gram quantity gains nothing from it.

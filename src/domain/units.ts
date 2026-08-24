@@ -193,7 +193,12 @@ export function resolveReportingQuantity(
   }
   // The document's own spelling, not its canonical form: this row is filing what the
   // document said, and saying so in the document's words is the honest label for it.
-  return { unit: source.uom.trim().toUpperCase(), quantity: roundPrecise(source.quantity, 3), basis: 'source' }
+  //
+  // Filed whole where the unit is filed whole, like every other path out of here. A row whose
+  // code is not in the Census file is still a row of kilograms, and one that files `7.438`
+  // beside a neighbour filing `7` contradicts both the policy and the note on the screen.
+  const unit = source.uom.trim().toUpperCase()
+  return { unit, quantity: asFiled(roundPrecise(source.quantity, 3), unit), basis: 'source' }
 }
 
 export function roundTo(value: number, decimals: number): number {

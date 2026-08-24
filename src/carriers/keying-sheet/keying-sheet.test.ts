@@ -334,6 +334,26 @@ describe('the unit each commodity is keyed in', () => {
     expect(keyingSheetToWorkbook(sheet)[0].rows.at(-1)![0]).toBe(2)
   })
 
+  it('keys the same whole-kilogram figure the form files', () => {
+    // A document already counting kilograms takes the identity path, which used to return the
+    // printed 7.438 while the SLI filed 7 — the two documents stating different quantities
+    // for the same goods.
+    const lines = [line({ classification: '9031.90.0000', quantity: 7.438, uom: 'KG', netWeightKg: 7.438 })]
+    const inKg = sli({
+      scheduleB: '9031.90.0000',
+      scheduleBUnit: 'KG',
+      scheduleBUnits: ['KG'],
+      sourceUom: 'KG',
+      reportingUom: 'KG',
+      reportingBasis: 'source',
+    })
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(lines, [inKg]), draft())
+    const [row] = sheet.commodities
+    expect(row.quantity).toBe('7')
+    // The document's own spelling is kept for the unit; only the figure is the filed one.
+    expect(row.unitOfMeasure).toBe('KG')
+  })
+
   it('leaves a code reported by the piece alone', () => {
     const sheet = buildKeyingSheet('fedex-ship-manager', fixture([line({})], [sli({})]), draft())
     expect(sheet.commodities[0].unitOfMeasure).toBe('PCS')

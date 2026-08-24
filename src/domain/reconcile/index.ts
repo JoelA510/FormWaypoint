@@ -227,8 +227,13 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
   // on a signed declaration says these goods are not there. Warned rather than blocked: what
   // to file instead is a decision (round up to one, file the piece count, reclassify), and
   // none of them is this app's to make.
+  // Gated on the row representing goods at all, not on it having a weight: a row invoiced in
+  // grams under a kilogram code converts without one, and 400 g rounds to zero just the same.
   const roundedAway = sliLines.filter(
-    (line) => line.reportingBasis !== 'none' && line.reportingQuantity === 0 && line.weightKg > 0,
+    (line) =>
+      line.reportingBasis !== 'none' &&
+      line.reportingQuantity === 0 &&
+      (line.weightKg > 0 || line.quantity > 0),
   )
 
   const checks: CheckResult[] = [

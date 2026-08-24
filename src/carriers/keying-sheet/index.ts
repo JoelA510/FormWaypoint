@@ -361,7 +361,11 @@ function keyedQuantity(
   // unit written two ways, which `restateQuantity` already decides. The row keeps the
   // document's own spelling, because the operator is keying against a document that says
   // `PCS` while the Census file says `NO`.
-  if (restated.basis === 'source') return asPrinted
+  //
+  // The *figure* still comes from the restatement, not from the printed quantity. A document
+  // already counting kilograms files whole kilograms on the form, and returning the printed
+  // 7.438 here would key a different quantity for the same goods than the SLI states.
+  if (restated.basis === 'source') return { ...asPrinted, quantity: restated.quantity }
   // The declaration files no quantity for this code, but the application still needs one, so
   // the row keys what the document counted and says which of the two it is. Writing the
   // literal 0 that "no quantity" restates to would have the operator key nothing at all
