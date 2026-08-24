@@ -23,6 +23,7 @@ import {
   type ScheduleBIndex,
 } from '../schedule-b'
 import { canRestate, resolveReportingQuantity } from '../units'
+import { pagesNeeded } from '../../lib/pagination'
 import type { ItemLibraryEntry } from '../item-library'
 import { partKey } from '../part-key'
 import {
@@ -41,7 +42,7 @@ const MONEY_TOLERANCE = 0.01
 const WEIGHT_TOLERANCE = 0.001
 
 export interface ReconcileOptions extends AggregationOptions {
-  /** Maximum commodity rows the target form can hold. */
+  /** Commodity rows one sheet of the target form holds. Beyond it the form continues onto another. */
   maxRows?: number
   /** Overrides which document set is used. Defaults to the USD set. */
   forceSet?: DocumentSet
@@ -221,6 +222,15 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
     (line) => line.reportingBasis !== 'none' && !Number.isFinite(line.reportingQuantity),
   )
 
+  // A row whose figure rounds away to nothing. Kilogram quantities are filed as whole
+  // kilograms, so anything under half a kilo lands on zero — and a quantity box reading `0`
+  // on a signed declaration says these goods are not there. Warned rather than blocked: what
+  // to file instead is a decision (round up to one, file the piece count, reclassify), and
+  // none of them is this app's to make.
+  const roundedAway = sliLines.filter(
+    (line) => line.reportingBasis !== 'none' && line.reportingQuantity === 0 && line.weightKg > 0,
+  )
+
   const checks: CheckResult[] = [
     { id: 'set-selection', severity: 'info', title: 'Controlling document set', detail: reason, passed: true },
     {
@@ -233,6 +243,18 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
           'sheet would total short by those rows.'
         : 'Every row carries a figure that can be written.',
       passed: unusable.length === 0,
+    },
+    {
+      id: 'quantities-nonzero',
+      severity: 'warning',
+      title: 'No commodity row files a quantity of zero',
+      detail: roundedAway.length
+        ? `${roundedAway.length} row(s) round to a quantity of 0 in the unit they are filed in ` +
+          `(${roundedAway.map((l) => `${l.scheduleB} at ${l.weightKg} kg`).join(', ')}). A kilogram quantity is ` +
+          'filed as whole kilograms, so goods under half a kilo have nowhere to land. Decide what the box ' +
+          'should say before signing — a zero declares the goods absent.'
+        : 'Every row files a quantity of at least one.',
+      passed: roundedAway.length === 0,
     },
     ...currencyCheck(currency),
     {
@@ -935,21 +957,31 @@ function sourceControlChecks(sliLines: SLILine[], merged: MergedLine[], options:
   })
 }
 
-function capacityCheck(sliLines: SLILine[], maxRows?: number): CheckResult[] {
-  if (!maxRows) return []
-  const fits = sliLines.length <= maxRows
+/**
+ * How many sheets the shipment will take.
+ *
+ * Informational, not blocking. A shipment with more commodity rows than the blank form holds
+ * used to be refused outright, which stopped the one thing the tool exists to do over a
+ * situation the forms themselves handle by being filed as several sheets — so the form is now
+ * produced with continuation pages and this says how many. See `paginateForm`.
+ */
+function capacityCheck(sliLines: SLILine[], rowsPerPage?: number): CheckResult[] {
+  if (!rowsPerPage) return []
+  const pages = pagesNeeded(sliLines.length, rowsPerPage)
   return [
     {
       id: 'row-capacity',
-      severity: 'blocking',
+      severity: 'info',
       title: 'Commodity rows fit the form',
-      detail: fits
-        ? `${sliLines.length} of ${maxRows} available rows used.`
-        : `This shipment needs ${sliLines.length} rows but the form holds ${maxRows}. It must be split across ` +
-          'continuation sheets before filing.',
-      passed: fits,
-      expected: `<= ${maxRows}`,
-      actual: String(sliLines.length),
+      detail:
+        pages === 1
+          ? `${sliLines.length} of ${rowsPerPage} available rows used, on one sheet.`
+          : `${sliLines.length} rows at ${rowsPerPage} to a sheet, so the form is generated as ${pages} pages. ` +
+            'Every box but the commodity table is one field across the sheets — correcting the consignee on ' +
+            'any page corrects it on all of them.',
+      passed: true,
+      expected: `${rowsPerPage} per sheet`,
+      actual: `${sliLines.length} rows, ${pages} sheet${pages === 1 ? '' : 's'}`,
     },
   ]
 }

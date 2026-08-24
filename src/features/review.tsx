@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Field, Input, ProvenanceRow, Select, type Tone } from '../components/ui'
 import { resolveDestinationCountry } from '../domain/reconcile'
 import { canonicalUnit, formatScheduleB, normalizeScheduleB } from '../domain/schedule-b'
-import { canRestate, resolveReportingQuantity, type QuantitySource } from '../domain/units'
+import { canRestate, filedWhole, resolveReportingQuantity, type QuantitySource } from '../domain/units'
 import { formatQuantity } from '../carriers/form-utils'
 import { partKey } from '../domain/part-key'
 import type { OverrideRecord } from '../store/local-store'
@@ -362,7 +362,11 @@ function basisNote(line: SLILine, byChoice: boolean): string {
       : `Schedule B requires ${required}; this row can only state ${line.reportingUom}.`
   }
   if (line.reportingBasis === 'net-weight') {
-    return 'Net weight — this code is reported by weight, not by the piece.'
+    // Named alongside the figure where the two differ. A row showing `4 KG` beside a net
+    // weight of 4.499 kg looks like one of them is wrong until it says which is which.
+    return filedWhole(line.reportingUom) && line.weightKg !== line.reportingQuantity
+      ? `Net weight ${line.weightKg} kg, filed as whole ${line.reportingUom}.`
+      : 'Net weight — this code is reported by weight, not by the piece.'
   }
   // Not "as invoiced": the document carries neither this figure nor this unit.
   return line.reportingBasis === 'converted'

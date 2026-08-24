@@ -151,7 +151,7 @@ describe('the unit each commodity is keyed in', () => {
     const sheet = buildKeyingSheet('fedex-ship-manager', fixture(lines, [byWeight()]), draft())
     const [row] = sheet.commodities
     expect(row.unitOfMeasure).toBe('KG')
-    expect(row.quantity).toBe('7.438')
+    expect(row.quantity).toBe('7')
     expect(row.quantityFromNetWeight).toBe(true)
     // Per kilogram, so quantity x unit price still returns the customs value the row prints.
     expect(Number(row.unitValue) * Number(row.quantity)).toBeCloseTo(Number(row.totalValue), 2)
@@ -165,7 +165,7 @@ describe('the unit each commodity is keyed in', () => {
       line({ id: 'b', partNumber: 'BBB-2', classification: '9031.90.0000', quantity: 4, netWeightKg: 5.118 }),
     ]
     const sheet = buildKeyingSheet('fedex-ship-manager', fixture(lines, [byWeight()]), draft())
-    expect(sheet.commodities.map((c) => c.quantity)).toEqual(['3', '5.118'])
+    expect(sheet.commodities.map((c) => c.quantity)).toEqual(['3', '5'])
     expect(sheet.commodities.every((c) => c.unitOfMeasure === 'KG')).toBe(true)
   })
 

@@ -456,12 +456,14 @@ describe('the reported unit from document to form', () => {
     const { adapter, result, draft } = run()
     const values = await readBack((await adapter.fill(template('ceva-sli.pdf'), draft)).bytes)
     // Rows are ordered by commodity number: 8544 first, then 9031.
-    expect(values['Quantity Schedule B Unit']).toBe('10\r4.263 KG')
+    // Whole kilograms — 4.263 kg files as 4.
+    expect(values['Quantity Schedule B Unit']).toBe('10\r4 KG')
 
     const sheet = buildKeyingSheet('fedex-ship-manager', result, draft)
     const keyed = sheet.commodities.find((c) => c.harmonizedCode === CODE_BY_WEIGHT)!
     expect(keyed.unitOfMeasure).toBe('KG')
-    expect(keyed.quantity).toBe('4.263')
+    // The same whole-kilogram figure the form carries — the two must not disagree.
+    expect(keyed.quantity).toBe('4')
   })
 
   it('carries a chosen unit all the way to the form and the sheet', async () => {
@@ -647,6 +649,105 @@ describe('Nippon Express — quantity, its unit, and the named place', () => {
     const { values, warnings } = await fillWith({}, { incoterm: 'DAT Rotterdam' })
     expect(values.INCOTERM).toBeUndefined()
     expect(warnings.join(' ')).toMatch(/DPU/)
+  })
+})
+
+/**
+ * More commodity rows than the blank form holds.
+ *
+ * This used to be a blocking check: the shipment was refused and nothing came out. The forms
+ * are filed as several sheets in that case, so the tool produces them — and the point of the
+ * arrangement is which fields are shared and which are not.
+ */
+describe('shipments that need more than one sheet', () => {
+  const rows = (count: number): SLILine[] =>
+    Array.from({ length: count }, (_, i) => ({
+      ...ROW,
+      sourceLineIds: [`line:${i}`],
+      scheduleB: `8544.42.${String(1000 + i).padStart(4, '0')}`,
+      quantity: i + 1,
+      reportingQuantity: i + 1,
+    }))
+
+  const fill = async (carrier: 'nippon-express' | 'ceva', lines: SLILine[]) => {
+    const adapter = getAdapter(carrier)
+    const draft = buildDraft(
+      { header: BLANK_HEADER, sliLines: lines, mergedLines: [], checks: [], selectedSet: 'FC', canGenerate: true },
+      VENDOR,
+      defaultShipmentSettings(adapter),
+      adapter,
+    )
+    const filled = await adapter.fill(template(path.basename(adapter.templateUrl)), draft)
+    const doc = await PDFDocument.load(filled.bytes, { ignoreEncryption: true, updateMetadata: false })
+    return { doc, form: doc.getForm(), filled, values: await readBack(filled.bytes) }
+  }
+
+  it('keeps one sheet while the rows fit', async () => {
+    const { doc, filled } = await fill('nippon-express', rows(8))
+    expect(doc.getPageCount()).toBe(1)
+    expect(filled.warnings).toEqual([])
+  })
+
+  it('puts the ninth Nippon row on a second sheet', async () => {
+    // Eight to a page, so nine rows are 8 + 1 — the shape that used to be refused outright.
+    const { doc, values } = await fill('nippon-express', rows(9))
+    expect(doc.getPageCount()).toBe(2)
+    expect(values['22.02 SB1']).toBe('8544.42.1000')
+    expect(values['29.02SB8']).toBe('8544.42.1007')
+    // The ninth is row 1 of page 2, and page 1's row 1 is untouched by it.
+    expect(values['22__p2.02 SB1']).toBe('8544.42.1008')
+    // Nothing spills into page 2's remaining rows.
+    expect(values['23__p2.02 SB2']).toBeUndefined()
+  })
+
+  it('writes the parties and the signature block once, for every sheet', async () => {
+    const { form, values } = await fill('nippon-express', rows(9))
+    // One field, one value, a widget on each sheet — so a correction on page 2 shows on
+    // page 1. That is the reader's own behaviour rather than anything kept in step here.
+    expect(values['1a. USPPI']).toContain('Vendor A Manufacturing, Inc.')
+    expect(form.getTextField('1a. USPPI').acroField.getWidgets()).toHaveLength(2)
+    expect(form.getTextField('33c TITLE').acroField.getWidgets()).toHaveLength(2)
+    expect(values['9a MODE']).toBe('AIR')
+  })
+
+  it('spreads a long shipment over as many sheets as it takes', async () => {
+    // Twenty rows at eight to a sheet is 8 + 8 + 4: each sheet is filled before the next
+    // is started, and the last one is short.
+    const { doc, values } = await fill('nippon-express', rows(20))
+    expect(doc.getPageCount()).toBe(3)
+    expect(values['22__p3.02 SB1']).toBe('8544.42.1016')
+    expect(values['25__p3.02SB4']).toBe('8544.42.1019')
+    // The fifth row of the last sheet is where the shipment runs out.
+    expect(values['26__p3.02SB5']).toBeUndefined()
+  })
+
+  it('continues the CEVA table onto a second sheet', async () => {
+    // Twelve to a page on this form, and the table is five multiline columns rather than a
+    // grid, so a continuation page is a second set of those five.
+    const { doc, values } = await fill('ceva', rows(13))
+    expect(doc.getPageCount()).toBe(2)
+    expect(values['Schedule B Number'].split('\r')).toHaveLength(12)
+    expect(values['Schedule B Number__p2'].split('\r')).toHaveLength(1)
+    expect(values['Schedule B Number__p2']).toContain('8544.42.1012')
+    // Every column on the continuation page carries the same row count as its neighbours.
+    const counts = ['D/F', 'Quantity Schedule B Unit', 'Shipping Weight', 'Value'].map(
+      (f) => values[`${f}__p2`].split('\r').length,
+    )
+    expect(new Set(counts)).toEqual(new Set([1]))
+  })
+
+  it('shares the CEVA parties and ticks across sheets', async () => {
+    const { form, values } = await fill('ceva', rows(13))
+    expect(values['Ultimate Consignee']).toContain('Consignee')
+    expect(form.getTextField('Ultimate Consignee').acroField.getWidgets()).toHaveLength(2)
+    expect(values.RESELLER).toBe('checked')
+    expect(form.getCheckBox('RESELLER').acroField.getWidgets()).toHaveLength(2)
+  })
+
+  it('no longer refuses a shipment for being too long', async () => {
+    const { filled } = await fill('nippon-express', rows(20))
+    expect(filled.warnings.join(' ')).not.toMatch(/continuation sheet/)
+    expect(filled.warnings.join(' ')).not.toMatch(/were not written/)
   })
 })
 

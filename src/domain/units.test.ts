@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   canRestate,
   derivesFromNetWeight,
+  filedWhole,
   resolveReportingQuantity,
   restateQuantity,
   roundPrecise,
@@ -23,7 +24,8 @@ describe('restating a quantity in the unit Schedule B requires', () => {
   })
 
   it('files the net weight for a code reported by weight', () => {
-    expect(restateQuantity(CABLES, 'KG')).toEqual({ unit: 'KG', quantity: 4.263, basis: 'net-weight' })
+    // Whole kilograms: see the block on filing units below.
+    expect(restateQuantity(CABLES, 'KG')).toEqual({ unit: 'KG', quantity: 4, basis: 'net-weight' })
   })
 
   it('converts within a family from the document’s own figure, not the weight', () => {
@@ -92,6 +94,36 @@ describe('restating a quantity in the unit Schedule B requires', () => {
   })
 })
 
+describe('units that are filed whole', () => {
+  it('files a kilogram quantity as a whole number of kilograms', () => {
+    // A kilogram quantity on a declaration is a count of kilograms. 48 pieces weighing
+    // 4.499 kg are filed as 4.
+    expect(restateQuantity({ quantity: 48, uom: 'PCS', weightKg: 4.499 }, 'KG')?.quantity).toBe(4)
+    expect(restateQuantity({ quantity: 48, uom: 'PCS', weightKg: 4.5 }, 'KG')?.quantity).toBe(5)
+    expect(restateQuantity({ quantity: 48, uom: 'PCS', weightKg: 127.5 }, 'KG')?.quantity).toBe(128)
+    // Including where the row was already counted in kilograms, or converted into them.
+    expect(restateQuantity({ quantity: 4.499, uom: 'KG', weightKg: 4.499 }, 'KG')?.quantity).toBe(4)
+    expect(restateQuantity({ quantity: 4499, uom: 'GM', weightKg: 0 }, 'KG')?.quantity).toBe(4)
+  })
+
+  it('leaves the net weight the row is proved against alone', () => {
+    // Only the figure in the box is whole. The reconciliation proves the row against the
+    // weight the packing list states, to the gramme.
+    const restated = restateQuantity({ quantity: 48, uom: 'PCS', weightKg: 4.499 }, 'KG')
+    expect(restated?.quantity).toBe(4)
+    expect(filedWhole('KG')).toBe(true)
+  })
+
+  it('does not round the units that whole numbers would destroy', () => {
+    // A tonne quantity rounded whole would file almost every shipment in this trade as 0,
+    // and a gram quantity gains nothing from it.
+    expect(filedWhole('T')).toBe(false)
+    expect(filedWhole('GM')).toBe(false)
+    expect(filedWhole('NO')).toBe(false)
+    expect(restateQuantity({ quantity: 12, uom: 'PCS', weightKg: 4.263 }, 'T')?.quantity).toBe(0.004263)
+  })
+})
+
 describe('rounding', () => {
   it('rounds cleanly past six decimal places', () => {
     // `roundTo`'s nudge is a fixed fraction of the factor, which past six places grows larger
@@ -133,7 +165,7 @@ describe('which units come from the net weight', () => {
 
 describe('choosing the unit a commodity row is filed in', () => {
   it('defaults to what Schedule B requires', () => {
-    expect(resolveReportingQuantity(CABLES, ['KG'])).toEqual({ unit: 'KG', quantity: 4.263, basis: 'net-weight' })
+    expect(resolveReportingQuantity(CABLES, ['KG'])).toEqual({ unit: 'KG', quantity: 4, basis: 'net-weight' })
     expect(resolveReportingQuantity(CABLES, ['NO'])).toEqual({ unit: 'NO', quantity: 12, basis: 'source' })
   })
 
@@ -149,7 +181,7 @@ describe('choosing the unit a commodity row is filed in', () => {
   it('lets an explicit choice beat the default', () => {
     expect(resolveReportingQuantity(CABLES, ['NO', 'KG'], 'KG')).toEqual({
       unit: 'KG',
-      quantity: 4.263,
+      quantity: 4,
       basis: 'net-weight',
     })
   })

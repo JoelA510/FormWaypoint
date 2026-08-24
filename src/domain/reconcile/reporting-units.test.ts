@@ -62,7 +62,8 @@ describe('the unit a commodity row is filed in', () => {
     const { sliLines } = reconcile(await shipment(BY_WEIGHT), scheduleB, CONTROLLED)
     const line = row(sliLines, BY_WEIGHT)
     expect(line.reportingUom).toBe('KG')
-    expect(line.reportingQuantity).toBe(4.263)
+    // Whole kilograms: 4.263 kg files as 4.
+    expect(line.reportingQuantity).toBe(4)
     expect(line.reportingBasis).toBe('net-weight')
     // Still 12 pieces on the invoice, and the row still says so.
     expect(line.quantity).toBe(12)
@@ -149,7 +150,7 @@ describe('the unit a commodity row is filed in', () => {
     })
     const line = row(sliLines, BY_COUNT)
     expect(line.reportingUom).toBe('KG')
-    expect(line.reportingQuantity).toBe(4.263)
+    expect(line.reportingQuantity).toBe(4)
     expect(line.reportingBasis).toBe('net-weight')
   })
 
@@ -170,5 +171,31 @@ describe('the unit a commodity row is filed in', () => {
     expect(line.scheduleBUnits).toEqual([])
     expect(line.reportingUom).toBe('PCS')
     expect(line.reportingQuantity).toBe(12)
+  })
+})
+
+describe('a shipment with more rows than a sheet holds', () => {
+  it('reports the sheet count instead of refusing the shipment', async () => {
+    // This was a blocking check: the form was refused and nothing came out, over a situation
+    // the paper handles by being filed as several sheets.
+    const spec = simpleShipment()
+    const parsed = await parseCipl('synthetic.pdf', await buildSyntheticCipl(spec))
+    // Three invoice lines aggregate to two commodity rows, so one to a sheet is two sheets.
+    const { sliLines, checks } = reconcile(parsed, scheduleB, { ...CONTROLLED, maxRows: 1 })
+    expect(sliLines.length).toBe(2)
+
+    const capacity = checks.find((c) => c.id === 'row-capacity')!
+    expect(capacity.severity).toBe('info')
+    expect(capacity.passed).toBe(true)
+    expect(capacity.detail).toMatch(/2 pages/)
+    // And nothing blocking is raised by the length alone.
+    expect(checks.filter((c) => c.severity === 'blocking' && !c.passed)).toEqual([])
+  })
+
+  it('still says so when one sheet is enough', async () => {
+    const parsed = await parseCipl('synthetic.pdf', await buildSyntheticCipl(simpleShipment()))
+    const { checks } = reconcile(parsed, scheduleB, { ...CONTROLLED, maxRows: 8 })
+    const capacity = checks.find((c) => c.id === 'row-capacity')!
+    expect(capacity.detail).toMatch(/one sheet/)
   })
 })
