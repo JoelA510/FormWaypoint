@@ -8,6 +8,7 @@ import { basisNote } from './quantity-basis'
 import { partKey } from '../domain/part-key'
 import type { OverrideRecord } from '../store/local-store'
 import type { CheckResult, MergedLine, ParsedCipl, Reconciliation, SLILine } from '../domain/types'
+import type { RowFigures } from '../domain/reconcile'
 
 const SEVERITY_TONE: Record<CheckResult['severity'], Tone> = {
   blocking: 'block',
@@ -170,15 +171,38 @@ export function CommodityTable({
   reconciliation,
   reportingUnits = {},
   onReportingUnitChange,
+  rowFigures = {},
+  onRowFigureChange,
 }: {
   reconciliation: Reconciliation
   /** The unit chosen for each commodity number, keyed by normalised code. */
   reportingUnits?: Record<string, string>
   /** Omitted where the table is read-only. */
   onReportingUnitChange?: (code: string, unit: string) => void
+  /** Figures entered against a row, keyed by `SLILine.rowKey`. */
+  rowFigures?: Record<string, RowFigures>
+  /** Omitted where the table is read-only. Passing `undefined` clears that field. */
+  onRowFigureChange?: (rowKey: string, field: keyof RowFigures, value: number | undefined) => void
 }) {
   const { sliLines, mergedLines } = reconciliation
   const byId = new Map(mergedLines.map((l) => [l.id, l]))
+
+  /** A figure cell: the row's own value, or a box to type one over it. */
+  const figure = (line: SLILine, field: keyof RowFigures, decimals: number, label: string) => {
+    const entered = rowFigures[line.rowKey]?.[field]
+    if (!onRowFigureChange) return <span className="tabular">{line[field].toFixed(decimals)}</span>
+    return (
+      <RowFigureInput
+        value={entered}
+        // What the row would file if the box were cleared, so typing over it reads as a
+        // substitution rather than as filling in a blank.
+        documentValue={entered === undefined ? line[field] : undefined}
+        decimals={decimals}
+        label={`${label} for ${line.scheduleB} ${line.domesticForeign}`}
+        onCommit={(next) => onRowFigureChange(line.rowKey, field, next)}
+      />
+    )
+  }
 
   return (
     <Card>
@@ -188,7 +212,7 @@ export function CommodityTable({
       />
       <CardBody className="px-0 py-0">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[820px] border-collapse text-sm">
+          <table className="w-full min-w-[1040px] border-collapse text-sm">
             <thead>
               <tr className="border-b bg-[var(--color-sunken)] text-left text-xs tracking-wide text-[var(--color-ink-faint)] uppercase">
                 <th className="px-4 py-2.5 font-semibold">D/F</th>
@@ -222,8 +246,11 @@ export function CommodityTable({
                         .join(', ')}
                     </p>
                   </td>
-                  <td className="tabular px-4 py-3 text-right">
-                    {line.quantity} {line.sourceUom}
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex items-center justify-end gap-1.5">
+                      {figure(line, 'quantity', 0, 'Invoice quantity')}
+                      <span className="text-xs text-[var(--color-ink-faint)]">{line.sourceUom}</span>
+                    </div>
                   </td>
                   <td className="px-4 py-3">
                     <ReportingUnitPicker
@@ -236,8 +263,8 @@ export function CommodityTable({
                       }
                     />
                   </td>
-                  <td className="tabular px-4 py-3 text-right">{line.weightKg.toFixed(3)}</td>
-                  <td className="tabular px-4 py-3 text-right">{line.valueUsd.toFixed(2)}</td>
+                  <td className="px-4 py-3 text-right">{figure(line, 'weightKg', 3, 'Net weight')}</td>
+                  <td className="px-4 py-3 text-right">{figure(line, 'valueUsd', 2, 'Value')}</td>
                 </tr>
               ))}
             </tbody>
@@ -603,6 +630,61 @@ export function PartOverridesPanel({
         </div>
       </CardBody>
     </Card>
+  )
+}
+
+/**
+ * One figure on a commodity row, as the documents gave it or as somebody typed it.
+ *
+ * The document's own figure is the placeholder rather than the value, so an untouched row
+ * shows what would be filed while an entered one shows, in a filled box, that this number is
+ * not the invoice's. Emptying the box is how an override is taken back — there is no separate
+ * control for it, because "delete what I typed" is what an empty box already means.
+ *
+ * Commits on blur, like the per-part weights: these are figures on a signed declaration and
+ * committing them keystroke by keystroke would file `1` on the way to `12`.
+ */
+function RowFigureInput({
+  value,
+  documentValue,
+  decimals,
+  label,
+  onCommit,
+}: {
+  value: number | undefined
+  /** What the row files without an override; shown as the placeholder. Absent while overridden. */
+  documentValue: number | undefined
+  decimals: number
+  label: string
+  onCommit: (next: number | undefined) => void
+}) {
+  const [draft, setDraft] = useState(value === undefined ? '' : String(value))
+
+  // Saved figures arrive from storage after the first render, so the box has to follow the
+  // incoming value or a row with a stored override shows an empty one beside a changed total.
+  useEffect(() => {
+    setDraft(value === undefined ? '' : String(value))
+  }, [value])
+
+  const parsed = Number(draft)
+  const blank = draft.trim() === ''
+  const valid = blank || (Number.isFinite(parsed) && parsed >= 0)
+
+  return (
+    <Input
+      value={draft}
+      inputMode="decimal"
+      aria-label={label}
+      placeholder={documentValue === undefined ? '' : documentValue.toFixed(decimals)}
+      className={`tabular w-24 text-right ${valid ? '' : 'border-[var(--color-block)]'} ${
+        value === undefined ? '' : 'border-[var(--color-warn)]'
+      }`}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        if (!valid) return
+        onCommit(blank ? undefined : parsed)
+      }}
+    />
   )
 }
 

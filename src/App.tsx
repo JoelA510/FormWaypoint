@@ -5,8 +5,14 @@ import { ChecksPanel, CommodityTable, OverridesPanel, PartOverridesPanel, Shipme
 import { ManualFieldsPanel } from './features/manual-fields'
 import { ItemLibraryPanel, ItemMasterUpdatesPanel, type ImportMode } from './features/item-library'
 import { HistoryPanel, OutputPanel } from './features/output-panel'
-import { reconcile, resolveDestinationCountry } from './domain/reconcile'
+import {
+  reconcile,
+  resolveDestinationCountry,
+  type ExportControlOverride,
+  type RowFigures,
+} from './domain/reconcile'
 import { indexByPart, libraryChanges, libraryWeights, type ItemLibraryEntry } from './domain/item-library'
+import { partKey } from './domain/part-key'
 import {
   createScheduleBIndex,
   loadBundledPayload,
@@ -82,6 +88,11 @@ export function App() {
    * from a previous shipment would quietly file goods that were measured differently.
    */
   const [reportingUnits, setReportingUnits] = useState<Record<string, string>>({})
+  // Figures and export control entered against this shipment. Session state, not stored: both
+  // are statements about one document's rows, and a figure that outlived the document it was
+  // entered against would file itself against the next shipment's goods.
+  const [rowFigures, setRowFigures] = useState<Record<string, RowFigures>>({})
+  const [exportControlByPart, setExportControlByPart] = useState<Record<string, ExportControlOverride>>({})
   const [overrides, setOverrides] = useState<OverrideRecord[]>([])
   const [partOverrides, setPartOverrides] = useState<PartOverrideRecord[]>([])
   const [items, setItems] = useState<ItemLibraryEntry[]>([])
@@ -351,12 +362,25 @@ export function App() {
       unitWeightsByPart,
       itemsByPart,
       reportingUnits,
+      rowFigures,
+      exportControlByPart,
       // Only where a form is actually produced. A keyed carrier borrows the Nippon adapter as
       // scaffolding for the draft, and reporting how many sheets its commodity table takes
       // describes a document this run does not generate.
       maxRows: keyedCarrier ? undefined : adapter.maxCommodityRows,
     })
-  }, [parsed, scheduleB, settings.eccn, settings.sme, settings.license, overrides, codesByPart, unitWeightsByPart, itemsByPart, reportingUnits, adapter, keyedCarrier])
+  }, [parsed, scheduleB, settings.eccn, settings.sme, settings.license, overrides, codesByPart, unitWeightsByPart, itemsByPart, reportingUnits, rowFigures, exportControlByPart, adapter, keyedCarrier])
+
+  // In the order the invoice lists them, deduped the way every other per-part map keys them,
+  // so the override table reads down the document rather than in whatever order a Set produced.
+  const shipmentParts = useMemo(() => {
+    const seen = new Map<string, string>()
+    for (const line of reconciliation?.mergedLines ?? []) {
+      const key = partKey(line.partNumber)
+      if (key && !seen.has(key)) seen.set(key, line.partNumber.trim())
+    }
+    return [...seen.values()]
+  }, [reconciliation])
 
   const draft = useMemo(
     () => (reconciliation ? buildDraft(reconciliation, profile, settings, adapter) : null),
@@ -859,6 +883,21 @@ export function App() {
                     return next
                   })
                 }
+                rowFigures={rowFigures}
+                onRowFigureChange={(rowKey, field, value) =>
+                  setRowFigures((current) => {
+                    // An emptied box is the override taken back, which is the absence of an
+                    // entry rather than an entry holding nothing — a row left holding `{}`
+                    // reads later as a figure somebody entered.
+                    const own = { ...(current[rowKey] ?? {}) }
+                    if (value === undefined) delete own[field]
+                    else own[field] = value
+                    const next = { ...current }
+                    if (Object.keys(own).length) next[rowKey] = own
+                    else delete next[rowKey]
+                    return next
+                  })
+                }
               />
               <ChecksPanel checks={checks} canGenerate={canGenerate} />
               <OverridesPanel
@@ -873,6 +912,16 @@ export function App() {
                 adapter={adapter}
                 onProfileChange={setProfile}
                 onSettingsChange={setSettings}
+                parts={shipmentParts}
+                exportControlByPart={exportControlByPart}
+                onExportControlChange={(part, next) =>
+                  setExportControlByPart((current) => {
+                    const kept = { ...current }
+                    if (next.eccn || next.license || next.sme) kept[part] = next
+                    else delete kept[part]
+                    return kept
+                  })
+                }
               />
               <OutputPanel
                 adapter={adapter}
@@ -891,6 +940,7 @@ export function App() {
                 eccn={settings.eccn || null}
                 license={settings.license || null}
                 sme={settings.sme || null}
+                exportControlByPart={exportControlByPart}
               />
               <HistoryPanel shipments={shipments} onClear={() => void clearAll()} />
             </>

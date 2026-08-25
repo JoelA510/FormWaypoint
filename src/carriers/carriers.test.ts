@@ -65,6 +65,7 @@ const VENDOR: CompanyProfile = {
 
 /** One reviewed commodity row, for the suites that build rows rather than parse them. */
 const ROW: SLILine = {
+  rowKey: '8544420000|F|EAR99|NLR|N|NO',
   sourceLineIds: ['line:1'],
   domesticForeign: 'F',
   scheduleB: '8544.42.0000',
@@ -1147,6 +1148,7 @@ describe('CEVA — the quantity box carries the Schedule B unit', () => {
  */
 describe('CEVA — an ECCN box shared by every row', () => {
   const row = (scheduleB: string, eccn: string | null): SLILine => ({
+    rowKey: `${scheduleB}|F|${eccn ?? ''}|NLR|N|NO`,
     sourceLineIds: [`line:${scheduleB}`],
     domesticForeign: 'F',
     scheduleB,

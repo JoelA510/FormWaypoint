@@ -19,6 +19,7 @@ import type { DesktopBridge } from '../desktop'
 import type { CarrierAdapter, SliDraft } from '../carriers/types'
 import type { ScheduleBIndex } from '../domain/schedule-b'
 import type { Reconciliation } from '../domain/types'
+import type { ExportControlOverride } from '../domain/reconcile'
 import { localStore, type ShipmentRecord } from '../store/local-store'
 
 export function OutputPanel({
@@ -38,6 +39,7 @@ export function OutputPanel({
   eccn = null,
   license = null,
   sme = null,
+  exportControlByPart = {},
 }: {
   adapter: CarrierAdapter
   reconciliation: Reconciliation
@@ -60,6 +62,8 @@ export function OutputPanel({
   /** The blanket licence and SME flag, for the same partitioning. */
   license?: string | null
   sme?: string | null
+  /** Export control entered against a part, so the sheet groups as the form files. */
+  exportControlByPart?: Record<string, ExportControlOverride>
   /** Gated on the document checks *and* the draft checks — see App. */
   canGenerate: boolean
   onGenerated: () => void
@@ -209,6 +213,7 @@ export function OutputPanel({
         eccn,
         license,
         sme,
+        exportControlByPart,
       })
       const delivery = await deliver(
         bridge,

@@ -33,7 +33,12 @@ import { buildXlsx, type CellValue, type Sheet } from '../../lib/xlsx'
 import type { SliDraft } from '../types'
 import { canonicalUnit, formatScheduleB, normalizeScheduleB, type ScheduleBIndex } from '../../domain/schedule-b'
 import { partKey } from '../../domain/part-key'
-import { domesticForeign, roundTo } from '../../domain/reconcile'
+import {
+  domesticForeign,
+  exportControlFor,
+  roundTo,
+  type ExportControlOverride,
+} from '../../domain/reconcile'
 import { toCountryPickerLabel, toIsoAlpha2 } from './countries'
 
 import {
@@ -250,6 +255,8 @@ export interface CodeCorrections {
   license?: string | null
   /** The shipment-wide SME flag, for lines that print none. Only `df-code` reads it. */
   sme?: string | null
+  /** Export control entered against a part, which beats both. Only `df-code` reads it. */
+  exportControlByPart?: Record<string, ExportControlOverride>
 }
 
 /**
@@ -290,16 +297,26 @@ function groupKeyFor(line: MergedLine, mode: GroupingMode, index: number, correc
     // controlled blanket where it prints none. Treating a blank as its own bucket splits a
     // row the filed SLI merges as soon as one line happens to print the controlled value
     // outright, which is the opposite of what this mode is for.
-    case 'df-code':
-      // Case-insensitive on the triplet, exactly as `aggregateLines` keys its rows.
+    case 'df-code': {
+      // Case-insensitive on the triplet, and resolved by the same function `aggregateLines`
+      // uses — this mode exists to be read against the form's rows line for line, and a
+      // second copy of that precedence is how it comes to group by a triplet the form does
+      // not file.
+      const control = exportControlFor(line, {
+        eccn: corrections.eccn ?? null,
+        license: corrections.license ?? null,
+        sme: corrections.sme ?? null,
+        exportControlByPart: corrections.exportControlByPart,
+      })
       return [
         domesticForeign(line.countryOfOrigin),
         code,
         unit,
-        (line.eccn || corrections.eccn || '').toUpperCase(),
-        (line.license || corrections.license || '').toUpperCase(),
-        (line.sme || corrections.sme || '').toUpperCase(),
+        (control.eccn ?? '').toUpperCase(),
+        (control.license ?? '').toUpperCase(),
+        (control.sme ?? '').toUpperCase(),
       ].join('|')
+    }
     case 'part-origin-code':
     default:
       return [partKey(line.partNumber), partKey(line.countryOfOrigin), code, unit].join('|')
@@ -897,6 +914,8 @@ export interface KeyingInputs {
   license?: string | null
   /** The blanket SME flag the SLI rows were built with, for the same reason. */
   sme?: string | null
+  /** Export control entered against a part. Beats both the printed and the shipment-wide value. */
+  exportControlByPart?: Record<string, ExportControlOverride>
 }
 
 export function buildKeyingSheet(
@@ -920,6 +939,7 @@ export function buildKeyingSheet(
       eccn: inputs.eccn,
       license: inputs.license,
       sme: inputs.sme,
+      exportControlByPart: inputs.exportControlByPart,
     },
     reportingUnits(reconciliation.sliLines),
     reconciliation.sliLines,

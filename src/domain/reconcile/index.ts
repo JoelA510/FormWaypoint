@@ -33,6 +33,7 @@ import {
   roundTo,
   unmatchedPackingLines,
   type AggregationOptions,
+  type ExportControlOverride,
 } from './lines'
 
 export * from './lines'
@@ -66,6 +67,27 @@ export interface ReconcileOptions extends AggregationOptions {
    * than one unit, where only the filer can say which the goods are actually measured in.
    */
   reportingUnits?: Record<string, string>
+  /**
+   * Figures a reviewer entered against a commodity row, keyed by `SLILine.rowKey`.
+   *
+   * The documents are the source of every figure this tool files, and this is the one door
+   * out of that — for the shipment whose packing list is missing a weight somebody forgot to
+   * enter, or whose invoice total the parser cannot be made to agree with in time to ship.
+   * Nothing is inferred: an absent field is not an override, and every row this touches is
+   * named in a check, with the figure the documents gave, so the departure is on the face of
+   * the reconciliation rather than buried in it.
+   *
+   * Keyed by what the row *is*, so correcting the classification or the export control moves
+   * the row out from under the figure rather than carrying it onto different goods.
+   */
+  rowFigures?: Record<string, RowFigures>
+}
+
+/** Figures entered against one commodity row. An absent field is not an override. */
+export interface RowFigures {
+  quantity?: number
+  weightKg?: number
+  valueUsd?: number
 }
 
 /**
@@ -187,6 +209,9 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
       ? applyUnitWeights(joined, options.unitWeightsByPart)
       : joined
   const sliLines = aggregateLines(mergedLines, options)
+  // Applied before the unit is resolved, so a hand-entered weight decides the filed kilogram
+  // figure exactly as a printed one would.
+  const entered = applyRowFigures(sliLines, options.rowFigures)
 
   // The unit each row is filed in, and its quantity restated into that unit.
   //
@@ -290,6 +315,8 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
     ...exportControlChecks(options, mergedLines),
     ...sourceControlChecks(sliLines, mergedLines, options),
     ...capacityCheck(sliLines, options.maxRows),
+    ...enteredFigureChecks(entered),
+    ...exportControlOverrideChecks(mergedLines, options.exportControlByPart),
   ]
 
   return {
@@ -305,6 +332,122 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
 // ---------------------------------------------------------------------------
 // Checks
 // ---------------------------------------------------------------------------
+
+/** One commodity row's figure as the documents gave it, beside the one entered over it. */
+interface EnteredFigure {
+  line: SLILine
+  field: 'quantity' | 'weightKg' | 'valueUsd'
+  was: number
+  now: number
+}
+
+/**
+ * Replace commodity-row figures with ones a reviewer entered, and say what was replaced.
+ *
+ * Mutates the rows in place, deliberately: everything downstream — the filed unit, the
+ * totals, the form, the keying sheet — has to see one set of figures, and a shipment
+ * described two ways is the failure this whole reconciliation exists to prevent.
+ *
+ * A field is an override only when it is a finite number that differs from the documents'.
+ * `undefined` means "not entered"; a figure equal to the printed one is not a departure and
+ * is not reported as one, so re-typing what is already there leaves no trace to explain.
+ */
+function applyRowFigures(sliLines: SLILine[], figures?: Record<string, RowFigures>): EnteredFigure[] {
+  if (!figures) return []
+  const applied: EnteredFigure[] = []
+  for (const line of sliLines) {
+    const entered = figures[line.rowKey]
+    if (!entered) continue
+    for (const field of ['quantity', 'weightKg', 'valueUsd'] as const) {
+      const now = entered[field]
+      if (now === undefined || !Number.isFinite(now) || now < 0) continue
+      const was = line[field]
+      if (now === was) continue
+      applied.push({ line, field, was, now })
+      line[field] = now
+      // The reported quantity is restated from the row's own figures further down, so it
+      // follows this without being set here — except that it starts life as a copy of the
+      // document's count, which would otherwise survive as a stale second opinion.
+      if (field === 'quantity') line.reportingQuantity = now
+    }
+  }
+  return applied
+}
+
+/** What a replaced figure is called on the review screen. */
+const FIGURE_LABELS: Record<EnteredFigure['field'], string> = {
+  quantity: 'quantity',
+  weightKg: 'net weight',
+  valueUsd: 'value',
+}
+
+/**
+ * Every figure filed against the documents' own, named.
+ *
+ * A warning rather than a note, and it never passes silently once anything has been entered:
+ * these are the numbers on a signed declaration, and the one thing a reviewer must not be
+ * able to do is forget that a box says something the invoice does not.
+ */
+function enteredFigureChecks(entered: EnteredFigure[]): CheckResult[] {
+  if (!entered.length) return []
+  const described = entered
+    .map((e) => `${e.line.scheduleB} ${e.line.domesticForeign}: ${FIGURE_LABELS[e.field]} ${e.was} → ${e.now}`)
+    .join('; ')
+  return [
+    {
+      id: 'entered-figures',
+      severity: 'warning',
+      title: 'Commodity figures entered by hand',
+      detail:
+        `${entered.length} figure(s) on the commodity rows are yours rather than the documents' (${described}). ` +
+        'The totals below reconcile against these, so a figure entered to make them agree makes them agree by ' +
+        'saying so. Check each against the shipment before signing.',
+      passed: false,
+      refs: [...new Set(entered.flatMap((e) => e.line.sourceLineIds))],
+    },
+  ]
+}
+
+/**
+ * Every part filed under export-control values a reviewer entered, named.
+ *
+ * Same reasoning as the classification overrides: a value nobody can account for later is
+ * indistinguishable from a typo, and the ECCN is the field on this form where that matters
+ * most.
+ */
+function exportControlOverrideChecks(
+  merged: MergedLine[],
+  byPart?: Record<string, ExportControlOverride>,
+): CheckResult[] {
+  if (!byPart || !Object.keys(byPart).length) return []
+  const described: string[] = []
+  const refs: string[] = []
+  for (const part of new Set(merged.map((l) => partKey(l.partNumber)).filter(Boolean))) {
+    const entered = byPart[part]
+    if (!entered) continue
+    const fields = (['eccn', 'license', 'sme'] as const)
+      .filter((field) => entered[field])
+      .map((field) => `${field.toUpperCase()} ${entered[field]}`)
+    if (!fields.length) continue
+    const lines = merged.filter((l) => partKey(l.partNumber) === part)
+    described.push(`${lines[0]?.partNumber || part} (${fields.join(', ')})`)
+    refs.push(...lines.map((l) => l.id))
+  }
+  if (!described.length) return []
+  return [
+    {
+      id: 'export-control-overrides',
+      severity: 'warning',
+      title: 'Export control entered per part',
+      detail:
+        `${described.length} part(s) are filed under export-control values you entered rather than the ` +
+        `shipment's (${described.join('; ')}). These beat both the shipment-wide values and anything the ` +
+        'document printed. Check them against the classification before signing.',
+      passed: false,
+      refs,
+    },
+  ]
+}
 
 /**
  * A row filed at its unit's minimum, named alongside the figure it was rounded up from.

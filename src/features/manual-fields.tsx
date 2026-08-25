@@ -1,6 +1,9 @@
 import { Badge, Card, CardBody, CardHeader, Field, Input, Select, Textarea, Toggle } from '../components/ui'
 import type { CompanyProfile, ShipmentSettings } from '../domain/draft'
 import type { CarrierAdapter } from '../carriers/types'
+import type { ExportControlOverride } from '../domain/reconcile'
+import { partKey } from '../domain/part-key'
+import { useState } from 'react'
 
 /**
  * The values a CIPL cannot supply.
@@ -15,12 +18,21 @@ export function ManualFieldsPanel({
   adapter,
   onProfileChange,
   onSettingsChange,
+  parts = [],
+  exportControlByPart = {},
+  onExportControlChange,
 }: {
   profile: CompanyProfile
   settings: ShipmentSettings
   adapter: CarrierAdapter
   onProfileChange: (next: CompanyProfile) => void
   onSettingsChange: (next: ShipmentSettings) => void
+  /** Part numbers on this shipment, in the order the invoice lists them. */
+  parts?: string[]
+  /** Export control entered against a part, keyed by uppercased part number. */
+  exportControlByPart?: Record<string, ExportControlOverride>
+  /** Omitted before a document is loaded, when there are no parts to enter anything against. */
+  onExportControlChange?: (part: string, next: ExportControlOverride) => void
 }) {
   const setProfile = <K extends keyof CompanyProfile>(key: K, value: CompanyProfile[K]) =>
     onProfileChange({ ...profile, [key]: value })
@@ -222,6 +234,14 @@ export function ManualFieldsPanel({
                 )}
               </Field>
             </div>
+            {onExportControlChange && parts.length ? (
+              <PerPartExportControl
+                parts={parts}
+                blanket={{ eccn: settings.eccn, license: settings.license, sme: settings.sme }}
+                entered={exportControlByPart}
+                onChange={onExportControlChange}
+              />
+            ) : null}
           </fieldset>
 
           <fieldset className="space-y-2.5 rounded-md border px-3 py-3">
@@ -309,6 +329,112 @@ export function ManualFieldsPanel({
           </p>
         </CardBody>
       </Card>
+    </div>
+  )
+}
+
+/**
+ * Export control for the part that does not match the rest of the shipment.
+ *
+ * Closed by default and counting what is inside it, because the shipment-wide values above are
+ * right on almost every shipment and a table of empty boxes on every part would read as work
+ * to do. Opening it is the deliberate act; the values above keep applying to everything left
+ * untouched.
+ *
+ * Each field falls back independently, so a part can carry its own ECCN under the shipment's
+ * licence. The shipment-wide value is each box's placeholder — what would be filed if the box
+ * stayed empty — so typing over it is visibly a substitution.
+ */
+function PerPartExportControl({
+  parts,
+  blanket,
+  entered,
+  onChange,
+}: {
+  parts: string[]
+  blanket: ExportControlOverride
+  entered: Record<string, ExportControlOverride>
+  onChange: (part: string, next: ExportControlOverride) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const count = parts.filter((part) => {
+    const own = entered[partKey(part)]
+    return Boolean(own?.eccn || own?.license || own?.sme)
+  }).length
+
+  return (
+    <div className="border-t border-[var(--color-warn)]/30 pt-3">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between text-left text-xs font-semibold tracking-wide text-[var(--color-warn)] uppercase"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <span>
+          Per-part override — {count ? `${count} of ${parts.length} set` : `${parts.length} part${parts.length === 1 ? '' : 's'}`}
+        </span>
+        <span aria-hidden>{open ? '−' : '+'}</span>
+      </button>
+      {open ? (
+        <>
+          <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+            For the item that is classified differently from the rest. Anything left empty files the
+            shipment-wide value above. A part filed on its own values is named in the checks.
+          </p>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full min-w-[420px] border-collapse text-sm">
+              <thead>
+                <tr className="text-left text-xs tracking-wide text-[var(--color-ink-faint)] uppercase">
+                  <th className="py-1.5 pr-3 font-semibold">Part</th>
+                  <th className="py-1.5 pr-3 font-semibold">ECCN</th>
+                  <th className="py-1.5 pr-3 font-semibold">Licence</th>
+                  <th className="py-1.5 font-semibold">SME</th>
+                </tr>
+              </thead>
+              <tbody>
+                {parts.map((part) => {
+                  const key = partKey(part)
+                  const own = entered[key] ?? {}
+                  const set = (field: keyof ExportControlOverride, value: string) =>
+                    onChange(key, { ...own, [field]: value.trim() || undefined })
+                  return (
+                    <tr key={key} className="border-t align-middle">
+                      <td className="tabular py-1.5 pr-3 whitespace-nowrap">{part}</td>
+                      <td className="py-1.5 pr-3">
+                        <Input
+                          value={own.eccn ?? ''}
+                          aria-label={`ECCN for ${part}`}
+                          placeholder={blanket.eccn || '—'}
+                          onChange={(e) => set('eccn', e.target.value)}
+                        />
+                      </td>
+                      <td className="py-1.5 pr-3">
+                        <Input
+                          value={own.license ?? ''}
+                          aria-label={`Licence for ${part}`}
+                          placeholder={blanket.license || '—'}
+                          onChange={(e) => set('license', e.target.value)}
+                        />
+                      </td>
+                      <td className="py-1.5">
+                        <Select
+                          value={own.sme ?? ''}
+                          aria-label={`SME for ${part}`}
+                          onChange={(e) => set('sme', e.target.value)}
+                        >
+                          <option value="">{blanket.sme || '—'}</option>
+                          <option value="N">N</option>
+                          <option value="Y">Y</option>
+                        </Select>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : null}
     </div>
   )
 }

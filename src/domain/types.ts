@@ -245,6 +245,16 @@ export interface ParsedCipl {
 
 /** A commodity row destined for a carrier form. */
 export interface SLILine {
+  /**
+   * What makes this row this row, as a string: the commodity number, D/F, the export-control
+   * triplet and the unit, which is exactly what `aggregateLines` groups on.
+   *
+   * Exists so a figure entered by hand can name the row it belongs to and survive a re-parse.
+   * It is derived from what the row *is*, so correcting the classification or the ECCN moves
+   * the row out from under an override rather than silently carrying it onto different goods
+   * — which is the behaviour to want from a hand-entered quantity on a signed declaration.
+   */
+  rowKey: string
   /** ids of every SourceLine that contributed. Never empty. */
   sourceLineIds: string[]
   /** D (domestic, US origin) or F (foreign). */

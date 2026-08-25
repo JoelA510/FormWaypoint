@@ -135,6 +135,54 @@ export function unmatchedPackingLines(invoiceLines: MergedLine[], packingLines: 
 // Aggregation
 // ---------------------------------------------------------------------------
 
+/** Export-control values entered against one part. An absent field is not an override. */
+export interface ExportControlOverride {
+  eccn?: string
+  license?: string
+  sme?: string
+}
+
+/** What a line carries about export control, before anything is decided about it. */
+export interface ExportControlSource {
+  partNumber: string
+  eccn?: string | null
+  license?: string | null
+  sme?: string | null
+}
+
+/** The shipment-wide values, and anything entered against a part. */
+export interface ExportControlChoice {
+  eccn: string | null
+  license: string | null
+  sme: string | null
+  exportControlByPart?: Record<string, ExportControlOverride>
+}
+
+/**
+ * The export-control triplet a line is filed under.
+ *
+ * Narrowest first, field by field. A value printed on the document beats the shipment-wide
+ * one — filing EAR99 over a stated `5A992.C` would be a misdeclaration — and a value entered
+ * against the part beats both, for the same reason `codesByPart` beats `overrides`: it is the
+ * statement somebody made about these goods specifically, and the reconciliation reports it.
+ *
+ * One function because two things decide it: the commodity rows on the form, and the keying
+ * sheet's `df-code` grouping, which exists to be read against those rows line for line. Two
+ * copies of this rule is how the sheet comes to group by one triplet while the form files
+ * another.
+ */
+export function exportControlFor(
+  line: ExportControlSource,
+  choice: ExportControlChoice,
+): { eccn: string | null; license: string | null; sme: string | null } {
+  const entered = choice.exportControlByPart?.[partKey(line.partNumber)]
+  return {
+    eccn: entered?.eccn || line.eccn || choice.eccn,
+    license: entered?.license || line.license || choice.license,
+    sme: entered?.sme || line.sme || choice.sme,
+  }
+}
+
 export interface AggregationOptions {
   /**
    * Compliance attributes applied to every line. These are controlled values, never
@@ -166,6 +214,17 @@ export interface AggregationOptions {
    * reconciliation reports the weights as *supplied*, never as proved against the source.
    */
   unitWeightsByPart?: Record<string, number>
+  /**
+   * Export-control values a reviewer entered against a part, keyed by uppercased part number.
+   *
+   * The shipment-wide values are the shortcut and they are right almost always; this is for
+   * the part that is not. Each field is independent — a part can carry its own ECCN under the
+   * shipment's licence — and an empty field means "no override", not "blank it".
+   *
+   * Part of the grouping key by consequence rather than by design: two lines that differ in
+   * export control are not one commodity row, so entering a value here splits a row.
+   */
+  exportControlByPart?: Record<string, ExportControlOverride>
 }
 
 /**
@@ -197,9 +256,7 @@ export function aggregateLines(lines: MergedLine[], options: AggregationOptions)
     // same holds for a stated license or SME (the `omron-ci` form prints all three per
     // line). All three are part of the grouping key: two lines that differ in export
     // control are not one commodity row.
-    const eccn = line.eccn || options.eccn
-    const license = line.license || options.license
-    const sme = line.sme || options.sme
+    const { eccn, license, sme } = exportControlFor(line, options)
 
     // The triplet is keyed case-insensitively: a hand-filled form can spell one
     // classification two ways ('5A992.C' beside '5A992.c'), and those are one commodity
@@ -225,6 +282,7 @@ export function aggregateLines(lines: MergedLine[], options: AggregationOptions)
       }
     } else {
       groups.set(key, {
+        rowKey: key,
         sourceLineIds: [line.id],
         domesticForeign: df,
         scheduleB: formatScheduleB(code),
