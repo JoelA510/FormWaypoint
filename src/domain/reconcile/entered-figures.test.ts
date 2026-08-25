@@ -47,6 +47,55 @@ describe('a figure entered against a commodity row', () => {
     expect(after.sliLines[0].rowKey).toBe(target.rowKey)
   })
 
+  it('reaches the keying sheet as well as the form', async () => {
+    // The SLI is built from rows and the keying sheet groups the lines beneath them, so a
+    // figure that stopped at the row would reach one document and not the other — two
+    // descriptions of one shipment, which is the failure this reconciliation exists to catch.
+    const target = run().sliLines[0]
+    const after = run({ rowFigures: { [target.rowKey]: { valueUsd: 999.99 } } })
+    const lines = after.mergedLines.filter((l) => target.sourceLineIds.includes(l.id))
+    expect(lines.reduce((sum, l) => sum + (l.extendedValue ?? 0), 0)).toBeCloseTo(999.99, 2)
+    // And the row still totals exactly what was entered, residue and all.
+    expect(after.sliLines.find((l) => l.rowKey === target.rowKey)!.valueUsd).toBeCloseTo(999.99, 2)
+  })
+
+  it('shares a figure out over the lines in proportion to what they hold', async () => {
+    const target = run().sliLines.find((l) => l.sourceLineIds.length > 1)!
+    const before = run().mergedLines.filter((l) => target.sourceLineIds.includes(l.id))
+    const doubled = target.valueUsd * 2
+    const after = run({ rowFigures: { [target.rowKey]: { valueUsd: doubled } } })
+    const lines = after.mergedLines.filter((l) => target.sourceLineIds.includes(l.id))
+    lines.forEach((line, i) => {
+      expect(line.extendedValue).toBeCloseTo((before[i].extendedValue ?? 0) * 2, 1)
+    })
+    expect(lines.reduce((sum, l) => sum + (l.extendedValue ?? 0), 0)).toBeCloseTo(doubled, 2)
+  })
+
+  it('splits evenly over a row that holds nothing to be proportional to', async () => {
+    // The case it exists for: a packing list that omitted a weight, so there is no ratio
+    // between the lines to preserve.
+    const target = run().sliLines.find((l) => l.sourceLineIds.length > 1)!
+    const zeroed = run({ rowFigures: { [target.rowKey]: { weightKg: 0 } } })
+    const row = zeroed.sliLines.find((l) => l.rowKey === target.rowKey)!
+    const after = run({ rowFigures: { [target.rowKey]: { weightKg: 0 }, [row.rowKey]: { weightKg: 3 } } })
+    const lines = after.mergedLines.filter((l) => target.sourceLineIds.includes(l.id))
+    expect(lines.reduce((sum, l) => sum + (l.netWeightKg ?? 0), 0)).toBeCloseTo(3, 3)
+  })
+
+  it('gives the lines a weight, which is what the blocking check reads', async () => {
+    // `weights-present` blocks on a *line* carrying no weight — the case in the docstring, a
+    // packing list missing one — so a figure that stopped at the commodity row would
+    // reconcile the totals and leave the shipment un-generatable anyway. It reads
+    // `netWeightKg == null`, so what matters is that every line under the row has a number.
+    const target = run().sliLines[0]
+    const after = run({ rowFigures: { [target.rowKey]: { weightKg: 4.5 } } })
+    const lines = after.mergedLines.filter((l) => target.sourceLineIds.includes(l.id))
+    expect(lines.length).toBeGreaterThan(0)
+    for (const line of lines) expect(line.netWeightKg).toEqual(expect.any(Number))
+    expect(lines.reduce((sum, l) => sum + (l.netWeightKg ?? 0), 0)).toBeCloseTo(4.5, 3)
+    expect(after.checks.find((c) => c.id === 'weights-present')?.passed).toBe(true)
+  })
+
   it('is named in a check, with the figure the documents gave', async () => {
     const target = run().sliLines[0]
     const { checks } = run({ rowFigures: { [target.rowKey]: { valueUsd: 999.99 } } })
@@ -82,17 +131,35 @@ describe('a figure entered against a commodity row', () => {
     expect(after.checks.find((c) => c.id === 'entered-figures')).toBeUndefined()
   })
 
-  it('lapses rather than following the row onto other goods', async () => {
-    // The key is what the row *is*. Reclassifying it moves it out from under the figure
-    // instead of carrying a hand-entered quantity onto a different commodity number.
+  it('stays with the goods when the row is only reclassified', async () => {
+    // A weight is a property of the goods, not of the number they are filed under. The key is
+    // the lines the row holds, so a row that keeps its goods keeps the figure entered about
+    // them — including when the shipment-wide export control is edited on the same screen,
+    // which used to change every row's identity at once and discard the lot.
     const target = run().sliLines[0]
     const figures = { [target.rowKey]: { quantity: 7 } }
+
     const reclassified = run({
       rowFigures: figures,
       overrides: { [target.scheduleB.replace(/\./g, '')]: '8501.10.4040' },
     })
-    expect(reclassified.sliLines.some((l) => l.quantity === 7 && l.scheduleB === '8501.10.4040')).toBe(false)
-    expect(reclassified.checks.find((c) => c.id === 'entered-figures')).toBeUndefined()
+    expect(reclassified.sliLines.find((l) => l.scheduleB === '8501.10.4040')?.quantity).toBe(7)
+
+    const reflagged = run({ rowFigures: figures, sme: 'Y' })
+    expect(reflagged.sliLines.find((l) => l.rowKey === target.rowKey)?.quantity).toBe(7)
+  })
+
+  it('lapses when the row stops describing the same goods', async () => {
+    // Splitting the row moves its lines apart, and a figure entered about all of them is not
+    // a figure about either half.
+    const target = run().sliLines.find((l) => l.sourceLineIds.length > 1)!
+    const part = document.lines.find((l) => target.sourceLineIds.includes(l.id))!.partNumber
+    const split = run({
+      rowFigures: { [target.rowKey]: { quantity: 7 } },
+      exportControlByPart: { [part.trim().toUpperCase()]: { eccn: '3A001.a' } },
+    })
+    expect(split.sliLines.some((l) => l.rowKey === target.rowKey)).toBe(false)
+    expect(split.checks.find((c) => c.id === 'entered-figures')).toBeUndefined()
   })
 })
 

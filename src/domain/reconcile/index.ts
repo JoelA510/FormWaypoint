@@ -29,6 +29,7 @@ import { partKey } from '../part-key'
 import {
   aggregateLines,
   applyUnitWeights,
+  exportControlFor,
   joinInvoiceToPacking,
   roundTo,
   unmatchedPackingLines,
@@ -208,10 +209,11 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
     !parsed.providesWeights && options.unitWeightsByPart
       ? applyUnitWeights(joined, options.unitWeightsByPart)
       : joined
+  // Grouped once to learn which lines make up which row, then again once any hand-entered
+  // figure has been shared out over those lines — see `applyRowFigures` for why the figure
+  // has to reach the lines rather than stopping at the row.
+  const entered = applyRowFigures(mergedLines, aggregateLines(mergedLines, options), options.rowFigures)
   const sliLines = aggregateLines(mergedLines, options)
-  // Applied before the unit is resolved, so a hand-entered weight decides the filed kilogram
-  // figure exactly as a printed one would.
-  const entered = applyRowFigures(sliLines, options.rowFigures)
 
   // The unit each row is filed in, and its quantity restated into that unit.
   //
@@ -335,40 +337,73 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
 
 /** One commodity row's figure as the documents gave it, beside the one entered over it. */
 interface EnteredFigure {
-  line: SLILine
+  row: SLILine
   field: 'quantity' | 'weightKg' | 'valueUsd'
   was: number
   now: number
 }
 
+/** Where a commodity row's figures live on the invoice lines that make it up. */
+const FIGURE_ON_LINE = {
+  quantity: { field: 'quantity', decimals: 3 },
+  weightKg: { field: 'netWeightKg', decimals: 3 },
+  valueUsd: { field: 'extendedValue', decimals: 2 },
+} as const
+
 /**
- * Replace commodity-row figures with ones a reviewer entered, and say what was replaced.
+ * Share a hand-entered commodity-row figure out over the invoice lines that make up the row.
  *
- * Mutates the rows in place, deliberately: everything downstream — the filed unit, the
- * totals, the form, the keying sheet — has to see one set of figures, and a shipment
- * described two ways is the failure this whole reconciliation exists to prevent.
+ * Mutates the lines, deliberately, and in preference to setting the figure on the row. The
+ * row is an aggregate: the SLI is built from rows, but the keying sheet groups the *lines* —
+ * finer than a row under one grouping mode and coarser under another — so a figure that
+ * stopped at the row would reach the declaration and not the sheet prepared alongside it,
+ * and the two documents would state different quantities for the same goods. That is the
+ * failure this whole reconciliation exists to prevent. Downstream of here the entered figure
+ * is simply what the shipment says.
  *
- * A field is an override only when it is a finite number that differs from the documents'.
- * `undefined` means "not entered"; a figure equal to the printed one is not a departure and
- * is not reported as one, so re-typing what is already there leaves no trace to explain.
+ * Shared out in proportion to what each line already holds, with the rounding residue put on
+ * the largest of them so the row totals exactly what was entered. A row holding nothing to be
+ * proportional to — the case this feature exists for, a weight the packing list omitted — is
+ * split evenly.
+ *
+ * A field is an override only when it is a finite, non-negative number that differs from the
+ * documents'. `undefined` means "not entered"; a figure equal to the printed one is not a
+ * departure and is not reported as one, so re-typing what is already there leaves no trace to
+ * explain.
  */
-function applyRowFigures(sliLines: SLILine[], figures?: Record<string, RowFigures>): EnteredFigure[] {
-  if (!figures) return []
+function applyRowFigures(
+  merged: MergedLine[],
+  rows: SLILine[],
+  figures?: Record<string, RowFigures>,
+): EnteredFigure[] {
+  if (!figures || !Object.keys(figures).length) return []
+  const byId = new Map(merged.map((line) => [line.id, line]))
   const applied: EnteredFigure[] = []
-  for (const line of sliLines) {
-    const entered = figures[line.rowKey]
+
+  for (const row of rows) {
+    const entered = figures[row.rowKey]
     if (!entered) continue
-    for (const field of ['quantity', 'weightKg', 'valueUsd'] as const) {
-      const now = entered[field]
+    const lines = row.sourceLineIds.map((id) => byId.get(id)).filter((l): l is MergedLine => Boolean(l))
+    if (!lines.length) continue
+
+    for (const key of ['quantity', 'weightKg', 'valueUsd'] as const) {
+      const now = entered[key]
       if (now === undefined || !Number.isFinite(now) || now < 0) continue
-      const was = line[field]
+      const was = row[key]
       if (now === was) continue
-      applied.push({ line, field, was, now })
-      line[field] = now
-      // The reported quantity is restated from the row's own figures further down, so it
-      // follows this without being set here — except that it starts life as a copy of the
-      // document's count, which would otherwise survive as a stale second opinion.
-      if (field === 'quantity') line.reportingQuantity = now
+      applied.push({ row, field: key, was, now })
+
+      const { field, decimals } = FIGURE_ON_LINE[key]
+      const held = lines.reduce((sum, line) => sum + (line[field] ?? 0), 0)
+      const shares = lines.map((line) => (held > 0 ? ((line[field] ?? 0) / held) * now : now / lines.length))
+      const rounded = shares.map((share) => roundTo(share, decimals))
+      // On the largest line, where a fraction of a gramme is least visible against what is
+      // already there.
+      const widest = rounded.indexOf(Math.max(...rounded))
+      rounded[widest] = roundTo(rounded[widest] + (now - rounded.reduce((a, b) => a + b, 0)), decimals)
+      lines.forEach((line, i) => {
+        line[field] = rounded[i]
+      })
     }
   }
   return applied
@@ -391,7 +426,7 @@ const FIGURE_LABELS: Record<EnteredFigure['field'], string> = {
 function enteredFigureChecks(entered: EnteredFigure[]): CheckResult[] {
   if (!entered.length) return []
   const described = entered
-    .map((e) => `${e.line.scheduleB} ${e.line.domesticForeign}: ${FIGURE_LABELS[e.field]} ${e.was} → ${e.now}`)
+    .map((e) => `${e.row.scheduleB} ${e.row.domesticForeign}: ${FIGURE_LABELS[e.field]} ${e.was} → ${e.now}`)
     .join('; ')
   return [
     {
@@ -403,7 +438,7 @@ function enteredFigureChecks(entered: EnteredFigure[]): CheckResult[] {
         'The totals below reconcile against these, so a figure entered to make them agree makes them agree by ' +
         'saying so. Check each against the shipment before signing.',
       passed: false,
-      refs: [...new Set(entered.flatMap((e) => e.line.sourceLineIds))],
+      refs: [...new Set(entered.flatMap((e) => e.row.sourceLineIds))],
     },
   ]
 }
@@ -1049,16 +1084,19 @@ function classificationChecks(
  * state its own.
  */
 function exportControlChecks(options: ReconcileOptions, merged: MergedLine[]): CheckResult[] {
-  const statedEverywhere = (value: (line: MergedLine) => string | undefined): boolean =>
-    merged.length > 0 && merged.every((line) => value(line))
+  // Asked of the value each line is actually filed under, not of the document alone: a field
+  // supplied part by part is supplied, and reporting it as "not yet set" describes a gap on
+  // the panel whose whole job is to say what still needs doing.
+  const filedEverywhere = (field: 'eccn' | 'license' | 'sme'): boolean =>
+    merged.length > 0 && merged.every((line) => exportControlFor(line, options)[field])
 
-  const missing = [
-    ['ECCN / EAR99 / USML category', options.eccn, (line: MergedLine) => line.eccn],
-    ['SME', options.sme, (line: MergedLine) => line.sme],
-    ['Licence, exception or NLR', options.license, (line: MergedLine) => line.license],
-  ]
-    .filter(([, blanket, stated]) => !blanket && !statedEverywhere(stated as (line: MergedLine) => string | undefined))
-    .map(([label]) => label as string)
+  const missing = ([
+    ['ECCN / EAR99 / USML category', 'eccn'],
+    ['SME', 'sme'],
+    ['Licence, exception or NLR', 'license'],
+  ] as const)
+    .filter(([, field]) => !filedEverywhere(field))
+    .map(([label]) => label)
 
   return [
     {
@@ -1068,8 +1106,8 @@ function exportControlChecks(options: ReconcileOptions, merged: MergedLine[]): C
       detail: missing.length
         ? `Not yet set: ${missing.join(', ')}. These are not on the CIPL and are never inferred — ` +
           'an absent ECCN does not establish EAR99, and EAR99 does not by itself establish NLR.'
-        : 'Every row carries a full export-control triplet, from the document line where stated and the ' +
-          'entered blanket value otherwise.',
+        : 'Every row carries a full export-control triplet, from the value entered against the part where ' +
+          'there is one, the document line where it states one, and the blanket value otherwise.',
       passed: missing.length === 0,
     },
   ]
@@ -1092,21 +1130,24 @@ function exportControlChecks(options: ReconcileOptions, merged: MergedLine[]): C
 function sourceControlChecks(sliLines: SLILine[], merged: MergedLine[], options: ReconcileOptions): CheckResult[] {
   const byId = new Map(merged.map((l) => [l.id, l]))
   const members = [
-    { id: 'eccn-from-document', label: 'ECCN', blanket: options.eccn, norm: 'EAR99', value: (l: MergedLine) => l.eccn },
-    { id: 'license-from-document', label: 'licence', blanket: options.license, norm: 'NLR', value: (l: MergedLine) => l.license },
-    { id: 'sme-from-document', label: 'SME', blanket: options.sme, norm: 'N', value: (l: MergedLine) => l.sme },
+    { id: 'eccn-from-document', label: 'ECCN', blanket: options.eccn, norm: 'EAR99', field: 'eccn' as const, value: (l: MergedLine) => l.eccn },
+    { id: 'license-from-document', label: 'licence', blanket: options.license, norm: 'NLR', field: 'license' as const, value: (l: MergedLine) => l.license },
+    { id: 'sme-from-document', label: 'SME', blanket: options.sme, norm: 'N', field: 'sme' as const, value: (l: MergedLine) => l.sme },
   ]
 
-  return members.flatMap(({ id, label, blanket, norm, value }) => {
+  return members.flatMap(({ id, label, blanket, norm, field, value }) => {
     const unremarkable = (blanket ?? '').trim().toUpperCase() || norm
     const stated = sliLines.flatMap((line, i) => {
-      const sourceValue = line.sourceLineIds
-        .map((lineId) => {
-          const source = byId.get(lineId)
-          return source ? value(source) : undefined
-        })
-        .find(Boolean)
-      return sourceValue && sourceValue.trim().toUpperCase() !== unremarkable
+      const source = line.sourceLineIds.map((lineId) => byId.get(lineId)).find((l) => l && value(l))
+      const sourceValue = source ? value(source) : undefined
+      // Only where the printed value is what the row files. A value entered against the part
+      // beats it, and saying "will be filed as 5A992.c, as printed on the document" about a
+      // row filing EAR99 is this panel contradicting itself about the most consequential
+      // field on the form.
+      const filed = source ? exportControlFor(source, options)[field] : undefined
+      return sourceValue &&
+        sourceValue.trim().toUpperCase() !== unremarkable &&
+        (filed ?? '').trim().toUpperCase() === sourceValue.trim().toUpperCase()
         ? [{ row: i + 1, scheduleB: line.scheduleB, value: sourceValue }]
         : []
     })

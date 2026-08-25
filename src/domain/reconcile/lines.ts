@@ -171,6 +171,23 @@ export interface ExportControlChoice {
  * copies of this rule is how the sheet comes to group by one triplet while the form files
  * another.
  */
+/**
+ * What names a commodity row for something entered against it.
+ *
+ * The lines it holds, sorted — a row *is* the goods it aggregates, so that is what a figure
+ * entered against it is a statement about.
+ *
+ * Not the grouping key, which was the obvious choice and the wrong one: it carries the
+ * shipment-wide export-control triplet, so setting the SME flag on the same screen changed
+ * every row's identity at once and silently discarded every figure on the form. Under this
+ * key a blanket edit leaves the rows holding the same goods and the figures stand, while
+ * reclassifying or splitting a row genuinely changes which goods it describes and the figure
+ * lapses — which is the behaviour to want from a hand-entered quantity on a declaration.
+ */
+export function rowKeyFor(sourceLineIds: string[]): string {
+  return [...sourceLineIds].sort().join('+')
+}
+
 export function exportControlFor(
   line: ExportControlSource,
   choice: ExportControlChoice,
@@ -282,7 +299,8 @@ export function aggregateLines(lines: MergedLine[], options: AggregationOptions)
       }
     } else {
       groups.set(key, {
-        rowKey: key,
+        // Filled in below, once the row knows every line it holds.
+        rowKey: '',
         sourceLineIds: [line.id],
         domesticForeign: df,
         scheduleB: formatScheduleB(code),
@@ -315,7 +333,9 @@ export function aggregateLines(lines: MergedLine[], options: AggregationOptions)
     }
   }
 
-  return [...groups.values()]
+  const rows = [...groups.values()]
+  for (const row of rows) row.rowKey = rowKeyFor(row.sourceLineIds)
+  return rows
     .map((line) => ({
       ...line,
       quantity: roundTo(line.quantity, 3),

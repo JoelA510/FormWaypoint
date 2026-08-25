@@ -274,10 +274,13 @@ export function App() {
       setBusy(true)
       setParsed(next)
       setError(null)
-      // A unit was chosen for the commodity numbers on the *last* document. These goods are
-      // measured however this document says they are, so the choice starts again from the
-      // Schedule B default rather than carrying over onto codes that happen to repeat.
+      // Everything entered about the *last* document's rows. These goods are measured however
+      // this document says they are, and a figure or a classification entered against another
+      // shipment's rows must not file itself against these — a repeated part or a repeated
+      // commodity number is the common case, not the exception.
       setReportingUnits({})
+      setRowFigures({})
+      setExportControlByPart({})
 
       try {
         const header = next.headers[next.availableSets[0]]
@@ -820,6 +823,13 @@ export function App() {
                       onClick={() => {
                         setParsed(null)
                         setError(null)
+                        // Along with everything entered about this document's rows. Loading
+                        // the next one clears these too, but "start over" has to mean it here
+                        // as well — otherwise the state survives with nothing on screen
+                        // referring to it.
+                        setReportingUnits({})
+                        setRowFigures({})
+                        setExportControlByPart({})
                       }}
                     >
                       Start over

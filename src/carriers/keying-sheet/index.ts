@@ -398,6 +398,16 @@ interface GroupFigures {
   keyed: KeyedQuantity
   /** The restated figure before its unit's whole-number rule, or NaN where it has none. */
   exact: number
+  /**
+   * True where this row's figure is a *share* — one of several keying rows dividing the whole
+   * figure the form files for one set of goods.
+   *
+   * What the figure means then changes: it is not a restatement of what this row holds, so the
+   * note beside it cannot claim the SLI files the same number for this row, because the SLI
+   * files one number for the lot. A component of a single keying row is not a share; it takes
+   * the whole total, which is the figure it would have restated for itself.
+   */
+  apportioned?: boolean
 }
 
 interface KeyedQuantity {
@@ -553,7 +563,11 @@ function apportionWholeUnits(
 
     bucket.forEach((group, index) => {
       const figure = figures.get(group) as GroupFigures
-      figures.set(group, { ...figure, keyed: { ...figure.keyed, quantity: whole[index] } })
+      // Only where the figure is genuinely *shared*. A component of one keying row takes the
+      // whole total, which is the same figure it would have restated for itself — calling
+      // that a share would strip the note off every row that simply rounds up to one.
+      const shared = bucket.length > 1
+      figures.set(group, { ...figure, apportioned: shared, keyed: { ...figure.keyed, quantity: whole[index] } })
     })
   }
 }
@@ -566,11 +580,18 @@ function apportionWholeUnits(
  * the form files a whole number for the goods: the sheet totals what the form files, so one
  * kilogram between two parts leaves the smaller one with none of it.
  */
-function quantityCaveat(keyed: KeyedQuantity, source: QuantitySource): KeyingCommodityRow['quantityCaveat'] {
+function quantityCaveat(figure: GroupFigures, source: QuantitySource): KeyingCommodityRow['quantityCaveat'] {
+  const { keyed } = figure
   if (keyed.notFiled || keyed.unavailable) return undefined
-  if (filedAtMinimum(source, keyed.unit, keyed.quantity)) return 'minimum'
   const holds = source.weightKg > 0 || source.quantity > 0
-  return keyed.quantity === 0 && holds && filedWhole(keyed.unit) ? 'shared-to-nothing' : undefined
+  // A shared-out figure first, and it decides both cases. A row that took its unit from an
+  // apportionment also holds less than half of it, so asking `filedAtMinimum` first labelled
+  // it a minimum and told the operator the SLI files the same — which it does not: the SLI
+  // files one figure for every row in the share-out together.
+  if (figure.apportioned) {
+    return keyed.quantity === 0 && holds && filedWhole(keyed.unit) ? 'shared-to-nothing' : undefined
+  }
+  return filedAtMinimum(source, keyed.unit, keyed.quantity) ? 'minimum' : undefined
 }
 
 /** `MY - Malaysia`, or the name and a prompt where no code could be found for it. */
@@ -752,7 +773,7 @@ function groupForKeying(
       // row differently: a `PCS` row is not filed at a whole-unit minimum and has not been
       // shared out, and saying it has sends the operator looking for a rounding that never
       // happened. What is wrong with such a row is upstream, and the reconciliation says so.
-      quantityCaveat: quantityCaveat(keyed, { quantity, uom: unitFor(group), weightKg }),
+      quantityCaveat: quantityCaveat(figures.get(group) as GroupFigures, { quantity, uom: unitFor(group), weightKg }),
       // Derived from the group's own total rather than copied off one line, so the unit
       // price and the total beside it can never disagree. Per *keyed* unit, so that
       // quantity x unit price still comes back to the customs value on a row filed by

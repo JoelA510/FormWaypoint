@@ -51,6 +51,9 @@ const LINE_NUMBER = /^\d{4}$/
 const ORDER_NUMBER = /^[0-9][0-9A-Z]{7,}$/
 const CURRENCY = /^[A-Z]{3}$/
 const SEQUENCE = /^\d{1,4}$/
+/** Column bounds on a packing-list block's start row, measured off the documents. */
+const PACKING_PART_MIN = 300
+const PACKING_DESCRIPTION_MIN = 460
 
 /** Left-hand label column on header pages. */
 const LEFT_LABEL_MAX = 300
@@ -1176,10 +1179,17 @@ function parsePackingBlock(
   const core = readBlockCore(block)
   if (!core) return null
 
-  // Start row: order, order, sequence, part number, description.
+  // Start row: order, order, sequence, part number, description — located by column rather
+  // than by position, because the sequence cell is simply *empty* on an order carrying a
+  // single line. Counting cells then reads the part number as the sequence and the
+  // description as the part number, and the part number is a join key.
   const startItems = block[0].items
-  const partNumber = startItems[3]?.str ?? ''
-  const description = startItems.slice(4).map((i) => i.str).join(' ').trim()
+  const partNumber = startItems.find((i) => i.x >= PACKING_PART_MIN && i.x < PACKING_DESCRIPTION_MIN)?.str ?? ''
+  const description = startItems
+    .filter((i) => i.x >= PACKING_DESCRIPTION_MIN)
+    .map((i) => i.str)
+    .join(' ')
+    .trim()
 
   // Quantity and country share a row; quantity is the first numeric right of centre.
   let quantity = 0

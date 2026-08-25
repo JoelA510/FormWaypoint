@@ -6,7 +6,7 @@
  * testing directly, and a component file that exports a function loses fast refresh.
  */
 import { canonicalUnit } from '../domain/schedule-b'
-import { wasRoundedWhole } from '../domain/units'
+import { filedAtMinimum, wasRoundedWhole } from '../domain/units'
 import type { SLILine } from '../domain/types'
 
 /**
@@ -68,7 +68,14 @@ export function basisNote(line: SLILine, byChoice: boolean): string {
  * came from.
  */
 function roundedFrom(line: SLILine): string {
-  const whole = `filed as whole ${line.reportingUom}`
+  // A row under half a unit is not rounded, it is *floored*: a whole unit cannot hold less
+  // than one and a zero would declare the goods absent, so it files one and overstates. The
+  // reconciliation and the keying sheet both say so, and this is the third surface — the one
+  // that exists to account for the figure — so it has to say the same thing.
+  const source = { quantity: line.quantity, uom: line.sourceUom, weightKg: line.weightKg }
+  const whole = filedAtMinimum(source, line.reportingUom, line.reportingQuantity)
+    ? `filed as 1 ${line.reportingUom}, the least this unit can hold — it overstates the row`
+    : `filed as whole ${line.reportingUom}`
   if (line.reportingBasis === 'net-weight') return `Net weight ${line.weightKg} kg, ${whole}.`
   if (line.reportingBasis === 'converted') return `Converted from ${line.quantity} ${line.sourceUom}, ${whole}.`
   return `Invoiced as ${line.quantity} ${line.sourceUom}, ${whole}.`

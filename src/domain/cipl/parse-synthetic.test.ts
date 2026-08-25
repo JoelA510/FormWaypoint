@@ -250,6 +250,11 @@ describe('an order carrying a single line', () => {
     const parsed = await parse(solitary())
     const line = byOrder(parsed, 'PACKING_LIST', '4500001452')
     expect(line.netWeightKg).toBeCloseTo(spec0().netWeightKg, 3)
+    // And reads the row by column rather than by counting cells: the empty sequence shifts
+    // nothing, so the part number is still the part number. It is a join key, so a
+    // description filed there quietly breaks the tier the join falls back on.
+    expect(line.partNumber).toBe(spec0().partNumber)
+    expect(line.description).toBe(spec0().description)
   })
 
   it('files no lot id rather than filing the country as one', async () => {

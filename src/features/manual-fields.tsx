@@ -3,7 +3,7 @@ import type { CompanyProfile, ShipmentSettings } from '../domain/draft'
 import type { CarrierAdapter } from '../carriers/types'
 import type { ExportControlOverride } from '../domain/reconcile'
 import { partKey } from '../domain/part-key'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 /**
  * The values a CIPL cannot supply.
@@ -401,19 +401,19 @@ function PerPartExportControl({
                     <tr key={key} className="border-t align-middle">
                       <td className="tabular py-1.5 pr-3 whitespace-nowrap">{part}</td>
                       <td className="py-1.5 pr-3">
-                        <Input
-                          value={own.eccn ?? ''}
-                          aria-label={`ECCN for ${part}`}
+                        <ControlInput
+                          value={own.eccn}
+                          label={`ECCN for ${part}`}
                           placeholder={blanket.eccn || '—'}
-                          onChange={(e) => set('eccn', e.target.value)}
+                          onCommit={(next) => set('eccn', next)}
                         />
                       </td>
                       <td className="py-1.5 pr-3">
-                        <Input
-                          value={own.license ?? ''}
-                          aria-label={`Licence for ${part}`}
+                        <ControlInput
+                          value={own.license}
+                          label={`Licence for ${part}`}
                           placeholder={blanket.license || '—'}
-                          onChange={(e) => set('license', e.target.value)}
+                          onCommit={(next) => set('license', next)}
                         />
                       </td>
                       <td className="py-1.5">
@@ -436,5 +436,41 @@ function PerPartExportControl({
         </>
       ) : null}
     </div>
+  )
+}
+
+/**
+ * One export-control value for one part, committed on blur.
+ *
+ * Not per keystroke, for the same reason the commodity figures are not: export control is
+ * part of what makes a commodity row a row, so every character regroups the rows. `3A001.a`
+ * typed a letter at a time files the shipment under `3`, then `3A`, then `3A0` — and each
+ * regrouping moves rows out from under any figure entered against them, which is not
+ * something a keystroke should be able to do.
+ */
+function ControlInput({
+  value,
+  label,
+  placeholder,
+  onCommit,
+}: {
+  value: string | undefined
+  label: string
+  placeholder: string
+  onCommit: (next: string) => void
+}) {
+  const [draft, setDraft] = useState(value ?? '')
+  useEffect(() => {
+    setDraft(value ?? '')
+  }, [value])
+
+  return (
+    <Input
+      value={draft}
+      aria-label={label}
+      placeholder={placeholder}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => onCommit(draft)}
+    />
   )
 }

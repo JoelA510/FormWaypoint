@@ -61,6 +61,17 @@ describe('why a filed quantity is what it is', () => {
       .toBe('Converted from 4000 GM.')
   })
 
+  it('says a floored row overstates, as the other two surfaces do', () => {
+    // Half a gramme under a kilogram code files 1. The reconciliation and the keying sheet
+    // both say that figure is larger than the goods; this is the surface that exists to
+    // account for the figure, so it cannot describe it as an ordinary rounding.
+    const tiny = row({ sourceUom: 'PCS', quantity: 1, weightKg: 0.0004, reportingBasis: 'net-weight', reportingQuantity: 1 })
+    expect(basisNote(tiny, false)).toBe(
+      'Net weight — this code is reported by weight, not by the piece. Net weight 0.0004 kg, filed as 1 KG, ' +
+        'the least this unit can hold — it overstates the row.',
+    )
+  })
+
   it('leaves a unit that is not filed whole alone', () => {
     const grams = row({ scheduleBUnits: ['GM'], reportingUom: 'GM', sourceUom: 'KG', quantity: 7.438, reportingBasis: 'converted', reportingQuantity: 7438 })
     expect(basisNote(grams, false)).toBe('Converted from 7.438 KG.')

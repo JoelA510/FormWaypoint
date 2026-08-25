@@ -187,19 +187,29 @@ export function CommodityTable({
   const { sliLines, mergedLines } = reconciliation
   const byId = new Map(mergedLines.map((l) => [l.id, l]))
 
-  /** A figure cell: the row's own value, or a box to type one over it. */
+  /**
+   * A figure cell: the row's own value, or a box to type one over it.
+   *
+   * `decimals` is a *floor*, not a format. An invoice can state a fractional count — a line
+   * of `0.3 KG` is one of the shapes this app already handles — and rendering the quantity
+   * column to zero places printed `0` beside a total that included it.
+   */
   const figure = (line: SLILine, field: keyof RowFigures, decimals: number, label: string) => {
+    const shown = atLeast(line[field], decimals)
     const entered = rowFigures[line.rowKey]?.[field]
-    if (!onRowFigureChange) return <span className="tabular">{line[field].toFixed(decimals)}</span>
+    if (!onRowFigureChange) return <span className="tabular">{shown}</span>
     return (
       <RowFigureInput
         value={entered}
         // What the row would file if the box were cleared, so typing over it reads as a
         // substitution rather than as filling in a blank.
-        documentValue={entered === undefined ? line[field] : undefined}
-        decimals={decimals}
+        documentValue={entered === undefined ? shown : undefined}
         label={`${label} for ${line.scheduleB} ${line.domesticForeign}`}
-        onCommit={(next) => onRowFigureChange(line.rowKey, field, next)}
+        // Typing the document's own figure back in is not an override, so it is not held as
+        // one. The reconciliation already declines to report it; a box left marked amber for
+        // a figure the checks say nobody entered is the two disagreeing about which numbers
+        // on the form are the filer's.
+        onCommit={(next) => onRowFigureChange(line.rowKey, field, next === line[field] ? undefined : next)}
       />
     )
   }
@@ -225,8 +235,8 @@ export function CommodityTable({
               </tr>
             </thead>
             <tbody>
-              {sliLines.map((line, i) => (
-                <tr key={`${line.scheduleB}-${i}`} className="border-b align-top last:border-b-0">
+              {sliLines.map((line) => (
+                <tr key={line.rowKey} className="border-b align-top last:border-b-0">
                   <td className="tabular px-4 py-3">{line.domesticForeign}</td>
                   <td className="tabular px-4 py-3 whitespace-nowrap">
                     {line.scheduleB}
@@ -290,6 +300,18 @@ export function CommodityTable({
 
 function sum(values: number[]): number {
   return Math.round(values.reduce((a, b) => a + b, 0) * 1000) / 1000
+}
+
+/**
+ * A figure at no fewer than `decimals` places, and no fewer than it actually has.
+ *
+ * `toFixed` alone is a truncation: the invoice-quantity column asks for whole numbers and an
+ * invoice that states `0.3 KG` would print `0` under a total that counts it.
+ */
+function atLeast(value: number, decimals: number): string {
+  if (!Number.isFinite(value)) return ''
+  const own = (String(value).split('.')[1] ?? '').length
+  return value.toFixed(Math.max(decimals, Math.min(own, 6)))
 }
 
 /**
@@ -647,21 +669,21 @@ export function PartOverridesPanel({
 function RowFigureInput({
   value,
   documentValue,
-  decimals,
   label,
   onCommit,
 }: {
   value: number | undefined
   /** What the row files without an override; shown as the placeholder. Absent while overridden. */
-  documentValue: number | undefined
-  decimals: number
+  documentValue: string | undefined
   label: string
   onCommit: (next: number | undefined) => void
 }) {
-  const [draft, setDraft] = useState(value === undefined ? '' : String(value))
+  const committed = value === undefined ? '' : String(value)
+  const [draft, setDraft] = useState(committed)
 
-  // Saved figures arrive from storage after the first render, so the box has to follow the
-  // incoming value or a row with a stored override shows an empty one beside a changed total.
+  // Saved figures arrive after the first render, and a re-parse can move a row out from under
+  // one, so the box has to follow the incoming value or it shows a figure the form is not
+  // filing.
   useEffect(() => {
     setDraft(value === undefined ? '' : String(value))
   }, [value])
@@ -675,13 +697,19 @@ function RowFigureInput({
       value={draft}
       inputMode="decimal"
       aria-label={label}
-      placeholder={documentValue === undefined ? '' : documentValue.toFixed(decimals)}
+      placeholder={documentValue ?? ''}
       className={`tabular w-24 text-right ${valid ? '' : 'border-[var(--color-block)]'} ${
         value === undefined ? '' : 'border-[var(--color-warn)]'
       }`}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => {
-        if (!valid) return
+        // An entry that is not a number is put back to what the row is actually filing.
+        // Leaving `12,5` on screen beside a form filing 12.5 is this panel showing a figure
+        // that is not the one being signed, which is the one thing it must never do.
+        if (!valid) {
+          setDraft(committed)
+          return
+        }
         onCommit(blank ? undefined : parsed)
       }}
     />
