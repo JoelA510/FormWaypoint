@@ -159,19 +159,6 @@ export interface ExportControlChoice {
 }
 
 /**
- * The export-control triplet a line is filed under.
- *
- * Narrowest first, field by field. A value printed on the document beats the shipment-wide
- * one — filing EAR99 over a stated `5A992.C` would be a misdeclaration — and a value entered
- * against the part beats both, for the same reason `codesByPart` beats `overrides`: it is the
- * statement somebody made about these goods specifically, and the reconciliation reports it.
- *
- * One function because two things decide it: the commodity rows on the form, and the keying
- * sheet's `df-code` grouping, which exists to be read against those rows line for line. Two
- * copies of this rule is how the sheet comes to group by one triplet while the form files
- * another.
- */
-/**
  * What names a commodity row for something entered against it.
  *
  * The lines it holds, sorted — a row *is* the goods it aggregates, so that is what a figure
@@ -188,6 +175,19 @@ export function rowKeyFor(sourceLineIds: string[]): string {
   return [...sourceLineIds].sort().join('+')
 }
 
+/**
+ * The export-control triplet a line is filed under.
+ *
+ * Narrowest first, field by field. A value printed on the document beats the shipment-wide
+ * one — filing EAR99 over a stated `5A992.C` would be a misdeclaration — and a value entered
+ * against the part beats both, for the same reason `codesByPart` beats `overrides`: it is the
+ * statement somebody made about these goods specifically, and the reconciliation reports it.
+ *
+ * One function because two things decide it: the commodity rows on the form, and the keying
+ * sheet's `df-code` grouping, which exists to be read against those rows line for line. Two
+ * copies of this rule is how the sheet comes to group by one triplet while the form files
+ * another.
+ */
 export function exportControlFor(
   line: ExportControlSource,
   choice: ExportControlChoice,

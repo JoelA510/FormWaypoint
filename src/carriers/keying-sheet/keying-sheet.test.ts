@@ -49,6 +49,9 @@ const line = (over: Partial<MergedLine>): MergedLine =>
 
 const sli = (over: Partial<SLILine>): SLILine =>
   ({
+    // As `rowKeyFor` builds it, so a fixture cannot key an override against a string
+    // production never emits.
+    rowKey: [...(over.sourceLineIds ?? [])].sort().join('+'),
     sourceLineIds: [],
     domesticForeign: 'F',
     scheduleB: '8544.42.0000',
@@ -204,6 +207,20 @@ describe('the unit each commodity is keyed in', () => {
     })
     expect(sheet.commodities).toHaveLength(1)
     expect(sheet.commodities[0].quantity).toBe('8')
+  })
+
+  it('shares out a figure the rows are all too small to have restated', () => {
+    // Two parts of two ten-thousandths of a kilogram. Each restates to nothing at three
+    // places, so there is no ratio between them — but the form still files 1, because it will
+    // not put a zero in a quantity box. Skipping the share-out left each row to reach that
+    // same minimum on its own and the sheet keyed 2 against a form filing 1.
+    const lines = ['a', 'b'].map((id, i) =>
+      line({ id, partNumber: `P-${i}`, classification: '9031.90.0000', netWeightKg: 0.0002 }),
+    )
+    const row = byWeight({ sourceLineIds: ['a', 'b'], weightKg: 0.0004, reportingQuantity: 1 })
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(lines, [row]), draft())
+    expect(sheet.commodities.map((c) => c.quantity)).toEqual(['1', '0'])
+    expect(sheet.commodities.reduce((sum, c) => sum + Number(c.quantity), 0)).toBe(1)
   })
 
   it('keys the form’s total even where the form rounded every row of it up', () => {

@@ -17,3 +17,23 @@
 export function partKey(partNumber: string): string {
   return partNumber.trim().toUpperCase()
 }
+
+/**
+ * The distinct parts a set of lines names, in first-seen order, each in its first spelling.
+ *
+ * Deduped the way everything else keys a part — case-insensitively, on the trimmed number —
+ * because trimming alone made one part printed in two cases look like two. A Map keeps the
+ * *last* value for a repeated key, so the first spelling has to be kept deliberately: it is
+ * the one the document leads with and the one an operator will recognise.
+ *
+ * Blank part numbers are dropped. A line that names no part is a fact about the line, and the
+ * callers that care report it separately; it is not a part.
+ */
+export function distinctParts(lines: { partNumber: string }[]): string[] {
+  const seen = new Map<string, string>()
+  for (const line of lines) {
+    const key = partKey(line.partNumber)
+    if (key && !seen.has(key)) seen.set(key, line.partNumber.trim())
+  }
+  return [...seen.values()]
+}

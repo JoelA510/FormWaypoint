@@ -470,7 +470,14 @@ function ControlInput({
       aria-label={label}
       placeholder={placeholder}
       onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => onCommit(draft)}
+      onBlur={() => {
+        // Only where something moved. Export control is part of the commodity-row grouping
+        // key, so every commit regroups the shipment and re-runs every check — and this table
+        // is designed to be opened and mostly left alone, so tabbing across it would pay that
+        // twice per part for nothing.
+        if (draft === (value ?? '')) return
+        onCommit(draft)
+      }}
     />
   )
 }

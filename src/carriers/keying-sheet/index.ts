@@ -32,7 +32,7 @@ import {
 import { buildXlsx, type CellValue, type Sheet } from '../../lib/xlsx'
 import type { SliDraft } from '../types'
 import { canonicalUnit, formatScheduleB, normalizeScheduleB, type ScheduleBIndex } from '../../domain/schedule-b'
-import { partKey } from '../../domain/part-key'
+import { distinctParts, partKey } from '../../domain/part-key'
 import {
   domesticForeign,
   exportControlFor,
@@ -539,18 +539,23 @@ function apportionWholeUnits(
     const total = filed.reduce((sum, row) => sum + row.reportingQuantity, 0)
     const shares = bucket.map((group) => (figures.get(group) as GroupFigures).exact)
     const held = shares.reduce((sum, value) => sum + value, 0)
-    // Nothing to divide proportionally, and no honest way to guess at it. A negative share
-    // among them is the same problem wearing a positive total: scaling would hand one row a
-    // negative quantity that the largest-remainder pass cannot take back, and the column would
-    // reach the form's figure only by cancelling out.
-    if (!(held > 0) || shares.some((value) => value < 0)) continue
-
+    // A negative share makes the total meaningless: scaling would hand one row a negative
+    // quantity that the largest-remainder pass cannot take back, and the column would reach
+    // the form's figure only by cancelling out.
+    if (shares.some((value) => value < 0)) continue
+    // Nothing to be proportional to — every group under half a unit, so each restated to
+    // nothing at three places — and yet the form files a whole number for the goods, because
+    // it will not put a zero in a quantity box. Skipping here left each row to reach that same
+    // minimum on its own, so two 0.2 g parts keyed 1 and 1 against a form filing 1. Shared out
+    // evenly instead, which is the only division the figures support.
+    //
     // Scaled onto the total first, then divided. Dividing the raw shares and mopping up the
     // difference only works while the form's total is within a unit of their sum, and it is
     // not always: three commodity rows of 0.5 kg each file 1 apiece, so a single keying row
     // covering all three has to key 3 against an exact share of 1.5. Scaling makes the shares
     // sum to what the form files by construction, whichever way each side rounded.
-    const scaled = shares.map((value) => (value * total) / held)
+    const scaled =
+      held > 0 ? shares.map((value) => (value * total) / held) : shares.map(() => total / shares.length)
     const whole = scaled.map((value) => Math.floor(value))
     const remainder = Math.min(
       Math.max(total - whole.reduce((sum, value) => sum + value, 0), 0),
@@ -689,15 +694,9 @@ function groupForKeying(
     // some lines had none is part of what the row must say — otherwise 2 pieces from the US
     // and 3 from nowhere print as 5 pieces of `D`, while the SLI files those 3 as `F`.
     const originMissing = group.some((l) => !l.countryOfOrigin.trim())
-    // Deduped the way the grouping keys them, which is case-insensitively. Trimming alone
-    // made one part printed in two cases look like two, which both dropped the operator's
-    // saved wording and put both spellings in a cell that holds one part number.
-    // A Map keeps the *last* value for a repeated key; the first spelling is the one to show.
-    const parts = [...group.reduce((seen, l) => {
-      const key = partKey(l.partNumber)
-      if (key && !seen.has(key)) seen.set(key, l.partNumber.trim())
-      return seen
-    }, new Map<string, string>()).values()]
+    // Deduped the way the grouping keys them, which is case-insensitively — see
+    // `distinctParts`, which the review screen's per-part table reads the same way.
+    const parts = distinctParts(group)
     // A saved wording is keyed to a part, so it only applies where the row is one part — and
     // a row that merged a line stating no part number is not one part, however few names it
     // carries. `parts` drops the blanks, so counting it alone made those rows look single and

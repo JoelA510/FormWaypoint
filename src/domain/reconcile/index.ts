@@ -210,9 +210,12 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
       ? applyUnitWeights(joined, options.unitWeightsByPart)
       : joined
   // Grouped once to learn which lines make up which row, then again once any hand-entered
-  // figure has been shared out over those lines — see `applyRowFigures` for why the figure
-  // has to reach the lines rather than stopping at the row.
-  const entered = applyRowFigures(mergedLines, aggregateLines(mergedLines, options), options.rowFigures)
+  // figure has been shared out over those lines — see `applyRowFigures` for why the figure has
+  // to reach the lines rather than stopping at the row. Only where something was entered:
+  // `reconcile` re-runs on every keystroke that reaches a setting, and almost no shipment uses
+  // this, so the second pass is not something every one of them should pay for.
+  const hasFigures = Boolean(options.rowFigures && Object.keys(options.rowFigures).length)
+  const entered = hasFigures ? applyRowFigures(mergedLines, aggregateLines(mergedLines, options), options.rowFigures) : []
   const sliLines = aggregateLines(mergedLines, options)
 
   // The unit each row is filed in, and its quantity restated into that unit.
@@ -327,6 +330,10 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
     mergedLines,
     sliLines,
     checks,
+    // What the documents said, for every figure entered over one. The rows themselves now
+    // carry the entered figure, so this is the only place the original survives — and the
+    // screen that offered the box has to be able to show what it is replacing.
+    enteredFigures: entered.map(({ row, field, was, now }) => ({ rowKey: row.rowKey, field, was, now })),
     canGenerate: checks.every((c) => c.severity !== 'blocking' || c.passed),
   }
 }
@@ -371,7 +378,7 @@ const FIGURE_ON_LINE = {
  * departure and is not reported as one, so re-typing what is already there leaves no trace to
  * explain.
  */
-function applyRowFigures(
+export function applyRowFigures(
   merged: MergedLine[],
   rows: SLILine[],
   figures?: Record<string, RowFigures>,
@@ -396,17 +403,44 @@ function applyRowFigures(
       const { field, decimals } = FIGURE_ON_LINE[key]
       const held = lines.reduce((sum, line) => sum + (line[field] ?? 0), 0)
       const shares = lines.map((line) => (held > 0 ? ((line[field] ?? 0) / held) * now : now / lines.length))
-      const rounded = shares.map((share) => roundTo(share, decimals))
-      // On the largest line, where a fraction of a gramme is least visible against what is
-      // already there.
-      const widest = rounded.indexOf(Math.max(...rounded))
-      rounded[widest] = roundTo(rounded[widest] + (now - rounded.reduce((a, b) => a + b, 0)), decimals)
       lines.forEach((line, i) => {
-        line[field] = rounded[i]
+        line[field] = shares[i]
       })
+      settle(lines, field, shares, now, decimals)
     }
   }
   return applied
+}
+
+/**
+ * Round each share to the unit's precision and place the difference, so the lines total the
+ * figure that was entered exactly.
+ *
+ * A place at a time, to whichever line's share lost the most in the rounding — largest
+ * remainder, as the keying sheet already apportions. Putting the whole difference on the
+ * largest share was simpler and could drive it negative: the difference grows with the number
+ * of lines while the largest share shrinks, so a hundred-line row with a one-kilogram weight
+ * entered against it could write a negative weight onto a real invoice line, and the row would
+ * still total what was entered so nothing would notice.
+ */
+function settle(lines: MergedLine[], field: 'quantity' | 'netWeightKg' | 'extendedValue', shares: number[], target: number, decimals: number): void {
+  const step = 10 ** -decimals
+  const rounded = shares.map((share) => roundTo(share, decimals))
+  let left = Math.round((target - rounded.reduce((a, b) => a + b, 0)) / step)
+  const byRemainder = shares
+    .map((share, index) => ({ index, lost: share - rounded[index] }))
+    .sort((a, b) => b.lost - a.lost || a.index - b.index)
+
+  for (let taken = 0; left !== 0 && taken < byRemainder.length * 2; taken++) {
+    const at = byRemainder[left > 0 ? taken % byRemainder.length : byRemainder.length - 1 - (taken % byRemainder.length)].index
+    // Never below nothing: a share cannot owe the row goods.
+    if (left < 0 && rounded[at] < step) continue
+    rounded[at] = roundTo(rounded[at] + (left > 0 ? step : -step), decimals)
+    left += left > 0 ? -1 : 1
+  }
+  lines.forEach((line, i) => {
+    line[field] = rounded[i]
+  })
 }
 
 /** What a replaced figure is called on the review screen. */
@@ -455,16 +489,26 @@ function exportControlOverrideChecks(
   byPart?: Record<string, ExportControlOverride>,
 ): CheckResult[] {
   if (!byPart || !Object.keys(byPart).length) return []
+  // Grouped once. Filtering the whole line list inside a loop over the parts is quadratic on
+  // a shipment where the parts scale with the lines, which is every shipment.
+  const byKey = new Map<string, MergedLine[]>()
+  for (const line of merged) {
+    const key = partKey(line.partNumber)
+    if (!key) continue
+    const held = byKey.get(key)
+    if (held) held.push(line)
+    else byKey.set(key, [line])
+  }
+
   const described: string[] = []
   const refs: string[] = []
-  for (const part of new Set(merged.map((l) => partKey(l.partNumber)).filter(Boolean))) {
+  for (const [part, lines] of byKey) {
     const entered = byPart[part]
     if (!entered) continue
     const fields = (['eccn', 'license', 'sme'] as const)
       .filter((field) => entered[field])
       .map((field) => `${field.toUpperCase()} ${entered[field]}`)
     if (!fields.length) continue
-    const lines = merged.filter((l) => partKey(l.partNumber) === part)
     described.push(`${lines[0]?.partNumber || part} (${fields.join(', ')})`)
     refs.push(...lines.map((l) => l.id))
   }
@@ -1087,15 +1131,17 @@ function exportControlChecks(options: ReconcileOptions, merged: MergedLine[]): C
   // Asked of the value each line is actually filed under, not of the document alone: a field
   // supplied part by part is supplied, and reporting it as "not yet set" describes a gap on
   // the panel whose whole job is to say what still needs doing.
-  const filedEverywhere = (field: 'eccn' | 'license' | 'sme'): boolean =>
-    merged.length > 0 && merged.every((line) => exportControlFor(line, options)[field])
-
+  //
+  // Resolved once per line rather than once per line per field. `exportControlFor` normalises
+  // a part key and answers all three, so asking it three times walked every line three times
+  // for something one pass produces.
+  const filed = merged.map((line) => exportControlFor(line, options))
   const missing = ([
     ['ECCN / EAR99 / USML category', 'eccn'],
     ['SME', 'sme'],
     ['Licence, exception or NLR', 'license'],
   ] as const)
-    .filter(([, field]) => !filedEverywhere(field))
+    .filter(([, field]) => !(filed.length > 0 && filed.every((control) => control[field])))
     .map(([label]) => label)
 
   return [

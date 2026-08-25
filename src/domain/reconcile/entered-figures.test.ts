@@ -13,8 +13,8 @@ import { parseCipl } from '../cipl'
 import { buildSyntheticCipl, simpleShipment } from '../../test/synthetic/cipl'
 import { buildOmronCiPdf, simpleOmronCi } from '../../test/synthetic/omron-ci'
 import { createScheduleBIndex, type ScheduleBIndex } from '../schedule-b'
-import { reconcile } from '.'
-import type { ParsedCipl } from '../types'
+import { applyRowFigures, reconcile } from '.'
+import type { MergedLine, ParsedCipl, SLILine } from '../types'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const CONTROLLED = { eccn: 'EAR99', sme: 'N', license: 'NLR' }
@@ -73,13 +73,39 @@ describe('a figure entered against a commodity row', () => {
 
   it('splits evenly over a row that holds nothing to be proportional to', async () => {
     // The case it exists for: a packing list that omitted a weight, so there is no ratio
-    // between the lines to preserve.
+    // between the lines to preserve. Built by zeroing the row first — one `rowFigures` object
+    // cannot hold two entries for one row, and writing it as two computed keys of the same
+    // string silently kept only the second, so this test used to prove the proportional
+    // branch while claiming the even one.
     const target = run().sliLines.find((l) => l.sourceLineIds.length > 1)!
     const zeroed = run({ rowFigures: { [target.rowKey]: { weightKg: 0 } } })
-    const row = zeroed.sliLines.find((l) => l.rowKey === target.rowKey)!
-    const after = run({ rowFigures: { [target.rowKey]: { weightKg: 0 }, [row.rowKey]: { weightKg: 3 } } })
+    const emptied = zeroed.mergedLines.filter((l) => target.sourceLineIds.includes(l.id))
+    expect(emptied.every((l) => l.netWeightKg === 0)).toBe(true)
+
+    const after = reconcile(
+      { ...document, lines: document.lines },
+      scheduleB,
+      { ...CONTROLLED, rowFigures: { [target.rowKey]: { weightKg: 3 } } },
+    )
+    // Proportional where there is a ratio; the even split is proved on the zeroed lines below.
     const lines = after.mergedLines.filter((l) => target.sourceLineIds.includes(l.id))
     expect(lines.reduce((sum, l) => sum + (l.netWeightKg ?? 0), 0)).toBeCloseTo(3, 3)
+  })
+
+  it('splits a figure evenly when the lines hold nothing at all', async () => {
+    // Straight at the branch, because a document whose packing list omits a weight is exactly
+    // what this is for and the synthetic builder always draws one.
+    const lines = [
+      { id: 'a', partNumber: 'P-1', quantity: 1, netWeightKg: undefined },
+      { id: 'b', partNumber: 'P-2', quantity: 1, netWeightKg: undefined },
+      { id: 'c', partNumber: 'P-3', quantity: 1, netWeightKg: undefined },
+    ] as unknown as MergedLine[]
+    const rows = [{ rowKey: 'a+b+c', sourceLineIds: ['a', 'b', 'c'], weightKg: 0 }] as unknown as SLILine[]
+    applyRowFigures(lines, rows, { 'a+b+c': { weightKg: 1 } })
+    // Even, with the odd thousandth to the first — ties by index, as the keying sheet's own
+    // apportionment breaks them, so the same shipment settles the same way twice.
+    expect(lines.map((l) => l.netWeightKg)).toEqual([0.334, 0.333, 0.333])
+    expect(lines.reduce((sum, l) => sum + (l.netWeightKg ?? 0), 0)).toBeCloseTo(1, 3)
   })
 
   it('gives the lines a weight, which is what the blocking check reads', async () => {
@@ -94,6 +120,19 @@ describe('a figure entered against a commodity row', () => {
     for (const line of lines) expect(line.netWeightKg).toEqual(expect.any(Number))
     expect(lines.reduce((sum, l) => sum + (l.netWeightKg ?? 0), 0)).toBeCloseTo(4.5, 3)
     expect(after.checks.find((c) => c.id === 'weights-present')?.passed).toBe(true)
+  })
+
+  it('keeps the documents’ own figure, so the screen can still show what it replaced', async () => {
+    // The row now carries the entered figure — that is the point of entering it — so this is
+    // the only place the original survives. Without it the review screen compares a typed
+    // value against the row's own, finds an override equal to itself, and deletes it the next
+    // time somebody clicks into the box and out again without typing.
+    const target = run().sliLines[0]
+    const after = run({ rowFigures: { [target.rowKey]: { valueUsd: 999.99 } } })
+    expect(after.enteredFigures).toEqual([
+      { rowKey: target.rowKey, field: 'valueUsd', was: target.valueUsd, now: 999.99 },
+    ])
+    expect(run().enteredFigures).toEqual([])
   })
 
   it('is named in a check, with the figure the documents gave', async () => {

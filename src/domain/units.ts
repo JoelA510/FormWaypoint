@@ -91,6 +91,9 @@ const asFiled: UnitRule = (raw, round, unit) => {
 /** The same figure with its unit's whole-number rule left off. */
 const asComputed: UnitRule = (raw, round) => round(raw)
 
+/** The arithmetic alone: neither the whole-number rule nor the unit's own precision. */
+const asRaw: UnitRule = (raw) => raw
+
 /** Where a filed quantity came from. Shown beside the figure wherever it is displayed. */
 export type QuantityBasis =
   /** The quantity the document printed, in the unit it printed. */
@@ -282,8 +285,12 @@ export function wasRoundedWhole(source: QuantitySource, unit: string, filed: num
  */
 export function filedAtMinimum(source: QuantitySource, unit: string, filed: number): boolean {
   if (!filedWhole(unit) || filed !== 1) return false
-  const exact = restateExact(source, unit)
-  return exact !== null && exact.quantity < 0.5
+  // Asked of the raw arithmetic, which is what `asFiled` decided on. `restateExact` still
+  // applies the unit's three-decimal precision, and 0.4996 kg rounds to 0.5 there — so a row
+  // the floor genuinely raised from nothing would answer "no", and the promise that every
+  // such row is named would break for exactly the rows nearest the boundary.
+  const raw = restate(source, unit, asRaw)
+  return raw !== null && Math.round(raw.quantity) === 0
 }
 
 export function roundTo(value: number, decimals: number): number {

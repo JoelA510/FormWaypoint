@@ -65,7 +65,7 @@ const VENDOR: CompanyProfile = {
 
 /** One reviewed commodity row, for the suites that build rows rather than parse them. */
 const ROW: SLILine = {
-  rowKey: '8544420000|F|EAR99|NLR|N|NO',
+  rowKey: 'line:1',
   sourceLineIds: ['line:1'],
   domesticForeign: 'F',
   scheduleB: '8544.42.0000',
@@ -674,6 +674,7 @@ describe('Nippon Express — quantity, its unit, and the named place', () => {
         sliLines: [{ ...ROW, ...line }],
         mergedLines: [],
         checks: [],
+        enteredFigures: [],
         selectedSet: 'FC',
         canGenerate: true,
       },
@@ -776,7 +777,7 @@ describe('shipments that need more than one sheet', () => {
   const fill = async (carrier: 'nippon-express' | 'ceva', lines: SLILine[]) => {
     const adapter = getAdapter(carrier)
     const draft = buildDraft(
-      { header: BLANK_HEADER, sliLines: lines, mergedLines: [], checks: [], selectedSet: 'FC', canGenerate: true },
+      { header: BLANK_HEADER, sliLines: lines, mergedLines: [], checks: [], enteredFigures: [], selectedSet: 'FC', canGenerate: true },
       VENDOR,
       defaultShipmentSettings(adapter),
       adapter,
@@ -870,6 +871,7 @@ describe('CEVA — recording the Incoterm', () => {
         sliLines: [ROW],
         mergedLines: [],
         checks: [],
+        enteredFigures: [],
         selectedSet: 'FC',
         canGenerate: true,
       },
@@ -1025,7 +1027,7 @@ describe('CEVA — the quantity box carries the Schedule B unit', () => {
   const fillRows = async (lines: SLILine[]) => {
     const adapter = getAdapter('ceva')
     const draft = buildDraft(
-      { header: BLANK_HEADER, sliLines: lines, mergedLines: [], checks: [], selectedSet: 'FC', canGenerate: true },
+      { header: BLANK_HEADER, sliLines: lines, mergedLines: [], checks: [], enteredFigures: [], selectedSet: 'FC', canGenerate: true },
       VENDOR,
       defaultShipmentSettings(adapter),
       adapter,
@@ -1110,6 +1112,7 @@ describe('CEVA — the quantity box carries the Schedule B unit', () => {
         sliLines: [{ ...ROW, reportingQuantity: Number.NaN }],
         mergedLines: [],
         checks: [],
+        enteredFigures: [],
         selectedSet: 'FC',
         canGenerate: true,
       },
@@ -1148,7 +1151,7 @@ describe('CEVA — the quantity box carries the Schedule B unit', () => {
  */
 describe('CEVA — an ECCN box shared by every row', () => {
   const row = (scheduleB: string, eccn: string | null): SLILine => ({
-    rowKey: `${scheduleB}|F|${eccn ?? ''}|NLR|N|NO`,
+    rowKey: `line:${scheduleB}`,
     sourceLineIds: [`line:${scheduleB}`],
     domesticForeign: 'F',
     scheduleB,
@@ -1172,7 +1175,7 @@ describe('CEVA — an ECCN box shared by every row', () => {
     const adapter = getAdapter('ceva')
     const draft: SliDraft = {
       ...buildDraft(
-        { header: BLANK_HEADER, sliLines: lines, mergedLines: [], checks: [], selectedSet: 'FC', canGenerate: true },
+        { header: BLANK_HEADER, sliLines: lines, mergedLines: [], checks: [], enteredFigures: [], selectedSet: 'FC', canGenerate: true },
         VENDOR,
         defaultShipmentSettings(adapter),
         adapter,

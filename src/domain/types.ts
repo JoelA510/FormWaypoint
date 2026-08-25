@@ -320,6 +320,22 @@ export interface Reconciliation {
   mergedLines: MergedLine[]
   sliLines: SLILine[]
   checks: CheckResult[]
+  /**
+   * Every commodity-row figure filed against the documents' own, with what the documents said.
+   *
+   * The rows carry the entered figure — that is the point of entering it — so this is the only
+   * place the original survives, and the screen that offered the box has to be able to show
+   * what it is replacing. Empty on a shipment where nothing was entered.
+   */
+  enteredFigures: EnteredFigureRecord[]
   /** True when no blocking check failed. */
   canGenerate: boolean
+}
+
+/** One commodity-row figure as the documents gave it, beside the one entered over it. */
+export interface EnteredFigureRecord {
+  rowKey: string
+  field: 'quantity' | 'weightKg' | 'valueUsd'
+  was: number
+  now: number
 }

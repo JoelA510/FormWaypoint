@@ -51,9 +51,16 @@ const LINE_NUMBER = /^\d{4}$/
 const ORDER_NUMBER = /^[0-9][0-9A-Z]{7,}$/
 const CURRENCY = /^[A-Z]{3}$/
 const SEQUENCE = /^\d{1,4}$/
-/** Column bounds on a packing-list block's start row, measured off the documents. */
-const PACKING_PART_MIN = 300
-const PACKING_DESCRIPTION_MIN = 460
+/**
+ * Column bounds on a line block's start row, measured off the documents.
+ *
+ * The order number opens the block at x=72 and repeats at x=180 (invoice) or x=186-204
+ * (packing); the sequence, when there is one, sits at x=246-252 and the packing list's part
+ * number at x=360.
+ */
+const ORDER_COLUMN_MAX = 130
+const ORDER_REPEAT_MIN = 150
+const SEQUENCE_COLUMN_MAX = 300
 
 /** Left-hand label column on header pages. */
 const LEFT_LABEL_MAX = 300
@@ -446,7 +453,19 @@ function headerOrderNumbers(rows: TextRow[]): string[] {
  */
 function isLineStart(row: TextRow): boolean {
   const [a, b] = row.items
-  return Boolean(a && b && ORDER_NUMBER.test(a.str) && a.str === b.str && b.x > a.x + 40)
+  // Both cells in their own columns rather than merely 40pt apart. Dropping the sequence test
+  // removed the only structural constraint beyond "two equal order-shaped tokens", and an
+  // order reference repeated anywhere on the page would have opened a phantom block. Measured
+  // off the documents: the order column sits at x=72 on both kinds, its repeat at x=180-204.
+  return Boolean(
+    a &&
+      b &&
+      ORDER_NUMBER.test(a.str) &&
+      a.str === b.str &&
+      a.x < ORDER_COLUMN_MAX &&
+      b.x > ORDER_REPEAT_MIN &&
+      b.x > a.x + 40,
+  )
 }
 
 /** A line block cut in half by a page break, waiting for the rest of itself. */
@@ -917,6 +936,13 @@ function figureRowIn(rows: TextRow[], from: number, to: number): number {
   return -1
 }
 
+/** The sequence a block's start row states, or null where the layout printed none. */
+function sequenceCell(start: TextRow): string | null {
+  const third = start.items[2]
+  if (!third || third.x >= SEQUENCE_COLUMN_MAX || !SEQUENCE.test(third.str)) return null
+  return third.str
+}
+
 interface BlockCore {
   orderNumber: string
   sequence: string
@@ -934,11 +960,13 @@ interface BlockCore {
 function readBlockCore(block: TextRow[]): BlockCore | null {
   const start = block[0]
   const orderNumber = start.items[0]?.str ?? ''
-  // Only when it is one. `isLineStart` no longer demands a sequence, so the third cell is
-  // whatever the layout put there — the part number, on a packing-list block for an order
-  // with a single line.
-  const third = start.items[2]?.str ?? ''
-  const sequence = SEQUENCE.test(third) ? third : ''
+  // Only when it is one, and only from the sequence's own column. `isLineStart` no longer
+  // demands a sequence, so the third cell is whatever the layout put there — the part number,
+  // on a packing-list block for an order with a single line. A part number of four digits or
+  // fewer matches the sequence pattern, and a bogus sequence both breaks the order+sequence
+  // join tier and can collide with a real sequence on another line of the same order, which
+  // hands an invoice line the wrong packing line's weights.
+  const sequence = sequenceCell(start) ?? ''
   if (!orderNumber) return null
 
   let lineNumber = ''
@@ -1179,17 +1207,17 @@ function parsePackingBlock(
   const core = readBlockCore(block)
   if (!core) return null
 
-  // Start row: order, order, sequence, part number, description — located by column rather
-  // than by position, because the sequence cell is simply *empty* on an order carrying a
-  // single line. Counting cells then reads the part number as the sequence and the
-  // description as the part number, and the part number is a join key.
+  // Start row: order, order, sequence, part number, description. Counted past the two order
+  // cells and past the sequence *only where the layout printed one* — it is simply absent on
+  // an order carrying a single line, and counting cells regardless reads the part number as
+  // the sequence and the description as the part number. The part number is a join key.
+  //
+  // Counted rather than located by absolute column, because the columns are one document's
+  // measurements and the shape — order, order, maybe sequence, part, the rest — is the format.
   const startItems = block[0].items
-  const partNumber = startItems.find((i) => i.x >= PACKING_PART_MIN && i.x < PACKING_DESCRIPTION_MIN)?.str ?? ''
-  const description = startItems
-    .filter((i) => i.x >= PACKING_DESCRIPTION_MIN)
-    .map((i) => i.str)
-    .join(' ')
-    .trim()
+  const after = startItems.slice(sequenceCell(block[0]) === null ? 2 : 3)
+  const partNumber = after[0]?.str ?? ''
+  const description = after.slice(1).map((i) => i.str).join(' ').trim()
 
   // Quantity and country share a row; quantity is the first numeric right of centre.
   let quantity = 0

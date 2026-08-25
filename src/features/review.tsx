@@ -184,8 +184,12 @@ export function CommodityTable({
   /** Omitted where the table is read-only. Passing `undefined` clears that field. */
   onRowFigureChange?: (rowKey: string, field: keyof RowFigures, value: number | undefined) => void
 }) {
-  const { sliLines, mergedLines } = reconciliation
+  const { sliLines, mergedLines, enteredFigures } = reconciliation
   const byId = new Map(mergedLines.map((l) => [l.id, l]))
+  // What the documents said, for the boxes that are showing something else. The row itself
+  // now carries the entered figure, so comparing a typed value against the row would call an
+  // override equal to itself "the document's figure" and delete it on the next blur.
+  const documentFigures = new Map(enteredFigures.map((e) => [`${e.rowKey}:${e.field}`, e.was]))
 
   /**
    * A figure cell: the row's own value, or a box to type one over it.
@@ -195,21 +199,23 @@ export function CommodityTable({
    * column to zero places printed `0` beside a total that included it.
    */
   const figure = (line: SLILine, field: keyof RowFigures, decimals: number, label: string) => {
-    const shown = atLeast(line[field], decimals)
     const entered = rowFigures[line.rowKey]?.[field]
-    if (!onRowFigureChange) return <span className="tabular">{shown}</span>
+    // The documents' own figure, which is the row's own until something is entered over it.
+    const fromDocument = documentFigures.get(`${line.rowKey}:${field}`) ?? line[field]
+    if (!onRowFigureChange) return <span className="tabular">{atLeast(line[field], decimals)}</span>
     return (
       <RowFigureInput
         value={entered}
-        // What the row would file if the box were cleared, so typing over it reads as a
-        // substitution rather than as filling in a blank.
-        documentValue={entered === undefined ? shown : undefined}
+        // Shown as the placeholder throughout, so the box always says what the row would file
+        // if it were cleared — including while it is holding something else.
+        documentValue={atLeast(fromDocument, decimals)}
         label={`${label} for ${line.scheduleB} ${line.domesticForeign}`}
         // Typing the document's own figure back in is not an override, so it is not held as
-        // one. The reconciliation already declines to report it; a box left marked amber for
-        // a figure the checks say nobody entered is the two disagreeing about which numbers
-        // on the form are the filer's.
-        onCommit={(next) => onRowFigureChange(line.rowKey, field, next === line[field] ? undefined : next)}
+        // one. The reconciliation already declines to report it; a box left marked amber for a
+        // figure the checks say nobody entered is the two disagreeing about which numbers on
+        // the form are the filer's. Compared against the *document's* figure — against the
+        // row's, an override equal to itself would delete itself on the next blur.
+        onCommit={(next) => onRowFigureChange(line.rowKey, field, next === fromDocument ? undefined : next)}
       />
     )
   }

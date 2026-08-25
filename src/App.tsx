@@ -12,7 +12,7 @@ import {
   type RowFigures,
 } from './domain/reconcile'
 import { indexByPart, libraryChanges, libraryWeights, type ItemLibraryEntry } from './domain/item-library'
-import { partKey } from './domain/part-key'
+import { distinctParts } from './domain/part-key'
 import {
   createScheduleBIndex,
   loadBundledPayload,
@@ -376,14 +376,7 @@ export function App() {
 
   // In the order the invoice lists them, deduped the way every other per-part map keys them,
   // so the override table reads down the document rather than in whatever order a Set produced.
-  const shipmentParts = useMemo(() => {
-    const seen = new Map<string, string>()
-    for (const line of reconciliation?.mergedLines ?? []) {
-      const key = partKey(line.partNumber)
-      if (key && !seen.has(key)) seen.set(key, line.partNumber.trim())
-    }
-    return [...seen.values()]
-  }, [reconciliation])
+  const shipmentParts = useMemo(() => distinctParts(reconciliation?.mergedLines ?? []), [reconciliation])
 
   const draft = useMemo(
     () => (reconciliation ? buildDraft(reconciliation, profile, settings, adapter) : null),
