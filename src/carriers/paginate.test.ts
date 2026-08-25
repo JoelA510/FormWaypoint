@@ -21,7 +21,8 @@ import {
   decodePDFRawStream,
   type PDFPage,
 } from 'pdf-lib'
-import { pagesNeeded, paginateForm, rowsByPage, stampPageNumbers } from './paginate'
+import { paginateForm, stampPageNumbers } from './paginate'
+import { pagesNeeded, rowsByPage } from '../lib/pagination'
 import { NIPPON_ROW_ROOTS } from './nippon-express/fields'
 import { CEVA_COMMODITY_FIELDS } from './ceva/fields'
 

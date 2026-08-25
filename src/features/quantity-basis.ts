@@ -6,7 +6,7 @@
  * testing directly, and a component file that exports a function loses fast refresh.
  */
 import { canonicalUnit } from '../domain/schedule-b'
-import { filedWhole, restateExact } from '../domain/units'
+import { wasRoundedWhole } from '../domain/units'
 import type { SLILine } from '../domain/types'
 
 /**
@@ -44,8 +44,11 @@ export function basisNote(line: SLILine, byChoice: boolean): string {
   }
   // Named alongside the figure where the two differ. A row showing `4 KG` beside a net weight
   // of 4.499 kg looks like one of them is a typo until this says which is which.
+  // Added to the explanation rather than put in its place. "Net weight 4.499 kg, filed as
+  // whole KG" on its own drops the clause that tells the reviewer the column is not a piece
+  // count — on exactly the rows where the figure is hardest to account for.
   if (line.reportingBasis === 'net-weight') {
-    return rounded || 'Net weight — this code is reported by weight, not by the piece.'
+    return `Net weight — this code is reported by weight, not by the piece.${whole}`
   }
   // Not "as invoiced": the document carries neither this figure nor this unit.
   if (line.reportingBasis === 'converted') {
@@ -71,17 +74,11 @@ function roundedFrom(line: SLILine): string {
   return `Invoiced as ${line.quantity} ${line.sourceUom}, ${whole}.`
 }
 
-/**
- * Whether the filed figure is the restated one or a rounded form of it.
- *
- * `restateExact` is the same restatement with only its unit's whole-number rule left off, so
- * the difference between the two *is* the rounding and nothing else.
- */
+/** Whether the filed figure is the restated one or a rounded form of it. */
 function wasRounded(line: SLILine): boolean {
-  if (!filedWhole(line.reportingUom)) return false
-  const exact = restateExact(
+  return wasRoundedWhole(
     { quantity: line.quantity, uom: line.sourceUom, weightKg: line.weightKg },
     line.reportingUom,
+    line.reportingQuantity,
   )
-  return exact !== null && exact.quantity !== line.reportingQuantity
 }

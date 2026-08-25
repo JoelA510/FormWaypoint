@@ -26,7 +26,6 @@
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRef, PDFString, StandardFonts } from 'pdf-lib'
 import type { PDFAcroForm, PDFContext, PDFForm, PDFPage } from 'pdf-lib'
 
-export { pagesNeeded, rowsByPage } from '../lib/pagination'
 
 /**
  * Entries that belong to the widget annotation rather than to the field, used when a
@@ -201,11 +200,11 @@ function extendOptions(ctx: PDFContext, field: PDFDict, entries: PDFArray | unde
   if (fieldType(ctx, field) !== 'Btn') return
   const options = ctx.lookupMaybe(field.get(PDFName.of('Opt')), PDFArray)
   if (!options) return
-  const source = entries ?? options
-  for (let i = 0; i < count; i++) {
-    const entry = i < source.size() ? source.get(i) : undefined
-    if (entry !== undefined) options.push(entry)
-  }
+  // Snapshotted, because the fallback source *is* the array being appended to: without this,
+  // a copy carrying more widgets than page 1's field had entries reads back the entries this
+  // very loop wrote and fabricates export values out of them.
+  const source = (entries ?? options).asArray().slice()
+  for (let i = 0; i < count && i < source.length; i++) options.push(source[i])
 }
 
 /** A field's type, which may be stated on it or inherited from a node above it. */
@@ -442,17 +441,17 @@ function reparentWidgets(ctx: PDFContext, doc: PDFDocument, page: PDFPage): void
   const annots = page.node.Annots()
   if (!annots) return
   const inTree = new Set(doc.getPages().map((p) => p.ref.toString()))
-  const stranded = new Set<string>()
+  const stranded = new Map<string, PDFRef>()
   for (let i = 0; i < annots.size(); i++) {
     const annot = ctx.lookup(asRef(annots.get(i)), PDFDict)
     const owner = annot.get(PDFName.of('P'))
-    if (owner instanceof PDFRef && !inTree.has(owner.toString())) stranded.add(owner.toString())
+    if (owner instanceof PDFRef && !inTree.has(owner.toString())) stranded.set(owner.toString(), owner)
     annot.set(PDFName.of('P'), page.ref)
   }
-  // The clones are referenced by nothing once the widgets have been repointed.
-  for (const [ref, object] of ctx.enumerateIndirectObjects()) {
-    if (stranded.has(ref.toString()) && object instanceof PDFDict) ctx.delete(ref)
-  }
+  // The clones are referenced by nothing once the widgets have been repointed. Deleted by the
+  // refs already in hand: `enumerateIndirectObjects` copies and sorts the whole object table,
+  // which is fifteen thousand entries on the Nippon template, once per sheet.
+  for (const ref of stranded.values()) ctx.delete(ref)
 }
 
 /**

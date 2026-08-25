@@ -237,6 +237,45 @@ describe('a shipment with more rows than a sheet holds', () => {
     expect(checks.filter((c) => c.severity === 'blocking' && !c.passed)).toEqual([])
   })
 
+  it('refuses a row count no real shipment has', async () => {
+    // The blocking check this replaced fired at one sheet, which is what the tool now handles
+    // by producing several. But nothing else notices a parse that went wrong: each sheet is a
+    // full copy of the template page written on the browser's main thread, so a mis-merged
+    // invoice becomes tens of megabytes and a frozen tab with the checks panel saying nothing.
+    const codes = [
+      '8501.10.3000', '8501.10.4040', '8501.10.4060', '8501.10.4080', '8501.10.6020', '8501.10.6040',
+      '8501.10.6060', '8501.10.6080', '8501.20.2000', '8501.20.3000', '8501.20.6000', '8501.31.2000',
+      '8501.31.3000', '8501.31.6000', '8501.31.8100', '8501.32.2000', '8501.32.4000', '8501.32.6100',
+      '8501.33.2000', '8501.33.3000', '8501.33.4040',
+    ]
+    const spec = simpleShipment()
+    const build = async (count: number) =>
+      parseCipl(
+        'synthetic.pdf',
+        await buildSyntheticCipl({
+          ...spec,
+          lines: codes.slice(0, count).map((classification, i) => ({
+            ...spec.lines[0],
+            lineNumber: String(i + 1).padStart(4, '0'),
+            partNumber: `P-${i + 1}`,
+            classification,
+          })),
+        }),
+      )
+
+    // One row to a sheet, so the row count is the sheet count.
+    const fine = reconcile(await build(20), scheduleB, { ...CONTROLLED, maxRows: 1 })
+    expect(fine.checks.find((c) => c.id === 'row-capacity')?.passed).toBe(true)
+    expect(fine.canGenerate).toBe(true)
+
+    const absurd = reconcile(await build(21), scheduleB, { ...CONTROLLED, maxRows: 1 })
+    const capacity = absurd.checks.find((c) => c.id === 'row-capacity')!
+    expect(capacity.severity).toBe('blocking')
+    expect(capacity.passed).toBe(false)
+    expect(capacity.detail).toMatch(/read wrongly/)
+    expect(absurd.canGenerate).toBe(false)
+  })
+
   it('still says so when one sheet is enough', async () => {
     const parsed = await parseCipl('synthetic.pdf', await buildSyntheticCipl(simpleShipment()))
     const { checks } = reconcile(parsed, scheduleB, { ...CONTROLLED, maxRows: 8 })

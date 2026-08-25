@@ -37,3 +37,18 @@ export function rowsByPage<T>(rows: T[], rowsPerPage: number): T[][] {
   for (let i = 0; i < count; i++) pages.push(rows.slice(i * size, (i + 1) * size))
   return pages
 }
+
+/**
+ * The most sheets a shipment is ever filed on.
+ *
+ * Not a form limit — the forms are filed on as many sheets as they need, which is the whole
+ * point of this module. It is a sanity limit on the *row count*, which comes from a parser
+ * reading somebody else's PDF: a merge that goes wrong produces hundreds of one-line
+ * commodity rows, and every one of those sheets is a full copy of the template page written
+ * synchronously on the browser's main thread. Sixty sheets is twenty megabytes and a frozen
+ * tab, with nothing on the screen saying anything is wrong.
+ *
+ * Twenty is far past any real shipment — 160 rows on the Nippon form, 240 on the CEVA one —
+ * so reaching it says the rows are wrong, not that the shipment is large.
+ */
+export const MAX_SHEETS = 20

@@ -37,9 +37,16 @@ describe('why a filed quantity is what it is', () => {
     ).toBe('As invoiced.')
   })
 
-  it('names the net weight a weight-derived row rounded away from', () => {
+  it('names the net weight a weight-derived row rounded away from, and what the column is', () => {
+    // Both. "Net weight 4.499 kg, filed as whole KG" alone drops the one clause that tells a
+    // reviewer the column is not a piece count, on the rows hardest to account for.
     expect(basisNote(row({ sourceUom: 'PCS', quantity: 48, reportingBasis: 'net-weight', weightKg: 4.499, reportingQuantity: 4 }), false))
-      .toBe('Net weight 4.499 kg, filed as whole KG.')
+      .toBe('Net weight — this code is reported by weight, not by the piece. Net weight 4.499 kg, filed as whole KG.')
+  })
+
+  it('says only what the column is where the weight went in unrounded', () => {
+    expect(basisNote(row({ sourceUom: 'PCS', quantity: 48, reportingBasis: 'net-weight', weightKg: 4, reportingQuantity: 4 }), false))
+      .toBe('Net weight — this code is reported by weight, not by the piece.')
   })
 
   it('says a converted whole-unit figure was both converted and rounded', () => {

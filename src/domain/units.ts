@@ -223,6 +223,46 @@ export function resolveReportingQuantity(
   return { unit, quantity: asFiled(roundPrecise(source.quantity, 3), unit), basis: 'source' }
 }
 
+/**
+ * Whether a filed figure is a rounded form of what the row actually holds.
+ *
+ * Asked of the rule that would have done the rounding rather than inferred from the figures
+ * on either side: 4000 GM and 4 KG differ in every digit and in the unit, and comparing them
+ * reports a rounding that a conversion coming out exact never performed.
+ *
+ * Here rather than at each of the three surfaces that need it. The review screen explains the
+ * figure, the reconciliation warns about it and the keying sheet prints a note beside it, and
+ * three copies of "was this rounded" written three ways is how those three came to disagree
+ * about one row. Adding a unit to `WHOLE_UNITS` should not mean finding them again.
+ */
+export function wasRoundedWhole(source: QuantitySource, unit: string, filed: number): boolean {
+  if (!filedWhole(unit)) return false
+  const exact = restateExact(source, unit)
+  return exact !== null && exact.quantity !== filed
+}
+
+/**
+ * Whether a row files nothing at all for goods it actually carries.
+ *
+ * A quantity box reading `0` on a signed declaration says the goods are not there, so this is
+ * a whole unit, a filed figure of nothing, and goods behind it — deliberately not "the figure
+ * is zero", which is also true of a code Schedule B files with no quantity and of a row whose
+ * parse went wrong.
+ *
+ * Not `wasRoundedWhole`, which asks whether the filed figure differs from the restated one.
+ * That restatement is itself rounded to three places, so half a gramme under a kilogram code
+ * is already `0` before the whole-number rule touches it — and the row whose figure vanished
+ * most completely would be the one reported as not having been rounded at all.
+ *
+ * The restatement is still consulted, for whether the unit is reachable: a row that fell back
+ * to the document's own unit is not filing a rounded anything.
+ */
+export function roundedAwayToNothing(source: QuantitySource, unit: string, filed: number): boolean {
+  if (!filedWhole(unit) || filed !== 0) return false
+  if (!(source.weightKg > 0 || source.quantity > 0)) return false
+  return restateExact(source, unit) !== null
+}
+
 export function roundTo(value: number, decimals: number): number {
   const factor = 10 ** decimals
   // Nudge before rounding so binary representation error (0.544 + 0.544 = 1.0879999…)

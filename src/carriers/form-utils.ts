@@ -9,7 +9,6 @@
 import { PDFDocument, PDFCheckBox, PDFRadioGroup, PDFTextField, type PDFField, type PDFForm } from 'pdf-lib'
 
 export interface WriteContext {
-  form: PDFForm
   written: Record<string, string>
   warnings: string[]
   /**
@@ -32,7 +31,9 @@ export async function loadForm(templateBytes: Uint8Array): Promise<{ doc: PDFDoc
 export function createContext(form: PDFForm): WriteContext {
   const fields = new Map<string, PDFField>()
   for (const field of form.getFields()) fields.set(field.getName(), field)
-  return { form, written: {}, warnings: [], fields }
+  // The form itself is deliberately not kept. Writing through `form.getField` would bypass
+  // both this map and the warning path below, which is the whole contract of this module.
+  return { written: {}, warnings: [], fields }
 }
 
 /** Set a text field. A missing field is reported, never silently dropped. */

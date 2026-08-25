@@ -1,6 +1,7 @@
 import type { CarrierAdapter, FillResult, SliDraft, TemplateVerification } from '../types'
 import { NIPPON_ROW_ROOTS } from './fields'
-import { paginateForm, rowsByPage } from '../paginate'
+import { paginateForm } from '../paginate'
+import { rowsByPage } from '../../lib/pagination'
 import {
   createContext,
   findMissingFields,

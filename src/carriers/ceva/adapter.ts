@@ -21,7 +21,8 @@ import {
   CEVA_MAX_ROWS,
   CEVA_REQUIRED_FIELDS,
 } from './fields'
-import { paginateForm, rowsByPage } from '../paginate'
+import { paginateForm } from '../paginate'
+import { rowsByPage } from '../../lib/pagination'
 
 /**
  * CEVA Logistics Shipper's Letter of Instructions.

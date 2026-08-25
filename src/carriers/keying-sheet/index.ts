@@ -26,6 +26,7 @@ import {
   restateExact,
   restateQuantity,
   roundPrecise,
+  roundedAwayToNothing,
 } from '../../domain/units'
 import { buildXlsx, type CellValue, type Sheet } from '../../lib/xlsx'
 import type { SliDraft } from '../types'
@@ -708,11 +709,14 @@ function groupForKeying(
       // reading `0` beside a customs value is an operator keying goods that are in the box as
       // absent.
       //
-      // Gated on the row representing goods at all, rather than on its restated figure: that
-      // figure is itself rounded to three places, so half a gramme under a kilogram code is
-      // already `0` there and the one row most in need of the note would not have carried it.
+      // Asked of the same rule the review screen asks, so the two surfaces cannot describe one
+      // row differently: a `PCS` row filing zero has not been rounded whole and has not been
+      // shared out, and saying it has sends the operator looking for a rounding that never
+      // happened. What is wrong with such a row is upstream, and the reconciliation says so.
       quantityRoundedAway:
-        keyed.quantity === 0 && !keyed.notFiled && !keyed.unavailable && (weightKg > 0 || quantity > 0),
+        !keyed.notFiled &&
+        !keyed.unavailable &&
+        roundedAwayToNothing({ quantity, uom: unitFor(group), weightKg }, keyed.unit, keyed.quantity),
       // Derived from the group's own total rather than copied off one line, so the unit
       // price and the total beside it can never disagree. Per *keyed* unit, so that
       // quantity x unit price still comes back to the customs value on a row filed by

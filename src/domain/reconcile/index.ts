@@ -22,8 +22,8 @@ import {
   screenCode,
   type ScheduleBIndex,
 } from '../schedule-b'
-import { canRestate, resolveReportingQuantity } from '../units'
-import { pagesNeeded } from '../../lib/pagination'
+import { canRestate, resolveReportingQuantity, roundedAwayToNothing } from '../units'
+import { MAX_SHEETS, pagesNeeded } from '../../lib/pagination'
 import type { ItemLibraryEntry } from '../item-library'
 import { partKey } from '../part-key'
 import {
@@ -227,13 +227,18 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
   // on a signed declaration says these goods are not there. Warned rather than blocked: what
   // to file instead is a decision (round up to one, file the piece count, reclassify), and
   // none of them is this app's to make.
-  // Gated on the row representing goods at all, not on it having a weight: a row invoiced in
-  // grams under a kilogram code converts without one, and 400 g rounds to zero just the same.
+  // One rule, shared with the review screen and the keying sheet, so the three surfaces cannot
+  // describe the same row differently. Gated on the row representing goods at all, not on it
+  // having a weight: a row invoiced in grams under a kilogram code converts without one, and
+  // 400 g rounds to zero just the same.
   const roundedAway = sliLines.filter(
     (line) =>
       line.reportingBasis !== 'none' &&
-      line.reportingQuantity === 0 &&
-      (line.weightKg > 0 || line.quantity > 0),
+      roundedAwayToNothing(
+        { quantity: line.quantity, uom: line.sourceUom, weightKg: line.weightKg },
+        line.reportingUom,
+        line.reportingQuantity,
+      ),
   )
 
   const checks: CheckResult[] = [
@@ -255,11 +260,11 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
       title: 'No commodity row files a quantity of zero',
       detail: roundedAway.length
         ? `${roundedAway.length} row(s) round to a quantity of 0 in the unit they are filed in ` +
-          // Whichever figure actually rounded away. A row invoiced in grams under a kilogram
-          // code converts without a stated weight, and printing `at 0 kg` about it sent the
-          // filer to look for a weight the document was never going to have.
-          `(${roundedAway.map(roundedAwayFrom).join(', ')}). A kilogram quantity is ` +
-          'filed as whole kilograms, so goods under half a kilo have nowhere to land. Decide what the box ' +
+          // Whichever figure actually rounded away, and in whichever unit. A row invoiced in
+          // grams under a kilogram code converts without a stated weight, and printing
+          // `at 0 kg` about it sent the filer to look for a weight the document never had.
+          `(${roundedAway.map(roundedAwayFrom).join(', ')}). A quantity in one of these units is filed as a ` +
+          'whole number of them, so anything under half a unit has nowhere to land. Decide what the box ' +
           'should say before signing — a zero declares the goods absent.'
         // Not "at least one": the eight codes Schedule B files with no quantity at all are
         // deliberately outside this check, and a shipment made up of them files a blank box
@@ -312,9 +317,11 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
  * a figure that had nothing to do with it.
  */
 function roundedAwayFrom(line: SLILine): string {
-  return line.reportingBasis === 'net-weight'
-    ? `${line.scheduleB} at ${line.weightKg} kg`
-    : `${line.scheduleB} at ${line.quantity} ${line.sourceUom}`
+  const from =
+    line.reportingBasis === 'net-weight'
+      ? `${line.weightKg} kg`
+      : `${line.quantity} ${line.sourceUom}`
+  return `${line.scheduleB} at ${from}, filed in ${line.reportingUom}`
 }
 
 /**
@@ -993,6 +1000,26 @@ function sourceControlChecks(sliLines: SLILine[], merged: MergedLine[], options:
 function capacityCheck(sliLines: SLILine[], rowsPerPage?: number): CheckResult[] {
   if (!rowsPerPage) return []
   const pages = pagesNeeded(sliLines.length, rowsPerPage)
+  // Past any real shipment. Every sheet is a full copy of the template page, produced on the
+  // browser's main thread, so a row count the parser got wrong turns into tens of megabytes
+  // and a frozen tab — and with the old blocking check gone, nothing else would notice.
+  if (pages > MAX_SHEETS) {
+    return [
+      {
+        id: 'row-capacity',
+        severity: 'blocking',
+        title: 'Commodity rows are within a plausible shipment',
+        detail:
+          `${sliLines.length} commodity rows would be filed on ${pages} sheets at ${rowsPerPage} to a sheet. ` +
+          `More than ${MAX_SHEETS} sheets is past any shipment this tool is meant for, so this is far more ` +
+          'likely to be a document the parser read wrongly than a shipment that large. Check the commodity ' +
+          'rows against the invoice before generating anything.',
+        expected: `at most ${MAX_SHEETS} sheets`,
+        actual: `${sliLines.length} rows, ${pages} sheets`,
+        passed: false,
+      },
+    ]
+  }
   return [
     {
       id: 'row-capacity',
