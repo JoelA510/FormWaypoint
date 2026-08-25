@@ -12,7 +12,17 @@ import {
 } from '../form-utils'
 import { isNamedPlace, parseIncoterm, RETIRED_INCOTERMS } from '../../domain/incoterms'
 import { canonicalUnit } from '../../domain/schedule-b'
-import { CEVA_CHECKBOXES, CEVA_CONSIGNEE_TYPE, CEVA_FIELDS as F, CEVA_INCOTERMS, CEVA_MAX_ROWS, CEVA_REQUIRED_FIELDS } from './fields'
+import {
+  CEVA_CHECKBOXES,
+  CEVA_COMMODITY_FIELDS,
+  CEVA_CONSIGNEE_TYPE,
+  CEVA_FIELDS as F,
+  CEVA_INCOTERMS,
+  CEVA_MAX_ROWS,
+  CEVA_REQUIRED_FIELDS,
+} from './fields'
+import { paginateForm } from '../paginate'
+import { rowsByPage } from '../../lib/pagination'
 
 /**
  * CEVA Logistics Shipper's Letter of Instructions.
@@ -56,7 +66,11 @@ export function createCevaAdapter(): CarrierAdapter {
     },
 
     async fill(templateBytes: Uint8Array, draft: SliDraft): Promise<FillResult> {
-      const { doc, form } = await loadForm(templateBytes)
+      // One sheet per twelve commodity rows. Only the five table columns are page-specific;
+      // every other box is a single field with a widget on each sheet, so the shipment is
+      // written once and the table page by page — see `paginateForm`.
+      const pages = rowsByPage(draft.lines, CEVA_MAX_ROWS)
+      const { doc, form, fieldName } = await paginateForm(templateBytes, pages.length, CEVA_COMMODITY_FIELDS)
       const ctx = createContext(form)
 
       // --- Parties ---------------------------------------------------------
@@ -215,17 +229,9 @@ export function createCevaAdapter(): CarrierAdapter {
       if (draft.insured) setText(ctx, F.insurance, 'YES')
 
       // --- Commodity table -------------------------------------------------
-      const rows = draft.lines.slice(0, CEVA_MAX_ROWS)
-      if (draft.lines.length > CEVA_MAX_ROWS) {
-        ctx.warnings.push(
-          `This shipment has ${draft.lines.length} commodity rows but the table holds ${CEVA_MAX_ROWS}. ` +
-            `Rows ${CEVA_MAX_ROWS + 1}+ were not written and need a continuation sheet.`,
-        )
-      }
-
       // A quantity that is not a number is a fault upstream, and the box it would have filled
       // is one somebody signs. Said out loud rather than left as an empty cell.
-      const unwritable = rows.filter((l) => l.reportingBasis !== 'none' && !Number.isFinite(l.reportingQuantity))
+      const unwritable = draft.lines.filter((l) => l.reportingBasis !== 'none' && !Number.isFinite(l.reportingQuantity))
       if (unwritable.length) {
         ctx.warnings.push(
           `${unwritable.length} commodity row(s) have no usable quantity (${unwritable
@@ -234,23 +240,27 @@ export function createCevaAdapter(): CarrierAdapter {
         )
       }
 
-      // Every column gets the same number of lines so the rows stay visually aligned.
-      setText(ctx, F.df, rows.map((l) => l.domesticForeign).join('\r'))
-      setText(ctx, F.scheduleB, rows.map((l) => `${l.scheduleB} (${l.description})`).join('\r'))
-      // Box 24 is captioned "Quantity — Schedule B Unit", so the figure is the one the
-      // commodity number is reported in rather than the invoice's piece count. The unit is
-      // spelled out beside anything that is not a count, because `4.263` against a cable
-      // reads as four cables to everyone who has ever filled this form in.
-      setText(ctx, F.quantity, rows.map(formatReportedQuantity).join('\r'))
-      setText(ctx, F.weight, rows.map((l) => l.weightKg.toFixed(3)).join('\r'))
-      // "U.S. dollar, omit cents" — rounded to the nearest dollar.
-      setText(ctx, F.value, rows.map((l) => String(Math.round(l.valueUsd))).join('\r'))
+      // Every column gets the same number of lines so the rows stay visually aligned, and
+      // each sheet carries only its own.
+      pages.forEach((pageRows, pageIndex) => {
+        const on = (field: string) => fieldName(field, pageIndex)
+        setText(ctx, on(F.df), pageRows.map((l) => l.domesticForeign).join('\r'))
+        setText(ctx, on(F.scheduleB), pageRows.map((l) => `${l.scheduleB} (${l.description})`).join('\r'))
+        // The quantity box is captioned "Quantity — Schedule B Unit", so the figure is the
+        // one the commodity number is reported in rather than the invoice's piece count. The
+        // unit is spelled out beside anything that is not a count, because `4.263` against a
+        // cable reads as four cables to everyone who has ever filled this form in.
+        setText(ctx, on(F.quantity), pageRows.map(formatReportedQuantity).join('\r'))
+        setText(ctx, on(F.weight), pageRows.map((l) => l.weightKg.toFixed(3)).join('\r'))
+        // "U.S. dollar, omit cents" — rounded to the nearest dollar.
+        setText(ctx, on(F.value), pageRows.map((l) => String(Math.round(l.valueUsd))).join('\r'))
+      })
 
       // The form has one licence box for the whole shipment. Rows can now carry their own
       // licences (the `omron-ci` form states one per line), so a mixed shipment gets the
       // same treatment as a mixed ECCN below: every distinct value is written and the
       // signer is warned, because a single value alone would misstate the other rows.
-      const licenses = distinct(rows.map((l) => l.license))
+      const licenses = distinct(draft.lines.map((l) => l.license))
       setText(ctx, F.license, licenses.join(' / '))
       if (licenses.length > 1) {
         ctx.warnings.push(
@@ -264,7 +274,7 @@ export function createCevaAdapter(): CarrierAdapter {
       // writing only the controlled one reads as though it covers every row. Shipment
       // vendorB1 is exactly that shape: a 5A992.C pendant kit alongside EAR99 lines, and a
       // box reading `5A992.C` alone would over-declare the rest.
-      const eccns = distinct(rows.map((l) => l.eccn))
+      const eccns = distinct(draft.lines.map((l) => l.eccn))
       if (eccns.length > 1) {
         setText(ctx, F.eccn, eccns.join(' / '))
         ctx.warnings.push(

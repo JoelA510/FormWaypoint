@@ -42,6 +42,30 @@ const PER_ITEM: Record<string, number> = { NO: 1, DOZ: 1 / 12, GRS: 1 / 144, HUN
  */
 export const NO_QUANTITY_UNIT = 'X'
 
+/**
+ * Units filed as a whole number of themselves.
+ *
+ * A kilogram quantity on an export declaration is a count of kilograms, not a measurement to
+ * three places: 48 pieces weighing 4.499 kg are filed as `4`. The net weight the row is
+ * proved against keeps every decimal it had — this is the figure that goes in the box, and
+ * only that.
+ *
+ * `KG` alone, deliberately. Rounding a tonne quantity to a whole number would file almost
+ * every shipment in this trade as `0`, and a gram quantity gains nothing from it.
+ */
+const WHOLE_UNITS = new Set(['KG'])
+
+/** Whether `unit` is filed as a whole number. */
+export function filedWhole(unit: string): boolean {
+  const canonical = canonicalUnit(unit)
+  return Boolean(canonical && WHOLE_UNITS.has(canonical))
+}
+
+/** The figure as its unit files it: whole where the unit is filed whole, as computed otherwise. */
+function asFiled(value: number, unit: string): number {
+  return filedWhole(unit) ? Math.round(value) : value
+}
+
 /** Where a filed quantity came from. Shown beside the figure wherever it is displayed. */
 export type QuantityBasis =
   /** The quantity the document printed, in the unit it printed. */
@@ -87,6 +111,28 @@ export interface QuantitySource {
  * The caller keeps what the document said and the reconciliation says why.
  */
 export function restateQuantity(source: QuantitySource, targetUnit: string): RestatedQuantity | null {
+  return restate(source, targetUnit, asFiled)
+}
+
+/**
+ * The same restatement with its unit's whole-number rule left off.
+ *
+ * One caller: the keying sheet, which shares a commodity row's whole figure out across the
+ * finer rows it prints. Sharing out needs the exact figure each of those rows contributes —
+ * rounding them first is what makes 3.719 and 3.719 into 4 and 4 under a row filing 7.
+ *
+ * Never write this to a form or a sheet. It is the input to a decision about whole units, not
+ * a quantity anything files.
+ */
+export function restateExact(source: QuantitySource, targetUnit: string): RestatedQuantity | null {
+  return restate(source, targetUnit, (value) => value)
+}
+
+function restate(
+  source: QuantitySource,
+  targetUnit: string,
+  applyUnitRule: (value: number, unit: string) => number,
+): RestatedQuantity | null {
   const target = canonicalUnit(targetUnit)
   if (!target) return null
   const from = canonicalUnit(source.uom) ?? ''
@@ -99,24 +145,26 @@ export function restateQuantity(source: QuantitySource, targetUnit: string): Res
 
   if (target === NO_QUANTITY_UNIT) return { unit, quantity: 0, basis: 'none' }
 
+  const filed = (value: number): number => applyUnitRule(value, target)
+
   // Already in the unit asked for. Ahead of the family tables so that a unit neither table
   // knows — square metres, litres, barrels — still restates onto itself, and `canRestate`
   // does not report the row's own unit as unavailable.
-  if (target === from) return { unit, quantity: roundPrecise(source.quantity, 3), basis: 'source' }
+  if (target === from) return { unit, quantity: filed(roundPrecise(source.quantity, 3)), basis: 'source' }
 
   // An exact multiple within the same family. Preferred over the net weight even for weight
   // units: the document's own figure is the stated one.
   const sameFamily = [PER_KILOGRAM, PER_ITEM].find((family) => family[from] != null && family[target] != null)
   if (sameFamily) {
     const factor = sameFamily[target] / sameFamily[from]
-    return { unit, quantity: roundScaled(source.quantity * factor, factor), basis: 'converted' }
+    return { unit, quantity: filed(roundScaled(source.quantity * factor, factor)), basis: 'converted' }
   }
 
   // Reported by weight, counted on the invoice. This is the case the Schedule B unit warning
   // has always described: the row files the net weight, not the piece count.
   const perKilogram = PER_KILOGRAM[target]
   if (perKilogram != null && source.weightKg > 0) {
-    return { unit, quantity: roundScaled(source.weightKg * perKilogram, perKilogram), basis: 'net-weight' }
+    return { unit, quantity: filed(roundScaled(source.weightKg * perKilogram, perKilogram)), basis: 'net-weight' }
   }
 
   return null
@@ -167,7 +215,52 @@ export function resolveReportingQuantity(
   }
   // The document's own spelling, not its canonical form: this row is filing what the
   // document said, and saying so in the document's words is the honest label for it.
-  return { unit: source.uom.trim().toUpperCase(), quantity: roundPrecise(source.quantity, 3), basis: 'source' }
+  //
+  // Filed whole where the unit is filed whole, like every other path out of here. A row whose
+  // code is not in the Census file is still a row of kilograms, and one that files `7.438`
+  // beside a neighbour filing `7` contradicts both the policy and the note on the screen.
+  const unit = source.uom.trim().toUpperCase()
+  return { unit, quantity: asFiled(roundPrecise(source.quantity, 3), unit), basis: 'source' }
+}
+
+/**
+ * Whether a filed figure is a rounded form of what the row actually holds.
+ *
+ * Asked of the rule that would have done the rounding rather than inferred from the figures
+ * on either side: 4000 GM and 4 KG differ in every digit and in the unit, and comparing them
+ * reports a rounding that a conversion coming out exact never performed.
+ *
+ * Here rather than at each of the three surfaces that need it. The review screen explains the
+ * figure, the reconciliation warns about it and the keying sheet prints a note beside it, and
+ * three copies of "was this rounded" written three ways is how those three came to disagree
+ * about one row. Adding a unit to `WHOLE_UNITS` should not mean finding them again.
+ */
+export function wasRoundedWhole(source: QuantitySource, unit: string, filed: number): boolean {
+  if (!filedWhole(unit)) return false
+  const exact = restateExact(source, unit)
+  return exact !== null && exact.quantity !== filed
+}
+
+/**
+ * Whether a row files nothing at all for goods it actually carries.
+ *
+ * A quantity box reading `0` on a signed declaration says the goods are not there, so this is
+ * a whole unit, a filed figure of nothing, and goods behind it — deliberately not "the figure
+ * is zero", which is also true of a code Schedule B files with no quantity and of a row whose
+ * parse went wrong.
+ *
+ * Not `wasRoundedWhole`, which asks whether the filed figure differs from the restated one.
+ * That restatement is itself rounded to three places, so half a gramme under a kilogram code
+ * is already `0` before the whole-number rule touches it — and the row whose figure vanished
+ * most completely would be the one reported as not having been rounded at all.
+ *
+ * The restatement is still consulted, for whether the unit is reachable: a row that fell back
+ * to the document's own unit is not filing a rounded anything.
+ */
+export function roundedAwayToNothing(source: QuantitySource, unit: string, filed: number): boolean {
+  if (!filedWhole(unit) || filed !== 0) return false
+  if (!(source.weightKg > 0 || source.quantity > 0)) return false
+  return restateExact(source, unit) !== null
 }
 
 export function roundTo(value: number, decimals: number): number {

@@ -200,14 +200,18 @@ describe.skipIf(!hasFixtures())('Schedule B validation', () => {
 })
 
 describe.skipIf(!hasFixtures())('form capacity', () => {
-  it('blocks when a shipment needs more rows than the form holds', () => {
+  it('reports the sheets a shipment needs rather than refusing it', () => {
+    // This used to block, and nothing came out, over a situation the paper has always
+    // handled by being filed as several sheets.
     const tight = reconcile(parsed.vendorA3, scheduleB, { ...CONTROLLED, maxRows: 2 })
     const capacity = tight.checks.find((c) => c.id === 'row-capacity')
-    expect(capacity?.passed).toBe(false)
-    expect(tight.canGenerate).toBe(false)
+    expect(capacity?.severity).toBe('info')
+    expect(capacity?.passed).toBe(true)
+    expect(capacity?.detail).toMatch(/pages/)
+    expect(tight.canGenerate).toBe(true)
 
     const roomy = reconcile(parsed.vendorA3, scheduleB, { ...CONTROLLED, maxRows: 8 })
-    expect(roomy.checks.find((c) => c.id === 'row-capacity')?.passed).toBe(true)
+    expect(roomy.checks.find((c) => c.id === 'row-capacity')?.detail).toMatch(/one sheet/)
     expect(roomy.canGenerate).toBe(true)
   })
 })

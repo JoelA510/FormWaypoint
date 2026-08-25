@@ -13,6 +13,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseCipl } from '../cipl'
 import { buildSyntheticCipl, simpleShipment } from '../../test/synthetic/cipl'
+import { buildOmronCiPdf, simpleOmronCi } from '../../test/synthetic/omron-ci'
 import { createScheduleBIndex, type ScheduleBIndex } from '../schedule-b'
 import { reconcile } from '.'
 import type { ParsedCipl, SLILine } from '../types'
@@ -62,7 +63,8 @@ describe('the unit a commodity row is filed in', () => {
     const { sliLines } = reconcile(await shipment(BY_WEIGHT), scheduleB, CONTROLLED)
     const line = row(sliLines, BY_WEIGHT)
     expect(line.reportingUom).toBe('KG')
-    expect(line.reportingQuantity).toBe(4.263)
+    // Whole kilograms: 4.263 kg files as 4.
+    expect(line.reportingQuantity).toBe(4)
     expect(line.reportingBasis).toBe('net-weight')
     // Still 12 pieces on the invoice, and the row still says so.
     expect(line.quantity).toBe(12)
@@ -149,7 +151,7 @@ describe('the unit a commodity row is filed in', () => {
     })
     const line = row(sliLines, BY_COUNT)
     expect(line.reportingUom).toBe('KG')
-    expect(line.reportingQuantity).toBe(4.263)
+    expect(line.reportingQuantity).toBe(4)
     expect(line.reportingBasis).toBe('net-weight')
   })
 
@@ -170,5 +172,114 @@ describe('the unit a commodity row is filed in', () => {
     expect(line.scheduleBUnits).toEqual([])
     expect(line.reportingUom).toBe('PCS')
     expect(line.reportingQuantity).toBe(12)
+  })
+})
+
+describe('a row that rounds away to nothing', () => {
+  it('warns when the weight it files rounds away, and names that weight', async () => {
+    // A quantity box reading `0` on a signed declaration says the goods are not there.
+    // 4016.93.0000 is reported in KG; a fifth of a kilo has nowhere to land.
+    const parsed = await shipment('4016.93.0000', { netWeightKg: 0.2, grossWeightKg: 0.3 })
+    const { sliLines, checks } = reconcile(parsed, scheduleB, CONTROLLED)
+    expect(row(sliLines, '4016.93.0000').reportingQuantity).toBe(0)
+
+    const zero = checks.find((c) => c.id === 'quantities-nonzero')!
+    expect(zero.passed).toBe(false)
+    expect(zero.severity).toBe('warning')
+    expect(zero.detail).toMatch(/4016\.93\.0000 at 0\.2 kg/)
+  })
+
+  it('warns with no weight anywhere, and names the figure that did round away', async () => {
+    // The Omron invoice states a unit per line and no weights at all, so a line invoiced as
+    // `0.3 KG` files its own figure — rounded whole, to nothing — with no weight behind it.
+    // Sending that filer to look at `0 kg` points them at a number the document has not got
+    // and is never going to have.
+    const spec = simpleOmronCi()
+    const bytes = await buildOmronCiPdf({
+      ...spec,
+      netWeightKg: undefined,
+      grossWeightKg: undefined,
+      lines: [{ ...spec.lines[0], hts: '4016.93.0000', quantity: 0.3, uom: 'KG' }],
+    })
+    const parsed = await parseCipl('ci.pdf', bytes)
+    const { sliLines, checks } = reconcile(parsed, scheduleB, CONTROLLED)
+    const line = row(sliLines, '4016.93.0000')
+    expect(line.weightKg).toBe(0)
+    expect(line.reportingQuantity).toBe(0)
+
+    const zero = checks.find((c) => c.id === 'quantities-nonzero')!
+    expect(zero.passed).toBe(false)
+    expect(zero.detail).toMatch(/4016\.93\.0000 at 0\.3 KG/)
+    expect(zero.detail).not.toMatch(/0 kg/)
+  })
+
+  it('says nothing when every row files at least one', async () => {
+    const { checks } = reconcile(await shipment(BY_WEIGHT), scheduleB, CONTROLLED)
+    expect(checks.find((c) => c.id === 'quantities-nonzero')?.passed).toBe(true)
+  })
+})
+
+describe('a shipment with more rows than a sheet holds', () => {
+  it('reports the sheet count instead of refusing the shipment', async () => {
+    // This was a blocking check: the form was refused and nothing came out, over a situation
+    // the paper handles by being filed as several sheets.
+    const spec = simpleShipment()
+    const parsed = await parseCipl('synthetic.pdf', await buildSyntheticCipl(spec))
+    // Three invoice lines aggregate to two commodity rows, so one to a sheet is two sheets.
+    const { sliLines, checks } = reconcile(parsed, scheduleB, { ...CONTROLLED, maxRows: 1 })
+    expect(sliLines.length).toBe(2)
+
+    const capacity = checks.find((c) => c.id === 'row-capacity')!
+    expect(capacity.severity).toBe('info')
+    expect(capacity.passed).toBe(true)
+    expect(capacity.detail).toMatch(/2 pages/)
+    // And nothing blocking is raised by the length alone.
+    expect(checks.filter((c) => c.severity === 'blocking' && !c.passed)).toEqual([])
+  })
+
+  it('refuses a row count no real shipment has', async () => {
+    // The blocking check this replaced fired at one sheet, which is what the tool now handles
+    // by producing several. But nothing else notices a parse that went wrong: each sheet is a
+    // full copy of the template page written on the browser's main thread, so a mis-merged
+    // invoice becomes tens of megabytes and a frozen tab with the checks panel saying nothing.
+    const codes = [
+      '8501.10.3000', '8501.10.4040', '8501.10.4060', '8501.10.4080', '8501.10.6020', '8501.10.6040',
+      '8501.10.6060', '8501.10.6080', '8501.20.2000', '8501.20.3000', '8501.20.6000', '8501.31.2000',
+      '8501.31.3000', '8501.31.6000', '8501.31.8100', '8501.32.2000', '8501.32.4000', '8501.32.6100',
+      '8501.33.2000', '8501.33.3000', '8501.33.4040',
+    ]
+    const spec = simpleShipment()
+    const build = async (count: number) =>
+      parseCipl(
+        'synthetic.pdf',
+        await buildSyntheticCipl({
+          ...spec,
+          lines: codes.slice(0, count).map((classification, i) => ({
+            ...spec.lines[0],
+            lineNumber: String(i + 1).padStart(4, '0'),
+            partNumber: `P-${i + 1}`,
+            classification,
+          })),
+        }),
+      )
+
+    // One row to a sheet, so the row count is the sheet count.
+    const fine = reconcile(await build(20), scheduleB, { ...CONTROLLED, maxRows: 1 })
+    expect(fine.checks.find((c) => c.id === 'row-capacity')?.passed).toBe(true)
+    expect(fine.canGenerate).toBe(true)
+
+    const absurd = reconcile(await build(21), scheduleB, { ...CONTROLLED, maxRows: 1 })
+    const capacity = absurd.checks.find((c) => c.id === 'row-capacity')!
+    expect(capacity.severity).toBe('blocking')
+    expect(capacity.passed).toBe(false)
+    expect(capacity.detail).toMatch(/read wrongly/)
+    expect(absurd.canGenerate).toBe(false)
+  })
+
+  it('still says so when one sheet is enough', async () => {
+    const parsed = await parseCipl('synthetic.pdf', await buildSyntheticCipl(simpleShipment()))
+    const { checks } = reconcile(parsed, scheduleB, { ...CONTROLLED, maxRows: 8 })
+    const capacity = checks.find((c) => c.id === 'row-capacity')!
+    expect(capacity.detail).toMatch(/one sheet/)
   })
 })

@@ -84,6 +84,21 @@ export const CEVA_REQUIRED_FIELDS: string[] = [
 
 /**
  * The commodity fields are fixed-height boxes. Beyond this many rows the text overflows the
- * printed table, so the adapter refuses rather than producing a form that looks complete.
+ * printed table, so the shipment continues onto another sheet — see `paginateForm`.
  */
 export const CEVA_MAX_ROWS = 12
+
+/**
+ * The commodity table's five columns, which is what a continuation page needs its own copy
+ * of. Flat names on this form, so they are their own roots.
+ *
+ * Every other field keeps its name across the sheets and is therefore one field with a
+ * widget on each — edit the consignee on page 2 and page 1 follows.
+ */
+export const CEVA_COMMODITY_FIELDS: readonly string[] = [
+  CEVA_FIELDS.df,
+  CEVA_FIELDS.scheduleB,
+  CEVA_FIELDS.quantity,
+  CEVA_FIELDS.weight,
+  CEVA_FIELDS.value,
+]

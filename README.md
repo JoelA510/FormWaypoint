@@ -66,10 +66,15 @@ of defaulting to zero.
 
 ## Supported carriers
 
-| Carrier | Form | Rows | Notes |
+| Carrier | Form | Rows per sheet | Notes |
 | --- | --- | --- | --- |
 | Nippon Express USA | SLI, file version 01/04/2022 | 8 | Per-cell fields; values keep cents; `EAR99` per row |
 | CEVA Logistics | SLI 11201-C3 rev. 8/2023 | 12 | One multiline field per column; values rounded to whole dollars |
+
+A shipment with more commodity rows than a sheet holds continues onto another, numbered in
+the bottom corner. Every box but the commodity table is one field with a widget on each
+sheet, so correcting the consignee on page 3 corrects it on page 1 — that is the reader's own
+behaviour, not something this tool maintains. See **Continuation pages** below.
 
 FedEx and UPS are handled differently on purpose: instead of an API, the tool produces a
 **keying sheet** laid out in the order FedEx Ship Manager and UPS WorldShip prompt for each
@@ -296,12 +301,42 @@ the invoice's piece count; a code reported by the piece is unchanged. Both carri
 both keying sheets take the same figure from the same place, so the paperwork prepared for
 one shipment cannot disagree with itself.
 
+A kilogram quantity is filed as a whole number of kilograms: 48 pieces weighing 4.499 kg are
+filed as `4`. Only the figure in the box is rounded — the net weight the row is reconciled
+against keeps every decimal the packing list gave it. Tonnes and grams are left alone, since
+rounding a tonne quantity whole would file almost every shipment in this trade as zero. A row
+that rounds away to zero is warned about rather than filed quietly.
+
 Where a code accepts more than one unit — `NO+KG` — only the filer knows how the goods are
 actually measured, so the review screen offers the choice per commodity number. Units the
 shipment cannot state are listed and disabled with the reason, rather than hidden: "there is
 no net weight for these goods" is the answer somebody is looking for. Where nothing supports
 the required unit at all, the document's own figure is filed and the reconciliation says so —
 no quantity is ever invented to fit a unit.
+
+## Continuation pages
+
+Both blank forms hold a fixed number of commodity rows — eight on the Nippon SLI, twelve on
+the CEVA one. A longer shipment used to be refused outright by a blocking check, which
+stopped the one thing this tool does over a situation the paperwork handles by being filed as
+several sheets.
+
+The form is now produced with as many sheets as the shipment needs. Rows fill each sheet
+before the next is started, and the sheets are numbered bottom-right where there is more than
+one.
+
+What makes it work is AcroForm field naming. Two widgets sharing a fully-qualified name are
+one field with one value — wrong for the commodity table, right for everything else — so the
+commodity rows are renamed per sheet and nothing else is:
+
+- **The parties, the shipment boxes and the signature block are one field each**, with a
+  widget on every sheet. Edit any of them on any page and every page follows.
+- **The commodity rows belong to their sheet.** Page 2 row 1 is its own field.
+
+The Nippon template names its commodity fields hierarchically (`22.02 SB1` is `02 SB1` under
+the row node `22`), so a sheet's eight rows are renamed by renaming eight nodes; the CEVA
+template is flat and its five columns are renamed directly. Both reduce to "rename these
+roots", which is all `paginateForm` is told.
 
 ## Incoterms
 

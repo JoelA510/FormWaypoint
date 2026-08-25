@@ -154,6 +154,16 @@ export const NIPPON_ROWS: NipponRowFields[] = [
   },
 ]
 
+/**
+ * The row nodes the commodity fields hang from, one per printed row.
+ *
+ * This form names its commodity fields hierarchically: `22.02 SB1` is the field `02 SB1`
+ * under the node `22`. That makes a page's rows renameable eight nodes at a time — see
+ * `paginateForm`, which uses these to give each continuation page commodity rows of its own
+ * while every other box stays one field shared across the sheets.
+ */
+export const NIPPON_ROW_ROOTS: readonly string[] = NIPPON_ROWS.map((row) => row.df.split('.')[0])
+
 /** Fields whose absence means the loaded PDF is not the revision this adapter maps. */
 export const NIPPON_REQUIRED_FIELDS: string[] = [
   NIPPON_HEADER_FIELDS.usppi,

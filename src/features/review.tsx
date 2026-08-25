@@ -4,6 +4,7 @@ import { resolveDestinationCountry } from '../domain/reconcile'
 import { canonicalUnit, formatScheduleB, normalizeScheduleB } from '../domain/schedule-b'
 import { canRestate, resolveReportingQuantity, type QuantitySource } from '../domain/units'
 import { formatQuantity } from '../carriers/form-utils'
+import { basisNote } from './quantity-basis'
 import { partKey } from '../domain/part-key'
 import type { OverrideRecord } from '../store/local-store'
 import type { CheckResult, MergedLine, ParsedCipl, Reconciliation, SLILine } from '../domain/types'
@@ -339,35 +340,6 @@ function ReportingUnitPicker({
       </p>
     </div>
   )
-}
-
-/**
- * Why the filed figure is what it is, in one line beside it.
- *
- * A row off the required unit says whether that was a choice or a limit, because the two
- * need different things done about them: one is somebody's decision to reconsider, the other
- * is a missing weight or a wrong classification.
- */
-function basisNote(line: SLILine, byChoice: boolean): string {
-  if (!line.scheduleBUnits.length) return 'Schedule B unit unknown — filing the invoice figure.'
-  if (line.reportingBasis === 'none') return 'Schedule B reports this code with no quantity.'
-  // Compared canonically. `PCS` and `NO` are one unit, and a row filing the document's
-  // spelling of the unit its code requires has not departed from Schedule B — the check
-  // beside this panel compares the same way and would say the row passes.
-  const filed = canonicalUnit(line.reportingUom)
-  if (!line.scheduleBUnits.some((unit) => canonicalUnit(unit) === filed)) {
-    const required = line.scheduleBUnits.join(' or ')
-    return byChoice
-      ? `Filed in ${line.reportingUom} by your choice; Schedule B requires ${required}.`
-      : `Schedule B requires ${required}; this row can only state ${line.reportingUom}.`
-  }
-  if (line.reportingBasis === 'net-weight') {
-    return 'Net weight — this code is reported by weight, not by the piece.'
-  }
-  // Not "as invoiced": the document carries neither this figure nor this unit.
-  return line.reportingBasis === 'converted'
-    ? `Converted from ${line.quantity} ${line.sourceUom}.`
-    : 'As invoiced.'
 }
 
 /**

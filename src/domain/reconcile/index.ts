@@ -22,7 +22,8 @@ import {
   screenCode,
   type ScheduleBIndex,
 } from '../schedule-b'
-import { canRestate, resolveReportingQuantity } from '../units'
+import { canRestate, resolveReportingQuantity, roundedAwayToNothing } from '../units'
+import { MAX_SHEETS, pagesNeeded } from '../../lib/pagination'
 import type { ItemLibraryEntry } from '../item-library'
 import { partKey } from '../part-key'
 import {
@@ -41,7 +42,7 @@ const MONEY_TOLERANCE = 0.01
 const WEIGHT_TOLERANCE = 0.001
 
 export interface ReconcileOptions extends AggregationOptions {
-  /** Maximum commodity rows the target form can hold. */
+  /** Commodity rows one sheet of the target form holds. Beyond it the form continues onto another. */
   maxRows?: number
   /** Overrides which document set is used. Defaults to the USD set. */
   forceSet?: DocumentSet
@@ -221,6 +222,25 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
     (line) => line.reportingBasis !== 'none' && !Number.isFinite(line.reportingQuantity),
   )
 
+  // A row whose figure rounds away to nothing. Kilogram quantities are filed as whole
+  // kilograms, so anything under half a kilo lands on zero — and a quantity box reading `0`
+  // on a signed declaration says these goods are not there. Warned rather than blocked: what
+  // to file instead is a decision (round up to one, file the piece count, reclassify), and
+  // none of them is this app's to make.
+  // One rule, shared with the review screen and the keying sheet, so the three surfaces cannot
+  // describe the same row differently. Gated on the row representing goods at all, not on it
+  // having a weight: a row invoiced in grams under a kilogram code converts without one, and
+  // 400 g rounds to zero just the same.
+  const roundedAway = sliLines.filter(
+    (line) =>
+      line.reportingBasis !== 'none' &&
+      roundedAwayToNothing(
+        { quantity: line.quantity, uom: line.sourceUom, weightKg: line.weightKg },
+        line.reportingUom,
+        line.reportingQuantity,
+      ),
+  )
+
   const checks: CheckResult[] = [
     { id: 'set-selection', severity: 'info', title: 'Controlling document set', detail: reason, passed: true },
     {
@@ -233,6 +253,24 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
           'sheet would total short by those rows.'
         : 'Every row carries a figure that can be written.',
       passed: unusable.length === 0,
+    },
+    {
+      id: 'quantities-nonzero',
+      severity: 'warning',
+      title: 'No commodity row files a quantity of zero',
+      detail: roundedAway.length
+        ? `${roundedAway.length} row(s) round to a quantity of 0 in the unit they are filed in ` +
+          // Whichever figure actually rounded away, and in whichever unit. A row invoiced in
+          // grams under a kilogram code converts without a stated weight, and printing
+          // `at 0 kg` about it sent the filer to look for a weight the document never had.
+          `(${roundedAway.map(roundedAwayFrom).join(', ')}). A quantity in one of these units is filed as a ` +
+          'whole number of them, so anything under half a unit has nowhere to land. Decide what the box ' +
+          'should say before signing — a zero declares the goods absent.'
+        // Not "at least one": the eight codes Schedule B files with no quantity at all are
+        // deliberately outside this check, and a shipment made up of them files a blank box
+        // on every row.
+        : 'No row files a quantity of zero.',
+      passed: roundedAway.length === 0,
     },
     ...currencyCheck(currency),
     {
@@ -269,6 +307,22 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
 // ---------------------------------------------------------------------------
 // Checks
 // ---------------------------------------------------------------------------
+
+/**
+ * A row that rounded to nothing, named alongside the figure that did the rounding.
+ *
+ * Told by the basis, not by whether a weight happens to be on the row. A line invoiced as
+ * 400 g under a kilogram code converts from its own quantity and rounds away there — and a
+ * packing list that also states a 0.45 kg net weight for it would have the filer inspecting
+ * a figure that had nothing to do with it.
+ */
+function roundedAwayFrom(line: SLILine): string {
+  const from =
+    line.reportingBasis === 'net-weight'
+      ? `${line.weightKg} kg`
+      : `${line.quantity} ${line.sourceUom}`
+  return `${line.scheduleB} at ${from}, filed in ${line.reportingUom}`
+}
 
 /**
  * The controlling set has to be priced in US dollars.
@@ -935,21 +989,52 @@ function sourceControlChecks(sliLines: SLILine[], merged: MergedLine[], options:
   })
 }
 
-function capacityCheck(sliLines: SLILine[], maxRows?: number): CheckResult[] {
-  if (!maxRows) return []
-  const fits = sliLines.length <= maxRows
+/**
+ * How many sheets the shipment will take.
+ *
+ * Informational, not blocking. A shipment with more commodity rows than the blank form holds
+ * used to be refused outright, which stopped the one thing the tool exists to do over a
+ * situation the forms themselves handle by being filed as several sheets — so the form is now
+ * produced with continuation pages and this says how many. See `paginateForm`.
+ */
+function capacityCheck(sliLines: SLILine[], rowsPerPage?: number): CheckResult[] {
+  if (!rowsPerPage) return []
+  const pages = pagesNeeded(sliLines.length, rowsPerPage)
+  // Past any real shipment. Every sheet is a full copy of the template page, produced on the
+  // browser's main thread, so a row count the parser got wrong turns into tens of megabytes
+  // and a frozen tab — and with the old blocking check gone, nothing else would notice.
+  if (pages > MAX_SHEETS) {
+    return [
+      {
+        id: 'row-capacity',
+        severity: 'blocking',
+        title: 'Commodity rows are within a plausible shipment',
+        detail:
+          `${sliLines.length} commodity rows would be filed on ${pages} sheets at ${rowsPerPage} to a sheet. ` +
+          `More than ${MAX_SHEETS} sheets is past any shipment this tool is meant for, so this is far more ` +
+          'likely to be a document the parser read wrongly than a shipment that large. Check the commodity ' +
+          'rows against the invoice before generating anything.',
+        expected: `at most ${MAX_SHEETS} sheets`,
+        actual: `${sliLines.length} rows, ${pages} sheets`,
+        passed: false,
+      },
+    ]
+  }
   return [
     {
       id: 'row-capacity',
-      severity: 'blocking',
-      title: 'Commodity rows fit the form',
-      detail: fits
-        ? `${sliLines.length} of ${maxRows} available rows used.`
-        : `This shipment needs ${sliLines.length} rows but the form holds ${maxRows}. It must be split across ` +
-          'continuation sheets before filing.',
-      passed: fits,
-      expected: `<= ${maxRows}`,
-      actual: String(sliLines.length),
+      severity: 'info',
+      // Not "rows fit the form": it says so on exactly the shipments that need a second sheet.
+      title: 'Sheets the commodity table needs',
+      detail:
+        pages === 1
+          ? `${sliLines.length} of ${rowsPerPage} available rows used, on one sheet.`
+          : `${sliLines.length} rows at ${rowsPerPage} to a sheet, so the form is generated as ${pages} pages. ` +
+            'Every box but the commodity table is one field across the sheets — correcting the consignee on ' +
+            'any page corrects it on all of them.',
+      // No `expected`/`actual`: the checks panel renders those only for a check that failed,
+      // and this one reports rather than judges.
+      passed: true,
     },
   ]
 }

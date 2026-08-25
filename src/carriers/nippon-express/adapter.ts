@@ -1,4 +1,7 @@
 import type { CarrierAdapter, FillResult, SliDraft, TemplateVerification } from '../types'
+import { NIPPON_ROW_ROOTS } from './fields'
+import { paginateForm } from '../paginate'
+import { rowsByPage } from '../../lib/pagination'
 import {
   createContext,
   findMissingFields,
@@ -73,7 +76,11 @@ export function createNipponExpressAdapter(options: NipponOptions = {}): Carrier
     },
 
     async fill(templateBytes: Uint8Array, draft: SliDraft): Promise<FillResult> {
-      const { doc, form } = await loadForm(templateBytes)
+      // One sheet per eight commodity rows. Every box but the commodity table is a single
+      // field with a widget on each sheet, so what follows writes the shipment once and the
+      // rows page by page — see `paginateForm`.
+      const pages = rowsByPage(draft.lines, NIPPON_ROWS.length)
+      const { doc, form, fieldName } = await paginateForm(templateBytes, pages.length, NIPPON_ROW_ROOTS)
       const ctx = createContext(form)
 
       // --- Parties ---------------------------------------------------------
@@ -179,32 +186,32 @@ export function createNipponExpressAdapter(options: NipponOptions = {}): Carrier
       )
 
       // --- Commodity rows --------------------------------------------------
-      if (draft.lines.length > NIPPON_ROWS.length) {
-        ctx.warnings.push(
-          `This shipment has ${draft.lines.length} commodity rows but the form holds ${NIPPON_ROWS.length}. ` +
-            `Rows ${NIPPON_ROWS.length + 1}+ were not written and need a continuation sheet.`,
-        )
-      }
-
-      draft.lines.slice(0, NIPPON_ROWS.length).forEach((line, i) => {
-        const row = NIPPON_ROWS[i]
-        const weight = options.useGrossWeight ? (options.grossWeightByRow?.[i] ?? line.weightKg) : line.weightKg
-
-        setText(ctx, row.df, line.domesticForeign)
-        setText(ctx, row.scheduleB, line.scheduleB)
-        // The quantity in the unit the commodity number is reported in, which is not always
-        // the invoice's piece count — several codes are reported by weight — and box 25
-        // beside it names that unit, so the two have to be resolved together or the form
-        // states a count under a kilogram heading.
-        setText(ctx, row.quantity, line.reportingBasis === 'none' ? '' : formatQuantity(line.reportingQuantity))
-        // Box 25. See the note at the top of this file.
-        setText(ctx, row.ddtcUom, line.reportingUom || line.scheduleBUnit || 'NO')
-        setText(ctx, row.weight, weight.toFixed(3))
-        // The form applies its own currency formatting, so a plain number is written here.
-        setText(ctx, row.value, line.valueUsd.toFixed(2))
-        setText(ctx, row.eccn, line.eccn)
-        setText(ctx, row.sme, line.sme)
-        setText(ctx, row.license, line.license)
+      pages.forEach((rows, pageIndex) => {
+        const on = (field: string) => fieldName(field, pageIndex)
+        rows.forEach((line, i) => {
+          const row = NIPPON_ROWS[i]
+          // The row's position in the shipment, not on its sheet: a per-row policy figure is
+          // indexed by the commodity it belongs to, and row 1 of page 2 is the ninth.
+          const shipmentRow = pageIndex * NIPPON_ROWS.length + i
+          const weight = options.useGrossWeight
+            ? (options.grossWeightByRow?.[shipmentRow] ?? line.weightKg)
+            : line.weightKg
+          setText(ctx, on(row.df), line.domesticForeign)
+          setText(ctx, on(row.scheduleB), line.scheduleB)
+          // The quantity in the unit the commodity number is reported in, which is not always
+          // the invoice's piece count — several codes are reported by weight — and box 25
+          // beside it names that unit, so the two have to be resolved together or the form
+          // states a count under a kilogram heading.
+          setText(ctx, on(row.quantity), line.reportingBasis === 'none' ? '' : formatQuantity(line.reportingQuantity))
+          // Box 25. See the note at the top of this file.
+          setText(ctx, on(row.ddtcUom), line.reportingUom || line.scheduleBUnit || 'NO')
+          setText(ctx, on(row.weight), weight.toFixed(3))
+          // The form applies its own currency formatting, so a plain number is written here.
+          setText(ctx, on(row.value), line.valueUsd.toFixed(2))
+          setText(ctx, on(row.eccn), line.eccn)
+          setText(ctx, on(row.sme), line.sme)
+          setText(ctx, on(row.license), line.license)
+        })
       })
 
       // --- Signature block -------------------------------------------------
