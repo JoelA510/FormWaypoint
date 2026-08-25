@@ -240,7 +240,11 @@ describe('the unit each commodity is keyed in', () => {
     })
     expect(sheet.commodities[0].quantity).toBe('0')
     expect(sheet.commodities[0].quantityRoundedAway).toBe(true)
-    expect(keyingSheetToWorkbook(sheet)[0].rows.flat().join(' ')).toMatch(/rounds to 0 whole KG/)
+    const grid = keyingSheetToWorkbook(sheet)[0].rows.flat().join(' ')
+    expect(grid).toMatch(/rounds to 0 whole KG/)
+    // Alongside what the column is counting, not instead of it. Being asked to decide what a
+    // `0` should say is no use without knowing the cell holds kilograms off the packing list.
+    expect(grid).toMatch(/net weight in KG/)
   })
 
   it('names the unit those rows are in, not the sheet’s mixed-unit label', () => {

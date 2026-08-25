@@ -358,6 +358,14 @@ function reportingUnits(sliLines: SLILine[]): Map<string, string> {
  * pass and read in another are three chances for those to describe different goods.
  */
 interface GroupFigures {
+  /**
+   * The commodity number this group files under, corrections applied.
+   *
+   * Resolved here and read below rather than resolved twice: it decides both the unit the
+   * quantity is restated into and the code printed beside that quantity, and those two must
+   * be talking about the same goods.
+   */
+  code: string
   /** The group's own quantity, in the unit the document reported it. */
   quantity: number
   /** The group's net weight in kilograms, summed once. */
@@ -496,8 +504,11 @@ function apportionWholeUnits(
     const total = filed.reduce((sum, row) => sum + row.reportingQuantity, 0)
     const shares = bucket.map((group) => (figures.get(group) as GroupFigures).exact)
     const held = shares.reduce((sum, value) => sum + value, 0)
-    // Nothing to divide proportionally, and no honest way to guess at it.
-    if (!(held > 0)) continue
+    // Nothing to divide proportionally, and no honest way to guess at it. A negative share
+    // among them is the same problem wearing a positive total: scaling would hand one row a
+    // negative quantity that the largest-remainder pass cannot take back, and the column would
+    // reach the form's figure only by cancelling out.
+    if (!(held > 0) || shares.some((value) => value < 0)) continue
 
     // Scaled onto the total first, then divided. Dividing the raw shares and mopping up the
     // difference only works while the form's total is within a unit of their sum, and it is
@@ -584,10 +595,12 @@ function groupForKeying(
     // Summed *here*, and read below, so the figure a quantity was restated from and the figure
     // printed beside it cannot drift apart.
     const weightKg = group.reduce((sum, l) => sum + (l.netWeightKg ?? 0), 0)
-    const codeKey = normalizeScheduleB(codeFor(group[0], corrections))
+    const code = codeFor(group[0], corrections)
+    const codeKey = normalizeScheduleB(code)
     const wanted = units.get(`${codeKey}|${canonicalUnit(group[0].uom) ?? ''}`) ?? units.get(codeKey)
     const exact = wanted ? restateExact({ quantity, uom: unitFor(group), weightKg }, wanted) : null
     figures.set(group, {
+      code,
       quantity,
       weightKg,
       keyed: keyedQuantity(group, quantity, weightKg, wanted),
@@ -599,7 +612,7 @@ function groupForKeying(
   return ordered.map((group) => {
     const first = group[0]
     const total = group.reduce((sum, l) => sum + (l.extendedValue ?? 0), 0)
-    const { quantity, weightKg, keyed } = figures.get(group) as GroupFigures
+    const { code, quantity, weightKg, keyed } = figures.get(group) as GroupFigures
     // Read from the distinct origins, not the first line's: a group whose first line prints
     // no origin and whose second says Japan is a Japanese row, and taking `first` would
     // give it an empty country cell with nothing prompting anybody to fill it in.
@@ -615,7 +628,6 @@ function groupForKeying(
     // some lines had none is part of what the row must say — otherwise 2 pieces from the US
     // and 3 from nowhere print as 5 pieces of `D`, while the SLI files those 3 as `F`.
     const originMissing = group.some((l) => !l.countryOfOrigin.trim())
-    const code = codeFor(first, corrections)
     // Deduped the way the grouping keys them, which is case-insensitively. Trimming alone
     // made one part printed in two cases look like two, which both dropped the operator's
     // saved wording and put both spellings in a cell that holds one part number.
@@ -1323,10 +1335,15 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
         // Ahead of the wording notes, because it is about the figure rather than the words:
         // a quantity that is a weight is the one cell on this row an operator can key
         // straight past without noticing it is not a count.
-        const unitNote = row.quantityRoundedAway
+        // The rounded-away warning is added to whatever else the figure needs saying about it,
+        // not put in its place: an operator asked to decide what a `0` should say still needs
+        // telling that the column is counting kilograms off the packing list rather than
+        // pieces, which is the one thing about this cell they can key straight past.
+        const roundedNote = row.quantityRoundedAway
           ? `quantity rounds to 0 whole ${row.unitOfMeasure} — these goods have a value but no ` +
             'quantity to key; decide what this cell should say'
-          : row.unitUnavailable
+          : ''
+        const unitNote = row.unitUnavailable
           ? `quantity is the ${row.unitOfMeasure} the document prints; this code files in ` +
             `${row.unitUnavailable} and this row has no figure for it`
           : row.quantityNotFiled
@@ -1338,18 +1355,18 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
                 ? `quantity is restated in ${row.unitOfMeasure}, the unit this code is reported in — the document ` +
                   'does not print this figure'
                 : ''
-        if (row.describedByOperator) return join(unitNote, 'your wording')
+        if (row.describedByOperator) return join(roundedNote, unitNote, 'your wording')
         // "also" only where the description itself came from the document. Beside Census
         // wording it would assert the CIPL had used the official text, which it did not.
         const fromDocument = sheet.options.descriptionSource !== 'schedule-b' || Boolean(row.scheduleBUnavailable)
         const lead = fromDocument ? 'document also said' : 'document said'
         const said = row.otherDescriptions.length ? `${lead}: ${row.otherDescriptions.join('; ')}` : ''
-        if (!row.scheduleBUnavailable) return join(unitNote, said)
+        if (!row.scheduleBUnavailable) return join(roundedNote, unitNote, said)
         const why =
           row.scheduleBUnavailable === 'no-index'
             ? 'Schedule B dataset not loaded — the document’s wording is used'
             : 'no Schedule B wording for this code — the document’s is used'
-        return join(unitNote, [why, said].filter(Boolean).join('; '))
+        return join(roundedNote, unitNote, [why, said].filter(Boolean).join('; '))
       }
     }
   }

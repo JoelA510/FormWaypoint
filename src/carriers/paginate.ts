@@ -24,7 +24,7 @@
  * commodity columns are top-level fields, renamed directly. Both are "rename these roots".
  */
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRef, PDFString, StandardFonts } from 'pdf-lib'
-import type { PDFAcroForm, PDFContext, PDFForm } from 'pdf-lib'
+import type { PDFAcroForm, PDFContext, PDFForm, PDFPage } from 'pdf-lib'
 
 export { pagesNeeded, rowsByPage } from '../lib/pagination'
 
@@ -87,8 +87,22 @@ interface Node {
   dict: PDFDict
 }
 
-/** Every terminal field at or below `ref`, keyed by fully-qualified name. */
-function terminalsUnder(ctx: PDFContext, ref: PDFRef, prefix: string, out: Map<string, Node>): Map<string, Node> {
+/**
+ * Every terminal field at or below `ref`, keyed by fully-qualified name.
+ *
+ * `seen` bounds the walk the way the hop counts bound the upward ones: a `/Kids` array that
+ * contains an ancestor is a malformed file, not an impossible one, and this runs over every
+ * root on every page — unbounded, one such node takes the browser tab down with the stack.
+ */
+function terminalsUnder(
+  ctx: PDFContext,
+  ref: PDFRef,
+  prefix: string,
+  out: Map<string, Node>,
+  seen: Set<string> = new Set(),
+): Map<string, Node> {
+  if (seen.has(ref.toString())) return out
+  seen.add(ref.toString())
   const dict = ctx.lookup(ref, PDFDict)
   const own = partialName(dict)
   const qualified = own === null ? prefix : prefix ? `${prefix}.${own}` : own
@@ -97,7 +111,7 @@ function terminalsUnder(ctx: PDFContext, ref: PDFRef, prefix: string, out: Map<s
     return out
   }
   const kids = kidsOf(ctx, dict)
-  if (kids) for (let i = 0; i < kids.size(); i++) terminalsUnder(ctx, asRef(kids.get(i)), qualified, out)
+  if (kids) for (let i = 0; i < kids.size(); i++) terminalsUnder(ctx, asRef(kids.get(i)), qualified, out, seen)
   return out
 }
 
@@ -157,11 +171,13 @@ function relink(ctx: PDFContext, acro: PDFAcroForm, oldRef: PDFRef, replacement:
   }
 }
 
-/** Every field-tree node at or below `ref`, the node itself included. */
-function refsUnder(ctx: PDFContext, ref: PDFRef, out: PDFRef[]): PDFRef[] {
+/** Every field-tree node at or below `ref`, the node itself included. Bounded like `terminalsUnder`. */
+function refsUnder(ctx: PDFContext, ref: PDFRef, out: PDFRef[], seen: Set<string> = new Set()): PDFRef[] {
+  if (seen.has(ref.toString())) return out
+  seen.add(ref.toString())
   out.push(ref)
   const kids = kidsOf(ctx, ctx.lookup(ref, PDFDict))
-  if (kids) for (let i = 0; i < kids.size(); i++) refsUnder(ctx, asRef(kids.get(i)), out)
+  if (kids) for (let i = 0; i < kids.size(); i++) refsUnder(ctx, asRef(kids.get(i)), out, seen)
   return out
 }
 
@@ -325,6 +341,11 @@ export async function paginateForm(
     // A copy carries the tagging index of the page it came from, and two pages cannot both be
     // structure element 0. Nothing re-tags the copy, so it says it is untagged, which it is.
     page.node.delete(PDFName.of('StructParents'))
+    // And whatever the source page ran on open. `stripActiveContent` cleared this from the
+    // template's own pages before any of them were copied, so without this a page-level
+    // action would survive on every sheet but the first.
+    page.node.delete(PDFName.of('AA'))
+    reparentWidgets(ctx, doc, page)
 
     for (const root of rootsOnPage(ctx, doc, sheet)) {
       if (roots.has(root.name)) {
@@ -405,6 +426,36 @@ export async function paginateForm(
 }
 
 /**
+ * Point a copied sheet's widgets at the sheet they are actually on.
+ *
+ * A widget's `/P` is the page it appears on. pdf-lib's copier clones the source page dictionary
+ * before it records it as copied, so the annotations it copies alongside end up pointing at a
+ * *second* clone that never joins the page tree — every widget on a continuation sheet claims
+ * to live on a page the document does not have. Readers that resolve a field's page through
+ * `/P` (field navigation, flattening, some print pipelines) can misplace or drop those fields,
+ * and the dead page dictionaries are written into the filed PDF alongside them.
+ *
+ * Verified on the real templates: a three-sheet form held five `/Type /Page` dictionaries for
+ * three pages, and all 99 widgets on sheets 2 and 3 pointed at the two that were not in it.
+ */
+function reparentWidgets(ctx: PDFContext, doc: PDFDocument, page: PDFPage): void {
+  const annots = page.node.Annots()
+  if (!annots) return
+  const inTree = new Set(doc.getPages().map((p) => p.ref.toString()))
+  const stranded = new Set<string>()
+  for (let i = 0; i < annots.size(); i++) {
+    const annot = ctx.lookup(asRef(annots.get(i)), PDFDict)
+    const owner = annot.get(PDFName.of('P'))
+    if (owner instanceof PDFRef && !inTree.has(owner.toString())) stranded.add(owner.toString())
+    annot.set(PDFName.of('P'), page.ref)
+  }
+  // The clones are referenced by nothing once the widgets have been repointed.
+  for (const [ref, object] of ctx.enumerateIndirectObjects()) {
+    if (stranded.has(ref.toString()) && object instanceof PDFDict) ctx.delete(ref)
+  }
+}
+
+/**
  * The distinct field-tree roots a page's annotations hang from.
  *
  * Collected before the caller changes anything. Re-parenting a widget rewrites the chain the
@@ -461,9 +512,16 @@ export async function stampPageNumbers(doc: PDFDocument): Promise<void> {
   pages.forEach((page, i) => {
     const label = `Page ${i + 1} of ${pages.length}`
     const size = 8
+    // Placed against the crop box, which is the part of the sheet a reader shows and a printer
+    // prints. `getWidth()` is the *media* width and the two are not the same paper: the CEVA
+    // template's media runs 0..684 while its crop runs 36..648, so right-aligning to the media
+    // put the last three characters of every page number off the visible page. The Nippon
+    // template's crop starts at y = 11.99, which left the label 2pt clear of the bottom edge,
+    // inside the margin most printers will not mark.
+    const box = page.getCropBox()
     page.drawText(label, {
-      x: page.getWidth() - font.widthOfTextAtSize(label, size) - 24,
-      y: 14,
+      x: box.x + box.width - font.widthOfTextAtSize(label, size) - 24,
+      y: box.y + 14,
       size,
       font,
     })

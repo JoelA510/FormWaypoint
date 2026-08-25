@@ -28,8 +28,8 @@ export function basisNote(line: SLILine, byChoice: boolean): string {
   // commodity number is not in the dataset at all still files whole kilograms, and saying only
   // "filing the invoice figure" beside a `7` the invoice does not carry is this screen telling
   // the filer the box matches a document it does not match.
-  const rounded = wasRounded(line)
-  const whole = rounded ? ` Invoiced as ${line.quantity} ${line.sourceUom}, filed as whole ${line.reportingUom}.` : ''
+  const rounded = wasRounded(line) ? roundedFrom(line) : ''
+  const whole = rounded ? ` ${rounded}` : ''
 
   if (!line.scheduleBUnits.length) return `Schedule B unit unknown — filing the invoice figure.${whole}`
   // Compared canonically. `PCS` and `NO` are one unit, and a row filing the document's
@@ -42,24 +42,33 @@ export function basisNote(line: SLILine, byChoice: boolean): string {
       ? `Filed in ${line.reportingUom} by your choice; Schedule B requires ${required}.${whole}`
       : `Schedule B requires ${required}; this row can only state ${line.reportingUom}.${whole}`
   }
+  // Named alongside the figure where the two differ. A row showing `4 KG` beside a net weight
+  // of 4.499 kg looks like one of them is a typo until this says which is which.
   if (line.reportingBasis === 'net-weight') {
-    // Named alongside the figure where the two differ. A row showing `4 KG` beside a net
-    // weight of 4.499 kg looks like one of them is a typo until this says which is which.
-    return rounded
-      ? `Net weight ${line.weightKg} kg, filed as whole ${line.reportingUom}.`
-      : 'Net weight — this code is reported by weight, not by the piece.'
+    return rounded || 'Net weight — this code is reported by weight, not by the piece.'
   }
   // Not "as invoiced": the document carries neither this figure nor this unit.
   if (line.reportingBasis === 'converted') {
-    return rounded
-      ? `Converted from ${line.quantity} ${line.sourceUom}, filed as whole ${line.reportingUom}.`
-      : `Converted from ${line.quantity} ${line.sourceUom}.`
+    return rounded || `Converted from ${line.quantity} ${line.sourceUom}.`
   }
   // And as true of an invoice already counting kilograms, which files its own figure rounded
   // whole, as of one whose kilograms were read off the net weight.
-  return rounded
-    ? `Invoiced as ${line.quantity} ${line.sourceUom}, filed as whole ${line.reportingUom}.`
-    : 'As invoiced.'
+  return rounded || 'As invoiced.'
+}
+
+/**
+ * The figure a whole-unit row was rounded from, named as what it actually is.
+ *
+ * Told by the basis. A row filing `4 KG` off a 4.499 kg net weight did not round the invoice's
+ * 12 pieces, and saying it did attributes the box to a figure that had nothing to do with it —
+ * which is worse than saying nothing, because this line is the only account of where the 4
+ * came from.
+ */
+function roundedFrom(line: SLILine): string {
+  const whole = `filed as whole ${line.reportingUom}`
+  if (line.reportingBasis === 'net-weight') return `Net weight ${line.weightKg} kg, ${whole}.`
+  if (line.reportingBasis === 'converted') return `Converted from ${line.quantity} ${line.sourceUom}, ${whole}.`
+  return `Invoiced as ${line.quantity} ${line.sourceUom}, ${whole}.`
 }
 
 /**

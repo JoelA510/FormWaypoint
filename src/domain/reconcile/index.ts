@@ -261,7 +261,10 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
           `(${roundedAway.map(roundedAwayFrom).join(', ')}). A kilogram quantity is ` +
           'filed as whole kilograms, so goods under half a kilo have nowhere to land. Decide what the box ' +
           'should say before signing — a zero declares the goods absent.'
-        : 'Every row files a quantity of at least one.',
+        // Not "at least one": the eight codes Schedule B files with no quantity at all are
+        // deliberately outside this check, and a shipment made up of them files a blank box
+        // on every row.
+        : 'No row files a quantity of zero.',
       passed: roundedAway.length === 0,
     },
     ...currencyCheck(currency),

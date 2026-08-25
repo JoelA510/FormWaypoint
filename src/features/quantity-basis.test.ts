@@ -74,6 +74,23 @@ describe('why a filed quantity is what it is', () => {
     expect(basisNote(off, false)).toMatch(/can only state KG\. Invoiced as 7\.438 KG, filed as whole KG\./)
   })
 
+  it('names the weight, not the piece count, on a row whose kilograms came from the weight', () => {
+    // A filer who chose KG for a code reported in NO: the 4 came off the 4.499 kg net weight,
+    // and calling it the invoice's 12 pieces attributes the box to a figure that had nothing
+    // to do with it.
+    const chosen = row({
+      scheduleBUnits: ['NO'],
+      sourceUom: 'PCS',
+      quantity: 12,
+      weightKg: 4.499,
+      reportingBasis: 'net-weight',
+      reportingQuantity: 4,
+    })
+    expect(basisNote(chosen, true)).toBe(
+      'Filed in KG by your choice; Schedule B requires NO. Net weight 4.499 kg, filed as whole KG.',
+    )
+  })
+
   it('adds nothing to those branches where no rounding happened', () => {
     expect(basisNote(row({ scheduleBUnits: [], quantity: 7 }), false)).toBe(
       'Schedule B unit unknown — filing the invoice figure.',

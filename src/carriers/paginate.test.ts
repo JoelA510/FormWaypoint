@@ -9,7 +9,18 @@ import { describe, expect, it } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFRawStream, PDFString, decodePDFRawStream, type PDFPage } from 'pdf-lib'
+import {
+  PDFArray,
+  PDFDict,
+  PDFDocument,
+  PDFHexString,
+  PDFName,
+  PDFRawStream,
+  PDFString,
+  StandardFonts,
+  decodePDFRawStream,
+  type PDFPage,
+} from 'pdf-lib'
 import { pagesNeeded, paginateForm, rowsByPage, stampPageNumbers } from './paginate'
 import { NIPPON_ROW_ROOTS } from './nippon-express/fields'
 import { CEVA_COMMODITY_FIELDS } from './ceva/fields'
@@ -26,8 +37,8 @@ const names = (doc: PDFDocument) => doc.getForm().getFields().map((f) => f.getNa
  * for `<hex> Tj` and keeps what reads as a page number. Counting pages proves the sheets
  * exist; this proves they say which of them the reader is holding.
  */
-function stamps(doc: PDFDocument): string[] {
-  const found: string[] = []
+function stamps(doc: PDFDocument): { label: string; x: number; y: number }[] {
+  const found: { label: string; x: number; y: number }[] = []
   for (const page of doc.getPages()) {
     const contents = page.node.Contents()
     const entries = contents instanceof PDFArray ? contents.asArray() : contents ? [contents] : []
@@ -35,9 +46,9 @@ function stamps(doc: PDFDocument): string[] {
       const stream = doc.context.lookup(entry)
       if (!(stream instanceof PDFRawStream)) continue
       const text = new TextDecoder('latin1').decode(decodePDFRawStream(stream).decode())
-      for (const [, hex] of text.matchAll(/<([0-9A-Fa-f]+)>\s*Tj/g)) {
+      for (const [, x, y, hex] of text.matchAll(/1 0 0 1 (-?[\d.]+) (-?[\d.]+) Tm\s*<([0-9A-Fa-f]+)>\s*Tj/g)) {
         const label = (hex.match(/../g) ?? []).map((byte) => String.fromCharCode(parseInt(byte, 16))).join('')
-        if (label.startsWith('Page ')) found.push(label)
+        if (label.startsWith('Page ')) found.push({ label, x: Number(x), y: Number(y) })
       }
     }
   }
@@ -338,6 +349,32 @@ describe('what the template carries that a filed form should not', () => {
     expect(strandedFields(single.doc)).toEqual([])
   })
 
+  it('puts every widget on the sheet it is actually on', async () => {
+    // A widget's `/P` is the page it appears on. pdf-lib's copier clones the source page before
+    // recording it as copied, so the annotations copied alongside pointed at a second clone
+    // that never joined the page tree: every widget on a continuation sheet claimed to live on
+    // a page the document does not have, and the clones shipped inside the filed PDF.
+    const { doc } = await paginateForm(template('ceva-sli.pdf'), 3, CEVA_COMMODITY_FIELDS)
+    const inTree = new Set(doc.getPages().map((page) => page.ref.toString()))
+    let widgets = 0
+    for (const page of doc.getPages()) {
+      const annots = page.node.Annots()
+      if (!annots) continue
+      for (let i = 0; i < annots.size(); i++) {
+        const owner = doc.context.lookup(annots.get(i), PDFDict).get(PDFName.of('P'))
+        widgets++
+        expect(inTree.has(String(owner)), `widget ${widgets} on a page outside the tree`).toBe(true)
+      }
+    }
+    expect(widgets).toBeGreaterThan(200)
+
+    // And no page dictionary the document does not use.
+    const pageDicts = doc.context
+      .enumerateIndirectObjects()
+      .filter(([, object]) => object instanceof PDFDict && String(object.get(PDFName.of('Type'))) === '/Page')
+    expect(pageDicts).toHaveLength(3)
+  })
+
   it('does not let a continuation sheet claim the first sheet’s tagging index', async () => {
     // A copied page carries the `/StructParents` of the page it came from, and two pages
     // cannot both be structure element 0. Nothing re-tags the copy, so it says it is
@@ -386,6 +423,20 @@ describe('shapes the shipped templates do not have', () => {
     expect(doc.getPageCount()).toBe(3)
   })
 
+  it('strips a page action from the continuation sheets, not only the first', async () => {
+    // `stripActiveContent` runs before any sheet is copied, and the copies come out of a
+    // separately loaded source, so a page-level action removed from sheet 1 came straight back
+    // on sheet 2 — the silent arrival that guard exists to stop.
+    const bytes = await builtForm((doc, page) => {
+      page.node.set(
+        PDFName.of('AA'),
+        doc.context.obj({ O: { S: 'JavaScript', JS: 'app.alert("hello")' } }),
+      )
+    })
+    const { doc } = await paginateForm(bytes, 2, ['Row'])
+    for (const page of doc.getPages()) expect(page.node.get(PDFName.of('AA'))).toBeUndefined()
+  })
+
   it('leaves an annotation that is not a form widget out of the field tree', async () => {
     // A link in the footer is the ordinary case. Walked as a field it resolves to the empty
     // name, is split into an orphan dictionary nothing registers, and every sheet’s copy is
@@ -432,7 +483,7 @@ describe('numbering the sheets', () => {
     const { doc } = await paginateForm(template('ceva-sli.pdf'), 3, CEVA_COMMODITY_FIELDS)
     const reloaded = await reload(doc)
     expect(reloaded.getPageCount()).toBe(3)
-    expect(stamps(reloaded)).toEqual(['Page 1 of 3', 'Page 2 of 3', 'Page 3 of 3'])
+    expect(stamps(reloaded).map((s) => s.label)).toEqual(['Page 1 of 3', 'Page 2 of 3', 'Page 3 of 3'])
   })
 
   it('says nothing on a single-page form', async () => {
@@ -447,10 +498,37 @@ describe('numbering the sheets', () => {
     expect((await doc.save()).length).toBeLessThanOrEqual(before + 64)
   })
 
+  it('draws the number inside the part of the sheet a reader shows', async () => {
+    // `getWidth()` is the *media* width, and the two templates are not cropped to it. The CEVA
+    // sheet's media runs 0..684 while its crop runs 36..648, so right-aligning to the media put
+    // the last three characters of every page number past the visible edge; the Nippon sheet's
+    // crop starts at y = 11.99, which left the label 2pt off the bottom, inside the margin most
+    // printers will not mark.
+    for (const [file, roots] of [
+      ['ceva-sli.pdf', CEVA_COMMODITY_FIELDS],
+      ['nippon-express-sli.pdf', NIPPON_ROW_ROOTS],
+    ] as const) {
+      const { doc } = await paginateForm(template(file), 3, roots)
+      const drawn = stamps(await reload(doc))
+      expect(drawn, file).toHaveLength(3)
+      // Measured with the face it was drawn in rather than guessed at from the character count.
+      const font = await doc.embedFont(StandardFonts.Helvetica)
+      doc.getPages().forEach((page, i) => {
+        const box = page.getCropBox()
+        const { x, y, label } = drawn[i]
+        const width = font.widthOfTextAtSize(label, 8)
+        expect(x, `${file} page ${i + 1} left`).toBeGreaterThan(box.x)
+        expect(x + width, `${file} page ${i + 1} right`).toBeLessThan(box.x + box.width)
+        expect(y, `${file} page ${i + 1} bottom`).toBeGreaterThan(box.y + 8)
+        expect(y, `${file} page ${i + 1} top`).toBeLessThan(box.y + box.height / 2)
+      })
+    }
+  })
+
   it('stamps a form filled through the adapter, on the sheets the shipment needed', async () => {
     // Through the door the app actually uses, so nothing between the pagination and the saved
     // bytes can drop it.
     const { doc } = await paginateForm(template('nippon-express-sli.pdf'), 2, NIPPON_ROW_ROOTS)
-    expect(stamps(await reload(doc))).toEqual(['Page 1 of 2', 'Page 2 of 2'])
+    expect(stamps(await reload(doc)).map((s) => s.label)).toEqual(['Page 1 of 2', 'Page 2 of 2'])
   })
 })

@@ -47,8 +47,23 @@ export function setText(ctx: WriteContext, fieldName: string, value: string | nu
     ctx.warnings.push(`"${fieldName}" is not a text field; skipped.`)
     return
   }
-  field.setText(value)
+  // The write itself can refuse the value — the CEVA `ZipCode` box carries `/MaxLen 5`, so a
+  // profile holding a ZIP+4 throws here. That is a warning about one box, not a reason to
+  // produce no form at all: everything else on the declaration is still worth having, and the
+  // filer is told which box to complete by hand.
+  try {
+    field.setText(value)
+  } catch (error) {
+    ctx.warnings.push(`"${fieldName}" would not take "${truncate(value)}" (${reason(error)}).`)
+    return
+  }
   ctx.written[fieldName] = value
+}
+
+/** A pdf-lib rejection in one clause, for a warning a filer reads. */
+function reason(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  return message.replace(/\s+/g, ' ').trim() || 'the field refused the value'
 }
 
 /** Tick a checkbox. `false` leaves the box untouched rather than explicitly unchecking. */
@@ -63,7 +78,12 @@ export function setCheckBox(ctx: WriteContext, fieldName: string, checked: boole
     ctx.warnings.push(`"${fieldName}" is not a checkbox; skipped.`)
     return
   }
-  field.check()
+  try {
+    field.check()
+  } catch (error) {
+    ctx.warnings.push(`"${fieldName}" would not tick (${reason(error)}).`)
+    return
+  }
   ctx.written[fieldName] = 'checked'
 }
 
@@ -87,7 +107,12 @@ export function selectRadio(ctx: WriteContext, fieldName: string, option: string
     ctx.warnings.push(`"${fieldName}" has no option "${option}" (has: ${field.getOptions().join(', ')}).`)
     return
   }
-  field.select(option)
+  try {
+    field.select(option)
+  } catch (error) {
+    ctx.warnings.push(`"${fieldName}" would not take "${option}" (${reason(error)}).`)
+    return
+  }
   ctx.written[fieldName] = option
 }
 
