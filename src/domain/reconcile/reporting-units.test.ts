@@ -175,21 +175,26 @@ describe('the unit a commodity row is filed in', () => {
   })
 })
 
-describe('a row that rounds away to nothing', () => {
-  it('warns when the weight it files rounds away, and names that weight', async () => {
-    // A quantity box reading `0` on a signed declaration says the goods are not there.
-    // 4016.93.0000 is reported in KG; a fifth of a kilo has nowhere to land.
+describe('a row holding less than half a unit', () => {
+  it('files one rather than nothing, and says the figure overstates the row', async () => {
+    // A quantity box reading `0` on a signed declaration says the goods are not there, and a
+    // fifth of a kilo is not nothing. 4016.93.0000 is reported in KG, so one is the least
+    // wrong figure the unit can hold — and it is five times the weight, which is the filer's
+    // decision to make rather than the tool's.
     const parsed = await shipment('4016.93.0000', { netWeightKg: 0.2, grossWeightKg: 0.3 })
     const { sliLines, checks } = reconcile(parsed, scheduleB, CONTROLLED)
-    expect(row(sliLines, '4016.93.0000').reportingQuantity).toBe(0)
+    expect(row(sliLines, '4016.93.0000').reportingQuantity).toBe(1)
+    // The weight the row is proved against keeps every decimal it had.
+    expect(row(sliLines, '4016.93.0000').weightKg).toBe(0.2)
 
-    const zero = checks.find((c) => c.id === 'quantities-nonzero')!
-    expect(zero.passed).toBe(false)
-    expect(zero.severity).toBe('warning')
-    expect(zero.detail).toMatch(/4016\.93\.0000 at 0\.2 kg/)
+    const flagged = checks.find((c) => c.id === 'quantities-nonzero')!
+    expect(flagged.passed).toBe(false)
+    expect(flagged.severity).toBe('warning')
+    expect(flagged.detail).toMatch(/4016\.93\.0000 at 0\.2 kg/)
+    expect(flagged.detail).toMatch(/filed as 1/)
   })
 
-  it('warns with no weight anywhere, and names the figure that did round away', async () => {
+  it('says so with no weight anywhere, and names the figure it was rounded up from', async () => {
     // The Omron invoice states a unit per line and no weights at all, so a line invoiced as
     // `0.3 KG` files its own figure — rounded whole, to nothing — with no weight behind it.
     // Sending that filer to look at `0 kg` points them at a number the document has not got
@@ -205,16 +210,25 @@ describe('a row that rounds away to nothing', () => {
     const { sliLines, checks } = reconcile(parsed, scheduleB, CONTROLLED)
     const line = row(sliLines, '4016.93.0000')
     expect(line.weightKg).toBe(0)
-    expect(line.reportingQuantity).toBe(0)
+    expect(line.reportingQuantity).toBe(1)
 
-    const zero = checks.find((c) => c.id === 'quantities-nonzero')!
-    expect(zero.passed).toBe(false)
-    expect(zero.detail).toMatch(/4016\.93\.0000 at 0\.3 KG/)
-    expect(zero.detail).not.toMatch(/0 kg/)
+    const flagged = checks.find((c) => c.id === 'quantities-nonzero')!
+    expect(flagged.passed).toBe(false)
+    expect(flagged.detail).toMatch(/4016\.93\.0000 at 0\.3 KG/)
+    expect(flagged.detail).not.toMatch(/0 kg/)
   })
 
-  it('says nothing when every row files at least one', async () => {
+  it('says nothing where the row holds a unit or more', async () => {
     const { checks } = reconcile(await shipment(BY_WEIGHT), scheduleB, CONTROLLED)
+    expect(checks.find((c) => c.id === 'quantities-nonzero')?.passed).toBe(true)
+  })
+
+  it('leaves a unit that is not filed whole alone', async () => {
+    // 2523.10.0000 is reported in `T`. A 4.263 kg row is 0.004263 tonnes, which is the figure
+    // it files: there is no whole-number rule on tonnes, so there is no minimum to raise it to
+    // and nothing to warn about.
+    const { sliLines, checks } = reconcile(await shipment('2523.10.0000'), scheduleB, CONTROLLED)
+    expect(row(sliLines, '2523.10.0000').reportingQuantity).toBeCloseTo(0.004263, 9)
     expect(checks.find((c) => c.id === 'quantities-nonzero')?.passed).toBe(true)
   })
 })

@@ -22,7 +22,7 @@ import {
   screenCode,
   type ScheduleBIndex,
 } from '../schedule-b'
-import { canRestate, resolveReportingQuantity, roundedAwayToNothing } from '../units'
+import { canRestate, filedAtMinimum, resolveReportingQuantity } from '../units'
 import { MAX_SHEETS, pagesNeeded } from '../../lib/pagination'
 import type { ItemLibraryEntry } from '../item-library'
 import { partKey } from '../part-key'
@@ -228,13 +228,11 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
   // to file instead is a decision (round up to one, file the piece count, reclassify), and
   // none of them is this app's to make.
   // One rule, shared with the review screen and the keying sheet, so the three surfaces cannot
-  // describe the same row differently. Gated on the row representing goods at all, not on it
-  // having a weight: a row invoiced in grams under a kilogram code converts without one, and
-  // 400 g rounds to zero just the same.
-  const roundedAway = sliLines.filter(
+  // describe the same row differently.
+  const atMinimum = sliLines.filter(
     (line) =>
       line.reportingBasis !== 'none' &&
-      roundedAwayToNothing(
+      filedAtMinimum(
         { quantity: line.quantity, uom: line.sourceUom, weightKg: line.weightKg },
         line.reportingUom,
         line.reportingQuantity,
@@ -257,20 +255,20 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
     {
       id: 'quantities-nonzero',
       severity: 'warning',
-      title: 'No commodity row files a quantity of zero',
-      detail: roundedAway.length
-        ? `${roundedAway.length} row(s) round to a quantity of 0 in the unit they are filed in ` +
-          // Whichever figure actually rounded away, and in whichever unit. A row invoiced in
-          // grams under a kilogram code converts without a stated weight, and printing
-          // `at 0 kg` about it sent the filer to look for a weight the document never had.
-          `(${roundedAway.map(roundedAwayFrom).join(', ')}). A quantity in one of these units is filed as a ` +
-          'whole number of them, so anything under half a unit has nowhere to land. Decide what the box ' +
-          'should say before signing — a zero declares the goods absent.'
-        // Not "at least one": the eight codes Schedule B files with no quantity at all are
-        // deliberately outside this check, and a shipment made up of them files a blank box
-        // on every row.
-        : 'No row files a quantity of zero.',
-      passed: roundedAway.length === 0,
+      title: 'No commodity row files more than it holds',
+      detail: atMinimum.length
+        ? `${atMinimum.length} row(s) hold less than half a unit and are filed as 1 ` +
+          // Whichever figure was rounded up, and in whichever unit. A row invoiced in grams
+          // under a kilogram code converts without a stated weight, and printing `at 0 kg`
+          // about it sent the filer to look for a weight the document never had.
+          `(${atMinimum.map(roundedAwayFrom).join(', ')}). A quantity in one of these units is filed as a whole ` +
+          'number of them and a zero would declare the goods absent, so one is the least wrong figure ' +
+          'available — but it overstates these rows. Decide what the box should say before signing.'
+        // Not "no row files zero": the eight codes Schedule B files with no quantity at all
+        // are deliberately outside this check, and a shipment made up of them files a blank
+        // box on every row.
+        : 'No row is filed at more than it holds.',
+      passed: atMinimum.length === 0,
     },
     ...currencyCheck(currency),
     {
@@ -309,12 +307,12 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
 // ---------------------------------------------------------------------------
 
 /**
- * A row that rounded to nothing, named alongside the figure that did the rounding.
+ * A row filed at its unit's minimum, named alongside the figure it was rounded up from.
  *
  * Told by the basis, not by whether a weight happens to be on the row. A line invoiced as
- * 400 g under a kilogram code converts from its own quantity and rounds away there — and a
- * packing list that also states a 0.45 kg net weight for it would have the filer inspecting
- * a figure that had nothing to do with it.
+ * 400 g under a kilogram code converts from its own quantity — and a packing list that also
+ * states a 0.45 kg net weight for it would have the filer inspecting a figure that had
+ * nothing to do with the one on the form.
  */
 function roundedAwayFrom(line: SLILine): string {
   const from =

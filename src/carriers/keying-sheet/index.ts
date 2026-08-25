@@ -21,12 +21,13 @@
 import type { MergedLine, Reconciliation, SLILine } from '../../domain/types'
 import {
   KG_PER_LB,
+  filedAtMinimum,
   filedWhole,
   kgToLb as kilogramsToPounds,
   restateExact,
   restateQuantity,
   roundPrecise,
-  roundedAwayToNothing,
+  type QuantitySource,
 } from '../../domain/units'
 import { buildXlsx, type CellValue, type Sheet } from '../../lib/xlsx'
 import type { SliDraft } from '../types'
@@ -129,10 +130,16 @@ export interface KeyingCommodityRow {
    */
   quantityNotFiled?: boolean
   /**
-   * True where the row files zero of a unit it does have a figure for — rounded away, or the
-   * short end of a whole figure shared out across the rows that make up one commodity row.
+   * Set where the keyed quantity is not what the row holds, and why.
+   *
+   * `minimum` — the row holds less than half a unit, so it keys 1: the least wrong figure a
+   * whole unit can hold for goods that are there, and an overstatement.
+   *
+   * `shared-to-nothing` — the row took nothing as its share of a commodity row's whole figure.
+   * One kilogram between two parts has to go to one of them, and the sheet has to total what
+   * the form files, so the other keys 0 for goods that are in the box.
    */
-  quantityRoundedAway?: boolean
+  quantityCaveat?: 'minimum' | 'shared-to-nothing'
   /** Six decimal places, as Ship Manager displays and stores it. */
   unitValue: string
   totalValue: string
@@ -534,6 +541,21 @@ function apportionWholeUnits(
   }
 }
 
+/**
+ * Why a keyed quantity is not the figure the row holds, if it is not.
+ *
+ * Two different things, and they need different words. A row under half a unit keys 1 — the
+ * form does too, and both overstate it. A row that took nothing from a share-out keys 0 while
+ * the form files a whole number for the goods: the sheet totals what the form files, so one
+ * kilogram between two parts leaves the smaller one with none of it.
+ */
+function quantityCaveat(keyed: KeyedQuantity, source: QuantitySource): KeyingCommodityRow['quantityCaveat'] {
+  if (keyed.notFiled || keyed.unavailable) return undefined
+  if (filedAtMinimum(source, keyed.unit, keyed.quantity)) return 'minimum'
+  const holds = source.weightKg > 0 || source.quantity > 0
+  return keyed.quantity === 0 && holds && filedWhole(keyed.unit) ? 'shared-to-nothing' : undefined
+}
+
 /** `MY - Malaysia`, or the name and a prompt where no code could be found for it. */
 function originLabel(origin: string): string {
   const { known } = toIsoAlpha2(origin)
@@ -710,13 +732,10 @@ function groupForKeying(
       // absent.
       //
       // Asked of the same rule the review screen asks, so the two surfaces cannot describe one
-      // row differently: a `PCS` row filing zero has not been rounded whole and has not been
+      // row differently: a `PCS` row is not filed at a whole-unit minimum and has not been
       // shared out, and saying it has sends the operator looking for a rounding that never
       // happened. What is wrong with such a row is upstream, and the reconciliation says so.
-      quantityRoundedAway:
-        !keyed.notFiled &&
-        !keyed.unavailable &&
-        roundedAwayToNothing({ quantity, uom: unitFor(group), weightKg }, keyed.unit, keyed.quantity),
+      quantityCaveat: quantityCaveat(keyed, { quantity, uom: unitFor(group), weightKg }),
       // Derived from the group's own total rather than copied off one line, so the unit
       // price and the total beside it can never disagree. Per *keyed* unit, so that
       // quantity x unit price still comes back to the customs value on a row filed by
@@ -1343,10 +1362,14 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
         // not put in its place: an operator asked to decide what a `0` should say still needs
         // telling that the column is counting kilograms off the packing list rather than
         // pieces, which is the one thing about this cell they can key straight past.
-        const roundedNote = row.quantityRoundedAway
-          ? `quantity rounds to 0 whole ${row.unitOfMeasure} — these goods have a value but no ` +
-            'quantity to key; decide what this cell should say'
-          : ''
+        const roundedNote =
+          row.quantityCaveat === 'minimum'
+            ? `less than half a ${row.unitOfMeasure}, keyed as 1 — the least wrong figure this unit can ` +
+              'hold; the SLI files the same, and both overstate this row'
+            : row.quantityCaveat === 'shared-to-nothing'
+              ? `keyed as 0 ${row.unitOfMeasure}: the SLI files a whole figure for these goods and the rows ` +
+                'making it up have to total it, so this one took none of it; decide what this cell should say'
+              : ''
         const unitNote = row.unitUnavailable
           ? `quantity is the ${row.unitOfMeasure} the document prints; this code files in ` +
             `${row.unitUnavailable} and this row has no figure for it`
@@ -1442,11 +1465,12 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
   const converted = sheet.commodities.filter((c) => c.quantityConverted).length
   const notFiled = sheet.commodities.filter((c) => c.quantityNotFiled).length
   const unstatable = sheet.commodities.filter((c) => c.unitUnavailable)
-  const roundedAway = sheet.commodities.filter((c) => c.quantityRoundedAway)
+  const atMinimum = sheet.commodities.filter((c) => c.quantityCaveat === 'minimum')
+  const sharedToNothing = sheet.commodities.filter((c) => c.quantityCaveat === 'shared-to-nothing')
   // The units those rows are actually in. `keyedUnitLabel` is the phrase "in mixed units" on a
-  // sheet holding more than one, which reads as "file 0 whole in mixed units" in a slot that
+  // sheet holding more than one, which reads as "keyed as 1 in mixed units" in a slot that
   // wants a unit name.
-  const roundedUnits = joinDistinct(roundedAway.map((c) => c.unitOfMeasure)) || 'units'
+  const unitsOf = (rows: KeyingCommodityRow[]) => joinDistinct(rows.map((c) => c.unitOfMeasure)) || 'units'
   // What the quantity column is actually counting. A single unit is named; a mixed sheet
   // says so rather than calling a column of kilograms and pieces "pcs", which is what the
   // TOTAL row read as before any of it could be anything but a count.
@@ -1534,11 +1558,15 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
           ? `${notFiled} row(s) are under a commodity number Schedule B files with no quantity at all. Their ` +
             'figure is the document\'s own count, carried because the application needs one — the SLI leaves it blank. '
           : '') +
-        (roundedAway.length
-          ? `${roundedAway.length} row(s) file 0 whole ${roundedUnits}: the goods carry a value but round to nothing ` +
-            'in the unit their commodity number is reported in, or took the short end of a figure shared out ' +
-            'across the rows making up one commodity row on the SLI. Decide what those cells should say before ' +
-            'keying — a quantity of 0 keys goods that are in the box as absent. '
+        (atMinimum.length
+          ? `${atMinimum.length} row(s) hold less than half a ${unitsOf(atMinimum)} and are keyed as 1: a whole ` +
+            'unit cannot hold less, and a 0 would key goods that are in the box as absent. The SLI files the ' +
+            'same figure, and both overstate those rows. Decide what those cells should say before keying. '
+          : '') +
+        (sharedToNothing.length
+          ? `${sharedToNothing.length} row(s) are keyed as 0 ${unitsOf(sharedToNothing)}: the SLI files one whole ` +
+            'figure for those goods and the rows making it up have to total it, so the smallest of them took ' +
+            'none. Decide what those cells should say before keying. '
           : '') +
         (unstatable.length
           ? `${unstatable.length} row(s) could not be stated in the unit their commodity number requires ` +

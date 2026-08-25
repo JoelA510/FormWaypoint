@@ -427,15 +427,23 @@ function headerOrderNumbers(rows: TextRow[]): string[] {
 // ---------------------------------------------------------------------------
 
 /**
- * A merchandise line always opens with the order number printed twice followed by the
- * sequence within that order. Nothing else on the page has that shape, which makes it a
- * reliable block delimiter even across page breaks.
+ * A merchandise line always opens with the order number printed twice, well apart. Nothing
+ * else on the page has that shape, which makes it a reliable block delimiter even across page
+ * breaks.
+ *
+ * The sequence that usually follows is *not* required. An order carrying a single line prints
+ * no sequence at all, and demanding one made the whole block invisible: not misread, not
+ * warned about — never seen, because this is what decides a block exists. The shipment that
+ * exposed it lost one line of 215 pieces and $3,128, and the only sign was the header naming
+ * an order number no line item referenced.
+ *
+ * Nor is the third cell checked when it is present. A packing-list block prints the part
+ * number there when the sequence is absent, so testing it against the sequence pattern would
+ * refuse the weights for exactly the lines whose value had just been recovered.
  */
 function isLineStart(row: TextRow): boolean {
-  const [a, b, c] = row.items
-  return Boolean(
-    a && b && c && ORDER_NUMBER.test(a.str) && a.str === b.str && SEQUENCE.test(c.str) && b.x > a.x + 40,
-  )
+  const [a, b] = row.items
+  return Boolean(a && b && ORDER_NUMBER.test(a.str) && a.str === b.str && b.x > a.x + 40)
 }
 
 /** A line block cut in half by a page break, waiting for the rest of itself. */
@@ -923,7 +931,11 @@ interface BlockCore {
 function readBlockCore(block: TextRow[]): BlockCore | null {
   const start = block[0]
   const orderNumber = start.items[0]?.str ?? ''
-  const sequence = start.items[2]?.str ?? ''
+  // Only when it is one. `isLineStart` no longer demands a sequence, so the third cell is
+  // whatever the layout put there — the part number, on a packing-list block for an order
+  // with a single line.
+  const third = start.items[2]?.str ?? ''
+  const sequence = SEQUENCE.test(third) ? third : ''
   if (!orderNumber) return null
 
   let lineNumber = ''
@@ -932,10 +944,16 @@ function readBlockCore(block: TextRow[]): BlockCore | null {
   let lineNumberItemIdx = -1
   for (let i = 1; i < block.length; i++) {
     const items = block[i].items
-    const idx = items.findIndex((it) => LINE_NUMBER.test(it.str) && it.x < 130)
-    if (idx !== -1 && items[idx + 1]) {
+    // In its own column, not merely left of centre: the carton number is four digits too and
+    // sits at x=24, so a block whose line-number row was missing would take it instead.
+    const idx = items.findIndex((it) => LINE_NUMBER.test(it.str) && it.x > 40 && it.x < 130)
+    if (idx !== -1) {
       lineNumber = items[idx].str
-      itemId = items[idx + 1].str
+      // The lot id sits immediately right of the line number, at x=96 — *in that column*.
+      // A line carrying no lot id prints the country of origin next instead, at x=198, and
+      // taking whatever came next filed `Germany` as an item identifier.
+      const next = items[idx + 1]
+      itemId = next && next.x < 130 ? next.str : ''
       lineNumberRowIdx = i
       lineNumberItemIdx = idx
       break
@@ -997,7 +1015,11 @@ function parseInvoiceBlock(
     // From the line number itself: it and the lot id beside it are identifiers the block has
     // already been read for, and an unreadable block was coming out described as its lot id.
     for (let k = Math.max(core.lineNumberItemIdx, 0); k < items.length; k++) consume(core.lineNumberRowIdx, k)
-    const from = core.lineNumberItemIdx + 2
+    // Past the line number, and past the lot id only where there is one. A line carrying no
+    // lot id prints the country in the next cell rather than the one after, so skipping two
+    // regardless left it with no origin at all — and `domesticForeign('')` answers F, which
+    // asserts a foreign origin the document never stated.
+    const from = core.lineNumberItemIdx + (core.itemId ? 2 : 1)
     countryOfOrigin = items.slice(from).map((t) => t.str).join(' ').trim()
   }
 

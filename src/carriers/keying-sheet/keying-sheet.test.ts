@@ -229,21 +229,21 @@ describe('the unit each commodity is keyed in', () => {
     expect(sheet.commodities[0].quantity).toBe('3')
   })
 
-  it('says so for a row too light to round to one kilogram at all', () => {
-    // Half a gramme under a kilogram code. The restated figure is itself rounded to three
-    // places, so testing *that* for being above zero excused the one row most in need of the
-    // note — the sheet printed a bare `0` beside a customs value and said nothing.
+  it('keys one for a row too light to reach a whole kilogram, and says it overstates', () => {
+    // Half a gramme under a kilogram code. A whole unit cannot hold less than one, and a `0`
+    // would key goods that are in the box as absent — so the sheet keys 1, as the SLI files 1,
+    // and says the figure is larger than the goods.
     const lines = [line({ id: 'a', classification: '9031.90.0000', netWeightKg: 0.0004, extendedValue: 90 })]
-    const row = byWeight({ sourceLineIds: ['a'], weightKg: 0.0004, reportingQuantity: 0 })
+    const row = byWeight({ sourceLineIds: ['a'], weightKg: 0.0004, reportingQuantity: 1 })
     const sheet = buildKeyingSheet('fedex-ship-manager', fixture(lines, [row]), draft(), {
       options: { columns: ['quantity', 'unitOfMeasure', 'totalValue', 'note'] },
     })
-    expect(sheet.commodities[0].quantity).toBe('0')
-    expect(sheet.commodities[0].quantityRoundedAway).toBe(true)
+    expect(sheet.commodities[0].quantity).toBe('1')
+    expect(sheet.commodities[0].quantityCaveat).toBe('minimum')
     const grid = keyingSheetToWorkbook(sheet)[0].rows.flat().join(' ')
-    expect(grid).toMatch(/rounds to 0 whole KG/)
+    expect(grid).toMatch(/less than half a KG, keyed as 1/)
     // Alongside what the column is counting, not instead of it. Being asked to decide what a
-    // `0` should say is no use without knowing the cell holds kilograms off the packing list.
+    // cell should say is no use without knowing it holds kilograms off the packing list.
     expect(grid).toMatch(/net weight in KG/)
   })
 
@@ -255,13 +255,13 @@ describe('the unit each commodity is keyed in', () => {
       line({ id: 'b', partNumber: 'BBB-2', classification: '8544.42.0000', quantity: 6, netWeightKg: 3 }),
     ]
     const rows = [
-      byWeight({ sourceLineIds: ['a'], weightKg: 0.2, reportingQuantity: 0 }),
+      byWeight({ sourceLineIds: ['a'], weightKg: 0.2, reportingQuantity: 1 }),
       sli({ sourceLineIds: ['b'], quantity: 6, reportingQuantity: 6 }),
     ]
     const sheet = buildKeyingSheet('fedex-ship-manager', fixture(lines, rows), draft())
     const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
-    expect(notes['Unit of quantity']).toMatch(/1 row\(s\) file 0 whole KG:/)
-    expect(notes['Unit of quantity']).not.toMatch(/file 0 whole in mixed units/)
+    expect(notes['Unit of quantity']).toMatch(/1 row\(s\) hold less than half a KG/)
+    expect(notes['Unit of quantity']).not.toMatch(/less than half a in mixed units/)
   })
 
   it('leaves a keying row alone where it covers only part of a commodity row', () => {
@@ -275,10 +275,11 @@ describe('the unit each commodity is keyed in', () => {
     expect(sheet.commodities[0].quantity).toBe('4')
   })
 
-  it('says so, loudly, where a row’s share rounds to nothing', () => {
-    // One kilogram between two parts: somebody has to get it. The row that does not is keying
-    // 0 against $20 of goods that are in the box, and the SLI's own zero-quantity check cannot
-    // see it — that check reads the form's rows, which file 1 and are fine.
+  it('says so, loudly, where a row’s share leaves it nothing', () => {
+    // One kilogram between two parts: somebody has to get it. The SLI files 1 for the goods
+    // and the sheet has to total what the SLI files, so the smaller part keys 0 against $20 of
+    // goods that are in the box. The SLI's own check cannot see that — it reads the form's
+    // rows, which file 1 and are fine — so the sheet has to say it itself.
     const lines = [
       line({ id: 'a', partNumber: 'AAA-1', classification: '9031.90.0000', netWeightKg: 0.9, extendedValue: 100 }),
       line({ id: 'b', partNumber: 'BBB-2', classification: '9031.90.0000', netWeightKg: 0.1, extendedValue: 20 }),
@@ -288,14 +289,14 @@ describe('the unit each commodity is keyed in', () => {
       options: { columns: ['quantity', 'unitOfMeasure', 'totalValue', 'note'] },
     })
     expect(sheet.commodities.map((c) => c.quantity)).toEqual(['1', '0'])
-    expect(sheet.commodities[0].quantityRoundedAway).toBeFalsy()
-    expect(sheet.commodities[1].quantityRoundedAway).toBe(true)
+    expect(sheet.commodities[0].quantityCaveat).toBeUndefined()
+    expect(sheet.commodities[1].quantityCaveat).toBe('shared-to-nothing')
 
     // On the row, and in the notes, because the column picker can switch the Note column off.
     const grid = keyingSheetToWorkbook(sheet)[0].rows.flat().join(' ')
-    expect(grid).toMatch(/rounds to 0 whole KG/)
+    expect(grid).toMatch(/keyed as 0 KG/)
     const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
-    expect(notes['Unit of quantity']).toMatch(/1 row\(s\) file 0 whole KG/)
+    expect(notes['Unit of quantity']).toMatch(/1 row\(s\) are keyed as 0 KG/)
 
     // The value is still on the row; a per-unit price needs units, so there is none.
     expect(sheet.commodities[0].unitValue).toBe('100.000000')
