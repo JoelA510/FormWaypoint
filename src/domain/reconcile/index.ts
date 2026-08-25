@@ -994,7 +994,8 @@ function capacityCheck(sliLines: SLILine[], rowsPerPage?: number): CheckResult[]
     {
       id: 'row-capacity',
       severity: 'info',
-      title: 'Commodity rows fit the form',
+      // Not "rows fit the form": it says so on exactly the shipments that need a second sheet.
+      title: 'Sheets the commodity table needs',
       detail:
         pages === 1
           ? `${sliLines.length} of ${rowsPerPage} available rows used, on one sheet.`

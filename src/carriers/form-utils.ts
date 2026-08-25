@@ -6,12 +6,22 @@
  * pattern-match those names, each adapter declares an explicit map and these helpers write
  * through it, recording anything that could not be written instead of throwing.
  */
-import { PDFDocument, PDFCheckBox, PDFRadioGroup, PDFTextField, type PDFForm } from 'pdf-lib'
+import { PDFDocument, PDFCheckBox, PDFRadioGroup, PDFTextField, type PDFField, type PDFForm } from 'pdf-lib'
 
 export interface WriteContext {
   form: PDFForm
   written: Record<string, string>
   warnings: string[]
+  /**
+   * Every field in the document, by name.
+   *
+   * `PDFForm.getField` walks the whole field tree and builds a wrapper for every field it
+   * passes, which was cheap while a form was one sheet with a fixed field count. Continuation
+   * pages make that count grow with the shipment, so writing row `n` costs more the more rows
+   * there are: an eleven-sheet Nippon SLI has 1032 fields and 792 row writes, and spent 2.75
+   * seconds of the browser's main thread on lookups alone. Built once here instead.
+   */
+  fields: Map<string, PDFField>
 }
 
 export async function loadForm(templateBytes: Uint8Array): Promise<{ doc: PDFDocument; form: PDFForm }> {
@@ -20,39 +30,41 @@ export async function loadForm(templateBytes: Uint8Array): Promise<{ doc: PDFDoc
 }
 
 export function createContext(form: PDFForm): WriteContext {
-  return { form, written: {}, warnings: [] }
+  const fields = new Map<string, PDFField>()
+  for (const field of form.getFields()) fields.set(field.getName(), field)
+  return { form, written: {}, warnings: [], fields }
 }
 
 /** Set a text field. A missing field is reported, never silently dropped. */
 export function setText(ctx: WriteContext, fieldName: string, value: string | null | undefined): void {
   if (value === null || value === undefined || value === '') return
-  try {
-    const field = ctx.form.getField(fieldName)
-    if (!(field instanceof PDFTextField)) {
-      ctx.warnings.push(`"${fieldName}" is not a text field; skipped.`)
-      return
-    }
-    field.setText(value)
-    ctx.written[fieldName] = value
-  } catch {
+  const field = ctx.fields.get(fieldName)
+  if (!field) {
     ctx.warnings.push(`The form has no field named "${fieldName}", so "${truncate(value)}" was not written.`)
+    return
   }
+  if (!(field instanceof PDFTextField)) {
+    ctx.warnings.push(`"${fieldName}" is not a text field; skipped.`)
+    return
+  }
+  field.setText(value)
+  ctx.written[fieldName] = value
 }
 
 /** Tick a checkbox. `false` leaves the box untouched rather than explicitly unchecking. */
 export function setCheckBox(ctx: WriteContext, fieldName: string, checked: boolean): void {
   if (!checked) return
-  try {
-    const field = ctx.form.getField(fieldName)
-    if (!(field instanceof PDFCheckBox)) {
-      ctx.warnings.push(`"${fieldName}" is not a checkbox; skipped.`)
-      return
-    }
-    field.check()
-    ctx.written[fieldName] = 'checked'
-  } catch {
+  const field = ctx.fields.get(fieldName)
+  if (!field) {
     ctx.warnings.push(`The form has no checkbox named "${fieldName}".`)
+    return
   }
+  if (!(field instanceof PDFCheckBox)) {
+    ctx.warnings.push(`"${fieldName}" is not a checkbox; skipped.`)
+    return
+  }
+  field.check()
+  ctx.written[fieldName] = 'checked'
 }
 
 /**
@@ -62,21 +74,21 @@ export function setCheckBox(ctx: WriteContext, fieldName: string, checked: boole
  * group with two options, so selecting "no" means writing to a different field than "yes".
  */
 export function selectRadio(ctx: WriteContext, fieldName: string, option: string): void {
-  try {
-    const field = ctx.form.getField(fieldName)
-    if (!(field instanceof PDFRadioGroup)) {
-      ctx.warnings.push(`"${fieldName}" is not a radio group; skipped.`)
-      return
-    }
-    if (!field.getOptions().includes(option)) {
-      ctx.warnings.push(`"${fieldName}" has no option "${option}" (has: ${field.getOptions().join(', ')}).`)
-      return
-    }
-    field.select(option)
-    ctx.written[fieldName] = option
-  } catch {
+  const field = ctx.fields.get(fieldName)
+  if (!field) {
     ctx.warnings.push(`The form has no radio group named "${fieldName}".`)
+    return
   }
+  if (!(field instanceof PDFRadioGroup)) {
+    ctx.warnings.push(`"${fieldName}" is not a radio group; skipped.`)
+    return
+  }
+  if (!field.getOptions().includes(option)) {
+    ctx.warnings.push(`"${fieldName}" has no option "${option}" (has: ${field.getOptions().join(', ')}).`)
+    return
+  }
+  field.select(option)
+  ctx.written[fieldName] = option
 }
 
 /** Which of the adapter's expected fields the loaded PDF is missing. */

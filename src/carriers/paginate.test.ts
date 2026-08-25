@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFRawStream, PDFString, decodePDFRawStream } from 'pdf-lib'
+import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFRawStream, PDFString, decodePDFRawStream, type PDFPage } from 'pdf-lib'
 import { pagesNeeded, paginateForm, rowsByPage, stampPageNumbers } from './paginate'
 import { NIPPON_ROW_ROOTS } from './nippon-express/fields'
 import { CEVA_COMMODITY_FIELDS } from './ceva/fields'
@@ -348,10 +348,88 @@ describe('what the template carries that a filed form should not', () => {
   })
 })
 
+/**
+ * Two shapes neither carrier template has.
+ *
+ * Everything else here runs against the real blanks, because what is being tested is a
+ * property of those files. These two are the opposite case: the code has to behave when a
+ * template revision brings a shape the current ones do not, and the only way to put one in
+ * front of it is to build it.
+ */
+describe('shapes the shipped templates do not have', () => {
+  async function builtForm(extra: (doc: PDFDocument, page: PDFPage) => void = () => {}): Promise<Uint8Array> {
+    const doc = await PDFDocument.create()
+    const page = doc.addPage([300, 300])
+    const form = doc.getForm()
+    const rows = form.createTextField('Row')
+    rows.addToPage(page, { x: 10, y: 200, width: 200, height: 20 })
+    const shared = form.createTextField('Consignee')
+    shared.addToPage(page, { x: 10, y: 160, width: 200, height: 20 })
+    extra(doc, page)
+    return doc.save()
+  }
+
+  it('leaves a dropdown’s list of items alone', async () => {
+    // `/Opt` means one entry per kid on a radio group and the list of selectable items on a
+    // choice field. Extending it on sight would offer the filer the first item once per sheet,
+    // in a box they pick a declaration value from.
+    const bytes = await builtForm((doc, page) => {
+      const terms = doc.getForm().createDropdown('Terms')
+      terms.setOptions(['FOB', 'CIF', 'DAP'])
+      terms.addToPage(page, { x: 10, y: 120, width: 200, height: 20 })
+    })
+    const { doc, form } = await paginateForm(bytes, 3, ['Row'])
+    const terms = form.getDropdown('Terms')
+    expect(terms.getOptions()).toEqual(['FOB', 'CIF', 'DAP'])
+    // Shared like any other box: one field, a widget on each sheet.
+    expect(terms.acroField.getWidgets()).toHaveLength(3)
+    expect(doc.getPageCount()).toBe(3)
+  })
+
+  it('leaves an annotation that is not a form widget out of the field tree', async () => {
+    // A link in the footer is the ordinary case. Walked as a field it resolves to the empty
+    // name, is split into an orphan dictionary nothing registers, and every sheet’s copy is
+    // parented onto it.
+    const bytes = await builtForm((doc, page) => {
+      page.node.addAnnot(
+        doc.context.register(
+          doc.context.obj({ Type: 'Annot', Subtype: 'Link', Rect: [10, 10, 100, 30], Border: [0, 0, 0] }),
+        ),
+      )
+    })
+    const { doc, form, fieldName } = await paginateForm(bytes, 2, ['Row'])
+    expect(names(doc).sort()).toEqual(['Consignee', 'Row', 'Row__p2'])
+    expect(strandedFields(doc)).toEqual([])
+
+    // The link is still a link: nothing adopted it into a field, on either sheet.
+    for (const page of doc.getPages()) {
+      const annots = page.node.Annots()!
+      const links = []
+      for (let i = 0; i < annots.size(); i++) {
+        const annot = doc.context.lookup(annots.get(i), PDFDict)
+        if (String(annot.get(PDFName.of('Subtype'))) === '/Link') links.push(annot)
+      }
+      expect(links, `page ${doc.getPages().indexOf(page)}`).toHaveLength(1)
+      expect(links[0].get(PDFName.of('Parent'))).toBeUndefined()
+    }
+
+    // And the form still works either side of it.
+    form.getTextField(fieldName('Row', 0)).setText('sheet one')
+    form.getTextField(fieldName('Row', 1)).setText('sheet two')
+    form.getTextField('Consignee').setText('both sheets')
+    const back = (await reload(doc)).getForm()
+    expect(back.getTextField('Row').getText()).toBe('sheet one')
+    expect(back.getTextField('Row__p2').getText()).toBe('sheet two')
+    expect(back.getTextField('Consignee').acroField.getWidgets()).toHaveLength(2)
+  })
+})
+
 describe('numbering the sheets', () => {
-  it('numbers each sheet where there is more than one', async () => {
+  it('numbers each sheet where there is more than one, without being asked', async () => {
+    // `paginateForm` does this itself. Nothing about a filled form shows an unnumbered
+    // continuation sheet — the field values read back identically — so an adapter that had to
+    // remember a second call would ship sheets with no way to tell which is which.
     const { doc } = await paginateForm(template('ceva-sli.pdf'), 3, CEVA_COMMODITY_FIELDS)
-    await stampPageNumbers(doc)
     const reloaded = await reload(doc)
     expect(reloaded.getPageCount()).toBe(3)
     expect(stamps(reloaded)).toEqual(['Page 1 of 3', 'Page 2 of 3', 'Page 3 of 3'])
@@ -361,9 +439,18 @@ describe('numbering the sheets', () => {
     // A one-page form is the form the carrier issued, and "Page 1 of 1" printed on it is this
     // tool leaving a mark for no reason. Nothing drawn, so nothing embedded either.
     const { doc } = await paginateForm(template('ceva-sli.pdf'), 1, CEVA_COMMODITY_FIELDS)
+    expect(stamps(await reload(doc))).toEqual([])
+    // Nor does asking again change anything: it embeds no font and draws no stream, so a form
+    // the carrier issued comes back the size it went in.
     const before = (await doc.save()).length
     await stampPageNumbers(doc)
-    expect(stamps(await reload(doc))).toEqual([])
     expect((await doc.save()).length).toBeLessThanOrEqual(before + 64)
+  })
+
+  it('stamps a form filled through the adapter, on the sheets the shipment needed', async () => {
+    // Through the door the app actually uses, so nothing between the pagination and the saved
+    // bytes can drop it.
+    const { doc } = await paginateForm(template('nippon-express-sli.pdf'), 2, NIPPON_ROW_ROOTS)
+    expect(stamps(await reload(doc))).toEqual(['Page 1 of 2', 'Page 2 of 2'])
   })
 })

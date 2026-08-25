@@ -17,8 +17,21 @@ import type { SLILine } from '../domain/types'
  * is a missing weight or a wrong classification.
  */
 export function basisNote(line: SLILine, byChoice: boolean): string {
-  if (!line.scheduleBUnits.length) return 'Schedule B unit unknown — filing the invoice figure.'
   if (line.reportingBasis === 'none') return 'Schedule B reports this code with no quantity.'
+  // Whether the box was rounded, asked of the rule that would have rounded it rather than
+  // inferred from the figures on either side. The two are not comparable on a converted row —
+  // 4000 GM and 4 KG differ in every digit and in the unit — so comparing them said "filed as
+  // whole KG" about a conversion that came out exact.
+  //
+  // Worked out before the branches below and appended to whichever one answers, because a row
+  // is rounded or not independently of what Schedule B has to say about its unit. A row whose
+  // commodity number is not in the dataset at all still files whole kilograms, and saying only
+  // "filing the invoice figure" beside a `7` the invoice does not carry is this screen telling
+  // the filer the box matches a document it does not match.
+  const rounded = wasRounded(line)
+  const whole = rounded ? ` Invoiced as ${line.quantity} ${line.sourceUom}, filed as whole ${line.reportingUom}.` : ''
+
+  if (!line.scheduleBUnits.length) return `Schedule B unit unknown — filing the invoice figure.${whole}`
   // Compared canonically. `PCS` and `NO` are one unit, and a row filing the document's
   // spelling of the unit its code requires has not departed from Schedule B — the check
   // beside this panel compares the same way and would say the row passes.
@@ -26,14 +39,9 @@ export function basisNote(line: SLILine, byChoice: boolean): string {
   if (!line.scheduleBUnits.some((unit) => canonicalUnit(unit) === filed)) {
     const required = line.scheduleBUnits.join(' or ')
     return byChoice
-      ? `Filed in ${line.reportingUom} by your choice; Schedule B requires ${required}.`
-      : `Schedule B requires ${required}; this row can only state ${line.reportingUom}.`
+      ? `Filed in ${line.reportingUom} by your choice; Schedule B requires ${required}.${whole}`
+      : `Schedule B requires ${required}; this row can only state ${line.reportingUom}.${whole}`
   }
-  // Whether the box was rounded, asked of the rule that would have rounded it rather than
-  // inferred from the figures on either side. The two are not comparable on a converted row —
-  // 4000 GM and 4 KG differ in every digit and in the unit — so comparing them said "filed as
-  // whole KG" about a conversion that came out exact.
-  const rounded = wasRounded(line)
   if (line.reportingBasis === 'net-weight') {
     // Named alongside the figure where the two differ. A row showing `4 KG` beside a net
     // weight of 4.499 kg looks like one of them is a typo until this says which is which.

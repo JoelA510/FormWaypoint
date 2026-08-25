@@ -59,6 +59,27 @@ describe('why a filed quantity is what it is', () => {
     expect(basisNote(grams, false)).toBe('Converted from 7.438 KG.')
   })
 
+  it('says a figure was rounded even where it cannot say what the unit should be', () => {
+    // A commodity number the Census file does not list still files whole kilograms. This is
+    // the only account anywhere of the box holding 7 against an invoice reading 7.438, and it
+    // used to return before it had asked whether there had been any rounding at all.
+    expect(basisNote(row({ scheduleBUnits: [] }), false)).toBe(
+      'Schedule B unit unknown — filing the invoice figure. Invoiced as 7.438 KG, filed as whole KG.',
+    )
+    // And where the unit is off the required one, by choice or by limit.
+    const off = row({ scheduleBUnits: ['NO'] })
+    expect(basisNote(off, true)).toBe(
+      'Filed in KG by your choice; Schedule B requires NO. Invoiced as 7.438 KG, filed as whole KG.',
+    )
+    expect(basisNote(off, false)).toMatch(/can only state KG\. Invoiced as 7\.438 KG, filed as whole KG\./)
+  })
+
+  it('adds nothing to those branches where no rounding happened', () => {
+    expect(basisNote(row({ scheduleBUnits: [], quantity: 7 }), false)).toBe(
+      'Schedule B unit unknown — filing the invoice figure.',
+    )
+  })
+
   it('still tells a unit that was chosen away from one that was not reachable', () => {
     const off = row({ scheduleBUnits: ['KG'], reportingUom: 'PCS', sourceUom: 'PCS', quantity: 12, reportingQuantity: 12 })
     expect(basisNote(off, true)).toMatch(/by your choice/)

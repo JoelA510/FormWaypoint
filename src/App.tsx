@@ -351,9 +351,12 @@ export function App() {
       unitWeightsByPart,
       itemsByPart,
       reportingUnits,
-      maxRows: adapter.maxCommodityRows,
+      // Only where a form is actually produced. A keyed carrier borrows the Nippon adapter as
+      // scaffolding for the draft, and reporting how many sheets its commodity table takes
+      // describes a document this run does not generate.
+      maxRows: keyedCarrier ? undefined : adapter.maxCommodityRows,
     })
-  }, [parsed, scheduleB, settings.eccn, settings.sme, settings.license, overrides, codesByPart, unitWeightsByPart, itemsByPart, reportingUnits, adapter])
+  }, [parsed, scheduleB, settings.eccn, settings.sme, settings.license, overrides, codesByPart, unitWeightsByPart, itemsByPart, reportingUnits, adapter, keyedCarrier])
 
   const draft = useMemo(
     () => (reconciliation ? buildDraft(reconciliation, profile, settings, adapter) : null),

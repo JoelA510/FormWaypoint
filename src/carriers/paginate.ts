@@ -166,22 +166,41 @@ function refsUnder(ctx: PDFContext, ref: PDFRef, out: PDFRef[]): PDFRef[] {
 }
 
 /**
- * Keep a radio group's `/Opt` array as long as its `/Kids`.
+ * Keep a *button* field's `/Opt` array as long as its `/Kids`.
  *
- * `/Opt[i]` is defined as the export value of `Kids[i]` (PDF 32000-1 §12.7.4.2.1), so a field
- * that gains widgets without gaining entries leaves every widget on a continuation sheet
+ * On a radio group `/Opt[i]` is the export value of `Kids[i]` (PDF 32000-1 §12.7.4.2.1), so a
+ * field that gains widgets without gaining entries leaves every widget on a continuation sheet
  * without one — and a reader that resolves a tick by kid index gets nothing back for a
- * selection made on page 2. The incoming field is a copy of this one, so its own entries are
- * the right ones to append; the field's own are the fallback.
+ * selection made on page 2.
+ *
+ * On a *choice* field the same key means something else entirely: it is the list of items the
+ * dropdown offers, and appending to it would offer the filer the first item once per sheet.
+ * Hence the field type is checked rather than the presence of the key. Neither template has a
+ * choice field today; that is the point — a revision that adds one should not quietly corrupt
+ * its item list.
+ *
+ * `entries` are the incoming copy's own, read before its field-level keys were stripped.
  */
-function extendOptions(ctx: PDFContext, field: PDFDict, incoming: PDFDict, count: number): void {
+function extendOptions(ctx: PDFContext, field: PDFDict, entries: PDFArray | undefined, count: number): void {
+  if (fieldType(ctx, field) !== 'Btn') return
   const options = ctx.lookupMaybe(field.get(PDFName.of('Opt')), PDFArray)
   if (!options) return
-  const source = ctx.lookupMaybe(incoming.get(PDFName.of('Opt')), PDFArray) ?? options
+  const source = entries ?? options
   for (let i = 0; i < count; i++) {
     const entry = i < source.size() ? source.get(i) : undefined
     if (entry !== undefined) options.push(entry)
   }
+}
+
+/** A field's type, which may be stated on it or inherited from a node above it. */
+function fieldType(ctx: PDFContext, dict: PDFDict): string | null {
+  let node: PDFDict | undefined = dict
+  for (let hops = 0; node && hops < 32; hops++) {
+    const type = node.get(PDFName.of('FT'))
+    if (type instanceof PDFName) return type.decodeText()
+    node = ctx.lookupMaybe(node.get(PDFName.of('Parent')), PDFDict)
+  }
+  return null
 }
 
 export interface PaginatedForm {
@@ -262,7 +281,10 @@ export async function paginateForm(
 
   const fieldName = (templateName: string, pageIndex: number): string => {
     if (pageIndex === 0) return templateName
-    const root = [...roots].find((r) => templateName === r || templateName.startsWith(`${r}.`))
+    // Scanned over the array the caller passed rather than the set: this runs once per field
+    // per row per page — 729 times on an eighty-row Nippon shipment — and spreading a set into
+    // a fresh array to scan it allocated one throwaway array each time.
+    const root = perPageRoots.find((r) => templateName === r || templateName.startsWith(`${r}.`))
     if (!root) return templateName
     return pageSuffixed(root, pageIndex) + templateName.slice(root.length)
   }
@@ -344,6 +366,10 @@ export async function paginateForm(
           kids = ctx.obj([]) as PDFArray
           field.dict.set(PDFName.of('Kids'), kids)
         }
+        // Read before anything is stripped: `Opt` is one of the field-level keys the merged
+        // branch below deletes, and reading it afterwards silently fell back to the field's
+        // own entries rather than the copy's.
+        const entries = ctx.lookupMaybe(node.dict.get(PDFName.of('Opt')), PDFArray)
         const incoming = kidsOf(ctx, node.dict)
         if (incoming) {
           for (let i = 0; i < incoming.size(); i++) {
@@ -351,13 +377,13 @@ export async function paginateForm(
             kids.push(incoming.get(i))
             adopted.add(incoming.get(i).toString())
           }
-          extendOptions(ctx, field.dict, node.dict, incoming.size())
+          extendOptions(ctx, field.dict, entries, incoming.size())
         } else {
           for (const key of FIELD_ONLY) node.dict.delete(PDFName.of(key))
           node.dict.set(PDFName.of('Parent'), field.ref)
           kids.push(node.ref)
           adopted.add(node.ref.toString())
-          extendOptions(ctx, field.dict, node.dict, 1)
+          extendOptions(ctx, field.dict, entries, 1)
         }
       }
 
@@ -374,6 +400,7 @@ export async function paginateForm(
     }
   }
 
+  await stampPageNumbers(doc)
   return { doc, form: doc.getForm(), pageCount: sheets, fieldName }
 }
 
@@ -389,7 +416,15 @@ function rootsOnPage(ctx: PDFContext, doc: PDFDocument, pageIndex: number): Retu
   if (!annots) return []
   const found = new Map<string, ReturnType<typeof rootOf>>()
   for (let i = 0; i < annots.size(); i++) {
-    const root = rootOf(ctx, asRef(annots.get(i)))
+    const ref = asRef(annots.get(i))
+    // Widgets only. A page can carry links, notes and stamps too, and those are annotations
+    // without a field above them: walked as fields they all resolve to the empty name, get
+    // split into orphan field dictionaries nothing registers, and the last one on page 1 wins
+    // the name the rest of them share. Neither template carries one — a footer URL in a
+    // revision is all it would take.
+    const subtype = ctx.lookup(ref, PDFDict).get(PDFName.of('Subtype'))
+    if (!(subtype instanceof PDFName) || subtype.decodeText() !== 'Widget') continue
+    const root = rootOf(ctx, ref)
     if (!found.has(root.ref.toString())) found.set(root.ref.toString(), root)
   }
   return [...found.values()]
@@ -411,6 +446,13 @@ function pageSuffixed(root: string, pageIndex: number): string {
  *
  * Only where there is more than one: a single-page form is the form the carrier issued, and
  * "Page 1 of 1" printed on it is this tool leaving a mark for no reason.
+ *
+ * Called by `paginateForm` itself rather than left to each adapter. Nothing about a filled
+ * form shows an unnumbered continuation sheet — the field values read back identically — so a
+ * third carrier that called `paginateForm` and forgot this would ship sheets with no way to
+ * tell which is which, and no test reading field values would notice.
+ *
+ * Exported for the tests, which check what was drawn rather than what was filled.
  */
 export async function stampPageNumbers(doc: PDFDocument): Promise<void> {
   const pages = doc.getPages()

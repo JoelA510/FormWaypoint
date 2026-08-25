@@ -32,9 +32,8 @@ function perPage(rowsPerPage: number): number {
  */
 export function rowsByPage<T>(rows: T[], rowsPerPage: number): T[][] {
   const size = perPage(rowsPerPage)
+  const count = pagesNeeded(rows.length, size)
   const pages: T[][] = []
-  for (let i = 0; i < pagesNeeded(rows.length, size); i++) {
-    pages.push(rows.slice(i * size, (i + 1) * size))
-  }
+  for (let i = 0; i < count; i++) pages.push(rows.slice(i * size, (i + 1) * size))
   return pages
 }

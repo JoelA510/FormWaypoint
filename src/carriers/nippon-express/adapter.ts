@@ -1,6 +1,6 @@
 import type { CarrierAdapter, FillResult, SliDraft, TemplateVerification } from '../types'
 import { NIPPON_ROW_ROOTS } from './fields'
-import { paginateForm, rowsByPage, stampPageNumbers } from '../paginate'
+import { paginateForm, rowsByPage } from '../paginate'
 import {
   createContext,
   findMissingFields,
@@ -186,6 +186,7 @@ export function createNipponExpressAdapter(options: NipponOptions = {}): Carrier
 
       // --- Commodity rows --------------------------------------------------
       pages.forEach((rows, pageIndex) => {
+        const on = (field: string) => fieldName(field, pageIndex)
         rows.forEach((line, i) => {
           const row = NIPPON_ROWS[i]
           // The row's position in the shipment, not on its sheet: a per-row policy figure is
@@ -194,8 +195,6 @@ export function createNipponExpressAdapter(options: NipponOptions = {}): Carrier
           const weight = options.useGrossWeight
             ? (options.grossWeightByRow?.[shipmentRow] ?? line.weightKg)
             : line.weightKg
-          const on = (field: string) => fieldName(field, pageIndex)
-
           setText(ctx, on(row.df), line.domesticForeign)
           setText(ctx, on(row.scheduleB), line.scheduleB)
           // The quantity in the unit the commodity number is reported in, which is not always
@@ -213,7 +212,6 @@ export function createNipponExpressAdapter(options: NipponOptions = {}): Carrier
           setText(ctx, on(row.license), line.license)
         })
       })
-      await stampPageNumbers(doc)
 
       // --- Signature block -------------------------------------------------
       // Boxes 33 and 34 are signature fields and are deliberately left for a human.

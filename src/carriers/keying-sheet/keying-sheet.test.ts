@@ -229,6 +229,37 @@ describe('the unit each commodity is keyed in', () => {
     expect(sheet.commodities[0].quantity).toBe('3')
   })
 
+  it('says so for a row too light to round to one kilogram at all', () => {
+    // Half a gramme under a kilogram code. The restated figure is itself rounded to three
+    // places, so testing *that* for being above zero excused the one row most in need of the
+    // note — the sheet printed a bare `0` beside a customs value and said nothing.
+    const lines = [line({ id: 'a', classification: '9031.90.0000', netWeightKg: 0.0004, extendedValue: 90 })]
+    const row = byWeight({ sourceLineIds: ['a'], weightKg: 0.0004, reportingQuantity: 0 })
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(lines, [row]), draft(), {
+      options: { columns: ['quantity', 'unitOfMeasure', 'totalValue', 'note'] },
+    })
+    expect(sheet.commodities[0].quantity).toBe('0')
+    expect(sheet.commodities[0].quantityRoundedAway).toBe(true)
+    expect(keyingSheetToWorkbook(sheet)[0].rows.flat().join(' ')).toMatch(/rounds to 0 whole KG/)
+  })
+
+  it('names the unit those rows are in, not the sheet’s mixed-unit label', () => {
+    // The sheet also holds a row filed in pieces, which makes the sheet-wide quantity label
+    // the phrase "in mixed units" — and "file 0 whole in mixed units" is not a sentence.
+    const lines = [
+      line({ id: 'a', partNumber: 'AAA-1', classification: '9031.90.0000', netWeightKg: 0.2, extendedValue: 20 }),
+      line({ id: 'b', partNumber: 'BBB-2', classification: '8544.42.0000', quantity: 6, netWeightKg: 3 }),
+    ]
+    const rows = [
+      byWeight({ sourceLineIds: ['a'], weightKg: 0.2, reportingQuantity: 0 }),
+      sli({ sourceLineIds: ['b'], quantity: 6, reportingQuantity: 6 }),
+    ]
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(lines, rows), draft())
+    const notes = Object.fromEntries(keyingSheetToWorkbook(sheet)[2].rows.map((r) => [String(r[0]), String(r[1])]))
+    expect(notes['Unit of quantity']).toMatch(/1 row\(s\) file 0 whole KG:/)
+    expect(notes['Unit of quantity']).not.toMatch(/file 0 whole in mixed units/)
+  })
+
   it('leaves a keying row alone where it covers only part of a commodity row', () => {
     // Line `c` is on the form's row and on no keying row here, so there is no total the two
     // tables agree about — handing the one keying row the whole row's figure would key `c`'s
