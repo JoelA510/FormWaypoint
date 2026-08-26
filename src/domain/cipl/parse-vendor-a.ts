@@ -58,10 +58,10 @@ const SEQUENCE = /^\d{1,4}$/
  * that happens to be four digits — never to decide whether a block is there at all. A page
  * printed at another scale must still parse.
  *
- * The sequence, where there is one, sits at x=246-252; the packing list's part number at 360.
+ * The sequence, where there is one, sits at x=246-252; the packing list's part number at 360,
+ * which is why a cell left of 300 on a start row is the sequence's and not the part's.
  */
 const SEQUENCE_COLUMN_MAX = 300
-const PACKING_PART_MIN = 300
 
 /** Left-hand label column on header pages. */
 const LEFT_LABEL_MAX = 300
@@ -936,10 +936,22 @@ function figureRowIn(rows: TextRow[], from: number, to: number): number {
   return -1
 }
 
-/** The sequence a block's start row states, or null where the layout printed none. */
+/**
+ * Whether the layout printed a sequence cell on this start row at all.
+ *
+ * An order carrying one line prints none, and the cells after it close up — so this is what
+ * decides where the part number sits, quite apart from whether the cell's contents parse as a
+ * sequence.
+ */
+function hasSequenceCell(start: TextRow): boolean {
+  const third = start.items[2]
+  return Boolean(third && third.x < SEQUENCE_COLUMN_MAX)
+}
+
+/** The sequence a block's start row states, or null where it states none this can read. */
 function sequenceCell(start: TextRow): string | null {
   const third = start.items[2]
-  if (!third || third.x >= SEQUENCE_COLUMN_MAX || !SEQUENCE.test(third.str)) return null
+  if (!hasSequenceCell(start) || !third || !SEQUENCE.test(third.str)) return null
   return third.str
 }
 
@@ -1226,13 +1238,12 @@ function parsePackingBlock(
   // Counted rather than located by absolute column, because the columns are one document's
   // measurements and the shape — order, order, maybe sequence, part, the rest — is the format.
   const startItems = block[0].items
-  // Its own column where the layout puts it there, and counted past the order pair and the
-  // sequence otherwise. Counting alone trusts `sequenceCell` to have recognised the sequence,
-  // and a sequence of five digits or one printed outside its column is not recognised — which
-  // made the sequence the part number and the part number the description. The part number is
-  // a join key and the key every per-part table is held under.
-  const column = startItems.findIndex((i) => i.x >= PACKING_PART_MIN)
-  const at = column === -1 ? (core.sequence ? 3 : 2) : column
+  // Counted past the order pair, and past the sequence cell where the layout printed one. It
+  // is *the cell* that decides the offset, not whether its contents parsed as a sequence: a
+  // sequence of five digits fails the shape test but still occupies the column, and treating
+  // it as absent made the sequence the part number and the part number the description. The
+  // part number is a join key and the key every per-part table is held under.
+  const at = hasSequenceCell(block[0]) ? 3 : 2
   const partNumber = startItems[at]?.str ?? ''
   const description = startItems.slice(at + 1).map((i) => i.str).join(' ').trim()
 

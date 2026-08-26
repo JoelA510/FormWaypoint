@@ -8,7 +8,7 @@ import { basisNote } from './quantity-basis'
 import { partKey } from '../domain/part-key'
 import type { OverrideRecord } from '../store/local-store'
 import type { CheckResult, MergedLine, ParsedCipl, Reconciliation, SLILine } from '../domain/types'
-import type { RowFigures } from '../domain/reconcile'
+import { FIGURE_ON_LINE, type RowFigures } from '../domain/reconcile'
 
 const SEVERITY_TONE: Record<CheckResult['severity'], Tone> = {
   blocking: 'block',
@@ -199,6 +199,11 @@ export function CommodityTable({
    * column to zero places printed `0` beside a total that included it.
    */
   const figure = (line: SLILine, field: keyof RowFigures, decimals: number, label: string) => {
+    // Displayed to at least `decimals` places; committed at the places the figure is actually
+    // filed at, which is not the same number. The invoice-quantity column shows whole numbers,
+    // and committing at *that* precision rounded a typed `0.3` to `0` — filing a quantity box
+    // that declares the goods absent, on the one column whose figures are counts.
+    const places = FIGURE_ON_LINE[field].decimals
     const entered = rowFigures[line.rowKey]?.[field]
     // The documents' own figure, which is the row's own until something is entered over it.
     const fromDocument = documentFigures.get(`${line.rowKey}:${field}`) ?? line[field]
@@ -214,7 +219,7 @@ export function CommodityTable({
         // form. The reconciliation rounds an entered figure to its field's places before
         // sharing it out; keeping the raw text here left `999.999` on screen, in a box marked
         // as an override, beside a declaration filing 1000.
-        decimals={decimals}
+        decimals={places}
         // Typing the document's own figure back in is not an override, so it is not held as
         // one. The reconciliation already declines to report it; a box left marked amber for a
         // figure the checks say nobody entered is the two disagreeing about which numbers on

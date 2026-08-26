@@ -22,7 +22,7 @@ import {
   screenCode,
   type ScheduleBIndex,
 } from '../schedule-b'
-import { canRestate, filedAtMinimum, resolveReportingQuantity, roundPrecise } from '../units'
+import { canRestate, filedAtMinimum, filedWhole, resolveReportingQuantity, roundPrecise } from '../units'
 import { MAX_SHEETS, pagesNeeded } from '../../lib/pagination'
 import { largestRemainder, placesFor } from '../../lib/apportion'
 import type { ItemLibraryEntry } from '../item-library'
@@ -259,7 +259,7 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
   // none of them is this app's to make.
   // One rule, shared with the review screen and the keying sheet, so the three surfaces cannot
   // describe the same row differently.
-  const atMinimum = sliLines.filter(
+  const overstated = sliLines.filter(
     (line) =>
       line.reportingBasis !== 'none' &&
       filedAtMinimum(
@@ -268,6 +268,15 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
         line.reportingQuantity,
       ),
   )
+  // The floor raises a row that holds *something*. A row whose own figure is nothing — a
+  // kilogram-invoiced line printing a zero count, which the document is entitled to do for a
+  // backordered row — still files a zero, and a quantity box reading `0` on a signed
+  // declaration says the goods are not there. Named beside the overstated ones because what
+  // the filer has to do about them is the same: decide what the box should say.
+  const understated = sliLines.filter(
+    (line) => line.reportingBasis !== 'none' && line.reportingQuantity === 0 && filedWhole(line.reportingUom),
+  )
+  const atMinimum = [...overstated, ...understated]
 
   const checks: CheckResult[] = [
     { id: 'set-selection', severity: 'info', title: 'Controlling document set', detail: reason, passed: true },
@@ -286,12 +295,18 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
       id: 'quantities-overstated',
       severity: 'warning',
       title: 'No commodity row files more than it holds',
-      detail: atMinimum.length
-        ? `${atMinimum.length} row(s) hold less than half a unit and are filed as 1 ` +
+      detail: understated.length
+        ? `${understated.length} row(s) file a quantity of 0 (${understated.map(overstatedFrom).join(', ')})` +
+          (overstated.length ? `, and ${overstated.length} file 1 for less than half a unit` : '') +
+          '. A whole unit cannot hold less than one, so a row holding something files 1 and overstates it — ' +
+          'but a row holding nothing files 0, and a zero on a signed declaration declares the goods absent. ' +
+          'Decide what those boxes should say before signing.'
+        : overstated.length
+        ? `${overstated.length} row(s) hold less than half a unit and are filed as 1 ` +
           // Whichever figure was rounded up, and in whichever unit. A row invoiced in grams
           // under a kilogram code converts without a stated weight, and printing `at 0 kg`
           // about it sent the filer to look for a weight the document never had.
-          `(${atMinimum.map(overstatedFrom).join(', ')}). A quantity in one of these units is filed as a whole ` +
+          `(${overstated.map(overstatedFrom).join(', ')}). A quantity in one of these units is filed as a whole ` +
           'number of them and a zero would declare the goods absent, so one is the least wrong figure ' +
           'available — but it overstates these rows. Decide what the box should say before signing.'
         // Not "no row files zero": the eight codes Schedule B files with no quantity at all
@@ -350,8 +365,16 @@ interface EnteredFigure {
   now: number
 }
 
-/** Where a commodity row's figures live on the invoice lines that make it up. */
-const FIGURE_ON_LINE = {
+/**
+ * Where a commodity row's figures live on the invoice lines that make it up, and the places
+ * each is held to.
+ *
+ * Exported because the box that offers a figure has to commit at the precision the figure is
+ * filed at. Left to the column's *display* precision, the invoice-quantity box — which shows
+ * whole numbers — rounded a typed `0.3` to `0` and filed a quantity box declaring the goods
+ * absent.
+ */
+export const FIGURE_ON_LINE = {
   quantity: { field: 'quantity', decimals: 3 },
   weightKg: { field: 'netWeightKg', decimals: 3 },
   valueUsd: { field: 'extendedValue', decimals: 2 },
@@ -406,8 +429,7 @@ export function applyRowFigures(
       if (now === was) continue
       applied.push({ row, field: key, was, now })
 
-      const held = lines.reduce((sum, line) => sum + (line[field] ?? 0), 0)
-      const shares = lines.map((line) => (held > 0 ? ((line[field] ?? 0) / held) * now : now / lines.length))
+      const shares = shareOut(lines, field, now)
       // Enough places to state every share as something. A gramme over five lines cannot be
       // held at the three a kilogram figure normally keeps: four of the five would round to
       // nothing, and a zero net weight on a line carrying goods is what the blocking weight
@@ -428,6 +450,37 @@ export function applyRowFigures(
     }
   }
   return applied
+}
+
+/**
+ * How an entered row figure divides over the lines beneath it.
+ *
+ * Three cases, and the middle one is what the feature exists for:
+ *
+ *   - **Some lines carry the figure and some do not.** The ones that do keep exactly what the
+ *     document printed, and the difference goes to the ones that do not, split evenly. A
+ *     packing list missing one line's weight is corrected by supplying the row total, and
+ *     scaling every line to reach it would restate figures the document did state — the
+ *     printed 2 kg becoming 5 because the missing line was never counted.
+ *   - **Every line carries it.** Shared in proportion to what each holds, which preserves
+ *     their relationship to one another.
+ *   - **None does.** Split evenly; there is no ratio to preserve.
+ *
+ * The first case falls back to the second where the entered figure is *less* than the lines
+ * already account for: there is no share left to give, and taking the difference off the
+ * stated lines is the only division that reaches the figure.
+ */
+function shareOut(lines: MergedLine[], field: 'quantity' | 'netWeightKg' | 'extendedValue', target: number): number[] {
+  const stated = lines.map((line) => line[field] != null)
+  const held = lines.reduce((sum, line) => sum + (line[field] ?? 0), 0)
+  const missing = stated.filter((has) => !has).length
+
+  if (missing && missing < lines.length && held <= target) {
+    const each = (target - held) / missing
+    return lines.map((line, i) => (stated[i] ? (line[field] as number) : each))
+  }
+  if (held > 0) return lines.map((line) => ((line[field] ?? 0) / held) * target)
+  return lines.map(() => target / lines.length)
 }
 
 /** What a replaced figure is called on the review screen. */

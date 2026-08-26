@@ -71,25 +71,39 @@ describe('a figure entered against a commodity row', () => {
     expect(lines.reduce((sum, l) => sum + (l.extendedValue ?? 0), 0)).toBeCloseTo(doubled, 2)
   })
 
-  it('splits evenly over a row that holds nothing to be proportional to', async () => {
-    // The case it exists for: a packing list that omitted a weight, so there is no ratio
-    // between the lines to preserve. Built by zeroing the row first — one `rowFigures` object
-    // cannot hold two entries for one row, and writing it as two computed keys of the same
-    // string silently kept only the second, so this test used to prove the proportional
-    // branch while claiming the even one.
-    const target = run().sliLines.find((l) => l.sourceLineIds.length > 1)!
-    const zeroed = run({ rowFigures: { [target.rowKey]: { weightKg: 0 } } })
-    const emptied = zeroed.mergedLines.filter((l) => target.sourceLineIds.includes(l.id))
-    expect(emptied.every((l) => l.netWeightKg === 0)).toBe(true)
+  it('gives the whole difference to the line the packing list left out', async () => {
+    // The case it exists for, and the one the proportional rule got wrong: some lines carry a
+    // weight and one does not. Scaling every line to reach the entered total would restate
+    // figures the document *did* state — a printed 2 kg becoming 5 because the missing line
+    // was never counted. The stated lines keep what they say; the difference goes to the rest.
+    const lines = [
+      { id: 'a', partNumber: 'P-1', quantity: 1, netWeightKg: 2 },
+      { id: 'b', partNumber: 'P-2', quantity: 1, netWeightKg: undefined },
+    ] as unknown as MergedLine[]
+    const rows = [{ rowKey: 'a+b', sourceLineIds: ['a', 'b'], weightKg: 2 }] as unknown as SLILine[]
+    applyRowFigures(lines, rows, { 'a+b': { weightKg: 5 } })
+    expect(lines.map((l) => l.netWeightKg)).toEqual([2, 3])
+  })
 
-    const after = reconcile(
-      { ...document, lines: document.lines },
-      scheduleB,
-      { ...CONTROLLED, rowFigures: { [target.rowKey]: { weightKg: 3 } } },
-    )
-    // Proportional where there is a ratio; the even split is proved on the zeroed lines below.
+  it('falls back to proportion where the entered figure is less than the lines account for', async () => {
+    // There is no share left to give the missing line, so the only division that reaches the
+    // figure is to take it off the stated ones.
+    const lines = [
+      { id: 'a', partNumber: 'P-1', quantity: 1, netWeightKg: 4 },
+      { id: 'b', partNumber: 'P-2', quantity: 1, netWeightKg: undefined },
+    ] as unknown as MergedLine[]
+    const rows = [{ rowKey: 'a+b', sourceLineIds: ['a', 'b'], weightKg: 4 }] as unknown as SLILine[]
+    applyRowFigures(lines, rows, { 'a+b': { weightKg: 3 } })
+    expect(lines.map((l) => l.netWeightKg)).toEqual([3, undefined])
+  })
+
+  it('shares in proportion where every line already carries the figure', async () => {
+    const target = run().sliLines.find((l) => l.sourceLineIds.length > 1)!
+    const before = run().mergedLines.filter((l) => target.sourceLineIds.includes(l.id))
+    expect(before.every((l) => l.netWeightKg != null)).toBe(true)
+    const after = run({ rowFigures: { [target.rowKey]: { weightKg: target.weightKg * 2 } } })
     const lines = after.mergedLines.filter((l) => target.sourceLineIds.includes(l.id))
-    expect(lines.reduce((sum, l) => sum + (l.netWeightKg ?? 0), 0)).toBeCloseTo(3, 3)
+    lines.forEach((line, i) => expect(line.netWeightKg).toBeCloseTo((before[i].netWeightKg ?? 0) * 2, 2))
   })
 
   it('splits a figure evenly when the lines hold nothing at all', async () => {
@@ -175,10 +189,21 @@ describe('a figure entered against a commodity row', () => {
   it('still reports the export control it does have, on a document that parsed no lines', async () => {
     // The panel's job is to say what still needs doing, and a document whose lines failed to
     // parse — the state the solitary-order fix is about — must not be told the ECCN just
-    // typed is missing.
+    // typed is missing. Asserted field by field with only *one* of the three set, so the
+    // blanket short-circuit cannot answer for all of them and hide whether the empty-line
+    // guard is there at all.
     const empty = { ...document, lines: [] }
-    const { checks } = reconcile(empty, scheduleB, CONTROLLED)
-    expect(checks.find((c) => c.id === 'export-control')?.passed).toBe(true)
+    const { checks } = reconcile(empty, scheduleB, { eccn: 'EAR99', sme: null, license: null })
+    const control = checks.find((c) => c.id === 'export-control')!
+    expect(control.passed).toBe(false)
+    // The list of what is outstanding, not the sentence after it — that one names the ECCN
+    // in explaining why an absent one establishes nothing.
+    const outstanding = control.detail.match(/Not yet set: ([^.]+)\./)![1]
+    expect(outstanding).not.toMatch(/ECCN/)
+    expect(outstanding).toMatch(/SME/)
+    expect(outstanding).toMatch(/Licence/)
+    // And with all three, nothing is outstanding.
+    expect(reconcile(empty, scheduleB, CONTROLLED).checks.find((c) => c.id === 'export-control')?.passed).toBe(true)
   })
 
   it('is named in a check, with the figure the documents gave', async () => {

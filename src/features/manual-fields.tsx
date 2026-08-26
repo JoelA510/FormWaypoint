@@ -213,10 +213,20 @@ export function ManualFieldsPanel({
               A CIPL never carries an ECCN. Its absence does not make a commodity EAR99, and EAR99 does not by
               itself make the shipment NLR. Enter what you have determined.
             </p>
+            {/* On blur, not per keystroke. These three are part of what makes a commodity row a
+                row, so every character regroups the shipment — and a figure entered against a
+                row that momentarily stops existing is dropped and does not come back. Typing
+                `5A992.c` should not be able to discard the weights on the screen above. */}
             <div className="grid gap-3 sm:grid-cols-3">
               <Field label="ECCN / EAR99">
                 {(id) => (
-                  <Input id={id} value={settings.eccn} onChange={(e) => setSetting('eccn', e.target.value)} placeholder="EAR99" />
+                  <ControlInput
+                    id={id}
+                    value={settings.eccn}
+                    label="ECCN for the shipment"
+                    placeholder="EAR99"
+                    onCommit={(next) => setSetting('eccn', next)}
+                  />
                 )}
               </Field>
               <Field label="SME">
@@ -230,7 +240,13 @@ export function ManualFieldsPanel({
               </Field>
               <Field label="Licence / NLR">
                 {(id) => (
-                  <Input id={id} value={settings.license} onChange={(e) => setSetting('license', e.target.value)} placeholder="NLR" />
+                  <ControlInput
+                    id={id}
+                    value={settings.license}
+                    label="Licence for the shipment"
+                    placeholder="NLR"
+                    onCommit={(next) => setSetting('license', next)}
+                  />
                 )}
               </Field>
             </div>
@@ -449,11 +465,13 @@ function PerPartExportControl({
  * something a keystroke should be able to do.
  */
 function ControlInput({
+  id,
   value,
   label,
   placeholder,
   onCommit,
 }: {
+  id?: string
   value: string | undefined
   label: string
   placeholder: string
@@ -466,6 +484,7 @@ function ControlInput({
 
   return (
     <Input
+      id={id}
       value={draft}
       aria-label={label}
       placeholder={placeholder}
