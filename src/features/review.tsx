@@ -716,7 +716,16 @@ function RowFigureInput({
           setDraft(committed)
           return
         }
-        onCommit(blank ? undefined : parsed)
+        // Only where something moved. Tabbing across the table would otherwise re-reconcile
+        // the whole shipment once per cell — and a box holding a re-typed document figure,
+        // which commits as "no override", would keep that text on screen with nothing behind
+        // it, because the value it follows never changed.
+        const next = blank ? undefined : parsed
+        if (next === value) {
+          setDraft(committed)
+          return
+        }
+        onCommit(next)
       }}
     />
   )

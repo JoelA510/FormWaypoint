@@ -218,9 +218,15 @@ describe('the unit each commodity is keyed in', () => {
       line({ id, partNumber: `P-${i}`, classification: '9031.90.0000', netWeightKg: 0.0002 }),
     )
     const row = byWeight({ sourceLineIds: ['a', 'b'], weightKg: 0.0004, reportingQuantity: 1 })
-    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(lines, [row]), draft())
+    const sheet = buildKeyingSheet('fedex-ship-manager', fixture(lines, [row]), draft(), {
+      options: { columns: ['quantity', 'unitOfMeasure', 'note'] },
+    })
     expect(sheet.commodities.map((c) => c.quantity)).toEqual(['1', '0'])
     expect(sheet.commodities.reduce((sum, c) => sum + Number(c.quantity), 0)).toBe(1)
+    // And both rows say what is wrong with them. The one keying a whole kilogram for two
+    // ten-thousandths of one is a five-thousand-fold overstatement, and gating the minimum
+    // note on the figure *not* having been shared out silenced exactly that row.
+    expect(sheet.commodities.map((c) => c.quantityCaveat)).toEqual(['minimum', 'shared-to-nothing'])
   })
 
   it('keys the form’s total even where the form rounded every row of it up', () => {

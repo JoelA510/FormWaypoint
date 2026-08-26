@@ -954,6 +954,8 @@ interface BlockCore {
   lineNumberRowIdx: number
   /** Index of the line-number cell within its row; the lot id sits immediately after it. */
   lineNumberItemIdx: number
+  /** Index the country of origin starts at on that row — past the lot id only where there is one. */
+  countryItemIdx: number
 }
 
 /** Fields common to both document kinds, located by content rather than column. */
@@ -973,20 +975,33 @@ function readBlockCore(block: TextRow[]): BlockCore | null {
   let itemId = ''
   let lineNumberRowIdx = -1
   let lineNumberItemIdx = -1
+  let countryItemIdx = -1
   for (let i = 1; i < block.length; i++) {
     const items = block[i].items
-    // In its own column, not merely left of centre: the carton number is four digits too and
-    // sits at x=24, so a block whose line-number row was missing would take it instead.
-    const idx = items.findIndex((it) => LINE_NUMBER.test(it.str) && it.x > 40 && it.x < 130)
-    if (idx !== -1) {
+    // Preferred in its own column — the carton number is four digits too and sits at x=24, so
+    // a block whose line-number row was missing would take it instead — but taken anywhere
+    // left of centre if that is the only candidate, because the column is one document's
+    // measurement and losing the row entirely costs more than reading the wrong cell: with no
+    // line-number row there is no country of origin either, and `domesticForeign('')` answers
+    // F, asserting a foreign origin the document never stated.
+    const candidates = items.map((it, at) => ({ it, at })).filter(({ it }) => LINE_NUMBER.test(it.str) && it.x < 130)
+    const chosen = candidates.find(({ it }) => it.x > 40) ?? candidates[0]
+    if (chosen) {
+      const idx = chosen.at
       lineNumber = items[idx].str
       // The lot id sits immediately right of the line number, at x=96 — *in that column*.
       // A line carrying no lot id prints the country of origin next instead, at x=198, and
       // taking whatever came next filed `Germany` as an item identifier.
       const next = items[idx + 1]
-      itemId = next && next.x < 130 ? next.str : ''
+      const hasLotId = Boolean(next && next.x < 130)
+      itemId = hasLotId && next ? next.str : ''
       lineNumberRowIdx = i
       lineNumberItemIdx = idx
+      // Where the country begins: past the line number, and past the lot id only where one
+      // was actually taken. Deciding that from `itemId` being non-empty instead coupled the
+      // two — a lot id rejected by the column bound above would then be read as part of the
+      // country, giving `LOT4417 Germany`.
+      countryItemIdx = idx + (hasLotId ? 2 : 1)
       break
     }
   }
@@ -1016,6 +1031,7 @@ function readBlockCore(block: TextRow[]): BlockCore | null {
     classificationRowIdx,
     lineNumberRowIdx,
     lineNumberItemIdx,
+    countryItemIdx,
   }
 }
 
@@ -1046,12 +1062,7 @@ function parseInvoiceBlock(
     // From the line number itself: it and the lot id beside it are identifiers the block has
     // already been read for, and an unreadable block was coming out described as its lot id.
     for (let k = Math.max(core.lineNumberItemIdx, 0); k < items.length; k++) consume(core.lineNumberRowIdx, k)
-    // Past the line number, and past the lot id only where there is one. A line carrying no
-    // lot id prints the country in the next cell rather than the one after, so skipping two
-    // regardless left it with no origin at all — and `domesticForeign('')` answers F, which
-    // asserts a foreign origin the document never stated.
-    const from = core.lineNumberItemIdx + (core.itemId ? 2 : 1)
-    countryOfOrigin = items.slice(from).map((t) => t.str).join(' ').trim()
+    countryOfOrigin = items.slice(core.countryItemIdx).map((t) => t.str).join(' ').trim()
   }
 
   const currency =
@@ -1215,7 +1226,7 @@ function parsePackingBlock(
   // Counted rather than located by absolute column, because the columns are one document's
   // measurements and the shape — order, order, maybe sequence, part, the rest — is the format.
   const startItems = block[0].items
-  const after = startItems.slice(sequenceCell(block[0]) === null ? 2 : 3)
+  const after = startItems.slice(core.sequence ? 3 : 2)
   const partNumber = after[0]?.str ?? ''
   const description = after.slice(1).map((i) => i.str).join(' ').trim()
 

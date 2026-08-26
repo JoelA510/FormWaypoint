@@ -187,7 +187,7 @@ describe('a row holding less than half a unit', () => {
     // The weight the row is proved against keeps every decimal it had.
     expect(row(sliLines, '4016.93.0000').weightKg).toBe(0.2)
 
-    const flagged = checks.find((c) => c.id === 'quantities-nonzero')!
+    const flagged = checks.find((c) => c.id === 'quantities-overstated')!
     expect(flagged.passed).toBe(false)
     expect(flagged.severity).toBe('warning')
     expect(flagged.detail).toMatch(/4016\.93\.0000 at 0\.2 kg/)
@@ -212,7 +212,7 @@ describe('a row holding less than half a unit', () => {
     expect(line.weightKg).toBe(0)
     expect(line.reportingQuantity).toBe(1)
 
-    const flagged = checks.find((c) => c.id === 'quantities-nonzero')!
+    const flagged = checks.find((c) => c.id === 'quantities-overstated')!
     expect(flagged.passed).toBe(false)
     expect(flagged.detail).toMatch(/4016\.93\.0000 at 0\.3 KG/)
     expect(flagged.detail).not.toMatch(/0 kg/)
@@ -220,7 +220,7 @@ describe('a row holding less than half a unit', () => {
 
   it('says nothing where the row holds a unit or more', async () => {
     const { checks } = reconcile(await shipment(BY_WEIGHT), scheduleB, CONTROLLED)
-    expect(checks.find((c) => c.id === 'quantities-nonzero')?.passed).toBe(true)
+    expect(checks.find((c) => c.id === 'quantities-overstated')?.passed).toBe(true)
   })
 
   it('leaves a unit that is not filed whole alone', async () => {
@@ -229,7 +229,7 @@ describe('a row holding less than half a unit', () => {
     // and nothing to warn about.
     const { sliLines, checks } = reconcile(await shipment('2523.10.0000'), scheduleB, CONTROLLED)
     expect(row(sliLines, '2523.10.0000').reportingQuantity).toBeCloseTo(0.004263, 9)
-    expect(checks.find((c) => c.id === 'quantities-nonzero')?.passed).toBe(true)
+    expect(checks.find((c) => c.id === 'quantities-overstated')?.passed).toBe(true)
   })
 })
 

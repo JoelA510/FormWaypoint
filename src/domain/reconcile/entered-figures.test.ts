@@ -135,6 +135,52 @@ describe('a figure entered against a commodity row', () => {
     expect(run().enteredFigures).toEqual([])
   })
 
+  it('files, reports and remembers the figure at the precision it is filed at', async () => {
+    // A value typed to three places is shared out over lines held to two, so the row totals a
+    // different number from the one in the box — and the box, the warning and the audit record
+    // would all go on saying what was typed while the form said otherwise.
+    const target = run().sliLines.find((l) => l.sourceLineIds.length > 1)!
+    const after = run({ rowFigures: { [target.rowKey]: { valueUsd: 999.999 } } })
+    const row = after.sliLines.find((l) => l.rowKey === target.rowKey)!
+    expect(row.valueUsd).toBe(1000)
+    expect(after.enteredFigures[0].now).toBe(1000)
+    expect(after.checks.find((c) => c.id === 'entered-figures')?.detail).toContain('→ 1000')
+  })
+
+  it('keeps enough places that no line under a small figure comes out at nothing', async () => {
+    // A gramme over several lines cannot be held at the three places a kilogram figure
+    // normally keeps: all but one share round to nothing, and a zero net weight on a line
+    // carrying goods is exactly what the blocking weight check exists to refuse — which it
+    // cannot, because it tests for absence rather than for zero.
+    const target = run().sliLines.find((l) => l.sourceLineIds.length > 1)!
+    const after = run({ rowFigures: { [target.rowKey]: { weightKg: 0.001 } } })
+    const lines = after.mergedLines.filter((l) => target.sourceLineIds.includes(l.id))
+    for (const line of lines) expect(line.netWeightKg, `${line.id}`).toBeGreaterThan(0)
+    expect(lines.reduce((sum, l) => sum + (l.netWeightKg ?? 0), 0)).toBeCloseTo(0.001, 9)
+  })
+
+  it('says nothing about a per-part value that changes nothing', async () => {
+    // The shipment-wide value is the box's placeholder, so typing it back in to confirm a part
+    // is the natural thing to do — and reporting that as a departure leaves a warning about
+    // something that did not happen.
+    const spec = simpleOmronCi()
+    const parsed = await parseCipl('ci.pdf', await buildOmronCiPdf(spec))
+    const { checks } = reconcile(parsed, scheduleB, {
+      ...CONTROLLED,
+      exportControlByPart: { [spec.lines[0].partNumber]: { eccn: 'EAR99' } },
+    })
+    expect(checks.find((c) => c.id === 'export-control-overrides')).toBeUndefined()
+  })
+
+  it('still reports the export control it does have, on a document that parsed no lines', async () => {
+    // The panel's job is to say what still needs doing, and a document whose lines failed to
+    // parse — the state the solitary-order fix is about — must not be told the ECCN just
+    // typed is missing.
+    const empty = { ...document, lines: [] }
+    const { checks } = reconcile(empty, scheduleB, CONTROLLED)
+    expect(checks.find((c) => c.id === 'export-control')?.passed).toBe(true)
+  })
+
   it('is named in a check, with the figure the documents gave', async () => {
     const target = run().sliLines[0]
     const { checks } = run({ rowFigures: { [target.rowKey]: { valueUsd: 999.99 } } })

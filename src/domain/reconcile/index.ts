@@ -24,6 +24,7 @@ import {
 } from '../schedule-b'
 import { canRestate, filedAtMinimum, resolveReportingQuantity } from '../units'
 import { MAX_SHEETS, pagesNeeded } from '../../lib/pagination'
+import { largestRemainder, placesFor } from '../../lib/apportion'
 import type { ItemLibraryEntry } from '../item-library'
 import { partKey } from '../part-key'
 import {
@@ -34,7 +35,6 @@ import {
   roundTo,
   unmatchedPackingLines,
   type AggregationOptions,
-  type ExportControlOverride,
 } from './lines'
 
 export * from './lines'
@@ -283,7 +283,7 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
       passed: unusable.length === 0,
     },
     {
-      id: 'quantities-nonzero',
+      id: 'quantities-overstated',
       severity: 'warning',
       title: 'No commodity row files more than it holds',
       detail: atMinimum.length
@@ -291,7 +291,7 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
           // Whichever figure was rounded up, and in whichever unit. A row invoiced in grams
           // under a kilogram code converts without a stated weight, and printing `at 0 kg`
           // about it sent the filer to look for a weight the document never had.
-          `(${atMinimum.map(roundedAwayFrom).join(', ')}). A quantity in one of these units is filed as a whole ` +
+          `(${atMinimum.map(overstatedFrom).join(', ')}). A quantity in one of these units is filed as a whole ` +
           'number of them and a zero would declare the goods absent, so one is the least wrong figure ' +
           'available — but it overstates these rows. Decide what the box should say before signing.'
         // Not "no row files zero": the eight codes Schedule B files with no quantity at all
@@ -321,7 +321,7 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
     ...sourceControlChecks(sliLines, mergedLines, options),
     ...capacityCheck(sliLines, options.maxRows),
     ...enteredFigureChecks(entered),
-    ...exportControlOverrideChecks(mergedLines, options.exportControlByPart),
+    ...exportControlOverrideChecks(mergedLines, options),
   ]
 
   return {
@@ -394,53 +394,32 @@ export function applyRowFigures(
     if (!lines.length) continue
 
     for (const key of ['quantity', 'weightKg', 'valueUsd'] as const) {
-      const now = entered[key]
-      if (now === undefined || !Number.isFinite(now) || now < 0) continue
+      const typed = entered[key]
+      if (typed === undefined || !Number.isFinite(typed) || typed < 0) continue
+      const { field, decimals } = FIGURE_ON_LINE[key]
+      // To the precision the figure is actually filed at, and reported at that precision too.
+      // A value typed to three places is shared out over lines held to two, so the row totals
+      // a different number from the one in the box — and the box, the warning and the audit
+      // record would all go on saying what was typed while the form said otherwise.
+      const now = roundTo(typed, decimals)
       const was = row[key]
       if (now === was) continue
       applied.push({ row, field: key, was, now })
 
-      const { field, decimals } = FIGURE_ON_LINE[key]
       const held = lines.reduce((sum, line) => sum + (line[field] ?? 0), 0)
       const shares = lines.map((line) => (held > 0 ? ((line[field] ?? 0) / held) * now : now / lines.length))
+      // Enough places to state every share as something. A gramme over five lines cannot be
+      // held at the three a kilogram figure normally keeps: four of the five would round to
+      // nothing, and a zero net weight on a line carrying goods is what the blocking weight
+      // check exists to refuse.
+      const places = placesFor(shares, decimals)
+      const settled = largestRemainder(shares, now, 10 ** -places)
       lines.forEach((line, i) => {
-        line[field] = shares[i]
+        line[field] = roundTo(settled[i], places)
       })
-      settle(lines, field, shares, now, decimals)
     }
   }
   return applied
-}
-
-/**
- * Round each share to the unit's precision and place the difference, so the lines total the
- * figure that was entered exactly.
- *
- * A place at a time, to whichever line's share lost the most in the rounding — largest
- * remainder, as the keying sheet already apportions. Putting the whole difference on the
- * largest share was simpler and could drive it negative: the difference grows with the number
- * of lines while the largest share shrinks, so a hundred-line row with a one-kilogram weight
- * entered against it could write a negative weight onto a real invoice line, and the row would
- * still total what was entered so nothing would notice.
- */
-function settle(lines: MergedLine[], field: 'quantity' | 'netWeightKg' | 'extendedValue', shares: number[], target: number, decimals: number): void {
-  const step = 10 ** -decimals
-  const rounded = shares.map((share) => roundTo(share, decimals))
-  let left = Math.round((target - rounded.reduce((a, b) => a + b, 0)) / step)
-  const byRemainder = shares
-    .map((share, index) => ({ index, lost: share - rounded[index] }))
-    .sort((a, b) => b.lost - a.lost || a.index - b.index)
-
-  for (let taken = 0; left !== 0 && taken < byRemainder.length * 2; taken++) {
-    const at = byRemainder[left > 0 ? taken % byRemainder.length : byRemainder.length - 1 - (taken % byRemainder.length)].index
-    // Never below nothing: a share cannot owe the row goods.
-    if (left < 0 && rounded[at] < step) continue
-    rounded[at] = roundTo(rounded[at] + (left > 0 ? step : -step), decimals)
-    left += left > 0 ? -1 : 1
-  }
-  lines.forEach((line, i) => {
-    line[field] = rounded[i]
-  })
 }
 
 /** What a replaced figure is called on the review screen. */
@@ -484,10 +463,20 @@ function enteredFigureChecks(entered: EnteredFigure[]): CheckResult[] {
  * indistinguishable from a typo, and the ECCN is the field on this form where that matters
  * most.
  */
-function exportControlOverrideChecks(
-  merged: MergedLine[],
-  byPart?: Record<string, ExportControlOverride>,
-): CheckResult[] {
+/** Whether an entered export-control value is the one the row would have filed anyway. */
+function sameControl(
+  entered: string | undefined,
+  line: MergedLine | undefined,
+  field: 'eccn' | 'license' | 'sme',
+  options: ReconcileOptions,
+): boolean {
+  if (!entered || !line) return false
+  const without = exportControlFor(line, { ...options, exportControlByPart: undefined })[field]
+  return (without ?? '').trim().toUpperCase() === entered.trim().toUpperCase()
+}
+
+function exportControlOverrideChecks(merged: MergedLine[], options: ReconcileOptions): CheckResult[] {
+  const byPart = options.exportControlByPart
   if (!byPart || !Object.keys(byPart).length) return []
   // Grouped once. Filtering the whole line list inside a loop over the parts is quadratic on
   // a shipment where the parts scale with the lines, which is every shipment.
@@ -506,7 +495,11 @@ function exportControlOverrideChecks(
     const entered = byPart[part]
     if (!entered) continue
     const fields = (['eccn', 'license', 'sme'] as const)
-      .filter((field) => entered[field])
+      // Only where it changes what the row files. The shipment-wide value is the box's
+      // placeholder, so typing it back in to confirm a part is the natural thing to do — and
+      // reporting that as "filed under values you entered" leaves a warning about a departure
+      // that did not happen. `applyRowFigures` declines the same no-op for the same reason.
+      .filter((field) => entered[field] && !sameControl(entered[field], lines[0], field, options))
       .map((field) => `${field.toUpperCase()} ${entered[field]}`)
     if (!fields.length) continue
     described.push(`${lines[0]?.partNumber || part} (${fields.join(', ')})`)
@@ -529,14 +522,14 @@ function exportControlOverrideChecks(
 }
 
 /**
- * A row filed at its unit's minimum, named alongside the figure it was rounded up from.
+ * A row filed at more than it holds, named alongside the figure it was rounded up from.
  *
  * Told by the basis, not by whether a weight happens to be on the row. A line invoiced as
  * 400 g under a kilogram code converts from its own quantity — and a packing list that also
  * states a 0.45 kg net weight for it would have the filer inspecting a figure that had
  * nothing to do with the one on the form.
  */
-function roundedAwayFrom(line: SLILine): string {
+function overstatedFrom(line: SLILine): string {
   const from =
     line.reportingBasis === 'net-weight'
       ? `${line.weightKg} kg`
@@ -1141,7 +1134,10 @@ function exportControlChecks(options: ReconcileOptions, merged: MergedLine[]): C
     ['SME', 'sme'],
     ['Licence, exception or NLR', 'license'],
   ] as const)
-    .filter(([, field]) => !(filed.length > 0 && filed.every((control) => control[field])))
+    // The blanket value on its own settles it, whatever the lines say — including a document
+    // whose lines failed to parse, which would otherwise be told the ECCN just typed is
+    // missing, on the panel whose whole job is to say what still needs doing.
+    .filter(([, field]) => !options[field] && !(filed.length > 0 && filed.every((control) => control[field])))
     .map(([label]) => label)
 
   return [

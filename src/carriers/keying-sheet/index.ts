@@ -589,13 +589,12 @@ function quantityCaveat(figure: GroupFigures, source: QuantitySource): KeyingCom
   const { keyed } = figure
   if (keyed.notFiled || keyed.unavailable) return undefined
   const holds = source.weightKg > 0 || source.quantity > 0
-  // A shared-out figure first, and it decides both cases. A row that took its unit from an
-  // apportionment also holds less than half of it, so asking `filedAtMinimum` first labelled
-  // it a minimum and told the operator the SLI files the same — which it does not: the SLI
-  // files one figure for every row in the share-out together.
-  if (figure.apportioned) {
-    return keyed.quantity === 0 && holds && filedWhole(keyed.unit) ? 'shared-to-nothing' : undefined
-  }
+  // A share that came to nothing first: that is the one caveat a shared-out row has of its
+  // own, and it is the more serious of the two.
+  if (figure.apportioned && keyed.quantity === 0 && holds && filedWhole(keyed.unit)) return 'shared-to-nothing'
+  // Then the minimum, whether the figure was shared out or not. Gating this on *not* having
+  // been shared silenced the row that most needed it — a group of two ten-thousandths of a
+  // kilogram keys a whole one, a five-thousand-fold overstatement, and said nothing at all.
   return filedAtMinimum(source, keyed.unit, keyed.quantity) ? 'minimum' : undefined
 }
 
@@ -1402,10 +1401,10 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
         // not put in its place: an operator asked to decide what a `0` should say still needs
         // telling that the column is counting kilograms off the packing list rather than
         // pieces, which is the one thing about this cell they can key straight past.
-        const roundedNote =
+        const caveatNote =
           row.quantityCaveat === 'minimum'
-            ? `less than half a ${row.unitOfMeasure}, keyed as 1 — the least wrong figure this unit can ` +
-              'hold; the SLI files the same, and both overstate this row'
+            ? `less than half a ${row.unitOfMeasure}, keyed as 1 — the least this unit can hold, and ` +
+              'more than this row holds'
             : row.quantityCaveat === 'shared-to-nothing'
               ? `keyed as 0 ${row.unitOfMeasure}: the SLI files a whole figure for these goods and the rows ` +
                 'making it up have to total it, so this one took none of it; decide what this cell should say'
@@ -1422,18 +1421,18 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
                 ? `quantity is restated in ${row.unitOfMeasure}, the unit this code is reported in — the document ` +
                   'does not print this figure'
                 : ''
-        if (row.describedByOperator) return join(roundedNote, unitNote, 'your wording')
+        if (row.describedByOperator) return join(caveatNote, unitNote, 'your wording')
         // "also" only where the description itself came from the document. Beside Census
         // wording it would assert the CIPL had used the official text, which it did not.
         const fromDocument = sheet.options.descriptionSource !== 'schedule-b' || Boolean(row.scheduleBUnavailable)
         const lead = fromDocument ? 'document also said' : 'document said'
         const said = row.otherDescriptions.length ? `${lead}: ${row.otherDescriptions.join('; ')}` : ''
-        if (!row.scheduleBUnavailable) return join(roundedNote, unitNote, said)
+        if (!row.scheduleBUnavailable) return join(caveatNote, unitNote, said)
         const why =
           row.scheduleBUnavailable === 'no-index'
             ? 'Schedule B dataset not loaded — the document’s wording is used'
             : 'no Schedule B wording for this code — the document’s is used'
-        return join(roundedNote, unitNote, [why, said].filter(Boolean).join('; '))
+        return join(caveatNote, unitNote, [why, said].filter(Boolean).join('; '))
       }
     }
   }
@@ -1600,8 +1599,8 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
           : '') +
         (atMinimum.length
           ? `${atMinimum.length} row(s) hold less than half a ${unitsOf(atMinimum)} and are keyed as 1: a whole ` +
-            'unit cannot hold less, and a 0 would key goods that are in the box as absent. The SLI files the ' +
-            'same figure, and both overstate those rows. Decide what those cells should say before keying. '
+            'unit cannot hold less, and a 0 would key goods that are in the box as absent. The figure is larger ' +
+            'than those rows hold. Decide what those cells should say before keying. '
           : '') +
         (sharedToNothing.length
           ? `${sharedToNothing.length} row(s) are keyed as 0 ${unitsOf(sharedToNothing)}: the SLI files one whole ` +
