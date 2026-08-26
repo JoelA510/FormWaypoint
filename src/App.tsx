@@ -378,6 +378,20 @@ export function App() {
   // so the override table reads down the document rather than in whatever order a Set produced.
   const shipmentParts = useMemo(() => distinctParts(reconciliation?.mergedLines ?? []), [reconciliation])
 
+  // A figure whose row no longer exists is dropped, not kept. `reconcile` promises the figure
+  // *lapses* when the row stops describing the same goods — but an entry left in this record
+  // would re-apply itself in full if that row's identity ever came back, which is one cleared
+  // per-part ECCN away, and the filer would never have re-entered it.
+  useEffect(() => {
+    if (!reconciliation) return
+    setRowFigures((current) => {
+      const live = new Set(reconciliation.sliLines.map((line) => line.rowKey))
+      const kept = Object.keys(current).filter((key) => live.has(key))
+      if (kept.length === Object.keys(current).length) return current
+      return Object.fromEntries(kept.map((key) => [key, current[key]]))
+    })
+  }, [reconciliation])
+
   const draft = useMemo(
     () => (reconciliation ? buildDraft(reconciliation, profile, settings, adapter) : null),
     [reconciliation, profile, settings, adapter],

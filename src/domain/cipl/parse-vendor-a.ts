@@ -52,15 +52,16 @@ const ORDER_NUMBER = /^[0-9][0-9A-Z]{7,}$/
 const CURRENCY = /^[A-Z]{3}$/
 const SEQUENCE = /^\d{1,4}$/
 /**
- * Column bounds on a line block's start row, measured off the documents.
+ * Columns on a line block's start row, measured off the documents.
  *
- * The order number opens the block at x=72 and repeats at x=180 (invoice) or x=186-204
- * (packing); the sequence, when there is one, sits at x=246-252 and the packing list's part
- * number at x=360.
+ * Used to tell one cell from another where the *shape* cannot — a sequence from a part number
+ * that happens to be four digits — never to decide whether a block is there at all. A page
+ * printed at another scale must still parse.
+ *
+ * The sequence, where there is one, sits at x=246-252; the packing list's part number at 360.
  */
-const ORDER_COLUMN_MAX = 130
-const ORDER_REPEAT_MIN = 150
 const SEQUENCE_COLUMN_MAX = 300
+const PACKING_PART_MIN = 300
 
 /** Left-hand label column on header pages. */
 const LEFT_LABEL_MAX = 300
@@ -453,19 +454,18 @@ function headerOrderNumbers(rows: TextRow[]): string[] {
  */
 function isLineStart(row: TextRow): boolean {
   const [a, b] = row.items
-  // Both cells in their own columns rather than merely 40pt apart. Dropping the sequence test
-  // removed the only structural constraint beyond "two equal order-shaped tokens", and an
-  // order reference repeated anywhere on the page would have opened a phantom block. Measured
-  // off the documents: the order column sits at x=72 on both kinds, its repeat at x=180-204.
-  return Boolean(
-    a &&
-      b &&
-      ORDER_NUMBER.test(a.str) &&
-      a.str === b.str &&
-      a.x < ORDER_COLUMN_MAX &&
-      b.x > ORDER_REPEAT_MIN &&
-      b.x > a.x + 40,
-  )
+  // Relative, not absolute. Bounding these to the columns one document prints them in was the
+  // obvious way to replace the sequence test and the worse one: a page printed at another
+  // scale would fail every block on it, which is the same total silence this predicate was
+  // just fixed for, over the whole document rather than one line.
+  //
+  // What remains is strong enough on its own: the *first two cells* of the row are the same
+  // order-shaped token, well apart. The header's own P/O field opens with its label and lists
+  // three different orders; nothing else on a detail page repeats one against itself. (A
+  // commodity-number guard was tried here and refused too much — a block split by a page break
+  // states its classification on the half that carries it, and the other half is still a
+  // block.)
+  return Boolean(a && b && ORDER_NUMBER.test(a.str) && a.str === b.str && b.x > a.x + 40)
 }
 
 /** A line block cut in half by a page break, waiting for the rest of itself. */
@@ -1226,9 +1226,15 @@ function parsePackingBlock(
   // Counted rather than located by absolute column, because the columns are one document's
   // measurements and the shape — order, order, maybe sequence, part, the rest — is the format.
   const startItems = block[0].items
-  const after = startItems.slice(core.sequence ? 3 : 2)
-  const partNumber = after[0]?.str ?? ''
-  const description = after.slice(1).map((i) => i.str).join(' ').trim()
+  // Its own column where the layout puts it there, and counted past the order pair and the
+  // sequence otherwise. Counting alone trusts `sequenceCell` to have recognised the sequence,
+  // and a sequence of five digits or one printed outside its column is not recognised — which
+  // made the sequence the part number and the part number the description. The part number is
+  // a join key and the key every per-part table is held under.
+  const column = startItems.findIndex((i) => i.x >= PACKING_PART_MIN)
+  const at = column === -1 ? (core.sequence ? 3 : 2) : column
+  const partNumber = startItems[at]?.str ?? ''
+  const description = startItems.slice(at + 1).map((i) => i.str).join(' ').trim()
 
   // Quantity and country share a row; quantity is the first numeric right of centre.
   let quantity = 0

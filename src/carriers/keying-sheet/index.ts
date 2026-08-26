@@ -29,6 +29,7 @@ import {
   roundPrecise,
   type QuantitySource,
 } from '../../domain/units'
+import { largestRemainder } from '../../lib/apportion'
 import { buildXlsx, type CellValue, type Sheet } from '../../lib/xlsx'
 import type { SliDraft } from '../types'
 import { canonicalUnit, formatScheduleB, normalizeScheduleB, type ScheduleBIndex } from '../../domain/schedule-b'
@@ -556,15 +557,10 @@ function apportionWholeUnits(
     // sum to what the form files by construction, whichever way each side rounded.
     const scaled =
       held > 0 ? shares.map((value) => (value * total) / held) : shares.map(() => total / shares.length)
-    const whole = scaled.map((value) => Math.floor(value))
-    const remainder = Math.min(
-      Math.max(total - whole.reduce((sum, value) => sum + value, 0), 0),
-      bucket.length,
-    )
-    const byFraction = scaled
-      .map((value, index) => ({ index, fraction: value - Math.floor(value) }))
-      .sort((a, b) => b.fraction - a.fraction || a.index - b.index)
-    for (let taken = 0; taken < remainder; taken++) whole[byFraction[taken].index] += 1
+    // Divided by the one rule, in whole units. Doing it inline here and again in
+    // `applyRowFigures` was two implementations of one division with two tie rules, which is
+    // how a shipment comes to be divided two ways by the two documents prepared from it.
+    const whole = largestRemainder(scaled, total, 1)
 
     bucket.forEach((group, index) => {
       const figure = figures.get(group) as GroupFigures

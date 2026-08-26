@@ -22,7 +22,7 @@ import {
   screenCode,
   type ScheduleBIndex,
 } from '../schedule-b'
-import { canRestate, filedAtMinimum, resolveReportingQuantity } from '../units'
+import { canRestate, filedAtMinimum, resolveReportingQuantity, roundPrecise } from '../units'
 import { MAX_SHEETS, pagesNeeded } from '../../lib/pagination'
 import { largestRemainder, placesFor } from '../../lib/apportion'
 import type { ItemLibraryEntry } from '../item-library'
@@ -368,10 +368,10 @@ const FIGURE_ON_LINE = {
  * failure this whole reconciliation exists to prevent. Downstream of here the entered figure
  * is simply what the shipment says.
  *
- * Shared out in proportion to what each line already holds, with the rounding residue put on
- * the largest of them so the row totals exactly what was entered. A row holding nothing to be
- * proportional to — the case this feature exists for, a weight the packing list omitted — is
- * split evenly.
+ * Shared out in proportion to what each line already holds, and settled by `largestRemainder`
+ * so the lines total exactly what was entered: each leftover step goes to the share that lost
+ * the most in the rounding, ties to the earlier line. A row holding nothing to be proportional
+ * to — the case this feature exists for, a weight the packing list omitted — is split evenly.
  *
  * A field is an override only when it is a finite, non-negative number that differs from the
  * documents'. `undefined` means "not entered"; a figure equal to the printed one is not a
@@ -415,7 +415,15 @@ export function applyRowFigures(
       const places = placesFor(shares, decimals)
       const settled = largestRemainder(shares, now, 10 ** -places)
       lines.forEach((line, i) => {
-        line[field] = roundTo(settled[i], places)
+        // A share of nothing is left as nothing rather than written as zero, where the line
+        // had no figure to begin with. `weights-present` blocks on a line *having* no weight
+        // and its own text says a blank must not be filed as zero — so filling one in with a
+        // hard zero would satisfy the check by doing the thing it forbids.
+        if (settled[i] === 0 && line[field] == null) return
+        // `roundPrecise`, not `roundTo`: `placesFor` can reach eight or nine places on a row
+        // whose lines differ by orders of magnitude, and `roundTo`'s nudge is ruinous there —
+        // `roundTo(0.5, 8)` is 0.50000002, which breaks the one property this division has.
+        line[field] = roundPrecise(settled[i], places)
       })
     }
   }
@@ -495,11 +503,14 @@ function exportControlOverrideChecks(merged: MergedLine[], options: ReconcileOpt
     const entered = byPart[part]
     if (!entered) continue
     const fields = (['eccn', 'license', 'sme'] as const)
-      // Only where it changes what the row files. The shipment-wide value is the box's
-      // placeholder, so typing it back in to confirm a part is the natural thing to do — and
-      // reporting that as "filed under values you entered" leaves a warning about a departure
-      // that did not happen. `applyRowFigures` declines the same no-op for the same reason.
-      .filter((field) => entered[field] && !sameControl(entered[field], lines[0], field, options))
+      // Only where it changes what *some* line of the part files. The shipment-wide value is
+      // the box's placeholder, so typing it back in to confirm a part is the natural thing to
+      // do — and reporting that as "filed under values you entered" leaves a warning about a
+      // departure that did not happen. `applyRowFigures` declines the same no-op for the same
+      // reason. Judged across every line, not the first: one part can appear on a line
+      // printing no ECCN and on a line printing `5A992.c`, and an entry of `EAR99` is a no-op
+      // against the first and a downgrade of a document-stated value against the second.
+      .filter((field) => entered[field] && lines.some((line) => !sameControl(entered[field], line, field, options)))
       .map((field) => `${field.toUpperCase()} ${entered[field]}`)
     if (!fields.length) continue
     described.push(`${lines[0]?.partNumber || part} (${fields.join(', ')})`)

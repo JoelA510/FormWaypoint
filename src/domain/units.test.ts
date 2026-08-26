@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   canRestate,
   derivesFromNetWeight,
+  filedAtMinimum,
   filedWhole,
   resolveReportingQuantity,
   restateQuantity,
@@ -131,6 +132,47 @@ describe('units that are filed whole', () => {
     expect(restateQuantity({ quantity: 12, uom: 'PCS', weightKg: 4.263 }, 'T')?.quantity).toBe(0.004263)
   })
 })
+
+describe('a row too light for the unit it files in', () => {
+  it('files one rather than nothing, because zero declares the goods absent', () => {
+    // 48 pieces weighing four ten-thousandths of a kilogram. A whole unit cannot hold less
+    // than one, and a `0` in a quantity box on a signed declaration says the goods are not
+    // there — so one is the least wrong figure available, and it is 2,500 times the weight.
+    expect(restateQuantity({ quantity: 48, uom: 'PCS', weightKg: 0.0004 }, 'KG')?.quantity).toBe(1)
+    expect(restateQuantity({ quantity: 48, uom: 'PCS', weightKg: 0.4 }, 'KG')?.quantity).toBe(1)
+    // Decided on the raw figure. The unit's own three-decimal precision runs first everywhere
+    // else, and it turns four ten-thousandths into a nought before the whole-number rule can
+    // see there were goods there at all.
+    expect(restateQuantity({ quantity: 1, uom: 'KG', weightKg: 0 }, 'KG')?.quantity).toBe(1)
+    expect(restateQuantity({ quantity: 0.0004, uom: 'KG', weightKg: 0 }, 'KG')?.quantity).toBe(1)
+  })
+
+  it('leaves a genuine nothing at nothing', () => {
+    // No goods, no figure to raise. A row of zero pieces and no weight is an incomplete line,
+    // and inventing a kilogram for it would state goods the document does not.
+    expect(restateQuantity({ quantity: 0, uom: 'KG', weightKg: 0 }, 'KG')?.quantity).toBe(0)
+  })
+
+  it('leaves a unit that is not filed whole alone', () => {
+    // Tonnes carry six places of their own, so there is no minimum to raise anything to: a
+    // 0.4 kg row files 0.0004 T rather than 1.
+    expect(restateQuantity({ quantity: 48, uom: 'PCS', weightKg: 0.4 }, 'T')?.quantity).toBeCloseTo(0.0004, 9)
+  })
+
+  it('names every row the floor applied to, and no other', () => {
+    const tiny = { quantity: 48, uom: 'PCS', weightKg: 0.0004 }
+    expect(filedAtMinimum(tiny, 'KG', 1)).toBe(true)
+    // The boundary the three-decimal restatement used to hide: 0.4996 rounds to 0.5 there and
+    // answered "not a minimum" for a row the floor had genuinely raised from nothing.
+    expect(filedAtMinimum({ quantity: 1, uom: 'PCS', weightKg: 0.4996 }, 'KG', 1)).toBe(true)
+    // A row that reached one on its own has not been floored.
+    expect(filedAtMinimum({ quantity: 1, uom: 'PCS', weightKg: 0.6 }, 'KG', 1)).toBe(false)
+    // Nor has one filing more than one, nor one whose unit is not filed whole.
+    expect(filedAtMinimum({ quantity: 1, uom: 'PCS', weightKg: 4.499 }, 'KG', 4)).toBe(false)
+    expect(filedAtMinimum(tiny, 'T', 1)).toBe(false)
+  })
+})
+
 
 describe('rounding', () => {
   it('rounds cleanly past six decimal places', () => {

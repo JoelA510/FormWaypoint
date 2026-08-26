@@ -210,6 +210,11 @@ export function CommodityTable({
         // if it were cleared — including while it is holding something else.
         documentValue={atLeast(fromDocument, decimals)}
         label={`${label} for ${line.scheduleB} ${line.domesticForeign}`}
+        // Held at the precision the figure is filed at, so the box states the number on the
+        // form. The reconciliation rounds an entered figure to its field's places before
+        // sharing it out; keeping the raw text here left `999.999` on screen, in a box marked
+        // as an override, beside a declaration filing 1000.
+        decimals={decimals}
         // Typing the document's own figure back in is not an override, so it is not held as
         // one. The reconciliation already declines to report it; a box left marked amber for a
         // figure the checks say nobody entered is the two disagreeing about which numbers on
@@ -675,12 +680,15 @@ export function PartOverridesPanel({
 function RowFigureInput({
   value,
   documentValue,
+  decimals,
   label,
   onCommit,
 }: {
   value: number | undefined
   /** What the row files without an override; shown as the placeholder. Absent while overridden. */
   documentValue: string | undefined
+  /** Places the figure is filed at. What is typed past them is not what the form would carry. */
+  decimals: number
   label: string
   onCommit: (next: number | undefined) => void
 }) {
@@ -720,7 +728,8 @@ function RowFigureInput({
         // the whole shipment once per cell — and a box holding a re-typed document figure,
         // which commits as "no override", would keep that text on screen with nothing behind
         // it, because the value it follows never changed.
-        const next = blank ? undefined : parsed
+        // Rounded here, where it is entered, so what is held and shown is what gets filed.
+        const next = blank ? undefined : Number(parsed.toFixed(decimals))
         if (next === value) {
           setDraft(committed)
           return
