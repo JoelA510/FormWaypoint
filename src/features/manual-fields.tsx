@@ -1,6 +1,9 @@
 import { Badge, Card, CardBody, CardHeader, Field, Input, Select, Textarea, Toggle } from '../components/ui'
 import type { CompanyProfile, ShipmentSettings } from '../domain/draft'
 import type { CarrierAdapter } from '../carriers/types'
+import type { ExportControlOverride } from '../domain/reconcile'
+import { partKey } from '../domain/part-key'
+import { useEffect, useState } from 'react'
 
 /**
  * The values a CIPL cannot supply.
@@ -15,12 +18,21 @@ export function ManualFieldsPanel({
   adapter,
   onProfileChange,
   onSettingsChange,
+  parts = [],
+  exportControlByPart = {},
+  onExportControlChange,
 }: {
   profile: CompanyProfile
   settings: ShipmentSettings
   adapter: CarrierAdapter
   onProfileChange: (next: CompanyProfile) => void
   onSettingsChange: (next: ShipmentSettings) => void
+  /** Part numbers on this shipment, in the order the invoice lists them. */
+  parts?: string[]
+  /** Export control entered against a part, keyed by uppercased part number. */
+  exportControlByPart?: Record<string, ExportControlOverride>
+  /** Omitted before a document is loaded, when there are no parts to enter anything against. */
+  onExportControlChange?: (part: string, next: ExportControlOverride) => void
 }) {
   const setProfile = <K extends keyof CompanyProfile>(key: K, value: CompanyProfile[K]) =>
     onProfileChange({ ...profile, [key]: value })
@@ -201,10 +213,20 @@ export function ManualFieldsPanel({
               A CIPL never carries an ECCN. Its absence does not make a commodity EAR99, and EAR99 does not by
               itself make the shipment NLR. Enter what you have determined.
             </p>
+            {/* On blur, not per keystroke. These three are part of what makes a commodity row a
+                row, so every character regroups the shipment — and a figure entered against a
+                row that momentarily stops existing is dropped and does not come back. Typing
+                `5A992.c` should not be able to discard the weights on the screen above. */}
             <div className="grid gap-3 sm:grid-cols-3">
               <Field label="ECCN / EAR99">
                 {(id) => (
-                  <Input id={id} value={settings.eccn} onChange={(e) => setSetting('eccn', e.target.value)} placeholder="EAR99" />
+                  <ControlInput
+                    id={id}
+                    value={settings.eccn}
+                    label="ECCN for the shipment"
+                    placeholder="EAR99"
+                    onCommit={(next) => setSetting('eccn', next)}
+                  />
                 )}
               </Field>
               <Field label="SME">
@@ -218,10 +240,24 @@ export function ManualFieldsPanel({
               </Field>
               <Field label="Licence / NLR">
                 {(id) => (
-                  <Input id={id} value={settings.license} onChange={(e) => setSetting('license', e.target.value)} placeholder="NLR" />
+                  <ControlInput
+                    id={id}
+                    value={settings.license}
+                    label="Licence for the shipment"
+                    placeholder="NLR"
+                    onCommit={(next) => setSetting('license', next)}
+                  />
                 )}
               </Field>
             </div>
+            {onExportControlChange && parts.length ? (
+              <PerPartExportControl
+                parts={parts}
+                blanket={{ eccn: settings.eccn, license: settings.license, sme: settings.sme }}
+                entered={exportControlByPart}
+                onChange={onExportControlChange}
+              />
+            ) : null}
           </fieldset>
 
           <fieldset className="space-y-2.5 rounded-md border px-3 py-3">
@@ -310,5 +346,157 @@ export function ManualFieldsPanel({
         </CardBody>
       </Card>
     </div>
+  )
+}
+
+/**
+ * Export control for the part that does not match the rest of the shipment.
+ *
+ * Closed by default and counting what is inside it, because the shipment-wide values above are
+ * right on almost every shipment and a table of empty boxes on every part would read as work
+ * to do. Opening it is the deliberate act; the values above keep applying to everything left
+ * untouched.
+ *
+ * Each field falls back independently, so a part can carry its own ECCN under the shipment's
+ * licence. The shipment-wide value is each box's placeholder — what would be filed if the box
+ * stayed empty — so typing over it is visibly a substitution.
+ */
+function PerPartExportControl({
+  parts,
+  blanket,
+  entered,
+  onChange,
+}: {
+  parts: string[]
+  blanket: ExportControlOverride
+  entered: Record<string, ExportControlOverride>
+  onChange: (part: string, next: ExportControlOverride) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const count = parts.filter((part) => {
+    const own = entered[partKey(part)]
+    return Boolean(own?.eccn || own?.license || own?.sme)
+  }).length
+
+  return (
+    <div className="border-t border-[var(--color-warn)]/30 pt-3">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between text-left text-xs font-semibold tracking-wide text-[var(--color-warn)] uppercase"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <span>
+          Per-part override — {count ? `${count} of ${parts.length} set` : `${parts.length} part${parts.length === 1 ? '' : 's'}`}
+        </span>
+        <span aria-hidden>{open ? '−' : '+'}</span>
+      </button>
+      {open ? (
+        <>
+          <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+            For the item that is classified differently from the rest. Anything left empty files the
+            shipment-wide value above. A part filed on its own values is named in the checks.
+          </p>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full min-w-[420px] border-collapse text-sm">
+              <thead>
+                <tr className="text-left text-xs tracking-wide text-[var(--color-ink-faint)] uppercase">
+                  <th className="py-1.5 pr-3 font-semibold">Part</th>
+                  <th className="py-1.5 pr-3 font-semibold">ECCN</th>
+                  <th className="py-1.5 pr-3 font-semibold">Licence</th>
+                  <th className="py-1.5 font-semibold">SME</th>
+                </tr>
+              </thead>
+              <tbody>
+                {parts.map((part) => {
+                  const key = partKey(part)
+                  const own = entered[key] ?? {}
+                  const set = (field: keyof ExportControlOverride, value: string) =>
+                    onChange(key, { ...own, [field]: value.trim() || undefined })
+                  return (
+                    <tr key={key} className="border-t align-middle">
+                      <td className="tabular py-1.5 pr-3 whitespace-nowrap">{part}</td>
+                      <td className="py-1.5 pr-3">
+                        <ControlInput
+                          value={own.eccn}
+                          label={`ECCN for ${part}`}
+                          placeholder={blanket.eccn || '—'}
+                          onCommit={(next) => set('eccn', next)}
+                        />
+                      </td>
+                      <td className="py-1.5 pr-3">
+                        <ControlInput
+                          value={own.license}
+                          label={`Licence for ${part}`}
+                          placeholder={blanket.license || '—'}
+                          onCommit={(next) => set('license', next)}
+                        />
+                      </td>
+                      <td className="py-1.5">
+                        <Select
+                          value={own.sme ?? ''}
+                          aria-label={`SME for ${part}`}
+                          onChange={(e) => set('sme', e.target.value)}
+                        >
+                          <option value="">{blanket.sme || '—'}</option>
+                          <option value="N">N</option>
+                          <option value="Y">Y</option>
+                        </Select>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : null}
+    </div>
+  )
+}
+
+/**
+ * One export-control value for one part, committed on blur.
+ *
+ * Not per keystroke, for the same reason the commodity figures are not: export control is
+ * part of what makes a commodity row a row, so every character regroups the rows. `3A001.a`
+ * typed a letter at a time files the shipment under `3`, then `3A`, then `3A0` — and each
+ * regrouping moves rows out from under any figure entered against them, which is not
+ * something a keystroke should be able to do.
+ */
+function ControlInput({
+  id,
+  value,
+  label,
+  placeholder,
+  onCommit,
+}: {
+  id?: string
+  value: string | undefined
+  label: string
+  placeholder: string
+  onCommit: (next: string) => void
+}) {
+  const [draft, setDraft] = useState(value ?? '')
+  useEffect(() => {
+    setDraft(value ?? '')
+  }, [value])
+
+  return (
+    <Input
+      id={id}
+      value={draft}
+      aria-label={label}
+      placeholder={placeholder}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        // Only where something moved. Export control is part of the commodity-row grouping
+        // key, so every commit regroups the shipment and re-runs every check — and this table
+        // is designed to be opened and mostly left alone, so tabbing across it would pay that
+        // twice per part for nothing.
+        if (draft === (value ?? '')) return
+        onCommit(draft)
+      }}
+    />
   )
 }

@@ -245,6 +245,14 @@ export interface ParsedCipl {
 
 /** A commodity row destined for a carrier form. */
 export interface SLILine {
+  /**
+   * What names this row for something entered against it: the source lines it holds, sorted.
+   *
+   * A row *is* the goods it aggregates, so that is what a hand-entered figure is a statement
+   * about. Regrouping the same goods leaves it standing; splitting the row or moving lines
+   * out of it does not. See `rowKeyFor`.
+   */
+  rowKey: string
   /** ids of every SourceLine that contributed. Never empty. */
   sourceLineIds: string[]
   /** D (domestic, US origin) or F (foreign). */
@@ -312,6 +320,22 @@ export interface Reconciliation {
   mergedLines: MergedLine[]
   sliLines: SLILine[]
   checks: CheckResult[]
+  /**
+   * Every commodity-row figure filed against the documents' own, with what the documents said.
+   *
+   * The rows carry the entered figure — that is the point of entering it — so this is the only
+   * place the original survives, and the screen that offered the box has to be able to show
+   * what it is replacing. Empty on a shipment where nothing was entered.
+   */
+  enteredFigures: EnteredFigureRecord[]
   /** True when no blocking check failed. */
   canGenerate: boolean
+}
+
+/** One commodity-row figure as the documents gave it, beside the one entered over it. */
+export interface EnteredFigureRecord {
+  rowKey: string
+  field: 'quantity' | 'weightKg' | 'valueUsd'
+  was: number
+  now: number
 }

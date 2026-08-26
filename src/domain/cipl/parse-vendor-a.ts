@@ -51,6 +51,17 @@ const LINE_NUMBER = /^\d{4}$/
 const ORDER_NUMBER = /^[0-9][0-9A-Z]{7,}$/
 const CURRENCY = /^[A-Z]{3}$/
 const SEQUENCE = /^\d{1,4}$/
+/**
+ * Columns on a line block's start row, measured off the documents.
+ *
+ * Used to tell one cell from another where the *shape* cannot — a sequence from a part number
+ * that happens to be four digits — never to decide whether a block is there at all. A page
+ * printed at another scale must still parse.
+ *
+ * The sequence, where there is one, sits at x=246-252; the packing list's part number at 360,
+ * which is why a cell left of 300 on a start row is the sequence's and not the part's.
+ */
+const SEQUENCE_COLUMN_MAX = 300
 
 /** Left-hand label column on header pages. */
 const LEFT_LABEL_MAX = 300
@@ -427,15 +438,34 @@ function headerOrderNumbers(rows: TextRow[]): string[] {
 // ---------------------------------------------------------------------------
 
 /**
- * A merchandise line always opens with the order number printed twice followed by the
- * sequence within that order. Nothing else on the page has that shape, which makes it a
- * reliable block delimiter even across page breaks.
+ * A merchandise line always opens with the order number printed twice, well apart. Nothing
+ * else on the page has that shape, which makes it a reliable block delimiter even across page
+ * breaks.
+ *
+ * The sequence that usually follows is *not* required. An order carrying a single line prints
+ * no sequence at all, and demanding one made the whole block invisible: not misread, not
+ * warned about — never seen, because this is what decides a block exists. The shipment that
+ * exposed it lost one line of 215 pieces and $3,128, and the only sign was the header naming
+ * an order number no line item referenced.
+ *
+ * Nor is the third cell checked when it is present. A packing-list block prints the part
+ * number there when the sequence is absent, so testing it against the sequence pattern would
+ * refuse the weights for exactly the lines whose value had just been recovered.
  */
 function isLineStart(row: TextRow): boolean {
-  const [a, b, c] = row.items
-  return Boolean(
-    a && b && c && ORDER_NUMBER.test(a.str) && a.str === b.str && SEQUENCE.test(c.str) && b.x > a.x + 40,
-  )
+  const [a, b] = row.items
+  // Relative, not absolute. Bounding these to the columns one document prints them in was the
+  // obvious way to replace the sequence test and the worse one: a page printed at another
+  // scale would fail every block on it, which is the same total silence this predicate was
+  // just fixed for, over the whole document rather than one line.
+  //
+  // What remains is strong enough on its own: the *first two cells* of the row are the same
+  // order-shaped token, well apart. The header's own P/O field opens with its label and lists
+  // three different orders; nothing else on a detail page repeats one against itself. (A
+  // commodity-number guard was tried here and refused too much — a block split by a page break
+  // states its classification on the half that carries it, and the other half is still a
+  // block.)
+  return Boolean(a && b && ORDER_NUMBER.test(a.str) && a.str === b.str && b.x > a.x + 40)
 }
 
 /** A line block cut in half by a page break, waiting for the rest of itself. */
@@ -906,6 +936,25 @@ function figureRowIn(rows: TextRow[], from: number, to: number): number {
   return -1
 }
 
+/**
+ * Whether the layout printed a sequence cell on this start row at all.
+ *
+ * An order carrying one line prints none, and the cells after it close up — so this is what
+ * decides where the part number sits, quite apart from whether the cell's contents parse as a
+ * sequence.
+ */
+function hasSequenceCell(start: TextRow): boolean {
+  const third = start.items[2]
+  return Boolean(third && third.x < SEQUENCE_COLUMN_MAX)
+}
+
+/** The sequence a block's start row states, or null where it states none this can read. */
+function sequenceCell(start: TextRow): string | null {
+  const third = start.items[2]
+  if (!hasSequenceCell(start) || !third || !SEQUENCE.test(third.str)) return null
+  return third.str
+}
+
 interface BlockCore {
   orderNumber: string
   sequence: string
@@ -917,27 +966,54 @@ interface BlockCore {
   lineNumberRowIdx: number
   /** Index of the line-number cell within its row; the lot id sits immediately after it. */
   lineNumberItemIdx: number
+  /** Index the country of origin starts at on that row — past the lot id only where there is one. */
+  countryItemIdx: number
 }
 
 /** Fields common to both document kinds, located by content rather than column. */
 function readBlockCore(block: TextRow[]): BlockCore | null {
   const start = block[0]
   const orderNumber = start.items[0]?.str ?? ''
-  const sequence = start.items[2]?.str ?? ''
+  // Only when it is one, and only from the sequence's own column. `isLineStart` no longer
+  // demands a sequence, so the third cell is whatever the layout put there — the part number,
+  // on a packing-list block for an order with a single line. A part number of four digits or
+  // fewer matches the sequence pattern, and a bogus sequence both breaks the order+sequence
+  // join tier and can collide with a real sequence on another line of the same order, which
+  // hands an invoice line the wrong packing line's weights.
+  const sequence = sequenceCell(start) ?? ''
   if (!orderNumber) return null
 
   let lineNumber = ''
   let itemId = ''
   let lineNumberRowIdx = -1
   let lineNumberItemIdx = -1
+  let countryItemIdx = -1
   for (let i = 1; i < block.length; i++) {
     const items = block[i].items
-    const idx = items.findIndex((it) => LINE_NUMBER.test(it.str) && it.x < 130)
-    if (idx !== -1 && items[idx + 1]) {
+    // Preferred in its own column — the carton number is four digits too and sits at x=24, so
+    // a block whose line-number row was missing would take it instead — but taken anywhere
+    // left of centre if that is the only candidate, because the column is one document's
+    // measurement and losing the row entirely costs more than reading the wrong cell: with no
+    // line-number row there is no country of origin either, and `domesticForeign('')` answers
+    // F, asserting a foreign origin the document never stated.
+    const candidates = items.map((it, at) => ({ it, at })).filter(({ it }) => LINE_NUMBER.test(it.str) && it.x < 130)
+    const chosen = candidates.find(({ it }) => it.x > 40) ?? candidates[0]
+    if (chosen) {
+      const idx = chosen.at
       lineNumber = items[idx].str
-      itemId = items[idx + 1].str
+      // The lot id sits immediately right of the line number, at x=96 — *in that column*.
+      // A line carrying no lot id prints the country of origin next instead, at x=198, and
+      // taking whatever came next filed `Germany` as an item identifier.
+      const next = items[idx + 1]
+      const hasLotId = Boolean(next && next.x < 130)
+      itemId = hasLotId && next ? next.str : ''
       lineNumberRowIdx = i
       lineNumberItemIdx = idx
+      // Where the country begins: past the line number, and past the lot id only where one
+      // was actually taken. Deciding that from `itemId` being non-empty instead coupled the
+      // two — a lot id rejected by the column bound above would then be read as part of the
+      // country, giving `LOT4417 Germany`.
+      countryItemIdx = idx + (hasLotId ? 2 : 1)
       break
     }
   }
@@ -967,6 +1043,7 @@ function readBlockCore(block: TextRow[]): BlockCore | null {
     classificationRowIdx,
     lineNumberRowIdx,
     lineNumberItemIdx,
+    countryItemIdx,
   }
 }
 
@@ -997,8 +1074,7 @@ function parseInvoiceBlock(
     // From the line number itself: it and the lot id beside it are identifiers the block has
     // already been read for, and an unreadable block was coming out described as its lot id.
     for (let k = Math.max(core.lineNumberItemIdx, 0); k < items.length; k++) consume(core.lineNumberRowIdx, k)
-    const from = core.lineNumberItemIdx + 2
-    countryOfOrigin = items.slice(from).map((t) => t.str).join(' ').trim()
+    countryOfOrigin = items.slice(core.countryItemIdx).map((t) => t.str).join(' ').trim()
   }
 
   const currency =
@@ -1154,10 +1230,22 @@ function parsePackingBlock(
   const core = readBlockCore(block)
   if (!core) return null
 
-  // Start row: order, order, sequence, part number, description.
+  // Start row: order, order, sequence, part number, description. Counted past the two order
+  // cells and past the sequence *only where the layout printed one* — it is simply absent on
+  // an order carrying a single line, and counting cells regardless reads the part number as
+  // the sequence and the description as the part number. The part number is a join key.
+  //
+  // Counted rather than located by absolute column, because the columns are one document's
+  // measurements and the shape — order, order, maybe sequence, part, the rest — is the format.
   const startItems = block[0].items
-  const partNumber = startItems[3]?.str ?? ''
-  const description = startItems.slice(4).map((i) => i.str).join(' ').trim()
+  // Counted past the order pair, and past the sequence cell where the layout printed one. It
+  // is *the cell* that decides the offset, not whether its contents parsed as a sequence: a
+  // sequence of five digits fails the shape test but still occupies the column, and treating
+  // it as absent made the sequence the part number and the part number the description. The
+  // part number is a join key and the key every per-part table is held under.
+  const at = hasSequenceCell(block[0]) ? 3 : 2
+  const partNumber = startItems[at]?.str ?? ''
+  const description = startItems.slice(at + 1).map((i) => i.str).join(' ').trim()
 
   // Quantity and country share a row; quantity is the first numeric right of centre.
   let quantity = 0

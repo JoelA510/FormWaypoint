@@ -22,13 +22,15 @@ import {
   screenCode,
   type ScheduleBIndex,
 } from '../schedule-b'
-import { canRestate, resolveReportingQuantity, roundedAwayToNothing } from '../units'
+import { canRestate, filedAtMinimum, filedWhole, resolveReportingQuantity, roundPrecise } from '../units'
 import { MAX_SHEETS, pagesNeeded } from '../../lib/pagination'
+import { largestRemainder, placesFor } from '../../lib/apportion'
 import type { ItemLibraryEntry } from '../item-library'
 import { partKey } from '../part-key'
 import {
   aggregateLines,
   applyUnitWeights,
+  exportControlFor,
   joinInvoiceToPacking,
   roundTo,
   unmatchedPackingLines,
@@ -66,6 +68,27 @@ export interface ReconcileOptions extends AggregationOptions {
    * than one unit, where only the filer can say which the goods are actually measured in.
    */
   reportingUnits?: Record<string, string>
+  /**
+   * Figures a reviewer entered against a commodity row, keyed by `SLILine.rowKey`.
+   *
+   * The documents are the source of every figure this tool files, and this is the one door
+   * out of that — for the shipment whose packing list is missing a weight somebody forgot to
+   * enter, or whose invoice total the parser cannot be made to agree with in time to ship.
+   * Nothing is inferred: an absent field is not an override, and every row this touches is
+   * named in a check, with the figure the documents gave, so the departure is on the face of
+   * the reconciliation rather than buried in it.
+   *
+   * Keyed by what the row *is*, so correcting the classification or the export control moves
+   * the row out from under the figure rather than carrying it onto different goods.
+   */
+  rowFigures?: Record<string, RowFigures>
+}
+
+/** Figures entered against one commodity row. An absent field is not an override. */
+export interface RowFigures {
+  quantity?: number
+  weightKg?: number
+  valueUsd?: number
 }
 
 /**
@@ -186,6 +209,13 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
     !parsed.providesWeights && options.unitWeightsByPart
       ? applyUnitWeights(joined, options.unitWeightsByPart)
       : joined
+  // Grouped once to learn which lines make up which row, then again once any hand-entered
+  // figure has been shared out over those lines — see `applyRowFigures` for why the figure has
+  // to reach the lines rather than stopping at the row. Only where something was entered:
+  // `reconcile` re-runs on every keystroke that reaches a setting, and almost no shipment uses
+  // this, so the second pass is not something every one of them should pay for.
+  const hasFigures = Boolean(options.rowFigures && Object.keys(options.rowFigures).length)
+  const entered = hasFigures ? applyRowFigures(mergedLines, aggregateLines(mergedLines, options), options.rowFigures) : []
   const sliLines = aggregateLines(mergedLines, options)
 
   // The unit each row is filed in, and its quantity restated into that unit.
@@ -228,18 +258,25 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
   // to file instead is a decision (round up to one, file the piece count, reclassify), and
   // none of them is this app's to make.
   // One rule, shared with the review screen and the keying sheet, so the three surfaces cannot
-  // describe the same row differently. Gated on the row representing goods at all, not on it
-  // having a weight: a row invoiced in grams under a kilogram code converts without one, and
-  // 400 g rounds to zero just the same.
-  const roundedAway = sliLines.filter(
+  // describe the same row differently.
+  const overstated = sliLines.filter(
     (line) =>
       line.reportingBasis !== 'none' &&
-      roundedAwayToNothing(
+      filedAtMinimum(
         { quantity: line.quantity, uom: line.sourceUom, weightKg: line.weightKg },
         line.reportingUom,
         line.reportingQuantity,
       ),
   )
+  // The floor raises a row that holds *something*. A row whose own figure is nothing — a
+  // kilogram-invoiced line printing a zero count, which the document is entitled to do for a
+  // backordered row — still files a zero, and a quantity box reading `0` on a signed
+  // declaration says the goods are not there. Named beside the overstated ones because what
+  // the filer has to do about them is the same: decide what the box should say.
+  const understated = sliLines.filter(
+    (line) => line.reportingBasis !== 'none' && line.reportingQuantity === 0 && filedWhole(line.reportingUom),
+  )
+  const atMinimum = [...overstated, ...understated]
 
   const checks: CheckResult[] = [
     { id: 'set-selection', severity: 'info', title: 'Controlling document set', detail: reason, passed: true },
@@ -255,22 +292,28 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
       passed: unusable.length === 0,
     },
     {
-      id: 'quantities-nonzero',
+      id: 'quantities-overstated',
       severity: 'warning',
-      title: 'No commodity row files a quantity of zero',
-      detail: roundedAway.length
-        ? `${roundedAway.length} row(s) round to a quantity of 0 in the unit they are filed in ` +
-          // Whichever figure actually rounded away, and in whichever unit. A row invoiced in
-          // grams under a kilogram code converts without a stated weight, and printing
-          // `at 0 kg` about it sent the filer to look for a weight the document never had.
-          `(${roundedAway.map(roundedAwayFrom).join(', ')}). A quantity in one of these units is filed as a ` +
-          'whole number of them, so anything under half a unit has nowhere to land. Decide what the box ' +
-          'should say before signing — a zero declares the goods absent.'
-        // Not "at least one": the eight codes Schedule B files with no quantity at all are
-        // deliberately outside this check, and a shipment made up of them files a blank box
-        // on every row.
-        : 'No row files a quantity of zero.',
-      passed: roundedAway.length === 0,
+      title: 'No commodity row files more than it holds',
+      detail: understated.length
+        ? `${understated.length} row(s) file a quantity of 0 (${understated.map(overstatedFrom).join(', ')})` +
+          (overstated.length ? `, and ${overstated.length} file 1 for less than half a unit` : '') +
+          '. A whole unit cannot hold less than one, so a row holding something files 1 and overstates it — ' +
+          'but a row holding nothing files 0, and a zero on a signed declaration declares the goods absent. ' +
+          'Decide what those boxes should say before signing.'
+        : overstated.length
+        ? `${overstated.length} row(s) hold less than half a unit and are filed as 1 ` +
+          // Whichever figure was rounded up, and in whichever unit. A row invoiced in grams
+          // under a kilogram code converts without a stated weight, and printing `at 0 kg`
+          // about it sent the filer to look for a weight the document never had.
+          `(${overstated.map(overstatedFrom).join(', ')}). A quantity in one of these units is filed as a whole ` +
+          'number of them and a zero would declare the goods absent, so one is the least wrong figure ' +
+          'available — but it overstates these rows. Decide what the box should say before signing.'
+        // Not "no row files zero": the eight codes Schedule B files with no quantity at all
+        // are deliberately outside this check, and a shipment made up of them files a blank
+        // box on every row.
+        : 'No row is filed at more than it holds.',
+      passed: atMinimum.length === 0,
     },
     ...currencyCheck(currency),
     {
@@ -292,6 +335,8 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
     ...exportControlChecks(options, mergedLines),
     ...sourceControlChecks(sliLines, mergedLines, options),
     ...capacityCheck(sliLines, options.maxRows),
+    ...enteredFigureChecks(entered),
+    ...exportControlOverrideChecks(mergedLines, options),
   ]
 
   return {
@@ -300,6 +345,10 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
     mergedLines,
     sliLines,
     checks,
+    // What the documents said, for every figure entered over one. The rows themselves now
+    // carry the entered figure, so this is the only place the original survives — and the
+    // screen that offered the box has to be able to show what it is replacing.
+    enteredFigures: entered.map(({ row, field, was, now }) => ({ rowKey: row.rowKey, field, was, now })),
     canGenerate: checks.every((c) => c.severity !== 'blocking' || c.passed),
   }
 }
@@ -308,15 +357,243 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
 // Checks
 // ---------------------------------------------------------------------------
 
+/** One commodity row's figure as the documents gave it, beside the one entered over it. */
+interface EnteredFigure {
+  row: SLILine
+  field: 'quantity' | 'weightKg' | 'valueUsd'
+  was: number
+  now: number
+}
+
 /**
- * A row that rounded to nothing, named alongside the figure that did the rounding.
+ * Where a commodity row's figures live on the invoice lines that make it up, and the places
+ * each is held to.
+ *
+ * Exported because the box that offers a figure has to commit at the precision the figure is
+ * filed at. Left to the column's *display* precision, the invoice-quantity box — which shows
+ * whole numbers — rounded a typed `0.3` to `0` and filed a quantity box declaring the goods
+ * absent.
+ */
+export const FIGURE_ON_LINE = {
+  quantity: { field: 'quantity', decimals: 3 },
+  weightKg: { field: 'netWeightKg', decimals: 3 },
+  valueUsd: { field: 'extendedValue', decimals: 2 },
+} as const
+
+/**
+ * Share a hand-entered commodity-row figure out over the invoice lines that make up the row.
+ *
+ * Mutates the lines, deliberately, and in preference to setting the figure on the row. The
+ * row is an aggregate: the SLI is built from rows, but the keying sheet groups the *lines* —
+ * finer than a row under one grouping mode and coarser under another — so a figure that
+ * stopped at the row would reach the declaration and not the sheet prepared alongside it,
+ * and the two documents would state different quantities for the same goods. That is the
+ * failure this whole reconciliation exists to prevent. Downstream of here the entered figure
+ * is simply what the shipment says.
+ *
+ * Shared out in proportion to what each line already holds, and settled by `largestRemainder`
+ * so the lines total exactly what was entered: each leftover step goes to the share that lost
+ * the most in the rounding, ties to the earlier line. A row holding nothing to be proportional
+ * to — the case this feature exists for, a weight the packing list omitted — is split evenly.
+ *
+ * A field is an override only when it is a finite, non-negative number that differs from the
+ * documents'. `undefined` means "not entered"; a figure equal to the printed one is not a
+ * departure and is not reported as one, so re-typing what is already there leaves no trace to
+ * explain.
+ */
+export function applyRowFigures(
+  merged: MergedLine[],
+  rows: SLILine[],
+  figures?: Record<string, RowFigures>,
+): EnteredFigure[] {
+  if (!figures || !Object.keys(figures).length) return []
+  const byId = new Map(merged.map((line) => [line.id, line]))
+  const applied: EnteredFigure[] = []
+
+  for (const row of rows) {
+    const entered = figures[row.rowKey]
+    if (!entered) continue
+    const lines = row.sourceLineIds.map((id) => byId.get(id)).filter((l): l is MergedLine => Boolean(l))
+    if (!lines.length) continue
+
+    for (const key of ['quantity', 'weightKg', 'valueUsd'] as const) {
+      const typed = entered[key]
+      if (typed === undefined || !Number.isFinite(typed) || typed < 0) continue
+      const { field, decimals } = FIGURE_ON_LINE[key]
+      // To the precision the figure is actually filed at, and reported at that precision too.
+      // A value typed to three places is shared out over lines held to two, so the row totals
+      // a different number from the one in the box — and the box, the warning and the audit
+      // record would all go on saying what was typed while the form said otherwise.
+      const now = roundTo(typed, decimals)
+      const was = row[key]
+      if (now === was) continue
+      applied.push({ row, field: key, was, now })
+
+      const shares = shareOut(lines, field, now)
+      // Enough places to state every share as something. A gramme over five lines cannot be
+      // held at the three a kilogram figure normally keeps: four of the five would round to
+      // nothing, and a zero net weight on a line carrying goods is what the blocking weight
+      // check exists to refuse.
+      const places = placesFor(shares, decimals)
+      const settled = largestRemainder(shares, now, 10 ** -places)
+      lines.forEach((line, i) => {
+        // A share of nothing is left as nothing rather than written as zero, where the line
+        // had no figure to begin with. `weights-present` blocks on a line *having* no weight
+        // and its own text says a blank must not be filed as zero — so filling one in with a
+        // hard zero would satisfy the check by doing the thing it forbids.
+        if (settled[i] === 0 && line[field] == null) return
+        // `roundPrecise`, not `roundTo`: `placesFor` can reach eight or nine places on a row
+        // whose lines differ by orders of magnitude, and `roundTo`'s nudge is ruinous there —
+        // `roundTo(0.5, 8)` is 0.50000002, which breaks the one property this division has.
+        line[field] = roundPrecise(settled[i], places)
+      })
+    }
+  }
+  return applied
+}
+
+/**
+ * How an entered row figure divides over the lines beneath it.
+ *
+ * Three cases, and the middle one is what the feature exists for:
+ *
+ *   - **Some lines carry the figure and some do not.** The ones that do keep exactly what the
+ *     document printed, and the difference goes to the ones that do not, split evenly. A
+ *     packing list missing one line's weight is corrected by supplying the row total, and
+ *     scaling every line to reach it would restate figures the document did state — the
+ *     printed 2 kg becoming 5 because the missing line was never counted.
+ *   - **Every line carries it.** Shared in proportion to what each holds, which preserves
+ *     their relationship to one another.
+ *   - **None does.** Split evenly; there is no ratio to preserve.
+ *
+ * The first case falls back to the second where the entered figure is *less* than the lines
+ * already account for: there is no share left to give, and taking the difference off the
+ * stated lines is the only division that reaches the figure.
+ */
+function shareOut(lines: MergedLine[], field: 'quantity' | 'netWeightKg' | 'extendedValue', target: number): number[] {
+  const stated = lines.map((line) => line[field] != null)
+  const held = lines.reduce((sum, line) => sum + (line[field] ?? 0), 0)
+  const missing = stated.filter((has) => !has).length
+
+  if (missing && missing < lines.length && held <= target) {
+    const each = (target - held) / missing
+    return lines.map((line, i) => (stated[i] ? (line[field] as number) : each))
+  }
+  if (held > 0) return lines.map((line) => ((line[field] ?? 0) / held) * target)
+  return lines.map(() => target / lines.length)
+}
+
+/** What a replaced figure is called on the review screen. */
+const FIGURE_LABELS: Record<EnteredFigure['field'], string> = {
+  quantity: 'quantity',
+  weightKg: 'net weight',
+  valueUsd: 'value',
+}
+
+/**
+ * Every figure filed against the documents' own, named.
+ *
+ * A warning rather than a note, and it never passes silently once anything has been entered:
+ * these are the numbers on a signed declaration, and the one thing a reviewer must not be
+ * able to do is forget that a box says something the invoice does not.
+ */
+function enteredFigureChecks(entered: EnteredFigure[]): CheckResult[] {
+  if (!entered.length) return []
+  const described = entered
+    .map((e) => `${e.row.scheduleB} ${e.row.domesticForeign}: ${FIGURE_LABELS[e.field]} ${e.was} → ${e.now}`)
+    .join('; ')
+  return [
+    {
+      id: 'entered-figures',
+      severity: 'warning',
+      title: 'Commodity figures entered by hand',
+      detail:
+        `${entered.length} figure(s) on the commodity rows are yours rather than the documents' (${described}). ` +
+        'The totals below reconcile against these, so a figure entered to make them agree makes them agree by ' +
+        'saying so. Check each against the shipment before signing.',
+      passed: false,
+      refs: [...new Set(entered.flatMap((e) => e.row.sourceLineIds))],
+    },
+  ]
+}
+
+/**
+ * Every part filed under export-control values a reviewer entered, named.
+ *
+ * Same reasoning as the classification overrides: a value nobody can account for later is
+ * indistinguishable from a typo, and the ECCN is the field on this form where that matters
+ * most.
+ */
+/** Whether an entered export-control value is the one the row would have filed anyway. */
+function sameControl(
+  entered: string | undefined,
+  line: MergedLine | undefined,
+  field: 'eccn' | 'license' | 'sme',
+  options: ReconcileOptions,
+): boolean {
+  if (!entered || !line) return false
+  const without = exportControlFor(line, { ...options, exportControlByPart: undefined })[field]
+  return (without ?? '').trim().toUpperCase() === entered.trim().toUpperCase()
+}
+
+function exportControlOverrideChecks(merged: MergedLine[], options: ReconcileOptions): CheckResult[] {
+  const byPart = options.exportControlByPart
+  if (!byPart || !Object.keys(byPart).length) return []
+  // Grouped once. Filtering the whole line list inside a loop over the parts is quadratic on
+  // a shipment where the parts scale with the lines, which is every shipment.
+  const byKey = new Map<string, MergedLine[]>()
+  for (const line of merged) {
+    const key = partKey(line.partNumber)
+    if (!key) continue
+    const held = byKey.get(key)
+    if (held) held.push(line)
+    else byKey.set(key, [line])
+  }
+
+  const described: string[] = []
+  const refs: string[] = []
+  for (const [part, lines] of byKey) {
+    const entered = byPart[part]
+    if (!entered) continue
+    const fields = (['eccn', 'license', 'sme'] as const)
+      // Only where it changes what *some* line of the part files. The shipment-wide value is
+      // the box's placeholder, so typing it back in to confirm a part is the natural thing to
+      // do — and reporting that as "filed under values you entered" leaves a warning about a
+      // departure that did not happen. `applyRowFigures` declines the same no-op for the same
+      // reason. Judged across every line, not the first: one part can appear on a line
+      // printing no ECCN and on a line printing `5A992.c`, and an entry of `EAR99` is a no-op
+      // against the first and a downgrade of a document-stated value against the second.
+      .filter((field) => entered[field] && lines.some((line) => !sameControl(entered[field], line, field, options)))
+      .map((field) => `${field.toUpperCase()} ${entered[field]}`)
+    if (!fields.length) continue
+    described.push(`${lines[0]?.partNumber || part} (${fields.join(', ')})`)
+    refs.push(...lines.map((l) => l.id))
+  }
+  if (!described.length) return []
+  return [
+    {
+      id: 'export-control-overrides',
+      severity: 'warning',
+      title: 'Export control entered per part',
+      detail:
+        `${described.length} part(s) are filed under export-control values you entered rather than the ` +
+        `shipment's (${described.join('; ')}). These beat both the shipment-wide values and anything the ` +
+        'document printed. Check them against the classification before signing.',
+      passed: false,
+      refs,
+    },
+  ]
+}
+
+/**
+ * A row filed at more than it holds, named alongside the figure it was rounded up from.
  *
  * Told by the basis, not by whether a weight happens to be on the row. A line invoiced as
- * 400 g under a kilogram code converts from its own quantity and rounds away there — and a
- * packing list that also states a 0.45 kg net weight for it would have the filer inspecting
- * a figure that had nothing to do with it.
+ * 400 g under a kilogram code converts from its own quantity — and a packing list that also
+ * states a 0.45 kg net weight for it would have the filer inspecting a figure that had
+ * nothing to do with the one on the form.
  */
-function roundedAwayFrom(line: SLILine): string {
+function overstatedFrom(line: SLILine): string {
   const from =
     line.reportingBasis === 'net-weight'
       ? `${line.weightKg} kg`
@@ -908,16 +1185,24 @@ function classificationChecks(
  * state its own.
  */
 function exportControlChecks(options: ReconcileOptions, merged: MergedLine[]): CheckResult[] {
-  const statedEverywhere = (value: (line: MergedLine) => string | undefined): boolean =>
-    merged.length > 0 && merged.every((line) => value(line))
-
-  const missing = [
-    ['ECCN / EAR99 / USML category', options.eccn, (line: MergedLine) => line.eccn],
-    ['SME', options.sme, (line: MergedLine) => line.sme],
-    ['Licence, exception or NLR', options.license, (line: MergedLine) => line.license],
-  ]
-    .filter(([, blanket, stated]) => !blanket && !statedEverywhere(stated as (line: MergedLine) => string | undefined))
-    .map(([label]) => label as string)
+  // Asked of the value each line is actually filed under, not of the document alone: a field
+  // supplied part by part is supplied, and reporting it as "not yet set" describes a gap on
+  // the panel whose whole job is to say what still needs doing.
+  //
+  // Resolved once per line rather than once per line per field. `exportControlFor` normalises
+  // a part key and answers all three, so asking it three times walked every line three times
+  // for something one pass produces.
+  const filed = merged.map((line) => exportControlFor(line, options))
+  const missing = ([
+    ['ECCN / EAR99 / USML category', 'eccn'],
+    ['SME', 'sme'],
+    ['Licence, exception or NLR', 'license'],
+  ] as const)
+    // The blanket value on its own settles it, whatever the lines say — including a document
+    // whose lines failed to parse, which would otherwise be told the ECCN just typed is
+    // missing, on the panel whose whole job is to say what still needs doing.
+    .filter(([, field]) => !options[field] && !(filed.length > 0 && filed.every((control) => control[field])))
+    .map(([label]) => label)
 
   return [
     {
@@ -927,8 +1212,8 @@ function exportControlChecks(options: ReconcileOptions, merged: MergedLine[]): C
       detail: missing.length
         ? `Not yet set: ${missing.join(', ')}. These are not on the CIPL and are never inferred — ` +
           'an absent ECCN does not establish EAR99, and EAR99 does not by itself establish NLR.'
-        : 'Every row carries a full export-control triplet, from the document line where stated and the ' +
-          'entered blanket value otherwise.',
+        : 'Every row carries a full export-control triplet, from the value entered against the part where ' +
+          'there is one, the document line where it states one, and the blanket value otherwise.',
       passed: missing.length === 0,
     },
   ]
@@ -951,21 +1236,24 @@ function exportControlChecks(options: ReconcileOptions, merged: MergedLine[]): C
 function sourceControlChecks(sliLines: SLILine[], merged: MergedLine[], options: ReconcileOptions): CheckResult[] {
   const byId = new Map(merged.map((l) => [l.id, l]))
   const members = [
-    { id: 'eccn-from-document', label: 'ECCN', blanket: options.eccn, norm: 'EAR99', value: (l: MergedLine) => l.eccn },
-    { id: 'license-from-document', label: 'licence', blanket: options.license, norm: 'NLR', value: (l: MergedLine) => l.license },
-    { id: 'sme-from-document', label: 'SME', blanket: options.sme, norm: 'N', value: (l: MergedLine) => l.sme },
+    { id: 'eccn-from-document', label: 'ECCN', blanket: options.eccn, norm: 'EAR99', field: 'eccn' as const, value: (l: MergedLine) => l.eccn },
+    { id: 'license-from-document', label: 'licence', blanket: options.license, norm: 'NLR', field: 'license' as const, value: (l: MergedLine) => l.license },
+    { id: 'sme-from-document', label: 'SME', blanket: options.sme, norm: 'N', field: 'sme' as const, value: (l: MergedLine) => l.sme },
   ]
 
-  return members.flatMap(({ id, label, blanket, norm, value }) => {
+  return members.flatMap(({ id, label, blanket, norm, field, value }) => {
     const unremarkable = (blanket ?? '').trim().toUpperCase() || norm
     const stated = sliLines.flatMap((line, i) => {
-      const sourceValue = line.sourceLineIds
-        .map((lineId) => {
-          const source = byId.get(lineId)
-          return source ? value(source) : undefined
-        })
-        .find(Boolean)
-      return sourceValue && sourceValue.trim().toUpperCase() !== unremarkable
+      const source = line.sourceLineIds.map((lineId) => byId.get(lineId)).find((l) => l && value(l))
+      const sourceValue = source ? value(source) : undefined
+      // Only where the printed value is what the row files. A value entered against the part
+      // beats it, and saying "will be filed as 5A992.c, as printed on the document" about a
+      // row filing EAR99 is this panel contradicting itself about the most consequential
+      // field on the form.
+      const filed = source ? exportControlFor(source, options)[field] : undefined
+      return sourceValue &&
+        sourceValue.trim().toUpperCase() !== unremarkable &&
+        (filed ?? '').trim().toUpperCase() === sourceValue.trim().toUpperCase()
         ? [{ row: i + 1, scheduleB: line.scheduleB, value: sourceValue }]
         : []
     })

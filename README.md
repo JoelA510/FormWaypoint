@@ -228,6 +228,9 @@ manufacture the parts a document cannot support:
 - It never infers **country of origin**, **hazardous-material status**, **routed-export
   status**, **consignee type** or **related-party status**.
 - It never treats a blank field as zero, and never applies a signature.
+- It never quietly substitutes a figure of its own for one the documents give. A **quantity,
+  weight or value entered by hand** replaces the document's — that is what it is for — and
+  every one is named in a check, with the figure it replaced, for as long as it stands.
 
 ## Verification
 
@@ -304,15 +307,35 @@ one shipment cannot disagree with itself.
 A kilogram quantity is filed as a whole number of kilograms: 48 pieces weighing 4.499 kg are
 filed as `4`. Only the figure in the box is rounded — the net weight the row is reconciled
 against keeps every decimal the packing list gave it. Tonnes and grams are left alone, since
-rounding a tonne quantity whole would file almost every shipment in this trade as zero. A row
-that rounds away to zero is warned about rather than filed quietly.
+rounding a tonne quantity whole would file almost every shipment in this trade as zero.
+
+It never files zero for goods that are there. A quantity box reading `0` on a signed
+declaration states that nothing was shipped, and thirty grams of gasket under a kilogram code
+is not nothing, so a row under half a unit files `1` — the least the unit can hold, and more
+than the row holds. Every such row is named on the review screen, in the checks and on the
+keying sheet, because filing one kilogram for thirty grams overstates the weight thirty-fold
+and only the filer can decide whether that is what should be declared.
 
 Where a code accepts more than one unit — `NO+KG` — only the filer knows how the goods are
 actually measured, so the review screen offers the choice per commodity number. Units the
 shipment cannot state are listed and disabled with the reason, rather than hidden: "there is
 no net weight for these goods" is the answer somebody is looking for. Where nothing supports
-the required unit at all, the document's own figure is filed and the reconciliation says so —
-no quantity is ever invented to fit a unit.
+the required unit at all, the document's own figure is filed and the reconciliation says so.
+
+## Figures entered by hand
+
+Every figure this tool files comes from the paperwork, with one door out of that. Quantity,
+net weight and value are editable on each commodity row, and export control can be set per
+part where one item is classified differently from the rest — for the shipment whose packing
+list is missing a weight somebody forgot to enter, found on the day it ships.
+
+Nothing is inferred through that door. An entered figure is shared out over the invoice lines
+the row holds, so the form and the keying sheet state one shipment rather than two; the
+documents' own figure stays on the screen as the placeholder; and every row and every part
+touched is named in a check that never passes once anything has been entered, because the one
+thing a reviewer must not be able to do is forget that a box says something the invoice does
+not. None of it is stored: these are statements about one document's rows, and a figure that
+outlived the document it was entered against would file itself against the next shipment.
 
 ## Continuation pages
 

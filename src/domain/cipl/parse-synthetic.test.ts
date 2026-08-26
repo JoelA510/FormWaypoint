@@ -23,6 +23,9 @@ const fc = (parsed: ParsedCipl, kind: 'INVOICE' | 'PACKING_LIST') =>
 const byOrder = (parsed: ParsedCipl, kind: 'INVOICE' | 'PACKING_LIST', order: string) =>
   fc(parsed, kind).find((l) => l.orderNumber === order)!
 
+/** The first line of the stock shipment, whose figures the solitary-order tests reuse. */
+const spec0 = (): SyntheticLine => simpleShipment().lines[0]
+
 describe('an ordinary shipment', () => {
   it('reads the header', async () => {
     const parsed = await parse()
@@ -210,6 +213,67 @@ describe('commodity headings', () => {
       ['Glass Cartridge Fuses <=1000V', 'FUSE, 1A 3AG'],
       ['Elect. Apparatus, Other', 'PCBAY, MB ELC ACRBD'],
     ])
+  })
+})
+
+describe('an order carrying a single line', () => {
+  /** No sequence within the order, and no lot id — the layout prints neither. */
+  const solitary = () => {
+    const spec = simpleShipment()
+    return {
+      ...spec,
+      lines: [
+        { ...spec.lines[0], order: '4500001452', sequence: '', lineNumber: '0000', itemId: '' },
+        ...spec.lines.slice(1),
+      ],
+    }
+  }
+
+  it('reads it, rather than never seeing it at all', async () => {
+    // The block delimiter demanded a sequence. An order with one line prints none, so the
+    // whole block was invisible — not misread, not warned about, never seen, because this is
+    // what decides a block exists. A real shipment lost one line of 215 pieces and $3,128 to
+    // it, and the only sign was the header naming an order no line item referenced.
+    const parsed = await parse(solitary())
+    expect(fc(parsed, 'INVOICE')).toHaveLength(3)
+    const line = byOrder(parsed, 'INVOICE', '4500001452')
+    expect(line.sequence).toBe('')
+    expect(line.quantity).toBe(spec0().quantity)
+    expect(line.extendedValue).toBeCloseTo(spec0().quantity * spec0().unitPrice, 2)
+  })
+
+  it('takes its weights too, where the packing list prints the part number in the sequence’s place', async () => {
+    // A packing-list block opens `order, order, sequence, part, description`. With no
+    // sequence the part number lands in the third cell, so a delimiter that checked that cell
+    // against the sequence pattern would refuse exactly the weights whose value it had just
+    // recovered.
+    const parsed = await parse(solitary())
+    const line = byOrder(parsed, 'PACKING_LIST', '4500001452')
+    expect(line.netWeightKg).toBeCloseTo(spec0().netWeightKg, 3)
+    // And reads the row by column rather than by counting cells: the empty sequence shifts
+    // nothing, so the part number is still the part number. It is a join key, so a
+    // description filed there quietly breaks the tier the join falls back on.
+    expect(line.partNumber).toBe(spec0().partNumber)
+    expect(line.description).toBe(spec0().description)
+  })
+
+  it('files no lot id rather than filing the country as one', async () => {
+    // The lot id sits immediately right of the line number, in its own column. A line
+    // carrying none prints the country of origin next instead, and taking whatever came next
+    // recorded `United States` as an item identifier — which then keys the row.
+    const parsed = await parse(solitary())
+    const line = byOrder(parsed, 'INVOICE', '4500001452')
+    expect(line.itemId).toBe('')
+    expect(line.countryOfOrigin).toBe(spec0().country)
+  })
+
+  it('reconciles the shipment it used to hold up', async () => {
+    const parsed = await parse(solitary())
+    const { checks } = reconcile(parsed, null, CONTROLLED)
+    for (const id of ['total-quantity', 'total-value', 'total-weight']) {
+      const check = checks.find((c) => c.id === id)
+      expect(check?.passed, `${id}: ${check?.detail}`).toBe(true)
+    }
   })
 })
 

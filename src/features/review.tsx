@@ -8,6 +8,7 @@ import { basisNote } from './quantity-basis'
 import { partKey } from '../domain/part-key'
 import type { OverrideRecord } from '../store/local-store'
 import type { CheckResult, MergedLine, ParsedCipl, Reconciliation, SLILine } from '../domain/types'
+import { FIGURE_ON_LINE, type RowFigures } from '../domain/reconcile'
 
 const SEVERITY_TONE: Record<CheckResult['severity'], Tone> = {
   blocking: 'block',
@@ -170,15 +171,64 @@ export function CommodityTable({
   reconciliation,
   reportingUnits = {},
   onReportingUnitChange,
+  rowFigures = {},
+  onRowFigureChange,
 }: {
   reconciliation: Reconciliation
   /** The unit chosen for each commodity number, keyed by normalised code. */
   reportingUnits?: Record<string, string>
   /** Omitted where the table is read-only. */
   onReportingUnitChange?: (code: string, unit: string) => void
+  /** Figures entered against a row, keyed by `SLILine.rowKey`. */
+  rowFigures?: Record<string, RowFigures>
+  /** Omitted where the table is read-only. Passing `undefined` clears that field. */
+  onRowFigureChange?: (rowKey: string, field: keyof RowFigures, value: number | undefined) => void
 }) {
-  const { sliLines, mergedLines } = reconciliation
+  const { sliLines, mergedLines, enteredFigures } = reconciliation
   const byId = new Map(mergedLines.map((l) => [l.id, l]))
+  // What the documents said, for the boxes that are showing something else. The row itself
+  // now carries the entered figure, so comparing a typed value against the row would call an
+  // override equal to itself "the document's figure" and delete it on the next blur.
+  const documentFigures = new Map(enteredFigures.map((e) => [`${e.rowKey}:${e.field}`, e.was]))
+
+  /**
+   * A figure cell: the row's own value, or a box to type one over it.
+   *
+   * `decimals` is a *floor*, not a format. An invoice can state a fractional count — a line
+   * of `0.3 KG` is one of the shapes this app already handles — and rendering the quantity
+   * column to zero places printed `0` beside a total that included it.
+   */
+  const figure = (line: SLILine, field: keyof RowFigures, decimals: number, label: string) => {
+    // Displayed to at least `decimals` places; committed at the places the figure is actually
+    // filed at, which is not the same number. The invoice-quantity column shows whole numbers,
+    // and committing at *that* precision rounded a typed `0.3` to `0` — filing a quantity box
+    // that declares the goods absent, on the one column whose figures are counts.
+    const places = FIGURE_ON_LINE[field].decimals
+    const entered = rowFigures[line.rowKey]?.[field]
+    // The documents' own figure, which is the row's own until something is entered over it.
+    const fromDocument = documentFigures.get(`${line.rowKey}:${field}`) ?? line[field]
+    if (!onRowFigureChange) return <span className="tabular">{atLeast(line[field], decimals)}</span>
+    return (
+      <RowFigureInput
+        value={entered}
+        // Shown as the placeholder throughout, so the box always says what the row would file
+        // if it were cleared — including while it is holding something else.
+        documentValue={atLeast(fromDocument, decimals)}
+        label={`${label} for ${line.scheduleB} ${line.domesticForeign}`}
+        // Held at the precision the figure is filed at, so the box states the number on the
+        // form. The reconciliation rounds an entered figure to its field's places before
+        // sharing it out; keeping the raw text here left `999.999` on screen, in a box marked
+        // as an override, beside a declaration filing 1000.
+        decimals={places}
+        // Typing the document's own figure back in is not an override, so it is not held as
+        // one. The reconciliation already declines to report it; a box left marked amber for a
+        // figure the checks say nobody entered is the two disagreeing about which numbers on
+        // the form are the filer's. Compared against the *document's* figure — against the
+        // row's, an override equal to itself would delete itself on the next blur.
+        onCommit={(next) => onRowFigureChange(line.rowKey, field, next === fromDocument ? undefined : next)}
+      />
+    )
+  }
 
   return (
     <Card>
@@ -188,7 +238,7 @@ export function CommodityTable({
       />
       <CardBody className="px-0 py-0">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[820px] border-collapse text-sm">
+          <table className="w-full min-w-[1040px] border-collapse text-sm">
             <thead>
               <tr className="border-b bg-[var(--color-sunken)] text-left text-xs tracking-wide text-[var(--color-ink-faint)] uppercase">
                 <th className="px-4 py-2.5 font-semibold">D/F</th>
@@ -201,8 +251,8 @@ export function CommodityTable({
               </tr>
             </thead>
             <tbody>
-              {sliLines.map((line, i) => (
-                <tr key={`${line.scheduleB}-${i}`} className="border-b align-top last:border-b-0">
+              {sliLines.map((line) => (
+                <tr key={line.rowKey} className="border-b align-top last:border-b-0">
                   <td className="tabular px-4 py-3">{line.domesticForeign}</td>
                   <td className="tabular px-4 py-3 whitespace-nowrap">
                     {line.scheduleB}
@@ -222,8 +272,11 @@ export function CommodityTable({
                         .join(', ')}
                     </p>
                   </td>
-                  <td className="tabular px-4 py-3 text-right">
-                    {line.quantity} {line.sourceUom}
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex items-center justify-end gap-1.5">
+                      {figure(line, 'quantity', 0, 'Invoice quantity')}
+                      <span className="text-xs text-[var(--color-ink-faint)]">{line.sourceUom}</span>
+                    </div>
                   </td>
                   <td className="px-4 py-3">
                     <ReportingUnitPicker
@@ -236,8 +289,8 @@ export function CommodityTable({
                       }
                     />
                   </td>
-                  <td className="tabular px-4 py-3 text-right">{line.weightKg.toFixed(3)}</td>
-                  <td className="tabular px-4 py-3 text-right">{line.valueUsd.toFixed(2)}</td>
+                  <td className="px-4 py-3 text-right">{figure(line, 'weightKg', 3, 'Net weight')}</td>
+                  <td className="px-4 py-3 text-right">{figure(line, 'valueUsd', 2, 'Value')}</td>
                 </tr>
               ))}
             </tbody>
@@ -263,6 +316,18 @@ export function CommodityTable({
 
 function sum(values: number[]): number {
   return Math.round(values.reduce((a, b) => a + b, 0) * 1000) / 1000
+}
+
+/**
+ * A figure at no fewer than `decimals` places, and no fewer than it actually has.
+ *
+ * `toFixed` alone is a truncation: the invoice-quantity column asks for whole numbers and an
+ * invoice that states `0.3 KG` would print `0` under a total that counts it.
+ */
+function atLeast(value: number, decimals: number): string {
+  if (!Number.isFinite(value)) return ''
+  const own = (String(value).split('.')[1] ?? '').length
+  return value.toFixed(Math.max(decimals, Math.min(own, 6)))
 }
 
 /**
@@ -603,6 +668,80 @@ export function PartOverridesPanel({
         </div>
       </CardBody>
     </Card>
+  )
+}
+
+/**
+ * One figure on a commodity row, as the documents gave it or as somebody typed it.
+ *
+ * The document's own figure is the placeholder rather than the value, so an untouched row
+ * shows what would be filed while an entered one shows, in a filled box, that this number is
+ * not the invoice's. Emptying the box is how an override is taken back — there is no separate
+ * control for it, because "delete what I typed" is what an empty box already means.
+ *
+ * Commits on blur, like the per-part weights: these are figures on a signed declaration and
+ * committing them keystroke by keystroke would file `1` on the way to `12`.
+ */
+function RowFigureInput({
+  value,
+  documentValue,
+  decimals,
+  label,
+  onCommit,
+}: {
+  value: number | undefined
+  /** What the row files without an override; shown as the placeholder. Absent while overridden. */
+  documentValue: string | undefined
+  /** Places the figure is filed at. What is typed past them is not what the form would carry. */
+  decimals: number
+  label: string
+  onCommit: (next: number | undefined) => void
+}) {
+  const committed = value === undefined ? '' : String(value)
+  const [draft, setDraft] = useState(committed)
+
+  // Saved figures arrive after the first render, and a re-parse can move a row out from under
+  // one, so the box has to follow the incoming value or it shows a figure the form is not
+  // filing.
+  useEffect(() => {
+    setDraft(value === undefined ? '' : String(value))
+  }, [value])
+
+  const parsed = Number(draft)
+  const blank = draft.trim() === ''
+  const valid = blank || (Number.isFinite(parsed) && parsed >= 0)
+
+  return (
+    <Input
+      value={draft}
+      inputMode="decimal"
+      aria-label={label}
+      placeholder={documentValue ?? ''}
+      className={`tabular w-24 text-right ${valid ? '' : 'border-[var(--color-block)]'} ${
+        value === undefined ? '' : 'border-[var(--color-warn)]'
+      }`}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        // An entry that is not a number is put back to what the row is actually filing.
+        // Leaving `12,5` on screen beside a form filing 12.5 is this panel showing a figure
+        // that is not the one being signed, which is the one thing it must never do.
+        if (!valid) {
+          setDraft(committed)
+          return
+        }
+        // Only where something moved. Tabbing across the table would otherwise re-reconcile
+        // the whole shipment once per cell — and a box holding a re-typed document figure,
+        // which commits as "no override", would keep that text on screen with nothing behind
+        // it, because the value it follows never changed.
+        // Rounded here, where it is entered, so what is held and shown is what gets filed.
+        const next = blank ? undefined : Number(parsed.toFixed(decimals))
+        if (next === value) {
+          setDraft(committed)
+          return
+        }
+        onCommit(next)
+      }}
+    />
   )
 }
 

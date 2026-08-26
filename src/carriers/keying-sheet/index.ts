@@ -21,18 +21,25 @@
 import type { MergedLine, Reconciliation, SLILine } from '../../domain/types'
 import {
   KG_PER_LB,
+  filedAtMinimum,
   filedWhole,
   kgToLb as kilogramsToPounds,
   restateExact,
   restateQuantity,
   roundPrecise,
-  roundedAwayToNothing,
+  type QuantitySource,
 } from '../../domain/units'
+import { largestRemainder } from '../../lib/apportion'
 import { buildXlsx, type CellValue, type Sheet } from '../../lib/xlsx'
 import type { SliDraft } from '../types'
 import { canonicalUnit, formatScheduleB, normalizeScheduleB, type ScheduleBIndex } from '../../domain/schedule-b'
-import { partKey } from '../../domain/part-key'
-import { domesticForeign, roundTo } from '../../domain/reconcile'
+import { distinctParts, partKey } from '../../domain/part-key'
+import {
+  domesticForeign,
+  exportControlFor,
+  roundTo,
+  type ExportControlOverride,
+} from '../../domain/reconcile'
 import { toCountryPickerLabel, toIsoAlpha2 } from './countries'
 
 import {
@@ -129,10 +136,16 @@ export interface KeyingCommodityRow {
    */
   quantityNotFiled?: boolean
   /**
-   * True where the row files zero of a unit it does have a figure for — rounded away, or the
-   * short end of a whole figure shared out across the rows that make up one commodity row.
+   * Set where the keyed quantity is not what the row holds, and why.
+   *
+   * `minimum` — the row holds less than half a unit, so it keys 1: the least wrong figure a
+   * whole unit can hold for goods that are there, and an overstatement.
+   *
+   * `shared-to-nothing` — the row took nothing as its share of a commodity row's whole figure.
+   * One kilogram between two parts has to go to one of them, and the sheet has to total what
+   * the form files, so the other keys 0 for goods that are in the box.
    */
-  quantityRoundedAway?: boolean
+  quantityCaveat?: 'minimum' | 'shared-to-nothing'
   /** Six decimal places, as Ship Manager displays and stores it. */
   unitValue: string
   totalValue: string
@@ -243,6 +256,8 @@ export interface CodeCorrections {
   license?: string | null
   /** The shipment-wide SME flag, for lines that print none. Only `df-code` reads it. */
   sme?: string | null
+  /** Export control entered against a part, which beats both. Only `df-code` reads it. */
+  exportControlByPart?: Record<string, ExportControlOverride>
 }
 
 /**
@@ -283,16 +298,26 @@ function groupKeyFor(line: MergedLine, mode: GroupingMode, index: number, correc
     // controlled blanket where it prints none. Treating a blank as its own bucket splits a
     // row the filed SLI merges as soon as one line happens to print the controlled value
     // outright, which is the opposite of what this mode is for.
-    case 'df-code':
-      // Case-insensitive on the triplet, exactly as `aggregateLines` keys its rows.
+    case 'df-code': {
+      // Case-insensitive on the triplet, and resolved by the same function `aggregateLines`
+      // uses — this mode exists to be read against the form's rows line for line, and a
+      // second copy of that precedence is how it comes to group by a triplet the form does
+      // not file.
+      const control = exportControlFor(line, {
+        eccn: corrections.eccn ?? null,
+        license: corrections.license ?? null,
+        sme: corrections.sme ?? null,
+        exportControlByPart: corrections.exportControlByPart,
+      })
       return [
         domesticForeign(line.countryOfOrigin),
         code,
         unit,
-        (line.eccn || corrections.eccn || '').toUpperCase(),
-        (line.license || corrections.license || '').toUpperCase(),
-        (line.sme || corrections.sme || '').toUpperCase(),
+        (control.eccn ?? '').toUpperCase(),
+        (control.license ?? '').toUpperCase(),
+        (control.sme ?? '').toUpperCase(),
       ].join('|')
+    }
     case 'part-origin-code':
     default:
       return [partKey(line.partNumber), partKey(line.countryOfOrigin), code, unit].join('|')
@@ -374,6 +399,16 @@ interface GroupFigures {
   keyed: KeyedQuantity
   /** The restated figure before its unit's whole-number rule, or NaN where it has none. */
   exact: number
+  /**
+   * True where this row's figure is a *share* — one of several keying rows dividing the whole
+   * figure the form files for one set of goods.
+   *
+   * What the figure means then changes: it is not a restatement of what this row holds, so the
+   * note beside it cannot claim the SLI files the same number for this row, because the SLI
+   * files one number for the lot. A component of a single keying row is not a share; it takes
+   * the whole total, which is the figure it would have restated for itself.
+   */
+  apportioned?: boolean
 }
 
 interface KeyedQuantity {
@@ -505,33 +540,58 @@ function apportionWholeUnits(
     const total = filed.reduce((sum, row) => sum + row.reportingQuantity, 0)
     const shares = bucket.map((group) => (figures.get(group) as GroupFigures).exact)
     const held = shares.reduce((sum, value) => sum + value, 0)
-    // Nothing to divide proportionally, and no honest way to guess at it. A negative share
-    // among them is the same problem wearing a positive total: scaling would hand one row a
-    // negative quantity that the largest-remainder pass cannot take back, and the column would
-    // reach the form's figure only by cancelling out.
-    if (!(held > 0) || shares.some((value) => value < 0)) continue
-
+    // A negative share makes the total meaningless: scaling would hand one row a negative
+    // quantity that the largest-remainder pass cannot take back, and the column would reach
+    // the form's figure only by cancelling out.
+    if (shares.some((value) => value < 0)) continue
+    // Nothing to be proportional to — every group under half a unit, so each restated to
+    // nothing at three places — and yet the form files a whole number for the goods, because
+    // it will not put a zero in a quantity box. Skipping here left each row to reach that same
+    // minimum on its own, so two 0.2 g parts keyed 1 and 1 against a form filing 1. Shared out
+    // evenly instead, which is the only division the figures support.
+    //
     // Scaled onto the total first, then divided. Dividing the raw shares and mopping up the
     // difference only works while the form's total is within a unit of their sum, and it is
     // not always: three commodity rows of 0.5 kg each file 1 apiece, so a single keying row
     // covering all three has to key 3 against an exact share of 1.5. Scaling makes the shares
     // sum to what the form files by construction, whichever way each side rounded.
-    const scaled = shares.map((value) => (value * total) / held)
-    const whole = scaled.map((value) => Math.floor(value))
-    const remainder = Math.min(
-      Math.max(total - whole.reduce((sum, value) => sum + value, 0), 0),
-      bucket.length,
-    )
-    const byFraction = scaled
-      .map((value, index) => ({ index, fraction: value - Math.floor(value) }))
-      .sort((a, b) => b.fraction - a.fraction || a.index - b.index)
-    for (let taken = 0; taken < remainder; taken++) whole[byFraction[taken].index] += 1
+    const scaled =
+      held > 0 ? shares.map((value) => (value * total) / held) : shares.map(() => total / shares.length)
+    // Divided by the one rule, in whole units. Doing it inline here and again in
+    // `applyRowFigures` was two implementations of one division with two tie rules, which is
+    // how a shipment comes to be divided two ways by the two documents prepared from it.
+    const whole = largestRemainder(scaled, total, 1)
 
     bucket.forEach((group, index) => {
       const figure = figures.get(group) as GroupFigures
-      figures.set(group, { ...figure, keyed: { ...figure.keyed, quantity: whole[index] } })
+      // Only where the figure is genuinely *shared*. A component of one keying row takes the
+      // whole total, which is the same figure it would have restated for itself — calling
+      // that a share would strip the note off every row that simply rounds up to one.
+      const shared = bucket.length > 1
+      figures.set(group, { ...figure, apportioned: shared, keyed: { ...figure.keyed, quantity: whole[index] } })
     })
   }
+}
+
+/**
+ * Why a keyed quantity is not the figure the row holds, if it is not.
+ *
+ * Two different things, and they need different words. A row under half a unit keys 1 — the
+ * form does too, and both overstate it. A row that took nothing from a share-out keys 0 while
+ * the form files a whole number for the goods: the sheet totals what the form files, so one
+ * kilogram between two parts leaves the smaller one with none of it.
+ */
+function quantityCaveat(figure: GroupFigures, source: QuantitySource): KeyingCommodityRow['quantityCaveat'] {
+  const { keyed } = figure
+  if (keyed.notFiled || keyed.unavailable) return undefined
+  const holds = source.weightKg > 0 || source.quantity > 0
+  // A share that came to nothing first: that is the one caveat a shared-out row has of its
+  // own, and it is the more serious of the two.
+  if (figure.apportioned && keyed.quantity === 0 && holds && filedWhole(keyed.unit)) return 'shared-to-nothing'
+  // Then the minimum, whether the figure was shared out or not. Gating this on *not* having
+  // been shared silenced the row that most needed it — a group of two ten-thousandths of a
+  // kilogram keys a whole one, a five-thousand-fold overstatement, and said nothing at all.
+  return filedAtMinimum(source, keyed.unit, keyed.quantity) ? 'minimum' : undefined
 }
 
 /** `MY - Malaysia`, or the name and a prompt where no code could be found for it. */
@@ -629,15 +689,9 @@ function groupForKeying(
     // some lines had none is part of what the row must say — otherwise 2 pieces from the US
     // and 3 from nowhere print as 5 pieces of `D`, while the SLI files those 3 as `F`.
     const originMissing = group.some((l) => !l.countryOfOrigin.trim())
-    // Deduped the way the grouping keys them, which is case-insensitively. Trimming alone
-    // made one part printed in two cases look like two, which both dropped the operator's
-    // saved wording and put both spellings in a cell that holds one part number.
-    // A Map keeps the *last* value for a repeated key; the first spelling is the one to show.
-    const parts = [...group.reduce((seen, l) => {
-      const key = partKey(l.partNumber)
-      if (key && !seen.has(key)) seen.set(key, l.partNumber.trim())
-      return seen
-    }, new Map<string, string>()).values()]
+    // Deduped the way the grouping keys them, which is case-insensitively — see
+    // `distinctParts`, which the review screen's per-part table reads the same way.
+    const parts = distinctParts(group)
     // A saved wording is keyed to a part, so it only applies where the row is one part — and
     // a row that merged a line stating no part number is not one part, however few names it
     // carries. `parts` drops the blanks, so counting it alone made those rows look single and
@@ -710,13 +764,10 @@ function groupForKeying(
       // absent.
       //
       // Asked of the same rule the review screen asks, so the two surfaces cannot describe one
-      // row differently: a `PCS` row filing zero has not been rounded whole and has not been
+      // row differently: a `PCS` row is not filed at a whole-unit minimum and has not been
       // shared out, and saying it has sends the operator looking for a rounding that never
       // happened. What is wrong with such a row is upstream, and the reconciliation says so.
-      quantityRoundedAway:
-        !keyed.notFiled &&
-        !keyed.unavailable &&
-        roundedAwayToNothing({ quantity, uom: unitFor(group), weightKg }, keyed.unit, keyed.quantity),
+      quantityCaveat: quantityCaveat(figures.get(group) as GroupFigures, { quantity, uom: unitFor(group), weightKg }),
       // Derived from the group's own total rather than copied off one line, so the unit
       // price and the total beside it can never disagree. Per *keyed* unit, so that
       // quantity x unit price still comes back to the customs value on a row filed by
@@ -878,6 +929,8 @@ export interface KeyingInputs {
   license?: string | null
   /** The blanket SME flag the SLI rows were built with, for the same reason. */
   sme?: string | null
+  /** Export control entered against a part. Beats both the printed and the shipment-wide value. */
+  exportControlByPart?: Record<string, ExportControlOverride>
 }
 
 export function buildKeyingSheet(
@@ -901,6 +954,7 @@ export function buildKeyingSheet(
       eccn: inputs.eccn,
       license: inputs.license,
       sme: inputs.sme,
+      exportControlByPart: inputs.exportControlByPart,
     },
     reportingUnits(reconciliation.sliLines),
     reconciliation.sliLines,
@@ -1343,10 +1397,14 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
         // not put in its place: an operator asked to decide what a `0` should say still needs
         // telling that the column is counting kilograms off the packing list rather than
         // pieces, which is the one thing about this cell they can key straight past.
-        const roundedNote = row.quantityRoundedAway
-          ? `quantity rounds to 0 whole ${row.unitOfMeasure} — these goods have a value but no ` +
-            'quantity to key; decide what this cell should say'
-          : ''
+        const caveatNote =
+          row.quantityCaveat === 'minimum'
+            ? `less than half a ${row.unitOfMeasure}, keyed as 1 — the least this unit can hold, and ` +
+              'more than this row holds'
+            : row.quantityCaveat === 'shared-to-nothing'
+              ? `keyed as 0 ${row.unitOfMeasure}: the SLI files a whole figure for these goods and the rows ` +
+                'making it up have to total it, so this one took none of it; decide what this cell should say'
+              : ''
         const unitNote = row.unitUnavailable
           ? `quantity is the ${row.unitOfMeasure} the document prints; this code files in ` +
             `${row.unitUnavailable} and this row has no figure for it`
@@ -1359,18 +1417,18 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
                 ? `quantity is restated in ${row.unitOfMeasure}, the unit this code is reported in — the document ` +
                   'does not print this figure'
                 : ''
-        if (row.describedByOperator) return join(roundedNote, unitNote, 'your wording')
+        if (row.describedByOperator) return join(caveatNote, unitNote, 'your wording')
         // "also" only where the description itself came from the document. Beside Census
         // wording it would assert the CIPL had used the official text, which it did not.
         const fromDocument = sheet.options.descriptionSource !== 'schedule-b' || Boolean(row.scheduleBUnavailable)
         const lead = fromDocument ? 'document also said' : 'document said'
         const said = row.otherDescriptions.length ? `${lead}: ${row.otherDescriptions.join('; ')}` : ''
-        if (!row.scheduleBUnavailable) return join(roundedNote, unitNote, said)
+        if (!row.scheduleBUnavailable) return join(caveatNote, unitNote, said)
         const why =
           row.scheduleBUnavailable === 'no-index'
             ? 'Schedule B dataset not loaded — the document’s wording is used'
             : 'no Schedule B wording for this code — the document’s is used'
-        return join(roundedNote, unitNote, [why, said].filter(Boolean).join('; '))
+        return join(caveatNote, unitNote, [why, said].filter(Boolean).join('; '))
       }
     }
   }
@@ -1442,11 +1500,12 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
   const converted = sheet.commodities.filter((c) => c.quantityConverted).length
   const notFiled = sheet.commodities.filter((c) => c.quantityNotFiled).length
   const unstatable = sheet.commodities.filter((c) => c.unitUnavailable)
-  const roundedAway = sheet.commodities.filter((c) => c.quantityRoundedAway)
+  const atMinimum = sheet.commodities.filter((c) => c.quantityCaveat === 'minimum')
+  const sharedToNothing = sheet.commodities.filter((c) => c.quantityCaveat === 'shared-to-nothing')
   // The units those rows are actually in. `keyedUnitLabel` is the phrase "in mixed units" on a
-  // sheet holding more than one, which reads as "file 0 whole in mixed units" in a slot that
+  // sheet holding more than one, which reads as "keyed as 1 in mixed units" in a slot that
   // wants a unit name.
-  const roundedUnits = joinDistinct(roundedAway.map((c) => c.unitOfMeasure)) || 'units'
+  const unitsOf = (rows: KeyingCommodityRow[]) => joinDistinct(rows.map((c) => c.unitOfMeasure)) || 'units'
   // What the quantity column is actually counting. A single unit is named; a mixed sheet
   // says so rather than calling a column of kilograms and pieces "pcs", which is what the
   // TOTAL row read as before any of it could be anything but a count.
@@ -1534,11 +1593,15 @@ export function keyingSheetToWorkbook(sheet: KeyingSheet): Sheet[] {
           ? `${notFiled} row(s) are under a commodity number Schedule B files with no quantity at all. Their ` +
             'figure is the document\'s own count, carried because the application needs one — the SLI leaves it blank. '
           : '') +
-        (roundedAway.length
-          ? `${roundedAway.length} row(s) file 0 whole ${roundedUnits}: the goods carry a value but round to nothing ` +
-            'in the unit their commodity number is reported in, or took the short end of a figure shared out ' +
-            'across the rows making up one commodity row on the SLI. Decide what those cells should say before ' +
-            'keying — a quantity of 0 keys goods that are in the box as absent. '
+        (atMinimum.length
+          ? `${atMinimum.length} row(s) hold less than half a ${unitsOf(atMinimum)} and are keyed as 1: a whole ` +
+            'unit cannot hold less, and a 0 would key goods that are in the box as absent. The figure is larger ' +
+            'than those rows hold. Decide what those cells should say before keying. '
+          : '') +
+        (sharedToNothing.length
+          ? `${sharedToNothing.length} row(s) are keyed as 0 ${unitsOf(sharedToNothing)}: the SLI files one whole ` +
+            'figure for those goods and the rows making it up have to total it, so the smallest of them took ' +
+            'none. Decide what those cells should say before keying. '
           : '') +
         (unstatable.length
           ? `${unstatable.length} row(s) could not be stated in the unit their commodity number requires ` +

@@ -5,8 +5,14 @@ import { ChecksPanel, CommodityTable, OverridesPanel, PartOverridesPanel, Shipme
 import { ManualFieldsPanel } from './features/manual-fields'
 import { ItemLibraryPanel, ItemMasterUpdatesPanel, type ImportMode } from './features/item-library'
 import { HistoryPanel, OutputPanel } from './features/output-panel'
-import { reconcile, resolveDestinationCountry } from './domain/reconcile'
+import {
+  reconcile,
+  resolveDestinationCountry,
+  type ExportControlOverride,
+  type RowFigures,
+} from './domain/reconcile'
 import { indexByPart, libraryChanges, libraryWeights, type ItemLibraryEntry } from './domain/item-library'
+import { distinctParts } from './domain/part-key'
 import {
   createScheduleBIndex,
   loadBundledPayload,
@@ -82,6 +88,11 @@ export function App() {
    * from a previous shipment would quietly file goods that were measured differently.
    */
   const [reportingUnits, setReportingUnits] = useState<Record<string, string>>({})
+  // Figures and export control entered against this shipment. Session state, not stored: both
+  // are statements about one document's rows, and a figure that outlived the document it was
+  // entered against would file itself against the next shipment's goods.
+  const [rowFigures, setRowFigures] = useState<Record<string, RowFigures>>({})
+  const [exportControlByPart, setExportControlByPart] = useState<Record<string, ExportControlOverride>>({})
   const [overrides, setOverrides] = useState<OverrideRecord[]>([])
   const [partOverrides, setPartOverrides] = useState<PartOverrideRecord[]>([])
   const [items, setItems] = useState<ItemLibraryEntry[]>([])
@@ -263,10 +274,13 @@ export function App() {
       setBusy(true)
       setParsed(next)
       setError(null)
-      // A unit was chosen for the commodity numbers on the *last* document. These goods are
-      // measured however this document says they are, so the choice starts again from the
-      // Schedule B default rather than carrying over onto codes that happen to repeat.
+      // Everything entered about the *last* document's rows. These goods are measured however
+      // this document says they are, and a figure or a classification entered against another
+      // shipment's rows must not file itself against these — a repeated part or a repeated
+      // commodity number is the common case, not the exception.
       setReportingUnits({})
+      setRowFigures({})
+      setExportControlByPart({})
 
       try {
         const header = next.headers[next.availableSets[0]]
@@ -351,12 +365,32 @@ export function App() {
       unitWeightsByPart,
       itemsByPart,
       reportingUnits,
+      rowFigures,
+      exportControlByPart,
       // Only where a form is actually produced. A keyed carrier borrows the Nippon adapter as
       // scaffolding for the draft, and reporting how many sheets its commodity table takes
       // describes a document this run does not generate.
       maxRows: keyedCarrier ? undefined : adapter.maxCommodityRows,
     })
-  }, [parsed, scheduleB, settings.eccn, settings.sme, settings.license, overrides, codesByPart, unitWeightsByPart, itemsByPart, reportingUnits, adapter, keyedCarrier])
+  }, [parsed, scheduleB, settings.eccn, settings.sme, settings.license, overrides, codesByPart, unitWeightsByPart, itemsByPart, reportingUnits, rowFigures, exportControlByPart, adapter, keyedCarrier])
+
+  // In the order the invoice lists them, deduped the way every other per-part map keys them,
+  // so the override table reads down the document rather than in whatever order a Set produced.
+  const shipmentParts = useMemo(() => distinctParts(reconciliation?.mergedLines ?? []), [reconciliation])
+
+  // A figure whose row no longer exists is dropped, not kept. `reconcile` promises the figure
+  // *lapses* when the row stops describing the same goods — but an entry left in this record
+  // would re-apply itself in full if that row's identity ever came back, which is one cleared
+  // per-part ECCN away, and the filer would never have re-entered it.
+  useEffect(() => {
+    if (!reconciliation) return
+    setRowFigures((current) => {
+      const live = new Set(reconciliation.sliLines.map((line) => line.rowKey))
+      const kept = Object.keys(current).filter((key) => live.has(key))
+      if (kept.length === Object.keys(current).length) return current
+      return Object.fromEntries(kept.map((key) => [key, current[key]]))
+    })
+  }, [reconciliation])
 
   const draft = useMemo(
     () => (reconciliation ? buildDraft(reconciliation, profile, settings, adapter) : null),
@@ -796,6 +830,13 @@ export function App() {
                       onClick={() => {
                         setParsed(null)
                         setError(null)
+                        // Along with everything entered about this document's rows. Loading
+                        // the next one clears these too, but "start over" has to mean it here
+                        // as well — otherwise the state survives with nothing on screen
+                        // referring to it.
+                        setReportingUnits({})
+                        setRowFigures({})
+                        setExportControlByPart({})
                       }}
                     >
                       Start over
@@ -859,6 +900,21 @@ export function App() {
                     return next
                   })
                 }
+                rowFigures={rowFigures}
+                onRowFigureChange={(rowKey, field, value) =>
+                  setRowFigures((current) => {
+                    // An emptied box is the override taken back, which is the absence of an
+                    // entry rather than an entry holding nothing — a row left holding `{}`
+                    // reads later as a figure somebody entered.
+                    const own = { ...(current[rowKey] ?? {}) }
+                    if (value === undefined) delete own[field]
+                    else own[field] = value
+                    const next = { ...current }
+                    if (Object.keys(own).length) next[rowKey] = own
+                    else delete next[rowKey]
+                    return next
+                  })
+                }
               />
               <ChecksPanel checks={checks} canGenerate={canGenerate} />
               <OverridesPanel
@@ -873,6 +929,16 @@ export function App() {
                 adapter={adapter}
                 onProfileChange={setProfile}
                 onSettingsChange={setSettings}
+                parts={shipmentParts}
+                exportControlByPart={exportControlByPart}
+                onExportControlChange={(part, next) =>
+                  setExportControlByPart((current) => {
+                    const kept = { ...current }
+                    if (next.eccn || next.license || next.sme) kept[part] = next
+                    else delete kept[part]
+                    return kept
+                  })
+                }
               />
               <OutputPanel
                 adapter={adapter}
@@ -891,6 +957,7 @@ export function App() {
                 eccn={settings.eccn || null}
                 license={settings.license || null}
                 sme={settings.sme || null}
+                exportControlByPart={exportControlByPart}
               />
               <HistoryPanel shipments={shipments} onClear={() => void clearAll()} />
             </>
