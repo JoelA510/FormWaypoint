@@ -150,17 +150,35 @@ function isPlausibleCountry(value: string | null | undefined): value is string {
 /**
  * Destination country for SLI box 7, or null when the documents do not establish one.
  *
- * The discharge port is the primary source because the consignee address block frequently
- * omits the country entirely (vendorA3 ends at `'s-Hertogenbosch NA 5234`). Returning null
- * is deliberate: a blank box a reviewer is told about beats a wrong one they are not.
+ * Three sources, most authoritative first. The discharge port is a routing statement and
+ * beats an address. Where the parser resolved the consignee block's own country against the
+ * ISO name list, that is a recognised country name and is taken next — it is the only
+ * statement of destination the in-house form makes, which otherwise has no discharge port
+ * and prints its country at the end of a postal line (`ORADEA, 410085, BIHOR, ROMANIA`).
+ * Last, the block's final line where it is plausibly a country on its own.
+ *
+ * Returning null is deliberate: a blank box a reviewer is told about beats a wrong one they
+ * are not.
+ *
+ * The source is returned alongside the value because the review screen names it, and naming
+ * the wrong one is its own defect on a tool whose premise is provable provenance: a
+ * discharge port of `Singapore`, with no comma, is not what box 7 was filled from.
  */
-export function resolveDestinationCountry(header: ShipmentHeader): string | null {
+export function resolveDestination(header: ShipmentHeader): { country: string | null; source: string } {
   if (header.dischargePort?.includes(',')) {
     const country = header.dischargePort.split(',').pop()?.trim()
-    if (isPlausibleCountry(country)) return country
+    if (isPlausibleCountry(country)) return { country, source: 'discharge port' }
+  }
+  if (isPlausibleCountry(header.consignedTo.country)) {
+    return { country: header.consignedTo.country, source: 'consignee address' }
   }
   const lastLine = header.consignedTo.lines.at(-1)?.trim()
-  return isPlausibleCountry(lastLine) ? lastLine : null
+  if (isPlausibleCountry(lastLine)) return { country: lastLine, source: 'consignee address' }
+  return { country: null, source: 'not established by the document' }
+}
+
+export function resolveDestinationCountry(header: ShipmentHeader): string | null {
+  return resolveDestination(header).country
 }
 
 /**
@@ -171,6 +189,7 @@ const UNREADABLE_HEADER: ShipmentHeader = {
   invoiceNumber: '',
   invoiceDate: '',
   onOrAboutDate: null,
+  shipDate: null,
   soldTo: { name: '', lines: [], country: null },
   consignedTo: { name: '', lines: [], country: null },
   notifyTo: null,
@@ -325,6 +344,19 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
         : `No header could be read for the ${set} set, so there are no document totals to reconcile against. ` +
           'This file is probably not one of the supported CIPL layouts.',
       passed: headerReadable,
+    },
+    {
+      // A document that states its own extent and did not arrive whole. Blocking, because
+      // nothing else catches it: a page that never arrived takes its subtotal with it, so
+      // the rows that did arrive reconcile against the total of the pages that were read
+      // and a short commodity list files as a complete shipment.
+      id: 'document-complete',
+      severity: 'blocking',
+      title: 'Every page of the document was read',
+      detail:
+        parsed.incompleteReason ??
+        `Read ${parsed.pageCount} page(s), and the document says nothing that contradicts that.`,
+      passed: !parsed.incompleteReason,
     },
     ...totalsChecks(header, mergedLines, sliLines, parsed.providesWeights, parsed.format !== 'vendor-a'),
     ...partTotalChecks(mergedLines, parsed.partTotals),

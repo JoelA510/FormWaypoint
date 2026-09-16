@@ -224,21 +224,26 @@ export async function readXlsxSheets(data: Uint8Array, limit = Infinity): Promis
 }
 
 /**
- * The first worksheet, in tab order, that satisfies `predicate` — parsed lazily, one
- * sheet at a time, so finding a form behind a cover tab does not row-parse every other
- * tab of a large workbook. Returns the sheet count alongside, for error messages.
+ * Every worksheet satisfying `predicate`, in tab order, with the workbook's sheet count
+ * alongside for error messages.
+ *
+ * All of them, not the first: a document longer than one page of a fixed-grid form is kept
+ * as one tab per page (`P1`, `P2`, …), and taking the first match read page one and filed
+ * the shipment without the rest of its goods. A cover or revision-history tab that the
+ * predicate rejects still costs only the rows it holds.
  */
-export async function findXlsxSheet(
+export async function findXlsxSheets(
   data: Uint8Array,
   predicate: (rows: SheetRows) => boolean,
-): Promise<{ sheet: SheetRows | null; sheetCount: number }> {
+): Promise<{ sheets: SheetRows[]; sheetCount: number }> {
   const decoder = new TextDecoder()
   const { sheetParts, shared } = await loadSheetParts(data)
+  const sheets: SheetRows[] = []
   for (const bytes of sheetParts) {
     const rows = sheetRows(decoder.decode(bytes), shared)
-    if (predicate(rows)) return { sheet: rows, sheetCount: sheetParts.length }
+    if (predicate(rows)) sheets.push(rows)
   }
-  return { sheet: null, sheetCount: sheetParts.length }
+  return { sheets, sheetCount: sheetParts.length }
 }
 
 /** Reads the first worksheet of an .xlsx file. */

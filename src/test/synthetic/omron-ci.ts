@@ -45,6 +45,8 @@ export interface OmronCiLine {
 export interface OmronCiSpec {
   invoiceNumber: string
   invoiceDate: string
+  /** The form's own SHIP DATE box, which is what dates the SLI. */
+  shipDate?: string
   purchaseOrder: string
   shipReference?: string
   carrier?: string
@@ -58,6 +60,21 @@ export interface OmronCiSpec {
   netWeightKg?: number
   grossWeightKg?: number
   lines: OmronCiLine[]
+  /** The `PAGE:` box, e.g. `{ at: 2, of: 4 }`. Defaults to `1 of 1`. */
+  page?: { at: number; of: number }
+  /** Line numbering starts here rather than at 1 — page 2 of a set carries `9`, not `1`. */
+  firstLineNumber?: number
+  /** The TAX cell of the totals band. Blank when omitted, as the form prints it. */
+  tax?: number
+  /** The FREIGHT cell of the totals band. Blank when omitted. */
+  freight?: number
+  /**
+   * The grand `TOTAL (USD)`, overriding subtotal + tax + freight.
+   *
+   * On a multi-page set every page repeats the *document's* total, which is what makes it
+   * an independent check on the pages this reader was handed.
+   */
+  grandTotal?: number
   /** Omit the SUBTOTAL figure, to model a workbook saved without cached formula results. */
   omitSubtotal?: boolean
   /**
@@ -137,6 +154,36 @@ const amountOf = (line: OmronCiLine): number => line.amount ?? Math.round(line.q
 export const subtotalOf = (spec: OmronCiSpec): number =>
   Math.round(spec.lines.reduce((sum, line) => sum + amountOf(line), 0) * 100) / 100
 
+/** What the form prints on its `TOTAL (USD)` row: merchandise plus tax and freight. */
+export const grandTotalOf = (spec: OmronCiSpec): number =>
+  spec.grandTotal ?? Math.round((subtotalOf(spec) + (spec.tax ?? 0) + (spec.freight ?? 0)) * 100) / 100
+
+const pageBox = (spec: OmronCiSpec): string => `${spec.page?.at ?? 1} of ${spec.page?.of ?? 1}`
+const firstLine = (spec: OmronCiSpec): number => spec.firstLineNumber ?? 1
+
+/**
+ * One invoice across several pages: the same header on each, the lines dealt out in order,
+ * and every page carrying the document's grand total under its own subtotal — which is how
+ * the real form is issued, and the only shape in which the page checks mean anything.
+ */
+export function omronCiPageSpecs(base: OmronCiSpec, linesPerPage: number): OmronCiSpec[] {
+  const pages: OmronCiLine[][] = []
+  for (let i = 0; i < base.lines.length; i += linesPerPage) pages.push(base.lines.slice(i, i + linesPerPage))
+  const grandTotal = grandTotalOf(base)
+  let lineNumber = 1
+  return pages.map((lines, index) => {
+    const spec: OmronCiSpec = {
+      ...base,
+      lines,
+      firstLineNumber: lineNumber,
+      page: { at: index + 1, of: pages.length },
+      grandTotal,
+    }
+    lineNumber += lines.length
+    return spec
+  })
+}
+
 // ---------------------------------------------------------------------------
 // Workbook grid
 // ---------------------------------------------------------------------------
@@ -170,12 +217,12 @@ export function omronCiGrid(spec: OmronCiSpec): SheetRows {
   ]
   grid.push(
     pair('INVOICE #:', spec.invoiceNumber, 'INVOICE DATE:', spec.invoiceDate),
-    pair('PURCHASE ORDER #:', spec.purchaseOrder, 'SHIP DATE:', ''),
+    pair('PURCHASE ORDER #:', spec.purchaseOrder, 'SHIP DATE:', spec.shipDate ?? ''),
     pair('SHIP REFERENCE:', spec.shipReference ?? '', 'AIR WAYBILL / TRACKING #:', ''),
     pair('CARRIER / AGENT:', spec.carrier ?? '', 'FREIGHT CHARGES:', spec.freightCharges ?? ''),
     pair('SERVICE / SHIP METHOD:', '', 'G/L ACCT. #:', ''),
     pair('CONSIGNEE EORI / USCI / VAT:', '', 'SHIPPER EIN / TAX ID:', ''),
-    pair('INCOTERMS:', spec.incoterms ?? '', 'PAGE:', '1 of 1'),
+    pair('INCOTERMS:', spec.incoterms ?? '', 'PAGE:', pageBox(spec)),
     [],
     ['', 'LN', 'PART #', 'DESCRIPTION OF GOODS', '', '', '', 'QTY', 'UOM', 'UNIT PRICE', 'AMOUNT'],
     ['', '', 'COO', 'HTS / SCHEDULE B', 'ECCN / EAR99', 'LICENSE / NLR', 'SME (Y/N)'],
@@ -183,27 +230,32 @@ export function omronCiGrid(spec: OmronCiSpec): SheetRows {
 
   spec.lines.forEach((line, i) => {
     grid.push(
-      ['', String(i + 1), line.partNumber, line.description, '', '', '',
+      ['', String(firstLine(spec) + i), line.partNumber, line.description, '', '', '',
         String(line.quantity), line.uom, money(line.unitPrice), money(amountOf(line))],
       ['', '', line.coo, line.hts, line.eccn, line.license, line.sme],
     )
   })
   // Unused form lines: an LN with everything else blank.
   for (let i = spec.lines.length; i < 8; i++) {
-    grid.push(['', String(i + 1)], [])
+    grid.push(['', String(firstLine(spec) + i)], [])
   }
 
   const subtotal = spec.omitSubtotal ? '' : money(subtotalOf(spec))
+  const total = spec.omitSubtotal && spec.grandTotal == null ? '' : money(grandTotalOf(spec))
   grid.push(
     ['', '☐  NO CHARGE — VALUE FOR CUSTOMS PURPOSES ONLY', '', '', '', '', '', 'SUBTOTAL', '', '', subtotal],
     ['', '# OF PIECES:', '', spec.pieces != null ? String(spec.pieces) : '', 'NET WT (KG):',
-      spec.netWeightKg != null ? String(spec.netWeightKg) : '', '', 'TAX', '', '', ''],
-    ['', 'GROSS WT (KG):', '', spec.grossWeightKg != null ? String(spec.grossWeightKg) : '', 'DIMS / VOLUME:', '', '', 'FREIGHT', '', '', ''],
-    ['', '', '', '', '', '', '', 'TOTAL (USD)', '', '', subtotal],
+      spec.netWeightKg != null ? String(spec.netWeightKg) : '', '', 'TAX', '', '', spec.tax != null ? money(spec.tax) : ''],
+    ['', 'GROSS WT (KG):', '', spec.grossWeightKg != null ? String(spec.grossWeightKg) : '', 'DIMS / VOLUME:', '', '', 'FREIGHT', '', '',
+      spec.freight != null ? money(spec.freight) : ''],
+    ['', '', '', '', '', '', '', 'TOTAL (USD)', '', '', total],
     ['', 'NAME / TITLE:', '', '', '', 'SIGNATURE:', '', '', '', 'DATE:', ''],
   )
   return grid
 }
+
+/** The pages of one invoice as the workbook holds them: one grid per sheet. */
+export const omronCiGrids = (specs: OmronCiSpec[]): SheetRows[] => specs.map(omronCiGrid)
 
 // ---------------------------------------------------------------------------
 // Printed PDF
@@ -226,9 +278,36 @@ const center = (column: { left: number; width: number }): number => column.left 
 const DESCRIPTION_CENTER = (COLUMNS.d.left + COLUMNS.g.left + COLUMNS.g.width) / 2
 
 export async function buildOmronCiPdf(spec: OmronCiSpec): Promise<ArrayBuffer> {
+  return buildOmronCiPdfPages([spec])
+}
+
+/**
+ * One printed document of several pages, each drawn to the same geometry.
+ *
+ * The pages are separate PDF pages, not a taller one: PDF y restarts on every page, which
+ * is exactly what the parser has to cope with and what concatenating rows would destroy.
+ */
+export async function buildOmronCiPdfPages(specs: OmronCiSpec[]): Promise<ArrayBuffer> {
   const doc = await PDFDocument.create()
   const font = await doc.embedFont(StandardFonts.Helvetica)
-  const page = doc.addPage([612, 792])
+  for (const spec of specs) drawOmronCiPage(doc.addPage([612, 792]), font, spec)
+  return (await doc.save()).buffer as ArrayBuffer
+}
+
+/**
+ * The form with something else bound after it — a terms sheet, a signed SLI, a packing
+ * list. None of those pages carries the form's document number, which is what tells a page
+ * of this invoice from a page that merely travelled with it.
+ */
+export async function buildOmronCiPdfWithForeignPage(specs: OmronCiSpec[], text: string): Promise<ArrayBuffer> {
+  const doc = await PDFDocument.create()
+  const font = await doc.embedFont(StandardFonts.Helvetica)
+  for (const spec of specs) drawOmronCiPage(doc.addPage([612, 792]), font, spec)
+  doc.addPage([612, 792]).drawText(text, { x: 40, y: 700, size: 10, font })
+  return (await doc.save()).buffer as ArrayBuffer
+}
+
+function drawOmronCiPage(page: PDFPage, font: PDFFont, spec: OmronCiSpec): void {
   const size = 7
 
   const at = (x: number, y: number, text: string) => {
@@ -272,12 +351,12 @@ export async function buildOmronCiPdf(spec: OmronCiSpec): Promise<ArrayBuffer> {
 
   const pairs: [string, string, string, string][] = [
     ['INVOICE #:', spec.invoiceNumber, 'INVOICE DATE:', spec.invoiceDate],
-    ['PURCHASE ORDER #:', spec.purchaseOrder, 'SHIP DATE:', ''],
+    ['PURCHASE ORDER #:', spec.purchaseOrder, 'SHIP DATE:', spec.shipDate ?? ''],
     ['SHIP REFERENCE:', spec.shipReference ?? '', 'AIR WAYBILL / TRACKING #:', ''],
     ['CARRIER / AGENT:', spec.carrier ?? '', 'FREIGHT CHARGES:', spec.freightCharges ?? ''],
     ['SERVICE / SHIP METHOD:', '', 'G/L ACCT. #:', ''],
     ['CONSIGNEE EORI / USCI / VAT:', '', 'SHIPPER EIN / TAX ID:', ''],
-    ['INCOTERMS:', spec.incoterms ?? '', 'PAGE:', '1 of 1'],
+    ['INCOTERMS:', spec.incoterms ?? '', 'PAGE:', pageBox(spec)],
   ]
   // With splitValues, a value is drawn one item per word, as pdfjs often reports it.
   const value = (x: number, y: number, text: string) => words(x, y, text, !!spec.splitValues)
@@ -325,22 +404,28 @@ export async function buildOmronCiPdf(spec: OmronCiSpec): Promise<ArrayBuffer> {
   drawLines(page, font, spec)
 
   const subtotal = spec.omitSubtotal ? '' : subtotalOf(spec).toFixed(2)
+  const total = spec.omitSubtotal && spec.grandTotal == null ? '' : grandTotalOf(spec).toFixed(2)
   const totalsTop = 240
   // The real print carries a checkbox glyph here; Helvetica cannot encode it, and the
   // parser keys on the words, so the fixture spells the box as ASCII.
   at(COLUMNS.ln.left, totalsTop, '[ ]  NO CHARGE - VALUE FOR CUSTOMS PURPOSES ONLY')
   at(COLUMNS.j.left, totalsTop, 'SUBTOTAL')
   centred(center(COLUMNS.k), totalsTop, subtotal)
+  // TAX and FREIGHT share their rows with the weights, exactly as the printed form does —
+  // and to the *right* of them, which is what stops a blank tax cell being read as the net
+  // weight of the shipment.
   at(COLUMNS.ln.left, totalsTop - 14, '# OF PIECES:')
   at(COLUMNS.d.left, totalsTop - 14, spec.pieces != null ? String(spec.pieces) : '')
   at(COLUMNS.e.left, totalsTop - 14, 'NET WT (KG):')
   at(COLUMNS.f.left, totalsTop - 14, spec.netWeightKg != null ? String(spec.netWeightKg) : '')
+  at(COLUMNS.j.left, totalsTop - 14, 'TAX')
+  centred(center(COLUMNS.k), totalsTop - 14, spec.tax != null ? spec.tax.toFixed(2) : '')
   at(COLUMNS.ln.left, totalsTop - 28, 'GROSS WT (KG):')
   at(COLUMNS.d.left, totalsTop - 28, spec.grossWeightKg != null ? String(spec.grossWeightKg) : '')
+  at(COLUMNS.j.left, totalsTop - 28, 'FREIGHT')
+  centred(center(COLUMNS.k), totalsTop - 28, spec.freight != null ? spec.freight.toFixed(2) : '')
   at(COLUMNS.j.left, totalsTop - 42, 'TOTAL (USD)')
-  centred(center(COLUMNS.k), totalsTop - 42, subtotal)
-
-  return (await doc.save()).buffer as ArrayBuffer
+  centred(center(COLUMNS.k), totalsTop - 42, total)
 }
 
 function drawLines(page: PDFPage, font: PDFFont, spec: OmronCiSpec): void {
@@ -360,7 +445,7 @@ function drawLines(page: PDFPage, font: PDFFont, spec: OmronCiSpec): void {
 
     // LN and the quantity/price cells are vertically merged: their baseline is the
     // block's centre, exactly where a spreadsheet print puts them.
-    centred(center(COLUMNS.ln), middleY, String(i + 1))
+    centred(center(COLUMNS.ln), middleY, String(firstLine(spec) + i))
     at(COLUMNS.c.left + 2, topY, line.partNumber)
     const words = (x: number, y: number, text: string) => {
       if (!line.splitDescription) {
@@ -389,6 +474,6 @@ function drawLines(page: PDFPage, font: PDFFont, spec: OmronCiSpec): void {
   })
   // Unused form lines print their LN only.
   for (let i = spec.lines.length; i < 8; i++) {
-    centred(center(COLUMNS.ln), 520 - i * blockHeight - 7, String(i + 1))
+    centred(center(COLUMNS.ln), 520 - i * blockHeight - 7, String(firstLine(spec) + i))
   }
 }

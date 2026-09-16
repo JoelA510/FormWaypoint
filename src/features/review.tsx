@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Field, Input, ProvenanceRow, Select, type Tone } from '../components/ui'
-import { resolveDestinationCountry } from '../domain/reconcile'
+import { resolveDestination } from '../domain/reconcile'
+import { exportDate } from '../domain/draft'
 import { canonicalUnit, formatScheduleB, normalizeScheduleB } from '../domain/schedule-b'
 import { canRestate, resolveReportingQuantity, type QuantitySource } from '../domain/units'
 import { formatQuantity } from '../carriers/form-utils'
@@ -20,6 +21,10 @@ const SEVERITY_TONE: Record<CheckResult['severity'], Tone> = {
 export function ShipmentSummary({ parsed, reconciliation }: { parsed: ParsedCipl; reconciliation: Reconciliation }) {
   const { header, selectedSet } = reconciliation
   const excluded = parsed.availableSets.filter((s) => s !== selectedSet)
+  // The same two resolutions the generated form is built from, so this screen cannot name a
+  // value or a source the SLI does not carry.
+  const exported = exportDate(header)
+  const destination = resolveDestination(header)
 
   return (
     <Card>
@@ -39,21 +44,28 @@ export function ShipmentSummary({ parsed, reconciliation }: { parsed: ParsedCipl
       />
       <CardBody className="grid gap-x-10 gap-y-0 md:grid-cols-2">
         <div>
-          <ProvenanceRow label="Invoice number" value={header.invoiceNumber} source="CIPL header" />
-          <ProvenanceRow label="Date of exportation" value={header.invoiceDate} source="CIPL invoice date" />
+          <ProvenanceRow label="Invoice number" value={header.invoiceNumber || '—'} source="CIPL header" />
+          <ProvenanceRow label="Date of exportation" value={exported.date || '—'} source={exported.source} />
           <ProvenanceRow
-            label="Ship date on the CIPL"
+            label="Invoice date"
+            value={header.invoiceDate || '—'}
+            source={
+              // "Superseded" only where the two are actually different dates. The vendor-b
+              // layout prints one date and states it in both boxes, and calling that a
+              // supersession describes a disagreement that is not there.
+              exported.date && exported.date !== header.invoiceDate ? 'superseded by the ship date' : 'used for box 2'
+            }
+            tone="neutral"
+          />
+          <ProvenanceRow
+            label="On or about date"
             value={header.onOrAboutDate ?? '—'}
-            source="not used for box 2"
+            source="a later sailing estimate — not used for box 2"
             tone="neutral"
           />
           <ProvenanceRow label="Ultimate consignee" value={header.consignedTo.name} source="CONSIGNED TO" />
           <ProvenanceRow label="Sold to" value={header.soldTo.name} source="SOLD TO — not the consignee" tone="neutral" />
-          <ProvenanceRow
-            label="Destination country"
-            value={resolveDestinationCountry(header) ?? '—'}
-            source="discharge port"
-          />
+          <ProvenanceRow label="Destination country" value={destination.country ?? '—'} source={destination.source} />
         </div>
         <div>
           <ProvenanceRow label="Forwarder named on the CIPL" value={header.vesselAgent ?? '—'} source="VESSEL AGENT" />

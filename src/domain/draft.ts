@@ -9,7 +9,7 @@
  */
 import type { CarrierAdapter, ConsigneeType, SliDraft, TransportMode } from '../carriers/types'
 import { parseLooseDate } from '../carriers/form-utils'
-import type { CheckResult, Reconciliation } from './types'
+import type { CheckResult, Reconciliation, ShipmentHeader } from './types'
 import { resolveDestinationCountry } from './reconcile'
 import { kgToLb } from './units'
 
@@ -140,6 +140,24 @@ export function withDestinationCountry(addressLines: string[], country: string |
   return alreadyThere ? lines : [...lines, country]
 }
 
+/**
+ * The date of exportation, and the box it came out of.
+ *
+ * Box 2 takes the date the document says the goods ship, where the layout has a box that
+ * means exactly that, and the invoice date otherwise — which is what all three historical
+ * shipments do, their layouts stating no ship date. Never the "on or about" line: that is a
+ * later sailing *estimate*, not a statement of when the shipment leaves.
+ *
+ * One function, because three places need the answer: the draft that is filed, the review
+ * screen that names where it came from, and the keying sheet's Ship Date note. Re-derived
+ * in each of them, the screen could name a date the generated form does not carry.
+ */
+export function exportDate(header: ShipmentHeader): { date: string; source: string } {
+  return header.shipDate
+    ? { date: header.shipDate, source: 'CIPL ship date' }
+    : { date: header.invoiceDate, source: 'CIPL invoice date' }
+}
+
 export function buildDraft(
   reconciliation: Reconciliation,
   profile: CompanyProfile,
@@ -165,9 +183,7 @@ export function buildDraft(
     consigneeType: settings.consigneeType,
     partiesRelated: settings.partiesRelated,
 
-    // Box 2 takes the invoice date, not the later "on or about" sailing date — that is what
-    // all three historical shipments do.
-    dateOfExportation: header.invoiceDate,
+    dateOfExportation: exportDate(header).date,
     transportationReference: settings.transportationReference,
     // Prefilled from the sales orders where the document actually carries them, and only
     // there: a layout that prints the *customer's* PO as its order number has no sales

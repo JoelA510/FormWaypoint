@@ -40,7 +40,8 @@ import {
   roundTo,
   type ExportControlOverride,
 } from '../../domain/reconcile'
-import { toCountryPickerLabel, toIsoAlpha2 } from './countries'
+import { toCountryPickerLabel, toIsoAlpha2 } from '../../domain/countries'
+import { exportDate } from '../../domain/draft'
 
 import {
   COMMODITY_COLUMNS,
@@ -56,7 +57,7 @@ import {
   type ScheduleBFallback,
 } from './options'
 
-export * from './countries'
+export * from '../../domain/countries'
 export * from './options'
 
 export type KeyingTarget = 'fedex-ship-manager' | 'ups-worldship'
@@ -1015,7 +1016,7 @@ export function buildKeyingSheet(
             { label: 'Service type', value: '', note: CHOOSE },
             { label: 'Package type', value: '', note: CHOOSE },
             { label: 'Package dimensions', value: '', note: 'Not on the CIPL — measure and enter' },
-            { label: 'Ship date', value: draft.dateOfExportation, note: 'CIPL invoice date' },
+            { label: 'Ship date', value: draft.dateOfExportation, note: exportDate(header).source },
             {
               label: 'Total carriage value',
               value: '',

@@ -175,6 +175,16 @@ export interface ShipmentHeader {
   invoiceDate: string
   /** The later "ON OR ABOUT" date. Deliberately *not* used for date of exportation. */
   onOrAboutDate: string | null
+  /**
+   * The date the document states the goods ship, where it has a box that means exactly
+   * that — the in-house form's `SHIP DATE`, and the `vendor-b` banner's `Ship Date`.
+   *
+   * Distinct from `onOrAboutDate`, which is the vendor layouts' later *sailing* estimate
+   * and is deliberately not filed. Where a ship date is stated it is the date of
+   * exportation, and `buildDraft` prefers it over the invoice date; null where the layout
+   * states none, which leaves those layouts filing the invoice date exactly as before.
+   */
+  shipDate: string | null
   soldTo: PartyAddress
   consignedTo: PartyAddress
   notifyTo: string | null
@@ -239,6 +249,17 @@ export interface ParsedCipl {
    * Absent for layouts that print no such summary.
    */
   partTotals?: Record<string, number>
+  /**
+   * Why the pages read do not make one complete document, when the document says so itself.
+   *
+   * Set by a parser for a layout that states its own extent — the in-house Commercial
+   * Invoice form numbers every page `2 of 4` — and left absent by every layout that does
+   * not. It exists because arithmetic cannot catch this class of failure: a page that never
+   * arrived takes its own subtotal with it, so the rows that did arrive reconcile perfectly
+   * against the total of the pages that were read, and a short commodity list files as a
+   * complete shipment. `reconcile` turns this into a blocking check.
+   */
+  incompleteReason?: string
   /** Non-fatal parse observations surfaced in the UI. */
   warnings: string[]
 }
