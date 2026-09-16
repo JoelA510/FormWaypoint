@@ -294,6 +294,19 @@ export async function buildOmronCiPdfPages(specs: OmronCiSpec[]): Promise<ArrayB
   return (await doc.save()).buffer as ArrayBuffer
 }
 
+/**
+ * The form with something else bound after it — a terms sheet, a signed SLI, a packing
+ * list. None of those pages carries the form's document number, which is what tells a page
+ * of this invoice from a page that merely travelled with it.
+ */
+export async function buildOmronCiPdfWithForeignPage(specs: OmronCiSpec[], text: string): Promise<ArrayBuffer> {
+  const doc = await PDFDocument.create()
+  const font = await doc.embedFont(StandardFonts.Helvetica)
+  for (const spec of specs) drawOmronCiPage(doc.addPage([612, 792]), font, spec)
+  doc.addPage([612, 792]).drawText(text, { x: 40, y: 700, size: 10, font })
+  return (await doc.save()).buffer as ArrayBuffer
+}
+
 function drawOmronCiPage(page: PDFPage, font: PDFFont, spec: OmronCiSpec): void {
   const size = 7
 

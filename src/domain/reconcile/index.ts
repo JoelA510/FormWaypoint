@@ -159,15 +159,26 @@ function isPlausibleCountry(value: string | null | undefined): value is string {
  *
  * Returning null is deliberate: a blank box a reviewer is told about beats a wrong one they
  * are not.
+ *
+ * The source is returned alongside the value because the review screen names it, and naming
+ * the wrong one is its own defect on a tool whose premise is provable provenance: a
+ * discharge port of `Singapore`, with no comma, is not what box 7 was filled from.
  */
-export function resolveDestinationCountry(header: ShipmentHeader): string | null {
+export function resolveDestination(header: ShipmentHeader): { country: string | null; source: string } {
   if (header.dischargePort?.includes(',')) {
     const country = header.dischargePort.split(',').pop()?.trim()
-    if (isPlausibleCountry(country)) return country
+    if (isPlausibleCountry(country)) return { country, source: 'discharge port' }
   }
-  if (isPlausibleCountry(header.consignedTo.country)) return header.consignedTo.country
+  if (isPlausibleCountry(header.consignedTo.country)) {
+    return { country: header.consignedTo.country, source: 'consignee address' }
+  }
   const lastLine = header.consignedTo.lines.at(-1)?.trim()
-  return isPlausibleCountry(lastLine) ? lastLine : null
+  if (isPlausibleCountry(lastLine)) return { country: lastLine, source: 'consignee address' }
+  return { country: null, source: 'not established by the document' }
+}
+
+export function resolveDestinationCountry(header: ShipmentHeader): string | null {
+  return resolveDestination(header).country
 }
 
 /**
@@ -333,6 +344,19 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
         : `No header could be read for the ${set} set, so there are no document totals to reconcile against. ` +
           'This file is probably not one of the supported CIPL layouts.',
       passed: headerReadable,
+    },
+    {
+      // A document that states its own extent and did not arrive whole. Blocking, because
+      // nothing else catches it: a page that never arrived takes its subtotal with it, so
+      // the rows that did arrive reconcile against the total of the pages that were read
+      // and a short commodity list files as a complete shipment.
+      id: 'document-complete',
+      severity: 'blocking',
+      title: 'Every page of the document was read',
+      detail:
+        parsed.incompleteReason ??
+        `Read ${parsed.pageCount} page(s), and the document says nothing that contradicts that.`,
+      passed: !parsed.incompleteReason,
     },
     ...totalsChecks(header, mergedLines, sliLines, parsed.providesWeights, parsed.format !== 'vendor-a'),
     ...partTotalChecks(mergedLines, parsed.partTotals),

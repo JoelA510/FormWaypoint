@@ -13,6 +13,7 @@ import { buildXlsx } from '../../lib/xlsx'
 import {
   buildOmronCiPdf,
   buildOmronCiPdfPages,
+  buildOmronCiPdfWithForeignPage,
   omronCiGrid,
   omronCiGrids,
   omronCiPageSpecs,
@@ -736,6 +737,29 @@ describe('the printed PDF', () => {
     expect(parsed.lines[0].description).toBe('Warranty replacement - NO CHARGE')
   })
 
+  it('reads past 99 lines, now that a document may be longer than one page', async () => {
+    // Eight lines to a page puts line 100 on page 13. A block whose LN is never matched is
+    // not short — it does not exist, and its text folds into the line above.
+    const spec: OmronCiSpec = {
+      ...simpleOmronCi(),
+      firstLineNumber: 99,
+      lines: Array.from({ length: 4 }, (_, i) => ({ ...simpleOmronCi().lines[0], partNumber: `P-${99 + i}` })),
+    }
+    const parsed = await parseCipl('ci.pdf', await buildOmronCiPdf(spec))
+    expect(parsed.lines.map((l) => l.lineNumber)).toEqual(['99', '100', '101', '102'])
+    expect(parsed.lines.map((l) => l.partNumber)).toEqual(['P-99', 'P-100', 'P-101', 'P-102'])
+  })
+
+  it('does not read a page bound after the invoice as a page of it', async () => {
+    // The detector looks at the first page alone. A terms sheet or a signed SLI printed
+    // behind the invoice would otherwise supply header values for any box it left blank.
+    const pdf = await buildOmronCiPdfWithForeignPage([simpleOmronCi()], 'TERMS AND CONDITIONS OF SALE')
+    const parsed = await parseCipl('ci.pdf', pdf)
+    expect(parsed.pageCount).toBe(1)
+    expect(parsed.lines).toHaveLength(2)
+    expect(parsed.warnings.some((w) => /do not carry the Commercial Invoice form's document number/.test(w))).toBe(true)
+  })
+
   it('says so when the same page is imported twice, rather than filing its goods twice', async () => {
     const parsed = await parseCipl('ci.pdf', await buildOmronCiPdfPages([simpleOmronCi(), simpleOmronCi()]))
     expect(parsed.warnings.some((w) => /same PAGE number/.test(w))).toBe(true)
@@ -922,7 +946,42 @@ describe('an invoice longer than one page', () => {
   it('refuses to read pages of two different invoices as one shipment', () => {
     const [first, second] = twoPages()
     const parsed = parsePages([first, { ...second, invoiceNumber: 'CI-2026-0009' }])
-    expect(parsed.warnings.some((w) => /more than one invoice number/.test(w))).toBe(true)
+    // Named, both of them: those are the two invoices somebody has to go and separate.
+    expect(parsed.warnings.some((w) => /INVOICE # \(CI-2026-0001, CI-2026-0009\)/.test(w))).toBe(true)
+    expect(parsed.incompleteReason).toMatch(/disagree about/)
+  })
+
+  it('reports every way the pages fail to be one document, not the first', () => {
+    // Two pages that disagree about the page count are frequently also two pages of
+    // different invoices, and the invoice numbers are the more actionable of the two.
+    const [first] = twoPages()
+    const other = omronCiPageSpecs({ ...simpleOmronCi(), invoiceNumber: 'CI-2026-0009' }, 1)[0]
+    const parsed = parsePages([first, { ...other, page: { at: 1, of: 3 } }])
+    expect(parsed.warnings.some((w) => /do not belong to one document/.test(w))).toBe(true)
+    expect(parsed.warnings.some((w) => /same PAGE number/.test(w))).toBe(true)
+    expect(parsed.warnings.some((w) => /INVOICE # \(CI-2026-0001, CI-2026-0009\)/.test(w))).toBe(true)
+  })
+
+  it('holds generation on a document that did not arrive whole', () => {
+    // The page box is the only statement of extent, and the arithmetic cannot catch this:
+    // a page that never arrived took its subtotal with it, so what is left balances.
+    const [first] = twoPages()
+    const grid = omronCiGrid(first)
+    grid.find((r) => r.some((c) => c === 'TOTAL (USD)'))![10] = ''
+    const parsed = parseOmronCiPages('ci.xlsx', [grid])
+    expect(parsed.headers.FC.totalValue).toBeCloseTo(108, 2)
+    const result = reconcile(parsed, null, { ...BLANK_CONTROLS })
+    // The rows do balance against what could be read — and generation is held anyway.
+    expect(result.checks.find((c) => c.id === 'total-value')).toMatchObject({ passed: true })
+    expect(result.checks.find((c) => c.id === 'document-complete')).toMatchObject({
+      passed: false,
+      severity: 'blocking',
+    })
+  })
+
+  it('passes the completeness check on a document that did arrive whole', () => {
+    const result = reconcile(parsePages(twoPages()), null, { ...BLANK_CONTROLS })
+    expect(result.checks.find((c) => c.id === 'document-complete')).toMatchObject({ passed: true })
   })
 
   it('says so when the pages disagree about how many there are', () => {
@@ -960,6 +1019,55 @@ describe('an invoice longer than one page', () => {
     )
     const parsed = parseOmronCiPages('ci.xlsx', blinded)
     expect(parsed.warnings.filter((w) => /could not be read/.test(w))).toHaveLength(1)
+  })
+
+  it('takes tax and freight from whichever page prints them, not from one page alone', () => {
+    // Every page repeats the totals band, but a page can be filled in and its neighbour
+    // left blank. Taking all three figures from the page that happened to state the grand
+    // total left the tax inside the merchandise total, failed the arithmetic, and reported
+    // a complete import as missing a page.
+    const [first, second] = twoPages({ tax: 12.5 })
+    const parsed = parsePages([{ ...first, tax: undefined }, second])
+    expect(parsed.headers.FC.totalValue).toBeCloseTo(280, 2)
+    expect(parsed.warnings.filter((w) => !w.includes('per-line weights'))).toEqual([])
+  })
+
+  it('takes the consignee from a page that states one, not from the first page to read any block', () => {
+    // A band can be found and still yield a blank consignee column. "Some block on page 1
+    // was read" is not a reason to prefer its empty consignee over page 2's filled one —
+    // that is a blank CONSIGNED TO box and a blank box 7, with nothing said.
+    const [first, second] = twoPages()
+    const parsed = parsePages([{ ...first, consigneeName: '', consigneeLines: [] }, second])
+    expect(parsed.headers.FC.consignedTo.name).toBe('Example Consignee Pte. Ltd.')
+    expect(parsed.warnings.some((w) => /consignee/i.test(w))).toBe(false)
+  })
+
+  it('says so when no page states a consignee at all', () => {
+    const blind = twoPages().map((spec) => ({ ...spec, consigneeName: '', consigneeLines: [] }))
+    const parsed = parsePages(blind)
+    expect(parsed.warnings.some((w) => /No consignee was read/.test(w))).toBe(true)
+  })
+
+  it('puts the document’s order and invoice numbers on every page’s lines', () => {
+    // The lines carry both, and a page whose box is struck through must take them from the
+    // pages that do state them — or half a shipment's rows are filed against an order
+    // number the header says is something else.
+    const [first, second] = twoPages({ purchaseOrder: '-' })
+    const parsed = parsePages([first, { ...second, purchaseOrder: '4501234567' }])
+    expect(new Set(parsed.lines.map((l) => l.orderNumber))).toEqual(new Set(['4501234567']))
+    expect(parsed.headers.FC.orderNumbers).toEqual(['4501234567'])
+  })
+
+  it('names the page the document prints, not the page of the import', () => {
+    // Import pages 1 and 3 of a three-page print. A defect on the document's page 3 must
+    // not send somebody to sheet 2 — a page they do not have.
+    const pages = omronCiPageSpecs(
+      { ...simpleOmronCi(), lines: Array.from({ length: 24 }, () => simpleOmronCi().lines[0]) },
+      8,
+    )
+    const parsed = parsePages([pages[0], { ...pages[2], omitSubtotal: true }])
+    expect(parsed.warnings.some((w) => w.startsWith('Page 3: No subtotal'))).toBe(true)
+    expect(parsed.lines.at(-1)?.page).toBe(3)
   })
 
   it('reads the printed pages of a multi-page PDF the same way', async () => {

@@ -48,9 +48,26 @@ describe('countryFromAddressLines', () => {
     expect(countryFromAddressLines(['', null, undefined])).toBeNull()
   })
 
-  it('takes the last country named when an address names more than one', () => {
-    // Read bottom-up and right-to-left, because that is where the country is printed —
-    // a street named after a country must not beat the country itself.
+  it('is not misled by a country named anywhere but the end of a line', () => {
+    // Only the last comma-separated segment of a line counts, because that is where a
+    // country is printed. A street named after one is not the destination.
     expect(countryFromAddressLines(['12 Ireland Street', 'Manchester', 'United Kingdom'])).toBe('United Kingdom')
+    expect(countryFromAddressLines(['1 Chad Avenue, Suite 400', 'ORADEA, BIHOR, ROMANIA'])).toBe('Romania')
+  })
+
+  it('reads a US state that shares a country name as the state it is', () => {
+    // `Atlanta, Georgia, 30301` ends in a postcode, so nothing on the line is offered —
+    // where reading every segment would file a domestic address as the country Georgia.
+    expect(countryFromAddressLines(['1 Peachtree St', 'Atlanta, Georgia, 30301'])).toBeNull()
+  })
+
+  it('establishes no country when the block points at two', () => {
+    // A contact line under the address ends in a personal name that is also a country, and
+    // there is no test that tells a person from a place. Box 7 goes to somebody who can
+    // read the page rather than being filed as Chad for a shipment to Romania.
+    expect(countryFromAddressLines(['ORADEA, 410085, BIHOR, ROMANIA', 'Attn: Miller, Chad'])).toBeNull()
+    expect(countryFromAddressLines(['ORADEA, BIHOR, ROMANIA', 'Contact: Beleiu, Jordan'])).toBeNull()
+    // The real form's own contact line ends in a phone number and costs nothing.
+    expect(countryFromAddressLines(['ORADEA, BIHOR, ROMANIA', 'Cristian Beleiu: +40 741 403 987'])).toBe('Romania')
   })
 })

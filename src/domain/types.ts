@@ -249,6 +249,17 @@ export interface ParsedCipl {
    * Absent for layouts that print no such summary.
    */
   partTotals?: Record<string, number>
+  /**
+   * Why the pages read do not make one complete document, when the document says so itself.
+   *
+   * Set by a parser for a layout that states its own extent — the in-house Commercial
+   * Invoice form numbers every page `2 of 4` — and left absent by every layout that does
+   * not. It exists because arithmetic cannot catch this class of failure: a page that never
+   * arrived takes its own subtotal with it, so the rows that did arrive reconcile perfectly
+   * against the total of the pages that were read, and a short commodity list files as a
+   * complete shipment. `reconcile` turns this into a blocking check.
+   */
+  incompleteReason?: string
   /** Non-fatal parse observations surfaced in the UI. */
   warnings: string[]
 }

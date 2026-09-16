@@ -638,27 +638,31 @@ export function toCountryPickerLabel(name: string | null | undefined): string {
 /**
  * The country an address block names, or null.
  *
- * Read bottom-up, because the country is the last thing printed on an international
- * address — and per comma-separated segment, because this form prints the whole tail of
- * the address on one line: `ORADEA, 410085, BIHOR, ROMANIA`. Taking that line whole gives
- * a postal line; taking its last segment gives the country.
+ * Two rules, and both of them exist to refuse rather than to find.
  *
- * Matched against the ISO name list and nothing else. A segment is accepted only when it
- * *is* a country name, so `BIHOR` (a Romanian county) and `410085` are passed over rather
- * than filed as the country of ultimate destination. Two-letter segments are deliberately
- * not accepted: `Pleasanton, CA` would otherwise resolve to Canada.
+ * The country is the *last* thing printed on an international address, so only the last
+ * comma-separated segment of a line is considered: `ORADEA, 410085, BIHOR, ROMANIA` yields
+ * ROMANIA, while `Atlanta, Georgia, 30301` ends in a postcode and yields nothing — where
+ * reading every segment would have filed a domestic US address as the country Georgia.
+ *
+ * And a block that names more than one country names none. A contact line printed under the
+ * address — `Attn: Miller, Chad`, `Contact: Beleiu, Jordan` — ends in a personal name that
+ * is also a country, and bottom-up reading would take it in preference to the real one.
+ * There is no test that tells a person from a place, so an address that points at two
+ * countries establishes neither, and box 7 is filled by somebody who can read the page.
+ *
+ * Matched against the ISO name list and nothing else, so `BIHOR` (a Romanian county) and
+ * `410085` are passed over. Two-letter segments are deliberately not accepted: `Pleasanton,
+ * CA` would otherwise resolve to Canada.
  */
 export function countryFromAddressLines(lines: readonly (string | null | undefined)[]): string | null {
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = (lines[i] ?? '').trim()
-    if (!line) continue
-    const segments = line.split(',')
-    for (let s = segments.length - 1; s >= 0; s--) {
-      const name = countryByName(segments[s])
-      if (name) return name
-    }
+  const found = new Set<string>()
+  for (const line of lines) {
+    const segments = (line ?? '').trim().split(',')
+    const name = countryByName(segments[segments.length - 1])
+    if (name) found.add(name)
   }
-  return null
+  return found.size === 1 ? [...found][0] : null
 }
 
 /**

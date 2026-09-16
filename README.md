@@ -37,17 +37,20 @@ downstream is shared. Adding a third means adding a detector and a parser, nothi
 The in-house form holds eight commodity lines to a page, and a longer shipment runs onto
 further pages — one sheet per page in the workbook (`P1`, `P2`, …), one page per page in a
 print. Every page repeats the whole header and states its own subtotal, so each is read as
-the complete form it is and the results merged. Two figures then prove nothing went missing
-between the printer and the import: the `PAGE: 2 of 4` box, which says how many pages there
-should be, and the grand `TOTAL (USD)`, which every page repeats and which still counts the
-goods on a page that never arrived. A short commodity list is reported, and the rows fail to
-reconcile against the total the document itself prints.
+the complete form it is and the results merged. The `PAGE: 2 of 4` box then says how many
+pages there should be, and **generation is blocked** when fewer arrive, when a page is
+imported twice, or when the pages disagree about any box that describes the document. The
+arithmetic cannot catch that on its own: a page that never arrived takes its subtotal with
+it, so the rows left behind balance perfectly. The grand `TOTAL (USD)` is the second proof —
+it counts the goods on the missing page, and the rows are reconciled against it.
 
 Its `SHIP DATE` is the date of exportation on the generated form. Its invoice date box is
 routinely struck through — these are loaned tools and no-charge replacements, not sales —
 and a box holding `-` is read as empty rather than filed as a dash. The country of ultimate
-destination comes from the consignee block, matched against the ISO country list so that a
-county or a postcode on the same line is passed over rather than filed as the country.
+destination comes from the consignee block, matched against the ISO country list and taken
+only from the end of a line, so a county, a postcode or a US state is passed over rather
+than filed as the country. A block that names two countries — a contact line ending in a
+personal name that is also one — establishes neither, and the box goes to a person.
 
 The second format states no weights at all, so box 26 comes from an imported item library
 or a per-part table you fill in once and the tool reuses. The reconciliation reports those

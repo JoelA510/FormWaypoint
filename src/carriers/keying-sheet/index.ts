@@ -41,6 +41,7 @@ import {
   type ExportControlOverride,
 } from '../../domain/reconcile'
 import { toCountryPickerLabel, toIsoAlpha2 } from '../../domain/countries'
+import { exportDate } from '../../domain/draft'
 
 import {
   COMMODITY_COLUMNS,
@@ -1015,11 +1016,7 @@ export function buildKeyingSheet(
             { label: 'Service type', value: '', note: CHOOSE },
             { label: 'Package type', value: '', note: CHOOSE },
             { label: 'Package dimensions', value: '', note: 'Not on the CIPL — measure and enter' },
-            {
-              label: 'Ship date',
-              value: draft.dateOfExportation,
-              note: header.shipDate ? 'CIPL ship date' : 'CIPL invoice date',
-            },
+            { label: 'Ship date', value: draft.dateOfExportation, note: exportDate(header).source },
             {
               label: 'Total carriage value',
               value: '',

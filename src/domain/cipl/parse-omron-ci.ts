@@ -181,12 +181,23 @@ function headingAt(row: string[], heading: string): number {
  * search that makes that mean anything.
  */
 interface OmronCiPage {
-  pageNumber: number
+  /** Where this page sat in the import: 1 for the first grid handed in. Ids are built on it. */
+  index: number
+  /**
+   * The page this is *of the document*, from its own `PAGE: 2 of 4` box.
+   *
+   * What a reader is told to go and look at, and what a line's provenance points to. Not
+   * the import order: hand in pages 1 and 3 of a three-page print and the defect reported
+   * on "page 2" sends somebody to a sheet they do not have.
+   */
+  printedPage: number | null
+  /** The `of` half of the same box: how many pages the document says it has. */
+  printedOf: number | null
   fields: Map<string, string>
   parties: Parties
   /** False when the address band could not be read on this page at all. */
   partiesRead: boolean
-  lines: SourceLine[]
+  rows: SheetRows
   /** The merchandise total printed under this page's own commodity table. */
   subtotal: number | null
   tax: number | null
@@ -212,6 +223,15 @@ type Parties = { shipper: PartyAddress; consignee: PartyAddress; billTo: PartyAd
  */
 const PLACEHOLDER = /^(?:[-–—/\\.]+|n\/?a)$/i
 
+/**
+ * Header boxes whose value describes the document rather than the page.
+ *
+ * Every one of them is printed identically on every page, so two pages stating different
+ * values are two different documents — or one that was re-filled after part of it was
+ * printed. `PAGE` is the one box that is *meant* to differ, and is checked separately.
+ */
+const PAGE_LABEL = 'PAGE'
+
 /** The Commercial Invoice form as a single page — the shape the workbook reader started at. */
 export function parseOmronCiWorkbook(
   fileName: string,
@@ -236,15 +256,22 @@ export function parseOmronCiWorkbook(
  *
  * A workbook carries them as sheets (`P1`, `P2`, …) and a print carries them as PDF pages;
  * both arrive here as one grid each. The header comes from the pages that state it, the
- * commodity lines are the pages' tables end to end, and the two figures that describe the
- * whole document — the page count in the `PAGE:` box and the grand `TOTAL (USD)` — are
- * what prove no page went missing between the printer and here.
+ * commodity lines are the pages' tables end to end, and the figures that describe the whole
+ * document — the page count in the `PAGE:` box and the grand `TOTAL (USD)` — are what prove
+ * no page went missing between the printer and here.
+ *
+ * Read in two passes, header before lines. The commodity lines carry the purchase order and
+ * the invoice number, and a page whose boxes are struck through has to take both from the
+ * pages that do state them — otherwise half a shipment's rows are filed against an order
+ * number the header says is something else.
  */
 export function parseOmronCiPages(fileName: string, pages: SheetRows[], fromWorkbook = true): ParsedCipl {
   const warnings: string[] = []
   const read = pages.map((rows, i) => readPage(rows, i + 1, fromWorkbook))
+  const label = (page: OmronCiPage, warning: string): string =>
+    read.length > 1 ? `Page ${page.printedPage ?? page.index}: ${warning}` : warning
   for (const page of read) {
-    for (const warning of page.warnings) warnings.push(prefixed(warning, page.pageNumber, read.length))
+    for (const warning of page.warnings) warnings.push(label(page, warning))
   }
 
   // Every label's first stated value, searched page by page. The header repeats on each
@@ -256,18 +283,16 @@ export function parseOmronCiPages(fileName: string, pages: SheetRows[], fromWork
   }
   const field = (label: string): string => fields.get(label) ?? ''
 
-  const withParties = read.find((page) => page.partiesRead)
-  if (!withParties) {
-    warnings.push(
-      'The shipper, consignee and bill-to blocks could not be read from this document. Enter the consignee by ' +
-        'hand, and check the addresses on the generated form against the invoice before signing.',
-    )
-  }
-  const parties = withParties?.parties ?? emptyParties()
+  const parties = mergeParties(read, warnings)
 
-  const lines = read.flatMap((page) => page.lines)
+  const lines = read.flatMap((page) =>
+    readPageLines(page, field('PURCHASE ORDER #'), field('INVOICE #'), fromWorkbook, (warning) =>
+      warnings.push(label(page, warning)),
+    ),
+  )
 
-  warnings.push(...pageContinuityWarnings(read))
+  const incomplete = pageProblems(read, fields)
+  warnings.push(...incomplete)
   const { totalValue, warnings: totalWarnings } = documentTotal(read)
   warnings.push(...totalWarnings)
 
@@ -285,18 +310,48 @@ export function parseOmronCiPages(fileName: string, pages: SheetRows[], fromWork
     availableSets: ['FC'],
     headers: { FC: header },
     lines,
+    // Blocking, not advisory. Every one of these says the pages handed in are not one
+    // complete document, and none of them is caught by the arithmetic: a page that never
+    // arrived takes its subtotal with it, so the rows it left behind reconcile perfectly
+    // against the total of the pages that did. `reconcile` turns this into the check that
+    // holds generation.
+    ...(incomplete.length ? { incompleteReason: incomplete.join(' ') } : {}),
     warnings,
   }
 }
 
-/** A page's own warning, named by its page where there is more than one to tell apart. */
-const prefixed = (warning: string, pageNumber: number, pageCount: number): string =>
-  pageCount > 1 ? `Page ${pageNumber}: ${warning}` : warning
-
 const emptyParty = (): PartyAddress => ({ name: '', lines: [], country: null })
 const emptyParties = (): Parties => ({ shipper: emptyParty(), consignee: emptyParty(), billTo: emptyParty() })
 
-function readPage(rows: SheetRows, pageNumber: number, fromWorkbook: boolean): OmronCiPage {
+/**
+ * The address blocks, from the page that actually read them.
+ *
+ * The consignee decides which page that is. A band can be found and still yield a blank
+ * consignee column — a merged cell, or an x-mapping the print defeated — and "some block on
+ * page 1 was read" is not a reason to prefer page 1's empty consignee over page 2's filled
+ * one. Both failures are reported: a band no page could read, and a consignee no page
+ * stated. Those are the two ways the SLI's CONSIGNED TO box and box 7 come out blank, and
+ * neither may be silent.
+ */
+function mergeParties(pages: OmronCiPage[], warnings: string[]): Parties {
+  const parties = pages.find((page) => page.parties.consignee.name)?.parties ?? pages.find((page) => page.partiesRead)?.parties
+  if (!parties) {
+    warnings.push(
+      'The shipper, consignee and bill-to blocks could not be read from this document. Enter the consignee by ' +
+        'hand, and check the addresses on the generated form against the invoice before signing.',
+    )
+    return emptyParties()
+  }
+  if (!parties.consignee.name) {
+    warnings.push(
+      'No consignee was read from the address band. Enter the ultimate consignee by hand, and check the ' +
+        'generated form against the invoice before signing.',
+    )
+  }
+  return parties
+}
+
+function readPage(rows: SheetRows, index: number, fromWorkbook: boolean): OmronCiPage {
   const warnings: string[] = []
 
   // Header grid: first value found for each label anywhere on the sheet. The instructions
@@ -316,17 +371,9 @@ function readPage(rows: SheetRows, pageNumber: number, fromWorkbook: boolean): O
       if (value && !PLACEHOLDER.test(value)) fields.set(key, value)
     }
   }
-  const field = (label: string): string => fields.get(label) ?? ''
 
   const parties = readParties(rows)
-  const lines = readLines(
-    rows,
-    field('PURCHASE ORDER #'),
-    field('INVOICE #'),
-    pageNumber,
-    warnings,
-    fromWorkbook,
-  )
+  const printed = /^(\d+)\s*of\s*(\d+)$/i.exec((fields.get(PAGE_LABEL) ?? '').trim())
 
   // Without the table's own AMOUNT column the figures are taken from the cells to the
   // right of each totals label — never the rightmost number on the row. The totals band
@@ -344,11 +391,13 @@ function readPage(rows: SheetRows, pageNumber: number, fromWorkbook: boolean): O
   }
 
   return {
-    pageNumber,
+    index,
+    printedPage: printed ? Number(printed[1]) : null,
+    printedOf: printed ? Number(printed[2]) : null,
     fields,
     parties: parties.parties,
     partiesRead: parties.read,
-    lines,
+    rows,
     subtotal,
     tax: amountOnRow(rows, 'TAX', amountColumn),
     freight: amountOnRow(rows, 'FREIGHT', amountColumn),
@@ -357,56 +406,74 @@ function readPage(rows: SheetRows, pageNumber: number, fromWorkbook: boolean): O
   }
 }
 
-/**
- * What the pages say about how many of them there should be.
- *
- * The `PAGE:` box is printed `2 of 4`, and it is the only place the document states its own
- * extent. A page missed on the way in — a print job that dropped one, a workbook whose last
- * tab was deleted — otherwise produces a shorter invoice that looks entirely complete, which
- * is the one failure this reader must not produce in silence. Said out loud here, and caught
- * again by the grand total below.
- */
-function pageContinuityWarnings(pages: OmronCiPage[]): string[] {
+/** This page's commodity lines, with the document's order and invoice numbers on them. */
+function readPageLines(
+  page: OmronCiPage,
+  purchaseOrder: string,
+  invoiceNumber: string,
+  fromWorkbook: boolean,
+  warn: (warning: string) => void,
+): SourceLine[] {
   const warnings: string[] = []
-  const stated = pages.map((page) => {
-    const match = /^(\d+)\s*of\s*(\d+)$/i.exec((page.fields.get('PAGE') ?? '').trim())
-    return match ? { at: Number(match[1]), of: Number(match[2]) } : null
-  })
+  const lines = readLines(page.rows, purchaseOrder, invoiceNumber, page, warnings, fromWorkbook)
+  for (const warning of warnings) warn(warning)
+  return lines
+}
 
-  const totals = [...new Set(stated.filter((s) => s != null).map((s) => s.of))]
+/**
+ * Every way the pages handed in fail to be one complete document.
+ *
+ * The `PAGE:` box is the only place the document states its own extent, and the header
+ * boxes below it are printed identically on every page. A page missed on the way in — a
+ * print job that dropped one, a workbook whose last tab was deleted — otherwise produces a
+ * shorter invoice that looks entirely complete, which is the one failure this reader must
+ * not produce in silence.
+ *
+ * Every problem found is reported, not the first. Two pages that disagree about the page
+ * count are also frequently two pages of different invoices, and the invoice numbers are
+ * the more actionable of the two things to be told.
+ */
+function pageProblems(pages: OmronCiPage[], fields: Map<string, string>): string[] {
+  const problems: string[] = []
+
+  const totals = [...new Set(pages.map((page) => page.printedOf).filter((of) => of != null))]
   if (totals.length > 1) {
-    warnings.push(
-      `These pages do not belong to one document: their PAGE boxes claim ${totals.join(' and ')} pages. ` +
-        'Import the pages of a single invoice.',
+    problems.push(
+      `These pages do not belong to one document: their PAGE boxes claim ${totals.join(' and ')} pages.`,
     )
-    return warnings
-  }
-
-  const declared = totals[0]
-  if (declared != null && declared !== pages.length) {
-    warnings.push(
-      `The form states it is ${declared} page(s), but ${pages.length} were read. ` +
+  } else if (totals[0] != null && totals[0] !== pages.length) {
+    problems.push(
+      `The form states it is ${totals[0]} page(s), but ${pages.length} were read. ` +
         'Every page of the invoice must be imported, or the commodity list will be short.',
     )
   }
 
-  const numbered = stated.filter((s) => s != null).map((s) => s.at)
-  const duplicated = numbered.length !== new Set(numbered).size
-  if (duplicated) {
-    warnings.push(
+  const numbered = pages.map((page) => page.printedPage).filter((at) => at != null)
+  if (numbered.length !== new Set(numbered).size) {
+    problems.push(
       `Two of the imported pages carry the same PAGE number (${numbered.join(', ')}). ` +
         'A page imported twice files its goods twice.',
     )
   }
 
-  const invoices = [...new Set(pages.map((page) => page.fields.get('INVOICE #') ?? '').filter(Boolean))]
-  if (invoices.length > 1) {
-    warnings.push(
-      `The imported pages carry more than one invoice number (${invoices.join(', ')}). ` +
-        'Import one invoice at a time.',
+  // Every other header box describes the document, so pages that disagree on one are not
+  // pages of one document. Reported with the values themselves, not just the label that
+  // differs: "INVOICE # (CI-2026-0001, CI-2026-0009)" names the two invoices somebody has
+  // stapled together, and that is what they have to go and separate. Merged silently, the
+  // date of exportation and box 26 would come from whichever page was handed in first.
+  const disagreeing = [...fields.keys()]
+    .filter((key) => key !== PAGE_LABEL)
+    .map((key) => ({ key, values: [...new Set(pages.map((page) => page.fields.get(key)).filter((v) => v != null))] }))
+    .filter(({ values }) => values.length > 1)
+  if (disagreeing.length) {
+    problems.push(
+      'The imported pages disagree about ' +
+        `${disagreeing.map(({ key, values }) => `${key} (${values.join(', ')})`).join('; ')}. ` +
+        'Import the pages of a single invoice.',
     )
   }
-  return warnings
+
+  return problems
 }
 
 /**
@@ -419,10 +486,11 @@ function pageContinuityWarnings(pages: OmronCiPage[]): string[] {
  * taken back out of it — they are not commodity value, and reconciling against a total that
  * includes them would fail every invoice carrying either.
  *
- * Preferring it is what makes a missing page *block*: the rows are then short of a total
- * the document itself prints, and the blocking total-value check says so with both figures
- * in hand. Where the two disagree the discrepancy is reported here as well, because which
- * of them is wrong is a question for the person holding the paperwork.
+ * Preferring it is what makes a missing page fail the arithmetic as well as the page count:
+ * the rows are then short of a total the document itself prints, and the blocking
+ * total-value check says so with both figures in hand. Where the two disagree the
+ * discrepancy is reported here as well, because which of them is wrong is a question for
+ * the person holding the paperwork.
  */
 function documentTotal(pages: OmronCiPage[]): { totalValue: number; warnings: string[] } {
   const warnings: string[] = []
@@ -431,19 +499,23 @@ function documentTotal(pages: OmronCiPage[]): { totalValue: number; warnings: st
     ? roundTo(subtotals.reduce((sum, value) => sum + (value ?? 0), 0), 2)
     : null
 
-  // Every page repeats the same grand total, so the first stated one is the document's.
-  const stated = pages.find((page) => page.grandTotal != null)
-  const grandTotal = stated?.grandTotal ?? null
-  const disagreeing = pages.filter((page) => page.grandTotal != null && Math.abs(page.grandTotal - (grandTotal ?? 0)) > 0.01)
-  if (disagreeing.length) {
+  // Every page repeats the same band, so each of the three figures is taken from the first
+  // page that states it — not all three from one page. A tax printed only on the page that
+  // carries the goods it is charged on would otherwise be left in the merchandise total,
+  // and a complete import would fail the arithmetic and be reported as missing a page.
+  const grandTotal = pages.find((page) => page.grandTotal != null)?.grandTotal ?? null
+  const tax = pages.find((page) => page.tax != null)?.tax ?? 0
+  const freight = pages.find((page) => page.freight != null)?.freight ?? 0
+
+  const stated = [...new Set(pages.map((page) => page.grandTotal).filter((value) => value != null))]
+  if (stated.length > 1) {
     warnings.push(
       'The pages print different grand totals, so the value of this shipment is not established by the ' +
         'document. Check the invoice before generating anything.',
     )
   }
 
-  const merchandise =
-    grandTotal == null ? null : roundTo(grandTotal - (stated?.tax ?? 0) - (stated?.freight ?? 0), 2)
+  const merchandise = grandTotal == null ? null : roundTo(grandTotal - tax - freight, 2)
 
   if (merchandise != null && subtotalSum != null && Math.abs(merchandise - subtotalSum) > 0.01) {
     warnings.push(
@@ -541,7 +613,7 @@ function readLines(
   rows: SheetRows,
   purchaseOrder: string,
   invoiceNumber: string,
-  pageNumber: number,
+  page: OmronCiPage,
   warnings: string[],
   fromWorkbook: boolean,
 ): SourceLine[] {
@@ -663,10 +735,15 @@ function readLines(
       // of this form, but nothing makes them: a set whose pages each restart at 1 would
       // otherwise collide, and two lines sharing an id are one line to everything
       // downstream that joins, groups or overrides by it.
-      id: ['FC', 'INV', invoiceNumber || 'CI', `P${pageNumber}`, String(lineNumber), partNumber].join(':'),
+      //
+      // Keyed on where the page sat in the import, not on the number printed on it: two
+      // pages both printed `1 of 1` are exactly the case this guards against, and they
+      // would share a printed number.
+      id: ['FC', 'INV', invoiceNumber || 'CI', `P${page.index}`, String(lineNumber), partNumber].join(':'),
       documentSet: 'FC',
       documentKind: 'INVOICE',
-      page: pageNumber,
+      // Provenance points at the document's own page, which is what a reviewer turns to.
+      page: page.printedPage ?? page.index,
       // The form's PO # is the customer's purchase order — the same thing `vendor-a`
       // prints in this position — so no separate `purchaseOrder` field is needed.
       orderNumber: purchaseOrder,
@@ -859,11 +936,29 @@ export function isOmronCiPdf(pages: TextPage[]): boolean {
  * columns share an x position.
  */
 export function parseOmronCiPdf(fileName: string, pages: TextPage[]): ParsedCipl {
-  // One page at a time, never the pages' rows concatenated. PDF y restarts on every page,
-  // so a second page's blocks collide with the first's by baseline — and the geometry
-  // below is all baselines. Each page is reshaped into its own grid and read as the
-  // complete form it is printed as; `parseOmronCiPages` merges them.
-  return parseOmronCiPages(fileName, pages.map((page) => pagesToGrid([page])), false)
+  // Only the pages that are this form. The detector looks at the first page alone, and a
+  // print of the invoice with a terms sheet or a signed SLI bound after it would otherwise
+  // have those pages read as pages of the form — supplying header values for any box the
+  // invoice left blank, and pushing whatever their tables reshaped into. The doc number is
+  // printed in the title bar of every page of the form, so it is what tells them apart.
+  const own = pages.filter((page) => page.rows.map(rowText).join(' ').includes(DOC_NUMBER))
+  const parsed = parseOmronCiPages(
+    fileName,
+    // One page at a time, never the pages' rows concatenated. PDF y restarts on every page,
+    // so a second page's blocks collide with the first's by baseline — and the geometry
+    // below is all baselines. Each page is reshaped into its own grid and read as the
+    // complete form it is printed as; `parseOmronCiPages` merges them.
+    own.map((page) => pageToGrid(page)),
+    false,
+  )
+  if (own.length !== pages.length) {
+    parsed.warnings.unshift(
+      `${pages.length - own.length} of this file's ${pages.length} pages do not carry the Commercial Invoice ` +
+        `form's document number (${DOC_NUMBER}) and were not read as part of it. If any of them is a page of ` +
+        'this invoice, it is missing from what was imported.',
+    )
+  }
+  return parsed
 }
 
 /**
@@ -878,7 +973,11 @@ const CENTRED_TOLERANCE = 25
 const LN_TOLERANCE = 8
 
 /**
- * Rebuilds the printed page into the same row/cell grid the workbook reader consumes.
+ * Rebuilds one printed page into the same row/cell grid the workbook reader consumes.
+ *
+ * One page, not several. PDF y restarts on every page, so rows taken from two of them share
+ * a baseline space they were never drawn in, and the blocks below merge into garbage. The
+ * signature says so, rather than a comment at the call site saying so.
  *
  * Three regions, three treatments. The label/value rows pass through in reading order,
  * which `valueAfter` already handles. The three-column address band is mapped by x, so an
@@ -886,8 +985,8 @@ const LN_TOLERANCE = 8
  * into the two-rows-per-block layout `readLines` expects, with cells resolved against the
  * table's own printed headings.
  */
-function pagesToGrid(pages: TextPage[]): SheetRows {
-  const rows = pages.flatMap((page) => page.rows)
+function pageToGrid(page: TextPage): SheetRows {
+  const rows = page.rows
   // The vertically merged headings (LN, QTY, …) print centred between the two heading
   // rows, so their baseline can land on either row or on one of their own. Locate the
   // heading band by its fixed members and calibrate each anchor from whichever row in
@@ -1164,8 +1263,17 @@ type Anchors = Record<
   number
 >
 
+/**
+ * An LN cell: a line number centred under the LN heading.
+ *
+ * Up to three digits. Two was enough while the reader refused anything past one page, and
+ * is not now: eight lines to a page puts line 100 on page 13, and a block that is never
+ * opened folds its part number and description into the line above — silently, because the
+ * lines below it simply do not exist to be counted. The column is ~25pt wide and the
+ * tolerance is 8pt, so nothing else on the row can answer to it.
+ */
 const isLnCell = (item: TextItem, anchors: Anchors): boolean =>
-  Math.abs(item.x - anchors.ln) <= LN_TOLERANCE && /^\d{1,2}$/.test(item.str)
+  Math.abs(item.x - anchors.ln) <= LN_TOLERANCE && /^\d{1,3}$/.test(item.str)
 
 /**
  * Reshapes the printed table region into two grid rows per block, in the same cell order
