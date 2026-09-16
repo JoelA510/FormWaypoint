@@ -269,6 +269,10 @@ function parseHeaderPage(page: TextPage, kind: DocumentKind, existing?: Shipment
     invoiceNumber: coalesce(invoiceNumber, existing?.invoiceNumber) ?? '',
     invoiceDate: coalesce(invoiceDate, existing?.invoiceDate) ?? '',
     onOrAboutDate: coalesce(onOrAboutDate, existing?.onOrAboutDate),
+    // This layout prints no ship date. Its `ON OR ABOUT` line is a later sailing estimate,
+    // not a statement that the goods leave then, and the SLIs filed for these shipments
+    // date box 2 from the invoice — so there is nothing here to prefer over it.
+    shipDate: null,
     soldTo: soldTo.name ? soldTo : (existing?.soldTo ?? soldTo),
     consignedTo: consignedTo.name ? consignedTo : (existing?.consignedTo ?? consignedTo),
     notifyTo: coalesce(notifyTo, existing?.notifyTo),

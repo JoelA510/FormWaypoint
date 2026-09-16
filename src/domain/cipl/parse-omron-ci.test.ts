@@ -5,16 +5,48 @@
  */
 import { describe, expect, it } from 'vitest'
 import { parseCipl, parseCiplFile } from '.'
-import { isOmronCiWorkbook, isPartyTitle, parseOmronCiWorkbook, titlesPartyBlock } from './parse-omron-ci'
-import { reconcile } from '../reconcile'
+import { isOmronCiWorkbook, isPartyTitle, parseOmronCiPages, parseOmronCiWorkbook, titlesPartyBlock } from './parse-omron-ci'
+import { reconcile, resolveDestinationCountry } from '../reconcile'
+import { buildDraft, defaultShipmentSettings, type CompanyProfile } from '../draft'
+import { getAdapter } from '../../carriers/registry'
 import { buildXlsx } from '../../lib/xlsx'
-import { buildOmronCiPdf, omronCiGrid, simpleOmronCi, subtotalOf } from '../../test/synthetic/omron-ci'
-import type { ParsedCipl } from '../types'
+import {
+  buildOmronCiPdf,
+  buildOmronCiPdfPages,
+  omronCiGrid,
+  omronCiGrids,
+  omronCiPageSpecs,
+  simpleOmronCi,
+  subtotalOf,
+  type OmronCiSpec,
+} from '../../test/synthetic/omron-ci'
+import type { ParsedCipl, Reconciliation } from '../types'
 
 const BLANK_CONTROLS = { eccn: null, sme: null, license: null }
 const UNIT_WEIGHTS = { '10000-0001': 0.5, '20000-0002': 0.4 }
 
 const parseGrid = (spec = simpleOmronCi()): ParsedCipl => parseOmronCiWorkbook('ci.xlsx', omronCiGrid(spec))
+/** The pages of one invoice, read the way a multi-sheet workbook or a multi-page print is. */
+const parsePages = (specs: OmronCiSpec[]): ParsedCipl => parseOmronCiPages('ci.xlsx', omronCiGrids(specs))
+
+const CEVA = getAdapter('ceva')
+const PROFILE: CompanyProfile = {
+  usppiName: 'Example Exporter, Inc.',
+  usppiAddressLines: ['1 Example Way'],
+  usppiZip: '94588',
+  usppiEin: '00-0000000',
+  contactName: 'A Person',
+  contactPhone: '000-000-0000',
+  pointOfOrigin: 'CA',
+  signerName: 'A Person',
+  signerTitle: 'Logistics',
+  signerEmail: 'a.person@example.com',
+  signerPhone: '000-000-0000',
+  signerInitials: 'AP',
+}
+const reconcileGrid = (spec = simpleOmronCi()): Reconciliation =>
+  reconcile(parseGrid(spec), null, { ...BLANK_CONTROLS, unitWeightsByPart: UNIT_WEIGHTS })
+const defaultSettings = () => defaultShipmentSettings(CEVA)
 
 describe('the workbook grid', () => {
   it('is recognised by its document number', () => {
@@ -38,17 +70,70 @@ describe('the workbook grid', () => {
     expect(header.consignedTo.lines).toEqual(['1 Harbour Way', 'Singapore 018989', 'Singapore'])
   })
 
-  it('does not put the form’s SHIP DATE into the field that means a sailing date', () => {
-    // `onOrAboutDate` is the later sailing date on the vendor layouts, and box 2 of the SLI
-    // deliberately takes the invoice date instead. Filling it from a box that means
-    // something else would move the date of exportation on those layouts too, through the
-    // one line in `buildDraft` that reads it.
-    const grid = omronCiGrid(simpleOmronCi())
-    const row = grid.find((r) => r[5] === 'SHIP DATE:')!
-    row[7] = '08/14/2026'
-    const header = parseOmronCiWorkbook('ci.xlsx', grid).headers.FC
+  it('reads the form’s SHIP DATE, and files box 2 from it rather than the invoice date', () => {
+    // The form has a box for the date the goods ship, and that is the date of exportation.
+    // `onOrAboutDate` stays null: on the vendor layouts it means a later *sailing estimate*,
+    // which is deliberately not filed, and this form states no such thing.
+    const header = parseGrid({ ...simpleOmronCi(), shipDate: '08/14/2026' }).headers.FC
+    expect(header.shipDate).toBe('08/14/2026')
     expect(header.onOrAboutDate).toBeNull()
     expect(header.invoiceDate).toBe('08/10/2026')
+
+    const draft = buildDraft(reconcileGrid({ ...simpleOmronCi(), shipDate: '08/14/2026' }), PROFILE, defaultSettings(), CEVA)
+    expect(draft.dateOfExportation).toBe('08/14/2026')
+  })
+
+  it('falls back to the invoice date when the form states no ship date', () => {
+    const draft = buildDraft(reconcileGrid(simpleOmronCi()), PROFILE, defaultSettings(), CEVA)
+    expect(draft.dateOfExportation).toBe('08/10/2026')
+  })
+
+  it('converts the ship date from the serial Excel stores it as', () => {
+    const grid = omronCiGrid(simpleOmronCi())
+    grid.find((r) => r[5] === 'SHIP DATE:')![7] = '46282'
+    expect(parseOmronCiWorkbook('ci.xlsx', grid).headers.FC.shipDate).toBe('09/17/2026')
+  })
+
+  it('keeps a struck-through box out of the commodity lines as well as the header', () => {
+    // The purchase order reaching the lines is the one reaching the header — a `-` filed
+    // as an order number against goods is the same defect wherever it lands.
+    const parsed = parseGrid({ ...simpleOmronCi(), purchaseOrder: '-' })
+    expect(parsed.lines.map((l) => l.orderNumber)).toEqual(['', ''])
+  })
+
+  it('takes a box from the page that fills it in when another page struck it through', () => {
+    const [first, second] = omronCiPageSpecs({ ...simpleOmronCi(), purchaseOrder: '-' }, 1)
+    const parsed = parsePages([first, { ...second, purchaseOrder: '4501234567' }])
+    expect(parsed.headers.FC.orderNumbers).toEqual(['4501234567'])
+  })
+
+  it('reads a struck-through box as empty rather than filing the dash it holds', () => {
+    // The form is filled in by hand and its unused boxes are struck through. Read
+    // literally, that dash becomes the invoice number in the output filename and the
+    // consignee's purchase order on the SLI.
+    const header = parseGrid({ ...simpleOmronCi(), invoiceNumber: '-', invoiceDate: '-', purchaseOrder: 'N/A' }).headers.FC
+    expect(header.invoiceNumber).toBe('')
+    expect(header.invoiceDate).toBe('')
+    expect(header.orderNumbers).toEqual([])
+  })
+
+  it('resolves the country of ultimate destination out of the consignee’s postal line', () => {
+    // The form has no discharge port, and prints the country at the end of a line that is
+    // otherwise a postal address. Neither the county nor the postcode may be filed as it.
+    const header = parseGrid({
+      ...simpleOmronCi(),
+      consigneeLines: ['STR. ANGHEL I. SALIGNY NR. 40', 'ORADEA, 410085, BIHOR, ROMANIA', 'Cristian B: +40 741 403 987'],
+    }).headers.FC
+    expect(header.consignedTo.country).toBe('Romania')
+    expect(resolveDestinationCountry(header)).toBe('Romania')
+  })
+
+  it('leaves the destination country unresolved rather than reading a state as a country', () => {
+    // `CA` is Canada in the ISO list and California on an address. A two-letter segment is
+    // never accepted, and an address naming no country resolves to nothing at all.
+    const header = parseGrid({ ...simpleOmronCi(), consigneeLines: ['1 Example Way', 'Pleasanton, CA'] }).headers.FC
+    expect(header.consignedTo.country).toBeNull()
+    expect(resolveDestinationCountry(header)).toBeNull()
   })
 
   it('reconciles values against the subtotal, not the tax-and-freight total', () => {
@@ -651,12 +736,12 @@ describe('the printed PDF', () => {
     expect(parsed.lines[0].description).toBe('Warranty replacement - NO CHARGE')
   })
 
-  it('refuses a multi-page print instead of merging its pages into garbage', async () => {
-    const doc = await (await import('pdf-lib')).PDFDocument.load(await buildOmronCiPdf(simpleOmronCi()))
-    const copy = await (await import('pdf-lib')).PDFDocument.load(await buildOmronCiPdf(simpleOmronCi()))
-    const [page] = await doc.copyPages(copy, [0])
-    doc.addPage(page)
-    await expect(parseCipl('ci.pdf', (await doc.save()).buffer as ArrayBuffer)).rejects.toThrow(/single page/)
+  it('says so when the same page is imported twice, rather than filing its goods twice', async () => {
+    const parsed = await parseCipl('ci.pdf', await buildOmronCiPdfPages([simpleOmronCi(), simpleOmronCi()]))
+    expect(parsed.warnings.some((w) => /same PAGE number/.test(w))).toBe(true)
+    // And the grand total each page repeats is what the rows are proved against, so the
+    // doubled list does not reconcile.
+    expect(parsed.headers.FC.totalValue).toBeCloseTo(190, 2)
   })
 })
 
@@ -748,5 +833,192 @@ describe('a printed table whose headings could not all be located', () => {
       sme: 'N',
       quantity: 4,
     })
+  })
+})
+
+describe('an invoice longer than one page', () => {
+  /** Sixteen lines dealt across two pages of eight, the way the form is actually issued. */
+  const twoPages = (overrides: Partial<OmronCiSpec> = {}): OmronCiSpec[] => {
+    const base: OmronCiSpec = {
+      ...simpleOmronCi(),
+      ...overrides,
+      lines: Array.from({ length: 16 }, (_, i) => ({
+        partNumber: `P-${i + 1}`,
+        description: `Part ${i + 1}`,
+        coo: i % 2 ? 'US' : 'CN',
+        hts: '8544.42.0000',
+        eccn: 'EAR99',
+        license: 'NLR',
+        sme: 'N',
+        quantity: 1,
+        uom: 'EA',
+        unitPrice: 10 + i,
+      })),
+    }
+    return omronCiPageSpecs(base, 8)
+  }
+
+  it('reads every page’s lines, numbered and attributed to the page they came from', () => {
+    const parsed = parsePages(twoPages())
+    expect(parsed.pageCount).toBe(2)
+    expect(parsed.lines).toHaveLength(16)
+    expect(parsed.lines.map((l) => l.lineNumber)).toEqual(Array.from({ length: 16 }, (_, i) => String(i + 1)))
+    expect(parsed.lines.map((l) => l.page)).toEqual([...Array(8).fill(1), ...Array(8).fill(2)])
+    expect(parsed.lines[15]).toMatchObject({ partNumber: 'P-16', countryOfOrigin: 'US' })
+  })
+
+  it('gives every line its own id, even when the pages number their lines the same way', () => {
+    // Nothing on the form makes line numbers run on across its pages. Two lines sharing an
+    // id are one line to everything downstream that joins, groups or overrides by it.
+    const pages = twoPages().map((spec) => ({ ...spec, firstLineNumber: 1 }))
+    const ids = parsePages(pages).lines.map((l) => l.id)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('totals the whole document, not the page it happened to start on', () => {
+    const parsed = parsePages(twoPages())
+    const stated = parsed.headers.FC.totalValue
+    const rows = parsed.lines.reduce((sum, line) => sum + (line.extendedValue ?? 0), 0)
+    expect(stated).toBeCloseTo(rows, 2)
+    // 16 lines at 10, 11, … 25 — proved against the arithmetic, not against itself.
+    expect(stated).toBeCloseTo(280, 2)
+  })
+
+  it('takes the document-level figures from the pages that state them, never their sum', () => {
+    // Pieces and weights are printed on every page and describe the shipment once. Summed,
+    // a two-page invoice would declare twice the freight it is.
+    const header = parsePages(twoPages({ pieces: 2, netWeightKg: 3.2, grossWeightKg: 4.1 })).headers.FC
+    expect(header.cartons).toBe(2)
+    expect(header.totalNetWeightKg).toBeCloseTo(3.2, 3)
+    expect(header.totalGrossWeightKg).toBeCloseTo(4.1, 3)
+  })
+
+  it('reconciles a multi-page shipment with nothing to report', () => {
+    const parsed = parsePages(twoPages())
+    const result = reconcile(parsed, null, {
+      ...BLANK_CONTROLS,
+      unitWeightsByPart: Object.fromEntries(parsed.lines.map((l) => [l.partNumber, 0.1])),
+    })
+    expect(result.checks.find((c) => c.id === 'total-value')).toMatchObject({ passed: true })
+    expect(parsed.warnings.filter((w) => !w.includes('per-line weights'))).toEqual([])
+  })
+
+  it('holds the shipment when a page of it was not imported', () => {
+    // The whole point of the two checks. A short commodity list that looks complete is the
+    // one failure this reader must not produce, so the page box says it out loud and the
+    // document's own grand total makes the blocking check fail.
+    const [first] = twoPages()
+    const parsed = parsePages([first])
+    expect(parsed.warnings.some((w) => /states it is 2 page\(s\), but 1 were read/.test(w))).toBe(true)
+    expect(parsed.warnings.some((w) => /page of this invoice is missing/.test(w))).toBe(true)
+
+    const result = reconcile(parsed, null, { ...BLANK_CONTROLS })
+    const check = result.checks.find((c) => c.id === 'total-value')!
+    expect(check).toMatchObject({ passed: false, severity: 'blocking' })
+    expect(check.expected).toBe('280.00')
+    expect(check.actual).toBe('108.00')
+  })
+
+  it('refuses to read pages of two different invoices as one shipment', () => {
+    const [first, second] = twoPages()
+    const parsed = parsePages([first, { ...second, invoiceNumber: 'CI-2026-0009' }])
+    expect(parsed.warnings.some((w) => /more than one invoice number/.test(w))).toBe(true)
+  })
+
+  it('says so when the pages disagree about how many there are', () => {
+    const [first, second] = twoPages()
+    const parsed = parsePages([first, { ...second, page: { at: 2, of: 3 } }])
+    expect(parsed.warnings.some((w) => /do not belong to one document/.test(w))).toBe(true)
+  })
+
+  it('names the page a warning came from', () => {
+    const [first, second] = twoPages()
+    const parsed = parsePages([first, { ...second, omitSubtotal: true }])
+    expect(parsed.warnings.some((w) => w.startsWith('Page 2: No subtotal'))).toBe(true)
+  })
+
+  it('reads the header from a page that states it when the first page does not', () => {
+    const [first, second] = twoPages()
+    const stripped = omronCiGrid(first).map((row) => (row.some((c) => c === 'CARRIER / AGENT:') ? [] : row))
+    const parsed = parseOmronCiPages('ci.xlsx', [stripped, omronCiGrid(second)])
+    expect(parsed.headers.FC.vesselAgent).toBe('Nippon Express')
+  })
+
+  it('reads the addresses from a later page when the first page’s band is unreadable', () => {
+    const [first, second] = twoPages()
+    const blinded = omronCiGrid(first).map((row) =>
+      row.some((c) => c.startsWith('SHIPPER (') || c.startsWith('CONSIGNEE (')) ? [] : row,
+    )
+    const parsed = parseOmronCiPages('ci.xlsx', [blinded, omronCiGrid(second)])
+    expect(parsed.headers.FC.consignedTo.name).toBe('Example Consignee Pte. Ltd.')
+    expect(parsed.warnings.some((w) => /could not be read/.test(w))).toBe(false)
+  })
+
+  it('says the addresses could not be read only when no page could read them', () => {
+    const blinded = twoPages().map((spec) =>
+      omronCiGrid(spec).map((row) => (row.some((c) => c.startsWith('SHIPPER (') || c.startsWith('CONSIGNEE (')) ? [] : row)),
+    )
+    const parsed = parseOmronCiPages('ci.xlsx', blinded)
+    expect(parsed.warnings.filter((w) => /could not be read/.test(w))).toHaveLength(1)
+  })
+
+  it('reads the printed pages of a multi-page PDF the same way', async () => {
+    const parsed = await parseCipl('ci.pdf', await buildOmronCiPdfPages(twoPages()))
+    expect(parsed.pageCount).toBe(2)
+    expect(parsed.lines).toHaveLength(16)
+    expect(parsed.lines.map((l) => l.page)).toEqual([...Array(8).fill(1), ...Array(8).fill(2)])
+    expect(parsed.lines[8]).toMatchObject({ partNumber: 'P-9', description: 'Part 9' })
+    expect(parsed.headers.FC.totalValue).toBeCloseTo(280, 2)
+    expect(parsed.warnings.filter((w) => !w.includes('per-line weights'))).toEqual([])
+  })
+
+  it('reads every page of a multi-sheet workbook through the file entry point', async () => {
+    const bytes = buildXlsx(
+      twoPages().map((spec, i) => ({ name: `P${i + 1}`, rows: omronCiGrid(spec) })),
+    )
+    const parsed = await parseCiplFile('ci.xlsx', bytes)
+    expect(parsed.pageCount).toBe(2)
+    expect(parsed.lines).toHaveLength(16)
+    expect(parsed.headers.FC.totalValue).toBeCloseTo(280, 2)
+  })
+
+  it('reads the form’s pages past a cover sheet that is not one of them', async () => {
+    const bytes = buildXlsx([
+      { name: 'Cover', rows: [['Doc. # 00004-00202 Rev. C'], ['Revision history']] },
+      ...twoPages().map((spec, i) => ({ name: `P${i + 1}`, rows: omronCiGrid(spec) })),
+    ])
+    const parsed = await parseCiplFile('ci.xlsx', bytes)
+    expect(parsed.pageCount).toBe(2)
+    expect(parsed.lines).toHaveLength(16)
+  })
+})
+
+describe('the totals band', () => {
+  it('takes the merchandise total out of the grand total, leaving tax and freight behind', () => {
+    // Reconciling the commodity rows against a total that includes tax and freight would
+    // fail every invoice carrying either.
+    const header = parseGrid({ ...simpleOmronCi(), tax: 12.5, freight: 40 }).headers.FC
+    expect(header.totalValue).toBeCloseTo(190, 2)
+  })
+
+  it('does the same from a print, where the tax cell sits beside the net weight', async () => {
+    // `TAX` prints to the right of `NET WT (KG)`. Read as the rightmost number on its row,
+    // an empty tax cell hands back 3.2 kg as an amount of money.
+    const parsed = await parseCipl('ci.pdf', await buildOmronCiPdf({ ...simpleOmronCi(), netWeightKg: 3.2 }))
+    expect(parsed.headers.FC.totalValue).toBeCloseTo(190, 2)
+    expect(parsed.headers.FC.totalNetWeightKg).toBeCloseTo(3.2, 3)
+  })
+
+  it('reports a subtotal that disagrees with the invoice’s own total', () => {
+    const parsed = parseGrid({ ...simpleOmronCi(), grandTotal: 250 })
+    expect(parsed.warnings.some((w) => /subtotals add to 190.00, but the invoice/.test(w))).toBe(true)
+    // The document's statement about itself wins: the rows are proved against it and fail.
+    expect(parsed.headers.FC.totalValue).toBeCloseTo(250, 2)
+  })
+
+  it('falls back to the page subtotals when no grand total is printed', () => {
+    const grid = omronCiGrid(simpleOmronCi())
+    grid.find((r) => r.some((c) => c === 'TOTAL (USD)'))![10] = ''
+    expect(parseOmronCiWorkbook('ci.xlsx', grid).headers.FC.totalValue).toBeCloseTo(190, 2)
   })
 })

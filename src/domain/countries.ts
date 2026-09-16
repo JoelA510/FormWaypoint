@@ -1,6 +1,11 @@
 /**
  * Country name to ISO 3166-1 alpha-2, and back to the name a picker shows.
  *
+ * Lives in `domain/` rather than beside the keying sheet that first needed it: a country
+ * name is a fact about a shipment, and the CIPL parsers have to recognise one in an
+ * address block before any carrier is chosen. `carriers/keying-sheet` re-exports it, so
+ * its own callers are unchanged.
+ *
  * FedEx Ship Manager stores country of manufacture as `GB`, `MY`, `JP`, `US` — the CIPL
  * prints `United Kingdom`, `Malaysia`, `Japan`, `United States`. Typing the long name into
  * that column does not fail loudly; it just is not the code the commodity record needs.
@@ -628,4 +633,44 @@ export function toCountryPickerLabel(name: string | null | undefined): string {
   if (!text) return ''
   const { code, known, name: canonical } = toIsoAlpha2(text)
   return known ? `${code} - ${canonical}` : text
+}
+
+/**
+ * The country an address block names, or null.
+ *
+ * Read bottom-up, because the country is the last thing printed on an international
+ * address — and per comma-separated segment, because this form prints the whole tail of
+ * the address on one line: `ORADEA, 410085, BIHOR, ROMANIA`. Taking that line whole gives
+ * a postal line; taking its last segment gives the country.
+ *
+ * Matched against the ISO name list and nothing else. A segment is accepted only when it
+ * *is* a country name, so `BIHOR` (a Romanian county) and `410085` are passed over rather
+ * than filed as the country of ultimate destination. Two-letter segments are deliberately
+ * not accepted: `Pleasanton, CA` would otherwise resolve to Canada.
+ */
+export function countryFromAddressLines(lines: readonly (string | null | undefined)[]): string | null {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = (lines[i] ?? '').trim()
+    if (!line) continue
+    const segments = line.split(',')
+    for (let s = segments.length - 1; s >= 0; s--) {
+      const name = countryByName(segments[s])
+      if (name) return name
+    }
+  }
+  return null
+}
+
+/**
+ * The canonical name for a country *named* in text, or null.
+ *
+ * Name lookup only — unlike `toIsoAlpha2`, a bare two-letter string is not read as a code.
+ * The callers here are reading somebody's address, where two letters are far more likely
+ * to be a state than a country.
+ */
+function countryByName(text: string | null | undefined): string | null {
+  const trimmed = (text ?? '').trim().replace(/[.,;]+$/, '')
+  if (trimmed.length < 3) return null
+  const code = ISO_ALPHA2[trimmed.toLowerCase()] ?? ISO_ALPHA2[(text ?? '').trim().toLowerCase()]
+  return code ? NAMES[code] : null
 }

@@ -22,6 +22,7 @@ const BLANK_HEADER: ShipmentHeader = {
   invoiceNumber: 'SYNTHETIC',
   invoiceDate: '2026-07-20',
   onOrAboutDate: null,
+  shipDate: null,
   soldTo: { name: 'Consignee', lines: ['Japan'], country: null },
   consignedTo: { name: 'Consignee', lines: ['Japan'], country: null },
   notifyTo: null,

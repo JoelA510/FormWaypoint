@@ -165,9 +165,11 @@ export function buildDraft(
     consigneeType: settings.consigneeType,
     partiesRelated: settings.partiesRelated,
 
-    // Box 2 takes the invoice date, not the later "on or about" sailing date — that is what
-    // all three historical shipments do.
-    dateOfExportation: header.invoiceDate,
+    // Box 2 takes the date the document says the goods ship, where it has a box that means
+    // exactly that, and the invoice date otherwise — which is what all three historical
+    // shipments do, their layouts stating no ship date. Never the "on or about" line: that
+    // is a later sailing *estimate*, not a statement of when the shipment leaves.
+    dateOfExportation: header.shipDate || header.invoiceDate,
     transportationReference: settings.transportationReference,
     // Prefilled from the sales orders where the document actually carries them, and only
     // there: a layout that prints the *customer's* PO as its order number has no sales

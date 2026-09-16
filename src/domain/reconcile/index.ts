@@ -150,15 +150,22 @@ function isPlausibleCountry(value: string | null | undefined): value is string {
 /**
  * Destination country for SLI box 7, or null when the documents do not establish one.
  *
- * The discharge port is the primary source because the consignee address block frequently
- * omits the country entirely (vendorA3 ends at `'s-Hertogenbosch NA 5234`). Returning null
- * is deliberate: a blank box a reviewer is told about beats a wrong one they are not.
+ * Three sources, most authoritative first. The discharge port is a routing statement and
+ * beats an address. Where the parser resolved the consignee block's own country against the
+ * ISO name list, that is a recognised country name and is taken next — it is the only
+ * statement of destination the in-house form makes, which otherwise has no discharge port
+ * and prints its country at the end of a postal line (`ORADEA, 410085, BIHOR, ROMANIA`).
+ * Last, the block's final line where it is plausibly a country on its own.
+ *
+ * Returning null is deliberate: a blank box a reviewer is told about beats a wrong one they
+ * are not.
  */
 export function resolveDestinationCountry(header: ShipmentHeader): string | null {
   if (header.dischargePort?.includes(',')) {
     const country = header.dischargePort.split(',').pop()?.trim()
     if (isPlausibleCountry(country)) return country
   }
+  if (isPlausibleCountry(header.consignedTo.country)) return header.consignedTo.country
   const lastLine = header.consignedTo.lines.at(-1)?.trim()
   return isPlausibleCountry(lastLine) ? lastLine : null
 }
@@ -171,6 +178,7 @@ const UNREADABLE_HEADER: ShipmentHeader = {
   invoiceNumber: '',
   invoiceDate: '',
   onOrAboutDate: null,
+  shipDate: null,
   soldTo: { name: '', lines: [], country: null },
   consignedTo: { name: '', lines: [], country: null },
   notifyTo: null,

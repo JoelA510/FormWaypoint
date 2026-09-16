@@ -251,9 +251,12 @@ function parseHeader(page: TextPage): ShipmentHeader {
   return {
     invoiceNumber: shipmentNumber,
     // This format prints a single Ship Date and no separate invoice date; the filed SLIs
-    // use it directly for box 2.
+    // use it directly for box 2. Stated in `shipDate` as well as `invoiceDate`, because
+    // that is what the box on the document says — the two agree here, so nothing about
+    // what this layout files changes.
     invoiceDate: shipDate,
     onOrAboutDate: null,
+    shipDate: shipDate || null,
     soldTo,
     consignedTo,
     notifyTo: null,

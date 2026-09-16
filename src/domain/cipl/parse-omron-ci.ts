@@ -17,12 +17,19 @@
  * Invoice only: there is no packing list, and no per-line weights, so `providesWeights` is
  * false and box 26 comes from the saved per-part table exactly as it does for `vendor-b`.
  *
+ * A shipment longer than the form's eight line slots runs onto further pages — further
+ * sheets in the workbook, further pages in the print — and every one of them repeats the
+ * whole header, states its own SUBTOTAL, and numbers itself `2 of 4` in the PAGE box. Each
+ * is therefore read as a complete form and the results merged, with that page box and the
+ * grand TOTAL used to prove no page went missing on the way in.
+ *
  * Both readers are label-driven, not coordinate-driven. The form is a controlled document,
  * but anchoring on the printed labels ("INVOICE #:", "PART #", …) means an extra inserted
  * row or a column nudged in a future revision moves nothing.
  */
 import type { ParsedCipl, PartyAddress, ShipmentHeader, SourceLine } from '../types'
 import type { SheetRows } from '../item-library/read-workbook'
+import { countryFromAddressLines } from '../countries'
 import { roundTo } from '../reconcile/lines'
 import { parseNumber, rowText, type TextItem, type TextPage, type TextRow } from './extract-text'
 
@@ -162,6 +169,50 @@ function headingAt(row: string[], heading: string): number {
   return row.findIndex((cell) => cell.trim().toUpperCase() === heading)
 }
 
+/**
+ * One page of the form, read on its own terms.
+ *
+ * The form is printed one page per sheet (or per PDF page) and *repeats its whole header*
+ * on every one of them — addresses, dates, weights and the grand total included. Only the
+ * commodity table, the SUBTOTAL under it and the `PAGE:` box differ. So each page is read
+ * as a complete form and the pages are merged afterwards, rather than concatenating their
+ * rows and reading the result as one long sheet: concatenating would find eight COO
+ * headings, four address bands and four totals bands, and there is no ordering of the
+ * search that makes that mean anything.
+ */
+interface OmronCiPage {
+  pageNumber: number
+  fields: Map<string, string>
+  parties: Parties
+  /** False when the address band could not be read on this page at all. */
+  partiesRead: boolean
+  lines: SourceLine[]
+  /** The merchandise total printed under this page's own commodity table. */
+  subtotal: number | null
+  tax: number | null
+  freight: number | null
+  /** The document-wide `TOTAL (USD)`, which every page repeats. */
+  grandTotal: number | null
+  warnings: string[]
+}
+
+type Parties = { shipper: PartyAddress; consignee: PartyAddress; billTo: PartyAddress }
+
+/**
+ * A header-grid box that spells "nothing" rather than a value.
+ *
+ * The form is filled in by hand and its unused boxes are struck through — `-`, `–`, `N/A`.
+ * Read literally, that dash becomes the invoice number in the output filename and the
+ * consignee's purchase order on the SLI. An empty box and a box holding a dash say the same
+ * thing, so they are read the same way.
+ *
+ * The header grid only. A commodity cell reading `-` is something somebody typed against
+ * goods being declared, and the reconciliation is where that gets held, in front of the
+ * person who can fix it.
+ */
+const PLACEHOLDER = /^(?:[-–—/\\.]+|n\/?a)$/i
+
+/** The Commercial Invoice form as a single page — the shape the workbook reader started at. */
 export function parseOmronCiWorkbook(
   fileName: string,
   rows: SheetRows,
@@ -177,35 +228,50 @@ export function parseOmronCiWorkbook(
    */
   fromWorkbook = true,
 ): ParsedCipl {
-  const warnings: string[] = []
+  return parseOmronCiPages(fileName, [rows], fromWorkbook)
+}
 
-  // Header grid: first value found for each label anywhere on the sheet. The instructions
-  // block below the print area repeats no labels, so first occurrence is the form's cell.
+/**
+ * The form as it is actually issued: one grid per page, in printed order.
+ *
+ * A workbook carries them as sheets (`P1`, `P2`, …) and a print carries them as PDF pages;
+ * both arrive here as one grid each. The header comes from the pages that state it, the
+ * commodity lines are the pages' tables end to end, and the two figures that describe the
+ * whole document — the page count in the `PAGE:` box and the grand `TOTAL (USD)` — are
+ * what prove no page went missing between the printer and here.
+ */
+export function parseOmronCiPages(fileName: string, pages: SheetRows[], fromWorkbook = true): ParsedCipl {
+  const warnings: string[] = []
+  const read = pages.map((rows, i) => readPage(rows, i + 1, fromWorkbook))
+  for (const page of read) {
+    for (const warning of page.warnings) warnings.push(prefixed(warning, page.pageNumber, read.length))
+  }
+
+  // Every label's first stated value, searched page by page. The header repeats on each
+  // page, so this is normally page 1's — but a value typed on only one page of a set (a
+  // tracking number added after the first page was filled) is still found.
   const fields = new Map<string, string>()
-  for (const row of rows) {
-    for (let i = 0; i < row.length; i++) {
-      if (!row[i] || !isLabel(row[i])) continue
-      const key = normalizeLabel(row[i])
-      if (fields.has(key)) continue
-      const value = valueAfter(row, i)
-      if (value) fields.set(key, value)
-    }
+  for (const page of read) {
+    for (const [key, value] of page.fields) if (!fields.has(key)) fields.set(key, value)
   }
   const field = (label: string): string => fields.get(label) ?? ''
 
-  const parties = readParties(rows, warnings)
-  const lines = readLines(rows, field('PURCHASE ORDER #'), field('INVOICE #'), warnings, fromWorkbook)
-
-  const subtotal = amountOnRow(rows, 'SUBTOTAL', fromWorkbook ? amountColumnIn(rows) : -1)
-  if (subtotal == null) {
+  const withParties = read.find((page) => page.partiesRead)
+  if (!withParties) {
     warnings.push(
-      'No subtotal could be read from this invoice, so the commodity values cannot be proved against the ' +
-        'document. If the workbook was generated rather than saved from Excel, its formulas may have no ' +
-        'cached results — open it in Excel, save, and import again.',
+      'The shipper, consignee and bill-to blocks could not be read from this document. Enter the consignee by ' +
+        'hand, and check the addresses on the generated form against the invoice before signing.',
     )
   }
+  const parties = withParties?.parties ?? emptyParties()
 
-  const header = buildHeader(field, parties, lines, subtotal)
+  const lines = read.flatMap((page) => page.lines)
+
+  warnings.push(...pageContinuityWarnings(read))
+  const { totalValue, warnings: totalWarnings } = documentTotal(read)
+  warnings.push(...totalWarnings)
+
+  const header = buildHeader(field, parties, lines, totalValue)
 
   warnings.push(
     'This form states no per-line weights. Box 26 must be supplied from the saved per-part weights or entered by hand.',
@@ -215,12 +281,178 @@ export function parseOmronCiWorkbook(
     fileName,
     format: 'omron-ci',
     providesWeights: false,
-    pageCount: 1,
+    pageCount: pages.length,
     availableSets: ['FC'],
     headers: { FC: header },
     lines,
     warnings,
   }
+}
+
+/** A page's own warning, named by its page where there is more than one to tell apart. */
+const prefixed = (warning: string, pageNumber: number, pageCount: number): string =>
+  pageCount > 1 ? `Page ${pageNumber}: ${warning}` : warning
+
+const emptyParty = (): PartyAddress => ({ name: '', lines: [], country: null })
+const emptyParties = (): Parties => ({ shipper: emptyParty(), consignee: emptyParty(), billTo: emptyParty() })
+
+function readPage(rows: SheetRows, pageNumber: number, fromWorkbook: boolean): OmronCiPage {
+  const warnings: string[] = []
+
+  // Header grid: first value found for each label anywhere on the sheet. The instructions
+  // block below the print area repeats no labels, so first occurrence is the form's cell.
+  //
+  // A struck-through box is not a value and is not recorded as one. Applied here so that
+  // every reader of the grid agrees — the purchase order reaching the commodity lines is
+  // the same one reaching the header, and a page that fills a box its neighbours struck
+  // through still supplies it.
+  const fields = new Map<string, string>()
+  for (const row of rows) {
+    for (let i = 0; i < row.length; i++) {
+      if (!row[i] || !isLabel(row[i])) continue
+      const key = normalizeLabel(row[i])
+      if (fields.has(key)) continue
+      const value = valueAfter(row, i).trim()
+      if (value && !PLACEHOLDER.test(value)) fields.set(key, value)
+    }
+  }
+  const field = (label: string): string => fields.get(label) ?? ''
+
+  const parties = readParties(rows)
+  const lines = readLines(
+    rows,
+    field('PURCHASE ORDER #'),
+    field('INVOICE #'),
+    pageNumber,
+    warnings,
+    fromWorkbook,
+  )
+
+  // Without the table's own AMOUNT column the figures are taken from the cells to the
+  // right of each totals label — never the rightmost number on the row. The totals band
+  // shares its rows with `# OF PIECES`, `NET WT (KG)` and `GROSS WT (KG)`, and on a print
+  // `TAX` sits to the right of the net weight: read from the end of the row, a blank tax
+  // cell hands back the weight, which then reconciles the shipment against a package.
+  const amountColumn = fromWorkbook ? amountColumnIn(rows) : -1
+  const subtotal = amountOnRow(rows, 'SUBTOTAL', amountColumn)
+  if (subtotal == null) {
+    warnings.push(
+      'No subtotal could be read from this invoice, so the commodity values cannot be proved against the ' +
+        'document. If the workbook was generated rather than saved from Excel, its formulas may have no ' +
+        'cached results — open it in Excel, save, and import again.',
+    )
+  }
+
+  return {
+    pageNumber,
+    fields,
+    parties: parties.parties,
+    partiesRead: parties.read,
+    lines,
+    subtotal,
+    tax: amountOnRow(rows, 'TAX', amountColumn),
+    freight: amountOnRow(rows, 'FREIGHT', amountColumn),
+    grandTotal: amountOnRow(rows, 'TOTAL (USD)', amountColumn),
+    warnings,
+  }
+}
+
+/**
+ * What the pages say about how many of them there should be.
+ *
+ * The `PAGE:` box is printed `2 of 4`, and it is the only place the document states its own
+ * extent. A page missed on the way in — a print job that dropped one, a workbook whose last
+ * tab was deleted — otherwise produces a shorter invoice that looks entirely complete, which
+ * is the one failure this reader must not produce in silence. Said out loud here, and caught
+ * again by the grand total below.
+ */
+function pageContinuityWarnings(pages: OmronCiPage[]): string[] {
+  const warnings: string[] = []
+  const stated = pages.map((page) => {
+    const match = /^(\d+)\s*of\s*(\d+)$/i.exec((page.fields.get('PAGE') ?? '').trim())
+    return match ? { at: Number(match[1]), of: Number(match[2]) } : null
+  })
+
+  const totals = [...new Set(stated.filter((s) => s != null).map((s) => s.of))]
+  if (totals.length > 1) {
+    warnings.push(
+      `These pages do not belong to one document: their PAGE boxes claim ${totals.join(' and ')} pages. ` +
+        'Import the pages of a single invoice.',
+    )
+    return warnings
+  }
+
+  const declared = totals[0]
+  if (declared != null && declared !== pages.length) {
+    warnings.push(
+      `The form states it is ${declared} page(s), but ${pages.length} were read. ` +
+        'Every page of the invoice must be imported, or the commodity list will be short.',
+    )
+  }
+
+  const numbered = stated.filter((s) => s != null).map((s) => s.at)
+  const duplicated = numbered.length !== new Set(numbered).size
+  if (duplicated) {
+    warnings.push(
+      `Two of the imported pages carry the same PAGE number (${numbered.join(', ')}). ` +
+        'A page imported twice files its goods twice.',
+    )
+  }
+
+  const invoices = [...new Set(pages.map((page) => page.fields.get('INVOICE #') ?? '').filter(Boolean))]
+  if (invoices.length > 1) {
+    warnings.push(
+      `The imported pages carry more than one invoice number (${invoices.join(', ')}). ` +
+        'Import one invoice at a time.',
+    )
+  }
+  return warnings
+}
+
+/**
+ * The merchandise total the whole document states, and what has to be said about it.
+ *
+ * Two figures describe it, and they are independent of each other. The SUBTOTALs are the
+ * pages' own arithmetic over the lines this reader just read; the grand `TOTAL (USD)` is
+ * the document's statement about itself, repeated on every page, and it still counts the
+ * goods on a page that never arrived. So the grand total is preferred, with tax and freight
+ * taken back out of it — they are not commodity value, and reconciling against a total that
+ * includes them would fail every invoice carrying either.
+ *
+ * Preferring it is what makes a missing page *block*: the rows are then short of a total
+ * the document itself prints, and the blocking total-value check says so with both figures
+ * in hand. Where the two disagree the discrepancy is reported here as well, because which
+ * of them is wrong is a question for the person holding the paperwork.
+ */
+function documentTotal(pages: OmronCiPage[]): { totalValue: number; warnings: string[] } {
+  const warnings: string[] = []
+  const subtotals = pages.map((page) => page.subtotal)
+  const subtotalSum = subtotals.every((value) => value != null)
+    ? roundTo(subtotals.reduce((sum, value) => sum + (value ?? 0), 0), 2)
+    : null
+
+  // Every page repeats the same grand total, so the first stated one is the document's.
+  const stated = pages.find((page) => page.grandTotal != null)
+  const grandTotal = stated?.grandTotal ?? null
+  const disagreeing = pages.filter((page) => page.grandTotal != null && Math.abs(page.grandTotal - (grandTotal ?? 0)) > 0.01)
+  if (disagreeing.length) {
+    warnings.push(
+      'The pages print different grand totals, so the value of this shipment is not established by the ' +
+        'document. Check the invoice before generating anything.',
+    )
+  }
+
+  const merchandise =
+    grandTotal == null ? null : roundTo(grandTotal - (stated?.tax ?? 0) - (stated?.freight ?? 0), 2)
+
+  if (merchandise != null && subtotalSum != null && Math.abs(merchandise - subtotalSum) > 0.01) {
+    warnings.push(
+      `The page subtotals add to ${subtotalSum.toFixed(2)}, but the invoice's own total states ` +
+        `${merchandise.toFixed(2)} of merchandise. A page of this invoice is missing, or a subtotal on it is stale.`,
+    )
+  }
+
+  return { totalValue: merchandise ?? subtotalSum ?? 0, warnings }
 }
 
 /**
@@ -242,24 +474,16 @@ function valueAfter(row: string[], index: number): string {
  * and its lines are whatever the following rows hold in that column, until the header grid
  * starts (its first row carries the INVOICE # label).
  */
-function readParties(
-  rows: SheetRows,
-  warnings: string[],
-): { shipper: PartyAddress; consignee: PartyAddress; billTo: PartyAddress } {
-  const empty = (): PartyAddress => ({ name: '', lines: [], country: null })
+function readParties(rows: SheetRows): { parties: Parties; read: boolean } {
   const bandIndex = rows.findIndex(
     (row) => row.some((c) => isPartyTitle(c, 'SHIPPER')) && row.some((c) => isPartyTitle(c, 'CONSIGNEE')),
   )
-  // Said out loud. The addresses are the one part of this form nothing downstream demands —
-  // the SLI will fill its consignee box with whatever is there, including nothing — so a
-  // band that could not be read has to report itself or it reads as a blank form.
-  const unreadable = () => {
-    warnings.push(
-      'The shipper, consignee and bill-to blocks could not be read from this document. Enter the consignee by ' +
-        'hand, and check the addresses on the generated form against the invoice before signing.',
-    )
-    return { shipper: empty(), consignee: empty(), billTo: empty() }
-  }
+  // Reported by the caller rather than here. The addresses are the one part of this form
+  // nothing downstream demands — the SLI will fill its consignee box with whatever is
+  // there, including nothing — so a band that could not be read has to be said out loud or
+  // it reads as a blank form. On a multi-page import that is only true of a document whose
+  // *every* page failed, which is not something one page can know.
+  const unreadable = () => ({ parties: emptyParties(), read: false })
   if (bandIndex === -1) return unreadable()
 
   const band = rows[bandIndex]
@@ -287,12 +511,23 @@ function readParties(
 
   const toParty = (lines: string[]): PartyAddress => {
     const [name = '', ...rest] = lines
-    return { name, lines: rest, country: null }
+    // The country the block itself names, which is the only statement of it this form
+    // makes — it has no discharge-port box. Read off the address rather than left null:
+    // without it box 7, the country of ultimate destination, has nothing to fill from and
+    // the blocking check holds every shipment on this form.
+    return { name, lines: rest, country: countryFromAddressLines([name, ...rest]) }
   }
   // The band was found and still yielded nothing — on the PDF path, a band whose three
   // titles could not all be located, which `partyRow` declines to map rather than guess at.
   if (!collected.shipper.length && !collected.consignee.length && !collected.billTo.length) return unreadable()
-  return { shipper: toParty(collected.shipper), consignee: toParty(collected.consignee), billTo: toParty(collected.billTo) }
+  return {
+    parties: {
+      shipper: toParty(collected.shipper),
+      consignee: toParty(collected.consignee),
+      billTo: toParty(collected.billTo),
+    },
+    read: true,
+  }
 }
 
 /**
@@ -306,6 +541,7 @@ function readLines(
   rows: SheetRows,
   purchaseOrder: string,
   invoiceNumber: string,
+  pageNumber: number,
   warnings: string[],
   fromWorkbook: boolean,
 ): SourceLine[] {
@@ -423,10 +659,14 @@ function readLines(
     const sme = cell(bottom, columns.sme)
 
     lines.push({
-      id: ['FC', 'INV', invoiceNumber || 'CI', String(lineNumber), partNumber].join(':'),
+      // The page is part of the id, not decoration. Line numbers run on across the pages
+      // of this form, but nothing makes them: a set whose pages each restart at 1 would
+      // otherwise collide, and two lines sharing an id are one line to everything
+      // downstream that joins, groups or overrides by it.
+      id: ['FC', 'INV', invoiceNumber || 'CI', `P${pageNumber}`, String(lineNumber), partNumber].join(':'),
       documentSet: 'FC',
       documentKind: 'INVOICE',
-      page: 1,
+      page: pageNumber,
       // The form's PO # is the customer's purchase order — the same thing `vendor-a`
       // prints in this position — so no separate `purchaseOrder` field is needed.
       orderNumber: purchaseOrder,
@@ -497,15 +737,18 @@ function isTotalsRow(row: string[]): boolean {
  * a weight to the blocking total-value check, which would then reconcile the shipment
  * against it instead of failing.
  *
- * Without the column the rightmost number is still the fallback; the caller warns when no
- * subtotal could be read at all, and that is the honest outcome of a table nobody could
- * calibrate.
+ * Without the column — the PDF path, whose totals rows are rebuilt from drawn text — the
+ * figure is taken from the cells *after* the label, in printed order. The rightmost number
+ * is not the same thing and is wrong on this very form: `TAX` prints to the right of the
+ * net weight, so an empty tax cell handed back `9.7` kg as an amount of money. Nothing
+ * after the label means nothing was printed there, which is what an empty tax box is.
  */
 function amountOnRow(rows: SheetRows, label: string, amountColumn: number): number | null {
   const row = rows.find((r) => r.some((c) => normalizeLabel(c) === label))
   if (!row) return null
   if (amountColumn >= 0) return parseNumber(row[amountColumn] ?? '')
-  for (let i = row.length - 1; i >= 0; i--) {
+  const at = row.findIndex((c) => normalizeLabel(c) === label)
+  for (let i = at + 1; i < row.length; i++) {
     const value = parseNumber(row[i])
     if (value != null) return value
   }
@@ -522,23 +765,22 @@ function amountColumnIn(rows: SheetRows): number {
 
 function buildHeader(
   field: (label: string) => string,
-  parties: { shipper: PartyAddress; consignee: PartyAddress; billTo: PartyAddress },
+  parties: Parties,
   lines: SourceLine[],
-  subtotal: number | null,
+  totalValue: number,
 ): ShipmentHeader {
   const freight = field('FREIGHT CHARGES').toUpperCase()
   return {
     invoiceNumber: field('INVOICE #'),
     invoiceDate: dateText(field('INVOICE DATE')),
-    // Left null, though the form does have a SHIP DATE box.
-    //
-    // `onOrAboutDate` means the *later sailing* date on the vendor layouts, and box 2 of the
-    // SLI deliberately takes the invoice date instead — the filed evidence for all three
-    // historical shipments. Filling this field from a box that means something else would
-    // change the date of exportation on those layouts too, through the one line in
-    // `buildDraft` that reads it. Whether this form's own ship date should date the SLI is
-    // a question for the people who file them, and it needs its own field to answer.
+    // Still null. `onOrAboutDate` means the *later sailing* date on the vendor layouts,
+    // and this form has no box for that — its SHIP DATE is the date the goods leave, which
+    // is `shipDate` below.
     onOrAboutDate: null,
+    // The date of exportation for this layout. The form states when the shipment goes, so
+    // that is what box 2 files; `buildDraft` prefers it over the invoice date, which on
+    // this form is routinely struck through because the goods are not sold.
+    shipDate: dateText(field('SHIP DATE')) || null,
     // BILL TO / SOLD TO is only filled in when it differs from the consignee.
     soldTo: parties.billTo.name ? parties.billTo : parties.consignee,
     consignedTo: parties.consignee,
@@ -562,11 +804,10 @@ function buildHeader(
       lines.reduce((sum, line) => sum + line.quantity, 0),
       3,
     ),
-    // The SUBTOTAL is the merchandise total the commodity rows must sum to. The grand
-    // TOTAL adds tax and freight, which are not commodity value; reconciling against it
-    // would fail every invoice that carries either. Zero when unreadable, so the
-    // total-value check fails loudly rather than proving the lines against themselves.
-    totalValue: subtotal ?? 0,
+    // The merchandise total the commodity rows must sum to, across every page — see
+    // `documentTotal`. Zero when the document states none, so the total-value check fails
+    // loudly rather than proving the lines against themselves.
+    totalValue,
     totalNetWeightKg: parseNumber(field('NET WT (KG)')),
     totalGrossWeightKg: parseNumber(field('GROSS WT (KG)')),
     totalMeasurementM3: null,
@@ -618,19 +859,11 @@ export function isOmronCiPdf(pages: TextPage[]): boolean {
  * columns share an x position.
  */
 export function parseOmronCiPdf(fileName: string, pages: TextPage[]): ParsedCipl {
-  // The form is a single page by design (its PAGE box is preprinted "1 of 1"), and the
-  // geometry below depends on that: PDF y restarts on every page, so a second page's
-  // blocks would collide with the first's by baseline and merge into garbage. A
-  // multi-page print is a misprint or a layout this parser does not know — refuse it
-  // loudly rather than filing a corrupted table.
-  if (pages.length > 1) {
-    throw new Error(
-      `${fileName} has ${pages.length} pages, but the Commercial Invoice form (00004-00202) is a ` +
-        'single page. Re-print it to one page, or import the .xlsx workbook instead.',
-    )
-  }
-  const grid = pagesToGrid(pages)
-  return parseOmronCiWorkbook(fileName, grid, false)
+  // One page at a time, never the pages' rows concatenated. PDF y restarts on every page,
+  // so a second page's blocks collide with the first's by baseline — and the geometry
+  // below is all baselines. Each page is reshaped into its own grid and read as the
+  // complete form it is printed as; `parseOmronCiPages` merges them.
+  return parseOmronCiPages(fileName, pages.map((page) => pagesToGrid([page])), false)
 }
 
 /**

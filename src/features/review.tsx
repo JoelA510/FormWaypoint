@@ -39,12 +39,22 @@ export function ShipmentSummary({ parsed, reconciliation }: { parsed: ParsedCipl
       />
       <CardBody className="grid gap-x-10 gap-y-0 md:grid-cols-2">
         <div>
-          <ProvenanceRow label="Invoice number" value={header.invoiceNumber} source="CIPL header" />
-          <ProvenanceRow label="Date of exportation" value={header.invoiceDate} source="CIPL invoice date" />
+          <ProvenanceRow label="Invoice number" value={header.invoiceNumber || '—'} source="CIPL header" />
           <ProvenanceRow
-            label="Ship date on the CIPL"
+            label="Date of exportation"
+            value={header.shipDate || header.invoiceDate || '—'}
+            source={header.shipDate ? 'CIPL ship date' : 'CIPL invoice date'}
+          />
+          <ProvenanceRow
+            label="Invoice date"
+            value={header.invoiceDate || '—'}
+            source={header.shipDate ? 'superseded by the ship date' : 'used for box 2'}
+            tone="neutral"
+          />
+          <ProvenanceRow
+            label="On or about date"
             value={header.onOrAboutDate ?? '—'}
-            source="not used for box 2"
+            source="a later sailing estimate — not used for box 2"
             tone="neutral"
           />
           <ProvenanceRow label="Ultimate consignee" value={header.consignedTo.name} source="CONSIGNED TO" />
@@ -52,7 +62,7 @@ export function ShipmentSummary({ parsed, reconciliation }: { parsed: ParsedCipl
           <ProvenanceRow
             label="Destination country"
             value={resolveDestinationCountry(header) ?? '—'}
-            source="discharge port"
+            source={header.dischargePort ? 'discharge port' : 'consignee address'}
           />
         </div>
         <div>

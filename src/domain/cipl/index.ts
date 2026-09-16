@@ -8,14 +8,14 @@
  * Adding a format means adding a detector and a parser here — nothing downstream changes.
  */
 import type { CiplFormat, ParsedCipl } from '../types'
-import { findXlsxSheet, isZip, WorkbookError } from '../item-library/read-workbook'
+import { findXlsxSheets, isZip, WorkbookError } from '../item-library/read-workbook'
 import { extractTextPages, rowText, type TextPage } from './extract-text'
-import { isOmronCiPdf, isOmronCiWorkbook, parseOmronCiPdf, parseOmronCiWorkbook } from './parse-omron-ci'
+import { isOmronCiPdf, isOmronCiWorkbook, parseOmronCiPages, parseOmronCiPdf } from './parse-omron-ci'
 import { parseCiplPages as parseVendorAPages } from './parse-vendor-a'
 import { isVendorBFormat, parseVendorBPages } from './parse-vendor-b'
 
 export * from './extract-text'
-export { isOmronCiWorkbook, parseOmronCiWorkbook } from './parse-omron-ci'
+export { isOmronCiWorkbook, parseOmronCiPages, parseOmronCiWorkbook } from './parse-omron-ci'
 
 export interface FormatDescriptor {
   id: CiplFormat
@@ -87,22 +87,26 @@ export async function parseCiplFile(fileName: string, data: ArrayBuffer | Uint8A
   const bytes = data instanceof Uint8Array ? data : new Uint8Array(data)
   if (!isZip(bytes)) return parseCipl(fileName, bytes)
 
-  // Every tab, not just the first: a controlled document's form can sit behind a cover or
-  // revision-history sheet, and the doc number identifies the right one wherever it is.
-  // Searched lazily so the tabs behind the match are never row-parsed.
+  // Every tab, and every tab that *is* the form — not the first one that is.
+  //
+  // A controlled document's form can sit behind a cover or revision-history sheet, so the
+  // doc number identifies the right one wherever it is; and an invoice longer than the
+  // form's eight line slots is kept one page per tab (`P1`, `P2`, …), so there is normally
+  // more than one right one. Reading only the first filed a four-page shipment as its first
+  // page, with nothing said.
   let found
   try {
-    found = await findXlsxSheet(bytes, isOmronCiWorkbook)
+    found = await findXlsxSheets(bytes, isOmronCiWorkbook)
   } catch (error) {
     if (error instanceof WorkbookError) throw new Error(`${fileName}: ${error.message}`)
     throw error
   }
-  if (!found.sheet) {
+  if (!found.sheets.length) {
     throw new Error(
       `${fileName} is a workbook, but none of its ${found.sheetCount} sheet(s) is the Commercial Invoice ` +
         'form (00004-00202) this tool reads. Workbook import supports that form only; CIPLs from other ' +
         'systems are read from their PDFs.',
     )
   }
-  return parseOmronCiWorkbook(fileName, found.sheet)
+  return parseOmronCiPages(fileName, found.sheets)
 }

@@ -175,6 +175,16 @@ export interface ShipmentHeader {
   invoiceDate: string
   /** The later "ON OR ABOUT" date. Deliberately *not* used for date of exportation. */
   onOrAboutDate: string | null
+  /**
+   * The date the document states the goods ship, where it has a box that means exactly
+   * that — the in-house form's `SHIP DATE`, and the `vendor-b` banner's `Ship Date`.
+   *
+   * Distinct from `onOrAboutDate`, which is the vendor layouts' later *sailing* estimate
+   * and is deliberately not filed. Where a ship date is stated it is the date of
+   * exportation, and `buildDraft` prefers it over the invoice date; null where the layout
+   * states none, which leaves those layouts filing the invoice date exactly as before.
+   */
+  shipDate: string | null
   soldTo: PartyAddress
   consignedTo: PartyAddress
   notifyTo: string | null
