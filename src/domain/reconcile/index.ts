@@ -503,7 +503,16 @@ export function applyRowFigures(
  * stated lines is the only division that reaches the figure.
  */
 function shareOut(lines: MergedLine[], field: 'quantity' | 'netWeightKg' | 'extendedValue', target: number): number[] {
-  const stated = lines.map((line) => line[field] != null)
+  // A net weight of zero counts as unstated, because that is what `weights-present` says it
+  // is — goods that weigh nothing were not shipped — and entering a figure against the row is
+  // the remedy that check names. Counted as stated, such a line holds nothing of the row's
+  // weight, so a proportional share hands it zero of whatever is entered and writes the same
+  // zero back: the check fails again, identically, with nothing the operator can do about it.
+  //
+  // Only the weight. A quantity of zero has its own blocking floor, and a line legitimately
+  // priced at nothing — a no-charge replacement shipped beside the parts it replaces — states
+  // its value as zero and means it.
+  const stated = lines.map((line) => (field === 'netWeightKg' ? (line[field] ?? 0) > 0 : line[field] != null))
   const held = lines.reduce((sum, line) => sum + (line[field] ?? 0), 0)
   const missing = stated.filter((has) => !has).length
 

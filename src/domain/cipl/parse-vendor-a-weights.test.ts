@@ -16,10 +16,22 @@ import { parseCiplPages } from './parse-vendor-a'
 import type { SourceLine } from '../types'
 import type { TextPage, TextRow } from './extract-text'
 
+/**
+ * Width of one character at the 7pt the detail pages are set in, measured off the documents:
+ * a six-figure weight reported by the extractor as 21.4 points wide.
+ *
+ * Rows are built with widths because the parser reads a right-aligned column by its right
+ * edge. A fixture that stated none would exercise the fallback rather than the rule.
+ */
+const CHAR = 3.43
+
 let y = 700
-const row = (...items: [string, number][]): TextRow => {
+const row = (...items: ([string, number] | [string, number, number])[]): TextRow => {
   y -= 12
-  return { y, items: items.map(([str, x]) => ({ str, x, y })) }
+  return {
+    y,
+    items: items.map(([str, x, width]) => ({ str, x, y, width: width ?? str.length * CHAR })),
+  }
 }
 
 const page = (pageNumber: number, rows: TextRow[]): TextPage => ({ pageNumber, width: 612, height: 792, rows })
@@ -58,6 +70,8 @@ const detailPage = (rows: TextRow[], { headings = true } = {}): TextPage => {
   ])
 }
 
+type Cell = [string, number] | [string, number, number]
+
 interface BlockSpec {
   order: string
   part: string
@@ -67,26 +81,37 @@ interface BlockSpec {
   /** Figures on the quantity row: the section's running totals, not this line's weights. */
   sectionTotals?: [string, string, string]
   /** The breakdown row's cells, right of the model, as the extractor split them. */
-  breakdown: [string, number][]
+  breakdown: Cell[]
+  /** Extra cells on the block's start row, where a description reaches the figure columns. */
+  startExtras?: Cell[]
+  /** Cells to print on the quantity row in place of the country of origin. */
+  origin?: Cell[]
 }
 
 /** The five-row packing block, at the columns the real documents print it in. */
 const block = (spec: BlockSpec): TextRow[] => {
-  const quantityRow: [string, number][] = [
+  const quantityRow: Cell[] = [
     ['5830', 24],
     [spec.model, 72],
-    ['United Kingdom', 264],
+    ...(spec.origin ?? [['United Kingdom', 264] as Cell]),
     [String(spec.quantity ?? 4), 397],
   ]
   if (spec.sectionTotals) {
     quantityRow.push([spec.sectionTotals[0], 437], [spec.sectionTotals[1], 503], [spec.sectionTotals[2], 565])
   }
   return [
-    row([spec.order, 72], [spec.order, 186], ['1', 252], [spec.part, 360], ['SWITCH, EXAMPLE', 480]),
+    row(
+      [spec.order, 72],
+      [spec.order, 186],
+      ['1', 252],
+      [spec.part, 360],
+      ['SWITCH, EXAMPLE', 480],
+      ...(spec.startExtras ?? []),
+    ),
     row(['0001', 72], [`${spec.order}X`, 96]),
     row([spec.code ?? '8536.50.9065', 72], ['PCS', 384]),
     row(...quantityRow),
-    row([`${spec.part} ${spec.model}`, 72], ...spec.breakdown),
+    ...(spec.breakdown.length ? [row([`${spec.part} ${spec.model}`, 72], ...spec.breakdown)] : []),
   ]
 }
 
@@ -247,11 +272,16 @@ describe('the weight breakdown', () => {
   it('files no weight at all where the net weight column is blank', () => {
     // The gross weight is not the net weight. Filing it as one puts a number on a customs
     // form that no document states; filing nothing fails a blocking check the operator sees.
+    // With the section's running totals printed above, which is the shape that makes this
+    // bite: a breakdown that cannot be read must not fall back to them. They are the
+    // section's figures, so filing them here overstates this line and counts the section
+    // twice — and it reconciles, because the same figures are on both sides of the sum.
     const line = only([
       ...block({
         order: '00000001OP0060',
         part: '44506-4010',
         model: 'MODEL-A',
+        sectionTotals: ['22.212', '24.433', '.012800'],
         breakdown: [
           ['(', 337],
           ['3.194', 508],
@@ -284,6 +314,127 @@ describe('the weight breakdown', () => {
     expect(line.weightDivisor).toBe(5)
     expect(line.netWeightKg).toBeCloseTo(2.905, 3)
     expect(line.grossWeightKg).toBeCloseTo(3.195, 3)
+  })
+
+  it('reads a wide figure by the edge its column is aligned by', () => {
+    // Figures are right-aligned: a net weight of five figures starts left of its own heading
+    // while ending where every other net weight ends. Read by its left edge it lands in the
+    // quantity column and is dropped — and the line does not come out short, it comes out
+    // wrong, because the gross weight slides left into the empty net slot and files as the
+    // net weight with the packaging in it.
+    const line = only(
+      block({
+        order: '00000001OP0060',
+        part: '44506-4010',
+        model: 'MODEL-A',
+        breakdown: [
+          ['(', 337],
+          // Right-aligned to 459 and 525, the edges every figure on the page shares.
+          ['11,113.140', 424.7],
+          ['12,224.454', 490.7],
+          ['.800000 )', 566],
+        ],
+      }),
+    )
+    expect(line.netWeightKg).toBe(11113.14)
+    expect(line.grossWeightKg).toBe(12224.454)
+  })
+
+  it('does not take the start row’s description cells for figures', () => {
+    // A packing block prints its description from the part-number column rightwards, straight
+    // through all three figure columns. Nothing but the block's own shape keeps those cells
+    // out of the weights: the row is above the classification row, so the scan starts below
+    // it.
+    const line = only(
+      block({
+        order: '00000001OP0060',
+        part: '44506-4010',
+        model: 'MODEL-A',
+        startExtras: [
+          ['24', 484],
+          ['1.5', 500],
+        ],
+        breakdown: [
+          ['(', 337],
+          ['2.904', 442],
+          ['3.194', 508],
+          ['.800000 )', 566],
+        ],
+      }),
+    )
+    expect(line.netWeightKg).toBe(2.904)
+    expect(line.grossWeightKg).toBe(3.194)
+  })
+
+  it('does not take a part number of digits alone for the quantity', () => {
+    const line = only(
+      block({
+        order: '00000001OP0060',
+        part: '4450640',
+        model: 'MODEL-A',
+        quantity: 4,
+        breakdown: [
+          ['(', 337],
+          ['2.904', 442],
+          ['3.194', 508],
+          ['.800000 )', 566],
+        ],
+      }),
+    )
+    expect(line.quantity).toBe(4)
+    expect(line.netWeightKg).toBe(2.904)
+  })
+
+  it('keeps the quantity and country of a line whose origin is bracketed', () => {
+    // `Korea (Republic of)`, split by the extractor. A reader that skipped any row carrying a
+    // bracket lost this row altogether — and with it the quantity, the country of origin, and
+    // the exclusion that keeps the section's running totals out of the weights.
+    const line = only(
+      block({
+        order: '00000001OP0060',
+        part: '44506-4010',
+        model: 'MODEL-A',
+        quantity: 4,
+        origin: [
+          ['Korea', 264],
+          ['(Republic', 300],
+          ['of)', 336],
+        ],
+        sectionTotals: ['22.212', '24.433', '.012800'],
+        breakdown: [
+          ['(', 337],
+          ['2.904', 442],
+          ['3.194', 508],
+          ['.800000 )', 566],
+        ],
+      }),
+    )
+    expect(line.quantity).toBe(4)
+    expect(line.countryOfOrigin).toBe('Korea (Republic of)')
+    expect(line.netWeightKg).toBe(2.904)
+  })
+
+  it('multiplies divided figures back up with the marker merged into the bracket', () => {
+    // The same re-issue font that merges the closing bracket into the measurement merges the
+    // marker into the opening bracket. Matched as a whole cell, `(@ / 5) (` is not a marker,
+    // and the line files at a fifth of its weight with no divider recorded — so the totals
+    // are not even granted the rounding they would need to agree.
+    const line = only(
+      block({
+        order: '00000001OP0060',
+        part: '44506-4010',
+        model: 'MODEL-A',
+        quantity: 4,
+        breakdown: [
+          ['(@ / 5) (', 309.3],
+          ['.581', 446.1],
+          ['.639', 512.1],
+          ['.800000 )', 566.5],
+        ],
+      }),
+    )
+    expect(line.weightDivisor).toBe(5)
+    expect(line.netWeightKg).toBeCloseTo(2.905, 3)
   })
 
   it('reads a page whose column headings could not be read', () => {

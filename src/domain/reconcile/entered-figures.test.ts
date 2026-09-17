@@ -97,6 +97,34 @@ describe('a figure entered against a commodity row', () => {
     expect(lines.map((l) => l.netWeightKg)).toEqual([3, undefined])
   })
 
+  it('treats a net weight stated as zero the way it treats none at all', async () => {
+    // `weights-present` blocks a line whose net weight is zero and tells the operator to enter
+    // the weight against the row. Counted as a figure the document stated, that line holds
+    // none of the row's weight, so a proportional share gives it zero of whatever is entered
+    // and writes the same zero back — the check fails again, identically, and the remedy it
+    // names cannot be carried out.
+    const lines = [
+      { id: 'a', partNumber: 'P-1', quantity: 1, netWeightKg: 0 },
+      { id: 'b', partNumber: 'P-2', quantity: 1, netWeightKg: 2 },
+    ] as unknown as MergedLine[]
+    const rows = [{ rowKey: 'a+b', sourceLineIds: ['a', 'b'], weightKg: 2 }] as unknown as SLILine[]
+    applyRowFigures(lines, rows, { 'a+b': { weightKg: 5 } })
+    expect(lines.map((l) => l.netWeightKg)).toEqual([3, 2])
+  })
+
+  it('leaves a value stated as zero alone, which is a figure a document can mean', async () => {
+    // Not the same as a weight. A no-charge line shipped beside the parts it replaces is
+    // priced at nothing and says so, and sharing an entered row value onto it would invent a
+    // price for goods the invoice gives away.
+    const lines = [
+      { id: 'a', partNumber: 'P-1', quantity: 1, extendedValue: 0 },
+      { id: 'b', partNumber: 'P-2', quantity: 1, extendedValue: 2 },
+    ] as unknown as MergedLine[]
+    const rows = [{ rowKey: 'a+b', sourceLineIds: ['a', 'b'], valueUsd: 2 }] as unknown as SLILine[]
+    applyRowFigures(lines, rows, { 'a+b': { valueUsd: 4 } })
+    expect(lines.map((l) => l.extendedValue)).toEqual([0, 4])
+  })
+
   it('shares in proportion where every line already carries the figure', async () => {
     const target = run().sliLines.find((l) => l.sourceLineIds.length > 1)!
     const before = run().mergedLines.filter((l) => target.sourceLineIds.includes(l.id))

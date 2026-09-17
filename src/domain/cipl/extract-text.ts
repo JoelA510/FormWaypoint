@@ -14,6 +14,20 @@ export interface TextItem {
   x: number
   /** PDF user-space y of the baseline. Larger = further up the page. */
   y: number
+  /**
+   * Width of the rendered text, in the same units as `x`.
+   *
+   * What a right-aligned column is aligned *by*. A figure column on these reports is right
+   * aligned under a left-aligned heading, so a wide figure starts further left than a narrow
+   * one and can start left of its own heading — while its right edge stays put. A reader that
+   * decides which column a figure is in from its left edge reads such a figure as the column
+   * before it, and the figures to its right each shift one column left to fill the gap, which
+   * files a gross weight as a net weight with nothing to show for it.
+   *
+   * Optional because a row built by hand in a test states no width; readers fall back to the
+   * left edge there, which is exact for anything narrow enough not to have the problem.
+   */
+  width?: number
 }
 
 export interface TextRow {
@@ -80,6 +94,7 @@ export async function extractTextPages(data: ArrayBuffer | Uint8Array): Promise<
           str,
           x: round1(raw.transform[4]),
           y: round1(raw.transform[5]),
+          width: typeof raw.width === 'number' ? round1(raw.width) : undefined,
         })
       }
 
