@@ -28,6 +28,7 @@ import {
   parseNumber,
   rowText,
   valueRightOf,
+  type TextItem,
   type TextPage,
   type TextRow,
 } from './extract-text'
@@ -570,11 +571,14 @@ function parseDetailLines(
   let group = groupIn
 
   const lines: SourceLine[] = []
+  // Calibrated once for the page, not once per block: the headings it reads are the page's,
+  // and a page of a dozen blocks was scanning all of them a dozen times over.
+  const columns = figureColumnsOf(page)
   const parseBlock = (block: TextRow[], group: string, pageNumber: number) => {
     const on = pageNumber === page.pageNumber ? page : { ...page, pageNumber }
     return ctx.kind === 'INVOICE'
       ? parseInvoiceBlock(block, on, ctx, group)
-      : parsePackingBlock(block, on, ctx, group)
+      : parsePackingBlock(block, on, ctx, group, columns)
   }
 
   // Set when this page's copy of the carried block is *still* unfinished — which makes its
@@ -667,11 +671,148 @@ function parseDetailLines(
  * The final line block on a page would otherwise run into the page footer, letting the
  * trade-terms text be mistaken for a commodity description. Cut the block at the totals row.
  */
-/** `(@ / 6)` — the figures beside it are the line total divided that many ways. */
-const DIVIDED_FIGURES = /^\(@\s*\/\s*(\d+)\)$/
+/**
+ * `(@ / 6)` — the figures beside it are the line total divided that many ways.
+ *
+ * Matched anywhere in a cell rather than as the whole of one, for the reason `parseFigure`
+ * strips brackets: a re-issued row is kerned tight enough that the extractor returns the
+ * marker and the breakdown's opening bracket as `(@ / 5) (`. Anchored, that cell is not a
+ * marker, the divisor stays 1, and the line files at a fifth of its weight — a wrong figure
+ * that reconciles against nothing, since `reconstructionSlack` is not told to allow for it
+ * either.
+ */
+const DIVIDED_FIGURES = /\(@\s*\/\s*(\d+)\)/
 
 function scaleFigure(value: number, divisor: number): number {
   return divisor === 1 ? value : Math.round(value * divisor * 1000) / 1000
+}
+
+/**
+ * A figure, with the weight breakdown's brackets attached to it or not.
+ *
+ * The bracket is a text item of its own on a document printed in one pass. It is not on one
+ * whose lines have been re-issued: a correction redraws the row in a different font, kerned
+ * tight against the figure beside it, and the extractor reports `.800000 )` as a single cell.
+ * Matching a bracket by exact item text then finds no closing bracket, and every weight on
+ * that row is dropped — which is what the reconciliation reports as a packing list whose rows
+ * do not add up to its own stated total. A revision correcting one line's weights cost the
+ * weights of every line it redrew.
+ *
+ * Stripping one bracket from each end reads both printings the same way. A bracketed number
+ * is a weight here and not an accounting negative: nothing in this layout is ever negative,
+ * and the brackets are the breakdown's own.
+ */
+function parseFigure(raw: string | undefined | null): number | null {
+  if (raw == null) return null
+  return parseNumber(raw.replace(/^\s*\(\s*/, '').replace(/\s*\)\s*$/, ''))
+}
+
+/**
+ * Where a detail page's figure columns begin, measured off the page's own printed headings.
+ *
+ * The breakdown is not always the same shape. A line packed across two cartons prints its
+ * quantity inside the brackets as well — `( 4  2.904  3.194  .800000 )` — and reading the
+ * figures in the order they appear files that quantity as the net weight and shifts every
+ * other figure a column right, silently. Which column a figure sits under is what says what
+ * it is, so that is what this reads, and an extra cell costs nothing.
+ */
+interface FigureColumns {
+  quantity: number
+  net: number
+  gross: number
+  measurement: number
+}
+
+/** The columns these documents print, for a page whose own headings could not be read. */
+const DEFAULT_FIGURE_COLUMNS: FigureColumns = { quantity: 340, net: 430, gross: 490, measurement: 534 }
+
+/**
+ * `NET` and `GROSS` are printed on the row above their shared `WEIGHT` heading, so the two
+ * weight columns are told apart by order rather than by wording — and matched on a trailing
+ * `WEIGHT` so an extractor that joins the two rows into `NET WEIGHT` still calibrates.
+ */
+const QUANTITY_HEADING = /^QUANTITY$/i
+const WEIGHT_HEADING = /(^|\s)WEIGHT$/i
+const MEASUREMENT_HEADING = /^MEASUREMENT$/i
+
+function figureColumnsOf(page: TextPage): FigureColumns {
+  for (const row of page.rows) {
+    const quantity = row.items.find((i) => QUANTITY_HEADING.test(i.str))
+    const measurement = row.items.find((i) => MEASUREMENT_HEADING.test(i.str))
+    const weights = row.items.filter((i) => WEIGHT_HEADING.test(i.str))
+    if (!quantity || !measurement || weights.length < 2) continue
+    return { quantity: quantity.x, net: weights[0].x, gross: weights[1].x, measurement: measurement.x }
+  }
+  return DEFAULT_FIGURE_COLUMNS
+}
+
+/**
+ * Which column an item belongs to, taken from the edge it is aligned by.
+ *
+ * These figures are right-aligned, so the right edge is the one that stays put: every net
+ * weight on a page ends at the same x whether it is `.581` or `1,113.140`. Classifying by the
+ * left edge instead put a wide figure in the column before its own — and that is not a
+ * figure lost, which a blocking check would catch, but a figure *shifted*: the gross weight
+ * slides into the empty net column and files as the net weight, with the packaging included
+ * and nothing to show for it.
+ *
+ * Where no width is known the left edge stands in, which is the same answer for any figure
+ * narrow enough for the two edges to fall in one column.
+ */
+function figureColumnAt(item: TextItem, columns: FigureColumns): keyof FigureColumns | null {
+  const right = item.x + (item.width ?? 0)
+  if (right >= columns.measurement) return 'measurement'
+  if (right >= columns.gross) return 'gross'
+  if (right >= columns.net) return 'net'
+  if (right >= columns.quantity) return 'quantity'
+  return null
+}
+
+interface RowWeights {
+  netWeightKg: number
+  grossWeightKg?: number
+  measurementM3?: number
+}
+
+/**
+ * The weights a row states, or null where it states none.
+ *
+ * A row qualifies on a net weight and one figure beside it — the same strength as the
+ * two-figure rule this replaces, now that which figure is which is decided by column. A row
+ * printing a gross weight against a blank net is not read at all: filing the gross weight as
+ * the net is a wrong number on a customs form, and no weight at all is a blocking check.
+ */
+function weightsIn(row: TextRow, columns: FigureColumns): RowWeights | null {
+  let net: number | undefined
+  let gross: number | undefined
+  let measurement: number | undefined
+  for (const item of row.items) {
+    const value = parseFigure(item.str)
+    if (value === null) continue
+    const column = figureColumnAt(item, columns)
+    if (column === 'net') net ??= value
+    else if (column === 'gross') gross ??= value
+    else if (column === 'measurement') measurement ??= value
+  }
+  if (net === undefined || (gross === undefined && measurement === undefined)) return null
+  return { netWeightKg: net, grossWeightKg: gross, measurementM3: measurement }
+}
+
+/**
+ * Whether a row prints anything in the weight columns at all.
+ *
+ * What separates "this block states no breakdown" from "this block states one that could not
+ * be read". Only the first may fall back to the section's running totals: where a breakdown
+ * is printed but its net column is blank, those totals are another line's weight as much as
+ * this one's, and filing them here both overstates this line and double-counts the section —
+ * which reconciles, because the same figures are on both sides of the sum.
+ */
+function statesWeightFigures(row: TextRow, columns: FigureColumns): boolean {
+  return row.items.some((item) => {
+    if (parseFigure(item.str) === null) return false
+    const column = figureColumnAt(item, columns)
+    return column === 'net' || column === 'gross' || column === 'measurement'
+  })
 }
 
 /**
@@ -931,10 +1072,18 @@ function classificationRowIn(rows: TextRow[], from: number, to: number): number 
   return -1
 }
 
-/** The row carrying a block's quantity, price and value. */
+/**
+ * The row carrying a block's quantity, price and value.
+ *
+ * Counted with the brackets stripped, because on a packing list this is the weight breakdown
+ * and a re-issued row carries one of its brackets against a figure. Counting `.428570 )` as
+ * text left a three-figure row looking like a two-figure one, so the block appeared to have
+ * no figures at all and the heading floor slipped a row — which is how a line ends up filed
+ * under the commodity heading of the line before it.
+ */
 function figureRowIn(rows: TextRow[], from: number, to: number): number {
   for (let i = from; i < to; i++) {
-    const numeric = rows[i].items.filter((it) => it.x > FIGURE_COLUMN_MIN && parseNumber(it.str) !== null)
+    const numeric = rows[i].items.filter((it) => it.x > FIGURE_COLUMN_MIN && parseFigure(it.str) !== null)
     if (numeric.length >= FIGURES_PER_ROW) return i
   }
   return -1
@@ -1230,6 +1379,7 @@ function parsePackingBlock(
   page: TextPage,
   ctx: PageContext,
   commodityGroup: string,
+  columns: FigureColumns,
 ): SourceLine | null {
   const core = readBlockCore(block)
   if (!core) return null
@@ -1251,71 +1401,93 @@ function parsePackingBlock(
   const partNumber = startItems[at]?.str ?? ''
   const description = startItems.slice(at + 1).map((i) => i.str).join(' ').trim()
 
-  // Quantity and country share a row; quantity is the first numeric right of centre.
+  // Every figure this block states is printed below its classification row: the shape is
+  // order, line number, classification, quantity, breakdown. Scanning from the top of the
+  // block instead let the start row answer for rows it is not — its description cells run
+  // from the part-number column rightwards, straight through the figure columns, so a
+  // description carrying a bare number was read as this line's weight and a part number of
+  // digits alone as its quantity. Neither reading failed a check.
+  const figuresFrom = core.classificationRowIdx === -1 ? 1 : core.classificationRowIdx + 1
+
+  // Quantity and country share a row; quantity is the figure in the quantity column.
+  //
+  // By column, like the weights, rather than by a window measured off one document: this row
+  // carries the quantity, the country of origin and the model, all three of which reach the
+  // form, and the whole point of reading the headings is that the columns can drift.
   let quantity = 0
   let countryOfOrigin = ''
   let model = ''
   let quantityRow: TextRow | undefined
-  for (const row of block) {
-    if (row.items.some((i) => i.str === '(')) continue
-    const qtyItem = row.items.find((i) => i.x > 340 && i.x < 430 && parseNumber(i.str) !== null)
+  let quantityRowIdx = -1
+  for (let i = figuresFrom; i < block.length; i++) {
+    const row = block[i]
+    const qtyItem = row.items.find(
+      (item) => figureColumnAt(item, columns) === 'quantity' && parseFigure(item.str) !== null,
+    )
     if (!qtyItem) continue
-    quantity = parseNumber(qtyItem.str) ?? 0
+    quantity = parseFigure(qtyItem.str) ?? 0
     quantityRow = row
-    const between = row.items.filter((i) => i.x > 200 && i.x < qtyItem.x)
-    countryOfOrigin = between.map((i) => i.str).join(' ').trim()
-    const left = row.items.filter((i) => i.x < 200)
+    quantityRowIdx = i
+    const between = row.items.filter((it) => it.x > 200 && it.x < qtyItem.x)
+    countryOfOrigin = between.map((it) => it.str).join(' ').trim()
+    const left = row.items.filter((it) => it.x < 200)
     model = left.length ? left[left.length - 1].str : ''
     break
   }
 
-  // Per-line weights are the numbers printed inside parentheses. The unparenthesised
-  // numbers to their upper right are running section totals and must not be read as line
-  // data — on a multi-line section they belong to the section, not to this line.
+  // Per-line weights are the figures printed in the breakdown below the quantity row. The
+  // figures on the quantity row itself are the section's running totals and must not be read
+  // as line data — on a multi-line section they belong to the section, not to this line.
+  //
+  // It is the quantity row, not the brackets, that separates the two. Requiring brackets read
+  // the breakdown only where the layout happened to print them, and this layout prints a
+  // line's weights bare wherever the section above carries no running total to tell them
+  // apart from — so those lines have always reached the form with no weight at all, whatever
+  // the packing list stated. Which row carries the quantity and the country is a fact about
+  // the block; which row is punctuated is not.
+  const breakdownFrom = quantityRowIdx === -1 ? figuresFrom : quantityRowIdx + 1
   let netWeightKg: number | undefined
   let grossWeightKg: number | undefined
   let measurementM3: number | undefined
 
   let weightDivisor: number | undefined
 
-  for (const row of block) {
-    const open = row.items.findIndex((i) => i.str === '(')
-    const close = row.items.findIndex((i) => i.str === ')')
-    if (open === -1 || close === -1 || close < open) continue
+  for (let i = breakdownFrom; i < block.length; i++) {
+    const row = block[i]
+    const weights = weightsIn(row, columns)
+    if (!weights) continue
 
-    // `(@ / 6)` to the left of the figures means they are the line total split six ways.
-    // vendorA4 prints one such line: 1.240 / 1.364 / .333330 against a line whose true
-    // weight is 7.438 — the same part and quantity as the line above it, which prints
-    // 7.438 outright. Multiplying is what makes the document's own total add up.
-    const marker = row.items.slice(0, open).find((i) => DIVIDED_FIGURES.test(i.str))
+    // `(@ / 6)` beside the figures means they are the line total split six ways. vendorA4
+    // prints one such line: 1.240 / 1.364 / .333330 against a line whose true weight is
+    // 7.438 — the same part and quantity as the line above it, which prints 7.438 outright.
+    // Multiplying is what makes the document's own total add up.
+    const marker = row.items.find((it) => DIVIDED_FIGURES.test(it.str))
     const divisor = marker ? Number(DIVIDED_FIGURES.exec(marker.str)?.[1] ?? 1) : 1
 
-    const inner = row.items
-      .slice(open + 1, close)
-      .map((i) => parseNumber(i.str))
-      .filter((n): n is number => n !== null)
-    if (inner.length >= 2) {
-      netWeightKg = scaleFigure(inner[0], divisor)
-      grossWeightKg = scaleFigure(inner[1], divisor)
-      measurementM3 = inner[2] === undefined ? undefined : scaleFigure(inner[2], divisor)
-      if (divisor !== 1) weightDivisor = divisor
-    }
+    netWeightKg = scaleFigure(weights.netWeightKg, divisor)
+    grossWeightKg = weights.grossWeightKg === undefined ? undefined : scaleFigure(weights.grossWeightKg, divisor)
+    measurementM3 = weights.measurementM3 === undefined ? undefined : scaleFigure(weights.measurementM3, divisor)
+    if (divisor !== 1) weightDivisor = divisor
     break
   }
 
-  // A packing list with a single merchandise line omits the parenthesised breakdown
-  // entirely and prints only the section totals (vendorA2). With one line in the section
-  // those are the line's own weights. If this assumption were ever wrong for a multi-line
-  // section, the weight reconciliation check would fail rather than silently overstate.
-  if (netWeightKg === undefined && quantityRow) {
-    const trailing = quantityRow.items
-      .filter((i) => i.x > 430)
-      .map((i) => parseNumber(i.str))
-      .filter((n): n is number => n !== null)
-    if (trailing.length >= 2) {
-      netWeightKg = trailing[0]
-      grossWeightKg = trailing[1]
-      measurementM3 = trailing[2]
+  // A packing list with a single merchandise line omits the breakdown entirely and prints
+  // only the section totals (vendorA2). With one line in the section those are the line's own
+  // weights.
+  //
+  // Only where the block prints no breakdown at all. Falling back whenever the weights came
+  // out undefined covered the other case too — a breakdown that *is* printed and could not be
+  // read, the blank net column two lines above this — and there the section totals are not
+  // this line's: they are the section's, so the line is overstated and the section counted
+  // twice, in a way that reconciles against the document because both sides carry the same
+  // figures. A breakdown that cannot be read leaves the weight blank, which blocks.
+  const printsBreakdown = block.slice(breakdownFrom).some((row) => statesWeightFigures(row, columns))
+  if (netWeightKg === undefined && quantityRow && !printsBreakdown) {
+    const totals = weightsIn(quantityRow, columns)
+    if (totals) {
+      netWeightKg = totals.netWeightKg
+      grossWeightKg = totals.grossWeightKg
+      measurementM3 = totals.measurementM3
     }
   }
 
