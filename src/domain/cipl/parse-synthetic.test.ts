@@ -100,6 +100,32 @@ describe('a line block split by a page break', () => {
   })
 })
 
+describe('a line the packing list weighs at nothing', () => {
+  // The shape a packing list takes when the weight never made it onto the line: the figure
+  // prints as `.000` and the document's own total is computed from the same zero, so every
+  // totals check reconciles and only the per-line one is left to notice.
+  const zeroed = () => {
+    const spec = simpleShipment()
+    spec.lines[1].netWeightKg = 0
+    spec.lines[1].grossWeightKg = 0
+    return spec
+  }
+
+  it('reads the zero the document states rather than no weight at all', async () => {
+    const line = byOrder(await parse(zeroed()), 'PACKING_LIST', '00000002OP0010')
+    expect(line.netWeightKg).toBe(0)
+  })
+
+  it('blocks the shipment, though the totals themselves agree', async () => {
+    const result = reconcile(await parse(zeroed()), null, CONTROLLED)
+    expect(result.checks.find((c) => c.id === 'total-weight')).toMatchObject({ passed: true })
+    const present = result.checks.find((c) => c.id === 'weights-present')!
+    expect(present.passed).toBe(false)
+    expect(present.detail).toContain('00000002OP0010/1')
+    expect(result.canGenerate).toBe(false)
+  })
+})
+
 describe('weights printed divided', () => {
   const divided = () => {
     const spec = simpleShipment()

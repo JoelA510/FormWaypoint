@@ -837,28 +837,50 @@ function totalsChecks(
     })
   }
 
-  const missingWeights = merged.filter((l) => l.netWeightKg == null)
+  const unmatched = merged.filter((l) => l.netWeightKg == null)
+  // A line that weighs nothing was not shipped. Stated as plainly as a missing one, because
+  // it fails for the same reason: on a code Schedule B reports by weight, the net weight *is*
+  // the quantity filed, and a row filed at zero declares goods that do not exist.
+  //
+  // Read as stated and refused here, rather than read as blank in the parser — where a
+  // document printing `0.000` is stating a figure, and a parser that quietly turned it into
+  // "no figure" would hide which of the two the document actually said. This is the check the
+  // apportionment guard already defers to when it refuses to write a share of zero.
+  const zeroWeights = merged.filter((l) => l.netWeightKg != null && l.netWeightKg <= 0)
+  const problems = [...unmatched, ...zeroWeights]
   // Worded for where the weight was supposed to come from. An invoice-only format has no
   // packing list to match against — its weights come from the saved per-part table — and
   // being told "no packing-list match" names a document the shipment cannot have while
   // saying nothing about the thing that would fix it.
-  const lineRefs = missingWeights.map((l) => `${l.orderNumber}/${l.sequence}`).join(', ')
+  const lineRefs = (lines: MergedLine[]) => lines.map((l) => `${l.orderNumber}/${l.sequence}`).join(', ')
+  const faults: string[] = []
+  if (unmatched.length) {
+    faults.push(
+      providesWeights
+        ? `No packing-list match for ${unmatched.length} line(s): ${lineRefs(unmatched)}. ` +
+          'A blank weight must not be filed as zero.'
+        : `No saved weight for ${unmatched.length} line(s): ${lineRefs(unmatched)}. This document states no ` +
+          'per-line weights, so each part needs one in the saved per-part table, or entered by hand. A blank ' +
+          'weight must not be filed as zero.',
+    )
+  }
+  if (zeroWeights.length) {
+    faults.push(
+      `${zeroWeights.length} line(s) state a net weight of zero: ${lineRefs(zeroWeights)}. Goods that weigh ` +
+        'nothing were not shipped — correct the document, or enter the weight against the row.',
+    )
+  }
   results.push({
     id: 'weights-present',
     severity: 'blocking',
     title: providesWeights ? 'Every invoice line has a packing-list weight' : 'Every invoice line has a net weight',
-    detail: !missingWeights.length
+    detail: !problems.length
       ? providesWeights
         ? 'All invoice lines matched a packing-list line.'
         : 'Every line has a net weight from the saved per-part table.'
-      : providesWeights
-        ? `No packing-list match for ${missingWeights.length} line(s): ${lineRefs}. ` +
-          'A blank weight must not be filed as zero.'
-        : `No saved weight for ${missingWeights.length} line(s): ${lineRefs}. This document states no ` +
-          'per-line weights, so each part needs one in the saved per-part table, or entered by hand. A blank ' +
-          'weight must not be filed as zero.',
-    passed: missingWeights.length === 0,
-    refs: missingWeights.map((l) => l.id),
+      : faults.join(' '),
+    passed: problems.length === 0,
+    refs: problems.map((l) => l.id),
   })
 
   return results
