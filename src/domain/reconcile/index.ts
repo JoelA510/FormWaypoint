@@ -754,6 +754,35 @@ function totalsChecks(
     refs: zeroQuantity.map((l) => l.id),
   })
 
+  // Nothing read is not a shipment. Without rows every total compares zero against zero and
+  // passes, so a document whose line table could not be found would otherwise reconcile.
+  results.push({
+    id: 'rows-present',
+    severity: 'blocking',
+    title: 'The document has commodity lines',
+    detail: merged.length
+      ? `${merged.length} line(s) read.`
+      : 'No commodity lines could be read from this document, so there is nothing to file. Check that it is ' +
+        'the complete CIPL and that its line table is not an image.',
+    passed: merged.length > 0,
+  })
+
+  // A line whose value could not be read adds nothing to the rows, and nothing on the form says
+  // so. The total-value check can catch the shortfall, but it cannot say which line, and when the
+  // total was not read either it compares zero with zero.
+  const valueless = merged.filter((l) => l.extendedValue == null || !Number.isFinite(l.extendedValue))
+  results.push({
+    id: 'values-present',
+    severity: 'blocking',
+    title: 'Every line has a value',
+    detail: valueless.length
+      ? `No value could be read for ${valueless.length} line(s): ` +
+        `${valueless.map((l) => `${l.orderNumber}/${l.sequence}`).join(', ')}. A blank value must not be filed as zero.`
+      : 'Every line states a value.',
+    passed: valueless.length === 0,
+    refs: valueless.map((l) => l.id),
+  })
+
   const value = roundTo(sliLines.reduce((s, l) => s + l.valueUsd, 0), 2)
   const valueOk = Math.abs(value - header.totalValue) <= MONEY_TOLERANCE
   results.push({
@@ -1184,9 +1213,13 @@ function classificationChecks(
     return [
       {
         id: 'schedule-b-unavailable',
-        severity: 'warning',
+        // Blocking, not a warning: without the dataset no code is checked for format, for being
+        // active, or for the unit it is reported in, so a form generated now files them unchecked.
+        severity: 'blocking',
         title: 'Schedule B validation did not run',
-        detail: 'The Census commodity dataset could not be loaded, so codes were not verified as active.',
+        detail:
+          'The Census commodity dataset is not loaded, so no commodity number can be checked. Generation waits ' +
+          'until it loads; if it does not, reload the app.',
         passed: false,
       },
     ]

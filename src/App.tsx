@@ -697,7 +697,7 @@ export function App() {
                   Schedule B {scheduleB.generatedAt}
                 </Badge>
               ) : (
-                <Badge tone="warn">loading Schedule B…</Badge>
+                <Badge tone="warn">{scheduleBError ? 'Schedule B not loaded' : 'loading Schedule B…'}</Badge>
               )
             ) : (
               <Badge tone="neutral">IATA DGR · air</Badge>
@@ -769,7 +769,7 @@ export function App() {
           <>
           {scheduleBError ? (
             <p className="rounded-md border border-[var(--color-warn)] bg-[var(--color-warn-soft)] px-3 py-2 text-sm">
-              {scheduleBError} Codes will not be checked for validity until it loads. Run{' '}
+              {scheduleBError} No form can be generated until it loads, because no commodity number can be checked. Run{' '}
               <code className="font-mono text-xs">npm run data:schedule-b</code> to rebuild it.
             </p>
           ) : null}

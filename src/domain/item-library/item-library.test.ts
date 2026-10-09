@@ -8,6 +8,8 @@ import {
   indexByPart,
   inspectWorkbook,
   libraryWeights,
+  parseWeight,
+  previewWeightKg,
   readDelimited,
   readWorkbook,
   readXlsx,
@@ -572,5 +574,27 @@ describe('flagging an imported library', () => {
     expect(flagEntries(entries, null).map((f) => [f.partNumber, f.status])).toEqual([['BAD-FORMAT', 'malformed']])
     // With the dataset, the retired code is a finding again.
     expect(flagEntries(entries, index)).toHaveLength(2)
+  })
+})
+
+describe('the weight preview and the import agree', () => {
+  // The preview is where the unit is chosen. It once stripped every comma while the import read
+  // `1,5` as one and a half, so a gram column previewed ten and a hundred times too heavy.
+  it.each([
+    ['1,5', 'g', 0.0015],
+    ['0,25', 'g', 0.00025],
+    ['1,234', 'kg', 1234],
+    ['1,234.5', 'kg', 1234.5],
+    ['2', 'lb', 0.907185],
+  ] as const)('reads %s %s as the import stores it', (raw, unit, kg) => {
+    expect(parseWeight(raw, unit)).toBe(kg)
+    expect(previewWeightKg(raw, unit)).toBe(`${kg.toFixed(3)} kg`)
+  })
+
+  it('previews nothing for a blank or zero weight, as the import stores nothing', () => {
+    for (const raw of ['', '0', 'n/a']) {
+      expect(parseWeight(raw, 'kg')).toBeNull()
+      expect(previewWeightKg(raw, 'kg')).toBe('—')
+    }
   })
 })

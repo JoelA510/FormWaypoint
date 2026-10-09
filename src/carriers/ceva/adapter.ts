@@ -240,6 +240,17 @@ export function createCevaAdapter(): CarrierAdapter {
         )
       }
 
+      // Whole dollars can turn a row with value into $0, which reads as goods of no value. The
+      // form's own rule is followed, but never silently: each such row is named.
+      const roundedAway = draft.lines.filter((l) => l.valueUsd > 0 && Math.round(l.valueUsd) === 0)
+      if (roundedAway.length) {
+        ctx.warnings.push(
+          `${roundedAway.length} row(s) worth under $0.50 file as $0 in whole dollars: ` +
+            `${roundedAway.map((l) => `${l.scheduleB} ($${l.valueUsd.toFixed(2)})`).join(', ')}. ` +
+            'Check the value the form should carry before filing.',
+        )
+      }
+
       // Every column gets the same number of lines so the rows stay visually aligned, and
       // each sheet carries only its own.
       pages.forEach((pageRows, pageIndex) => {

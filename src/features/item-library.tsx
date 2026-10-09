@@ -16,6 +16,7 @@ import {
   importItems,
   inspectWorkbook,
   libraryChangesFileName,
+  previewWeightKg,
   readWorkbook,
   renderLibraryChangeLog,
   renderLibraryChangesCsv,
@@ -280,7 +281,7 @@ function StagedImport({
                 <li key={i} className="tabular flex justify-between gap-3">
                   <span className="truncate">{row[inspection.columns.partNumber as number] || '—'}</span>
                   <span>
-                    {row[weightColumn] || '—'} → <strong>{previewKg(row[weightColumn], declared ?? unit)}</strong>
+                    {row[weightColumn] || '—'} → <strong>{previewWeightKg(row[weightColumn], declared ?? unit)}</strong>
                   </span>
                 </li>
               ))}
@@ -330,12 +331,6 @@ function StagedImport({
   )
 }
 
-function previewKg(raw: string | undefined, unit: WeightUnit): string {
-  const value = Number((raw ?? '').replace(/,/g, ''))
-  if (!Number.isFinite(value) || value <= 0) return '—'
-  const kg = value * (unit === 'g' ? 0.001 : unit === 'lb' ? 0.45359237 : 1)
-  return `${kg.toFixed(3)} kg`
-}
 
 function ImportReport({ summary, counts }: { summary: ImportSummary; counts: { added: number; updated: number } | null }) {
   const notes = [

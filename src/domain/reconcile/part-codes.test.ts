@@ -12,6 +12,7 @@ import { libraryWeights } from '../item-library'
 import { buildSyntheticCipl, simpleShipment } from '../../test/synthetic/cipl'
 import { parseCipl } from '../cipl'
 import type { CheckResult, MergedLine } from '../types'
+import { blockersBesidesDataset } from '../../test/checks'
 
 const CONTROLLED = { eccn: 'EAR99', sme: 'N', license: 'NLR' }
 
@@ -137,7 +138,7 @@ describe('telling the reviewer a code was substituted', () => {
       ...CONTROLLED,
       codesByPart: { '10000-0001': '8536.50.9065' },
     })
-    expect(result.canGenerate).toBe(true)
+    expect(blockersBesidesDataset(result.checks)).toEqual([])
   })
 
   it('stays quiet when the entered code is what the document already says', async () => {

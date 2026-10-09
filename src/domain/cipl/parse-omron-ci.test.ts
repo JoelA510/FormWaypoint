@@ -22,6 +22,7 @@ import {
   type OmronCiSpec,
 } from '../../test/synthetic/omron-ci'
 import type { ParsedCipl, Reconciliation } from '../types'
+import { blockersBesidesDataset } from '../../test/checks'
 
 const BLANK_CONTROLS = { eccn: null, sme: null, license: null }
 const UNIT_WEIGHTS = { '10000-0001': 0.5, '20000-0002': 0.4 }
@@ -195,7 +196,7 @@ describe('the workbook grid', () => {
       expect(result.checks.find((c) => c.id === id), id).toMatchObject({ passed: true })
     }
     expect(result.checks.find((c) => c.id === 'export-control')).toMatchObject({ passed: true })
-    expect(result.canGenerate).toBe(true)
+    expect(blockersBesidesDataset(result.checks)).toEqual([])
   })
 
   it('converts an Excel date serial into the date the cell displayed', () => {
@@ -398,7 +399,7 @@ describe('the workbook grid', () => {
     })
     expect(stale.checks.find((c) => c.id === 'total-weight')).toMatchObject({ passed: false, severity: 'warning' })
     // A disagreement between two supplied figures warns; it does not block.
-    expect(stale.canGenerate).toBe(true)
+    expect(blockersBesidesDataset(stale.checks)).toEqual([])
   })
 
   it('warns when a stated licence downgrades an entered licence number', () => {

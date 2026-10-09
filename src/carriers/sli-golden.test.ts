@@ -10,6 +10,7 @@ import { buildDraft, defaultShipmentSettings, type CompanyProfile } from '../dom
 import { buildSyntheticCipl, simpleShipment } from '../test/synthetic/cipl'
 import type { ParsedCipl } from '../domain/types'
 import { getAdapter } from './registry'
+import type { SliDraft } from './types'
 
 /**
  * Every box on each SLI, end to end, with no shipment documents.
@@ -112,8 +113,8 @@ const CEVA_EXPECTED: Record<string, string> = {
   'Shipping Weight': '1.700\r1.700',
   // "U.S. dollar, omit cents".
   Value: '90\r100',
-  // 3.740 kg gross is 8.245 lb, filed whole.
-  'Pieces & Dimensions': '2 cartons\r8 lbs / 3.740 Kg gross',
+  // 3.740 kg gross is 8.245 lb, filed to one decimal.
+  'Pieces & Dimensions': '2 cartons\r8.2 lbs / 3.740 Kg gross',
   'License No': 'NLR',
   'Duly Authorized': 'Pat Example',
   Title: 'Shipping Lead',
@@ -156,13 +157,13 @@ async function readBack(bytes: Uint8Array): Promise<Record<string, string>> {
   return values
 }
 
-async function fillSynthetic(carrier: 'nippon-express' | 'ceva', hazardous = false) {
+async function fillSynthetic(carrier: 'nippon-express' | 'ceva', hazardous = false, edit = (d: SliDraft) => d) {
   const adapter = getAdapter(carrier)
   const result = reconcile(document, scheduleB, { ...CONTROLLED, maxRows: adapter.maxCommodityRows })
   expect(result.canGenerate).toBe(true)
   const draft = buildDraft(result, PROFILE, defaultShipmentSettings(adapter), adapter)
   const blank = new Uint8Array(fs.readFileSync(path.join(ROOT, 'public/templates', path.basename(adapter.templateUrl))))
-  const filled = await adapter.fill(blank, { ...draft, hazardous })
+  const filled = await adapter.fill(blank, edit({ ...draft, hazardous }))
   return { filled, values: await readBack(filled.bytes) }
 }
 
@@ -186,6 +187,15 @@ describe('every box on the CEVA SLI', () => {
     const { filled, values } = await fillSynthetic('ceva')
     expect(values).toEqual(CEVA_EXPECTED)
     expect(filled.warnings).toEqual([])
+  })
+
+  it('names a row that whole dollars would file as $0', async () => {
+    const { filled, values } = await fillSynthetic('ceva', false, (d) => ({
+      ...d,
+      lines: d.lines.map((l, i) => (i === 1 ? { ...l, valueUsd: 0.4 } : l)),
+    }))
+    expect(values.Value).toBe('90\r0')
+    expect(filled.warnings.join(' ')).toMatch(/under \$0\.50 file as \$0.*9031\.49\.8000 \(\$0\.40\)/)
   })
 
   it('declares dangerous goods when the shipment has them', async () => {
