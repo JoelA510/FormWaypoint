@@ -227,6 +227,7 @@ const KG_PER_LB_LABEL = (1 / KG_PER_LB).toFixed(9)
 
 const MANUAL = 'Not on the CIPL — enter manually'
 const CHOOSE = 'Not on the CIPL — choose in the application'
+const NO_GROSS = 'Not on the CIPL — weigh the package and enter its gross weight'
 
 /**
  * The commodity number this line is actually filed under.
@@ -972,7 +973,17 @@ export function buildKeyingSheet(
   // adds up, and a figure there that is not the sum of what is above it reads as an
   // arithmetic error in the shipment with nothing on the sheet to say otherwise.
   const netKg = mergedLines.reduce((sum, l) => sum + (l.netWeightKg ?? 0), 0)
-  const grossKg = header.totalGrossWeightKg ?? netKg
+  // The package weight is the gross the CIPL prints, or nothing. Net weight is not a stand-in:
+  // keyed as the package weight it understates what the carrier will weigh, under a label that
+  // says gross. A CIPL with no gross (Vendor B never prints one) leaves the field to a person.
+  const grossKg =
+    header.totalGrossWeightKg != null && Number.isFinite(header.totalGrossWeightKg) && header.totalGrossWeightKg > 0
+      ? header.totalGrossWeightKg
+      : null
+  const packageWeight =
+    grossKg != null
+      ? { value: kgToLb(grossKg).toFixed(2), note: `Gross ${grossKg.toFixed(3)} kg converted` }
+      : { value: '', note: NO_GROSS }
   const customsValue = commodities.reduce((sum, c) => sum + Number(c.totalValue || 0), 0)
   const printedKg = commodities.reduce((sum, c) => sum + Number(c.weightKg || 0), 0)
 
@@ -1012,7 +1023,7 @@ export function buildKeyingSheet(
               value: header.cartons != null ? String(header.cartons) : '',
               note: 'CIPL carton count',
             },
-            { label: 'Weight (lbs)', value: kgToLb(grossKg).toFixed(2), note: `Gross ${grossKg.toFixed(3)} kg converted` },
+            { label: 'Weight (lbs)', ...packageWeight },
             { label: 'Service type', value: '', note: CHOOSE },
             { label: 'Package type', value: '', note: CHOOSE },
             { label: 'Package dimensions', value: '', note: 'Not on the CIPL — measure and enter' },
@@ -1093,7 +1104,7 @@ export function buildKeyingSheet(
               note: `CIPL trade terms (${draft.freight || 'not stated'})`,
             },
             { label: 'Package Type', value: '', note: CHOOSE },
-            { label: 'Weight (lb)', value: kgToLb(grossKg).toFixed(2), note: `Gross ${grossKg.toFixed(3)} kg converted` },
+            { label: 'Weight (lb)', ...packageWeight },
             { label: 'Package Value', value: '', note: 'Declared value — a decision, not a document value' },
           ],
         },
@@ -1164,7 +1175,7 @@ export function buildKeyingSheet(
       quantity: roundTo(mergedLines.reduce((sum, l) => sum + l.quantity, 0), 3),
       customsValue: mergedLines.reduce((sum, l) => sum + (l.extendedValue ?? 0), 0).toFixed(2),
       netWeightKg: roundTo(netKg, 3).toFixed(3),
-      grossWeightKg: header.totalGrossWeightKg == null ? null : roundTo(header.totalGrossWeightKg, 3).toFixed(3),
+      grossWeightKg: grossKg == null ? null : roundTo(grossKg, 3).toFixed(3),
     },
     provenance: {
       sourceFile: sourceFile ?? '',

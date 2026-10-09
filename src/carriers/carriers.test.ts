@@ -154,7 +154,7 @@ describe('carrier detection on names alone', () => {
   })
 })
 
-describe.skipIf(!hasFixtures())('template verification', () => {
+describe('template verification', () => {
   it('recognises both shipped blank templates', async () => {
     for (const id of ['nippon-express', 'ceva'] as const) {
       const adapter = getAdapter(id)

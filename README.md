@@ -252,10 +252,12 @@ manufacture the parts a document cannot support:
 
 ## Verification
 
-A clean checkout runs the whole suite — several hundred tests, and `npm run check` prints the
-count. They cover the parsers, the reconciliation engine, the
+A clean checkout runs every test that needs no shipment document — several hundred, and
+`npm run check` prints the count. They cover the parsers, the reconciliation engine, the
 Schedule B validator, the carrier adapters and the guards, using synthetic documents built
-to reproduce each supported layout without reproducing anyone's data.
+to reproduce each supported layout without reproducing anyone's data. Among them, a golden
+test fills both carrier SLIs from a synthetic shipment and compares every box with figures
+worked out by hand (`src/carriers/sli-golden.test.ts`).
 
 The dangerous goods suites are written against the course materials' own worked scenarios, so
 a failure means this tool and the training disagree: the workbook's two-box Section IB
@@ -264,13 +266,14 @@ classify as PI 967 Section II and need the battery mark, its 300 Wh data-backup 
 fully regulated by air, and the two-laptops-in-two-packages marking exemption withdraws itself
 the moment a third package joins the consignment.
 
-A further **122 tests are skipped unless real shipment documents are present**. Those are
-the regression suites: they run five real, manually-processed shipments across both layouts
-and check the result against the completed SLIs that were filed for them, so a pass means
-the tool reproduces what a person produced by hand. They also pin the failure modes that
-would otherwise be silent: a blank exporter profile, an unreadable weight total, a
-double-claimed packing line, an impossible date. A form that looks complete and is wrong is
-the worst outcome this tool can produce.
+A further **104 tests are skipped unless real shipment documents are present**, and the run
+says so before it starts (and in the CI job summary). Those are the regression suites: they
+run real, manually-processed shipments across both layouts and check the result against the
+completed SLIs that were filed for them, so a pass means the tool reproduces what a person
+produced by hand. The guards for the failure modes that would otherwise be silent (a blank
+exporter profile, an unreadable weight total, a double-claimed packing line, an impossible
+date) run on a synthetic shipment, so they never skip. A form that looks complete and is
+wrong is the worst outcome this tool can produce.
 
 Those documents are a customer's commercial paperwork and are not committed, so neither the
 files nor their document numbers appear in this repository. To run the full suite, place the
@@ -279,11 +282,13 @@ documented in `src/test/fixtures.ts`. Everything the tests assert is checked in,
 fixture only ever supplies the input side.
 
 ```bash
-npm run check    # typecheck, lint, tests, production build
+npm run check      # typecheck, lint, tests, production build
+npm run test:real  # every test, failing instead of skipping when a document is absent
 ```
 
-CI runs exactly this command on every push and pull request, so it cannot drift from what
-you see locally.
+CI runs `npm run check` on every pull request and every push to `main`, so it cannot drift
+from what you see locally. It never has the shipment documents, so `npm run test:real` is run
+by hand where they are, before a release, and each run is recorded in `docs/testing.md`.
 
 ## Schedule B data
 

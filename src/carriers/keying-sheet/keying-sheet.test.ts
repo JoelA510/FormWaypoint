@@ -668,6 +668,34 @@ describe('FedEx Ship Manager sheet', () => {
   })
 })
 
+describe('a CIPL that prints no gross weight', () => {
+  // Vendor B never prints one, and an Omron form can leave GROSS WT blank. The package weight
+  // is then the operator's to enter: the net weight is not a stand-in for what the carrier
+  // will weigh.
+  const withGross = (gross: number | null) => {
+    const reconciliation = fixture([line({})], [sli({})])
+    return { ...reconciliation, header: { ...reconciliation.header, totalGrossWeightKg: gross } }
+  }
+  const cases = [
+    ['fedex-ship-manager', 'Weight (lbs)'],
+    ['ups-worldship', 'Weight (lb)'],
+  ] as const
+
+  for (const [target, label] of cases) {
+    it(`leaves the ${target} package weight blank and lists it to enter`, () => {
+      for (const gross of [null, 0]) {
+        const sheet = buildKeyingSheet(target, withGross(gross), draft())
+        const field = sheet.sections.flatMap((s) => s.fields).find((f) => f.label === label)
+        expect(field).toBeDefined()
+        expect(field!.value).toBe('')
+        expect(field!.note).toContain('weigh the package')
+        expect(sheet.manualFields).toContain(label)
+        expect(sheet.filed.grossWeightKg).toBeNull()
+      }
+    })
+  }
+})
+
 describe('UPS WorldShip sheet', () => {
   const sheet = () => buildKeyingSheet('ups-worldship', fixture([line({})], [sli({})]), draft())
 
