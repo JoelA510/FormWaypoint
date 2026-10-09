@@ -21,6 +21,9 @@ B refresh, which cannot work in a browser.
 
 ## Milestone tracker
 
+> The dangerous goods rows below are built but **unverified against the current IATA DGR**, and the
+> workflow has not been used for a real consignment (docs/adr/0003-dangerous-goods-unverified.md).
+
 | Feature | Status | Description |
 | :--- | :--- | :--- |
 | **CIPL parser** | ✅ Done | Position-aware text extraction; FC/TP1 sets, multi-page detail, repeated POs. No OCR — the documents have a text layer. |

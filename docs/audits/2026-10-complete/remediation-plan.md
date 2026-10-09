@@ -2,10 +2,10 @@
 
 Repo: **JoelA510/FormWaypoint** · Plan drawn up: 2026-10-08 · Source audit: [`audit.md`](./audit.md)
 
-**Status:** IN PROGRESS as of 2026-10-09. D1 and Milestone 1's pull requests merged (#58, #59,
-#60); Milestone 1 closes on the owner's three actions (ruleset import, `npm run test:real`, the
-GitHub Support request). Milestone 2a in review. The owner approves each pull request before it
-merges.
+**Status:** IN PROGRESS as of 2026-10-09. D1, Milestone 1 (#58, #59, #60) and Milestone 2a and
+2b part 1 (#61, #62) merged; Milestone 2b part 2 (M2.6 reduced, M2.10) in review. Milestone 1
+closes on the owner's three actions (ruleset import, `npm run test:real`, the GitHub Support
+request). The owner approves each pull request before it merges.
 
 End state: every audit area at "no blocker/high findings", end-to-end coverage of the critical
 journey, a released build installed and smoke-tested, docs current. Measured against: a shipper at
@@ -316,7 +316,11 @@ Every blocker (audit findings 5.1, 6.1, 8.1), plus the enforcement floor. Two pu
 
 ## Milestone 2b: security and saved data
 
-> **M2.6. Saved records have no version or validation** (4.6, medium; resolves 2.2. Graded into
+> **M2.6. Saved records have no version or validation** **Reduced 2026-10-09:** this milestone
+> validates on read (`src/store/decode.ts`) without changing the stored shape; the `schemaVersion`
+> stamp and the migration test move to M4.2, beside the updater that will first change a shape.
+> The original item follows.
+> (4.6, medium; resolves 2.2. Graded into
 > this milestone because the updater (M4.2) makes every release read the last release's records)
 > - **Fix approach:**
 >   - `schemaVersion` on every record.
@@ -578,6 +582,8 @@ its own.
 >   - The updater is the first plugin, so an ADR records reversing "no plugins, deliberately"
 >     (`lib.rs:9-12`).
 >   - Bump `rust-version` to 1.90 or later.
+>   - From M2.6: stamp a `schemaVersion` on saved records, with a migration test that opens the
+>     previous release's database, before the first release that changes a stored shape.
 > - **Files touched:** `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`,
 >   `src-tauri/capabilities/default.json` (`updater:default`), `src-tauri/src/lib.rs`,
 >   `src/desktop/index.ts`, a small update prompt in `src/App.tsx`, `release.yml`,
@@ -837,7 +843,7 @@ partly automated by M4.2's signature check.
   draft and the DG assessment out of `App.tsx`'s own render (medium) — a flagged refactor, not
   scheduled.
 - 2026-10-09: CEVA row values are whole dollars by the form's instruction, against the owner's
-  2-decimal rule for currency (ADR 0002) — open question for the owner.
+  2-decimal rule for currency; the owner kept whole dollars (ADR 0002).
 
 ## Deferred with reason
 

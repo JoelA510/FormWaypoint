@@ -30,8 +30,8 @@ Where the code stood on 2026-10-09:
   a quotient has no "as stated" form, and 6 decimals carries every figure these documents print.
 - CEVA's package line printed whole pounds; it now prints one decimal.
 - CEVA's row values are whole dollars, following the form's own instruction ("U.S. dollar, omit
-  cents"). That differs from the 2-decimal rule and is an open question for the owner; until it
-  is answered, a row that rounds to $0 is named in a warning.
+  cents"). The owner confirmed that on 2026-10-09 as the one exception to the 2-decimal rule; a
+  row that rounds to $0 is named in a warning.
 - The Schedule B reporting quantity in KG is a whole number by AES rule. It is a quantity, not a
   weight, and is outside this table.
 

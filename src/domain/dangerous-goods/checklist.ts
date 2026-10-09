@@ -16,6 +16,7 @@ import { cell } from '../../lib/report'
 import { applyA181, groupByClassification, overpackOrder, packageCountInConsignment, type DgAssessment } from './assess'
 import { formatKg } from './dgd'
 import {
+  DG_SOURCE_NOTICE,
   CHEMISTRY_LABELS,
   FORM_LABELS,
   combinedSectionIIStatement,
@@ -34,6 +35,7 @@ export function buildChecklist(
   const carrier = consignment.operatingCarrier.trim()
 
   out.push('# Lithium battery air consignment — package and air waybill checklist')
+  out.push('', `> ${DG_SOURCE_NOTICE}`)
   out.push('')
   out.push(`Prepared ${preparedOn}${carrier ? ` for carriage on ${cell(carrier)}` : ''}.`)
   out.push('')
