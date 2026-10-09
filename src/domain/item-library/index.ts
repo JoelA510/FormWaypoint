@@ -19,6 +19,7 @@
  */
 import { screenCode, type CodeScreening, type ScheduleBIndex } from '../schedule-b'
 import { partKey } from '../part-key'
+import { KG_PER_LB } from '../units'
 
 export * from './read-workbook'
 export * from './changes'
@@ -57,7 +58,7 @@ export const WEIGHT_UNIT_LABELS: Record<WeightUnit, string> = {
   lb: 'pounds',
 }
 
-const TO_KG: Record<WeightUnit, number> = { g: 0.001, kg: 1, lb: 0.45359237 }
+const TO_KG: Record<WeightUnit, number> = { g: 0.001, kg: 1, lb: KG_PER_LB }
 
 export type ColumnRole = 'partNumber' | 'description' | 'exportCode' | 'importCode' | 'weight'
 
@@ -229,7 +230,7 @@ function parseLooseNumber(text: string): number {
   return Number(text.replace(/,/g, ''))
 }
 
-function parseWeight(raw: string | undefined, unit: WeightUnit): number | null {
+export function parseWeight(raw: string | undefined, unit: WeightUnit): number | null {
   const text = (raw ?? '').trim()
   if (!text) return null
   const value = parseLooseNumber(text)
@@ -237,6 +238,18 @@ function parseWeight(raw: string | undefined, unit: WeightUnit): number | null {
   // silent wrong answer a blank is meant to prevent.
   if (!Number.isFinite(value) || value <= 0) return null
   return Math.round(value * TO_KG[unit] * 1e6) / 1e6
+}
+
+/**
+ * What the import will store for one cell, shown beside it before importing.
+ *
+ * The preview is the screen where the unit is chosen, so it must read a cell exactly as the
+ * import will: a preview that read `1,5` as fifteen while the import stored one and a half
+ * invited the wrong unit. Same function, so the two cannot disagree.
+ */
+export function previewWeightKg(raw: string | undefined, unit: WeightUnit): string {
+  const kg = parseWeight(raw, unit)
+  return kg == null ? '—' : `${kg.toFixed(3)} kg`
 }
 
 export interface ImportOptions {

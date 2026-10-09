@@ -31,8 +31,8 @@ import {
  * form's own labels, and both are deliberate:
  *
  *  - **Box 26 is labelled "Gross Shipping Weight" but receives the net weight.** All three
- *    historical shipments do this. Whether that is house practice or a long-standing habit
- *    is a policy question, so it is exposed as `useGrossWeight` rather than hard-coded.
+ *    historical shipments do this, and the owner settled it as net (docs/adr/0001). The
+ *    `useGrossWeight` switch remains, unset, for the day that changes.
  *  - **Box 25 (DDTC quantity/UOM) receives the literal text `NO`.** Every historical line
  *    carries it, and it coincides with the Schedule B unit of quantity for those codes.
  */

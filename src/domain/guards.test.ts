@@ -246,6 +246,49 @@ describe('reconciliation cannot fail open', () => {
     expect(result.canGenerate).toBe(false)
   })
 
+  it('blocks a document whose lines could not be read, even when every total reads zero', () => {
+    // The case the totals checks cannot see: no rows, and no totals either, so each compares
+    // zero against zero and passes.
+    const set = parsed.availableSets[0]
+    const nothingRead: ParsedCipl = {
+      ...parsed,
+      headers: {
+        ...parsed.headers,
+        [set]: { ...parsed.headers[set]!, totalQuantity: 0, totalValue: 0, totalNetWeightKg: 0 },
+      },
+      lines: [],
+    }
+    const result = reconcile(nothingRead, scheduleB, CONTROLLED)
+    expect(result.checks.find((c) => c.id === 'rows-present')?.passed).toBe(false)
+    expect(result.canGenerate).toBe(false)
+  })
+
+  it('names a line whose value could not be read instead of filing it at zero', () => {
+    const invoiceLine = parsed.lines.find((l) => l.documentKind === 'INVOICE')!
+    const valueLost: ParsedCipl = {
+      ...parsed,
+      lines: parsed.lines.map((l) => (l.id === invoiceLine.id ? { ...l, extendedValue: undefined } : l)),
+    }
+    const result = reconcile(valueLost, scheduleB, CONTROLLED)
+    const check = result.checks.find((c) => c.id === 'values-present')
+    expect(check?.severity).toBe('blocking')
+    expect(check?.passed).toBe(false)
+    expect(check?.detail).toContain(`${invoiceLine.orderNumber}/${invoiceLine.sequence}`)
+    expect(result.canGenerate).toBe(false)
+  })
+
+  it('blocks when the Schedule B dataset is not loaded, rather than filing codes unchecked', () => {
+    const result = reconcile(parsed, null, CONTROLLED)
+    expect(result.checks.find((c) => c.id === 'schedule-b-unavailable')).toMatchObject({ severity: 'blocking', passed: false })
+    expect(result.canGenerate).toBe(false)
+  })
+
+  it('passes both when every line is read with a value', () => {
+    const result = reconcile(parsed, scheduleB, CONTROLLED)
+    expect(result.checks.find((c) => c.id === 'rows-present')?.passed).toBe(true)
+    expect(result.checks.find((c) => c.id === 'values-present')?.passed).toBe(true)
+  })
+
   it('reports an unreadable document instead of throwing', () => {
     const empty: ParsedCipl = {
       fileName: 'not-a-cipl.pdf',

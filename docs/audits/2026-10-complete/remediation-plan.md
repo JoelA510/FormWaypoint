@@ -2,8 +2,10 @@
 
 Repo: **JoelA510/FormWaypoint** · Plan drawn up: 2026-10-08 · Source audit: [`audit.md`](./audit.md)
 
-**Status:** IN PROGRESS as of 2026-10-09. D1 in review; Milestone 1 next. The owner reviews
-and approves each pull request before it merges.
+**Status:** IN PROGRESS as of 2026-10-09. D1 and Milestone 1's pull requests merged (#58, #59,
+#60); Milestone 1 closes on the owner's three actions (ruleset import, `npm run test:real`, the
+GitHub Support request). Milestone 2a in review. The owner approves each pull request before it
+merges.
 
 End state: every audit area at "no blocker/high findings", end-to-end coverage of the critical
 journey, a released build installed and smoke-tested, docs current. Measured against: a shipper at
@@ -245,7 +247,10 @@ Every blocker (audit findings 5.1, 6.1, 8.1), plus the enforcement floor. Two pu
 > - **Rollback:** revert.
 > - **Diff class:** minimal diff.
 
-> **M2.2. One module decides what each box files** (4.3, medium; resolves 4.2)
+> **M2.2. One module decides what each box files** (4.3, medium; resolves 4.2). **Declined by the
+> owner, 2026-10-09:** replaced by the precision rules in `docs/adr/0002-figure-precision.md`, checked
+> box by box by the golden test; 4.2 is handled by a warning naming any CEVA row that whole dollars
+> file as $0.
 > - **Fix approach:** `src/domain/filed-figure.ts`, one rounding function per kind (money to
 >   cents, weight to grams, then the box's precision) with a floor-or-warn policy per box. A CEVA
 >   value that rounds to $0 warns (finding 4.2). The adapters, keying sheet, review box and DG renderer
@@ -288,7 +293,8 @@ Every blocker (audit findings 5.1, 6.1, 8.1), plus the enforcement floor. Two pu
 > - **Rollback:** revert.
 > - **Diff class:** minimal diff.
 
-> **M2.5. Net weight filed where the form asks for gross** (4.7, medium; owner decision)
+> **M2.5. Net weight filed where the form asks for gross** (4.7, medium; owner decision). **Decided
+> 2026-10-09: net** (`docs/adr/0001-net-weight-in-shipping-weight-boxes.md`).
 > - **Fix approach:**
 >   1. The owner confirms the rule (15 CFR 30.6, and what Nippon Express and CEVA accept).
 >   2. Record it in an ADR.
@@ -824,7 +830,14 @@ partly automated by M4.2's signature check.
 
 ## Discovered during execution
 
-- (none yet)
+- 2026-10-09: the CEVA package line printed a zero gross as `0 lbs / 0.000 Kg gross`, and the
+  keying sheet's filed gross reported `0.000`; both now treat a zero gross as absent (low, fixed in
+  #59 and Milestone 2a).
+- 2026-10-09: the error boundary can't keep the shipment on screen without moving reconcile, the
+  draft and the DG assessment out of `App.tsx`'s own render (medium) — a flagged refactor, not
+  scheduled.
+- 2026-10-09: CEVA row values are whole dollars by the form's instruction, against the owner's
+  2-decimal rule for currency (ADR 0002) — open question for the owner.
 
 ## Deferred with reason
 

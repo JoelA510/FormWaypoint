@@ -10,6 +10,7 @@ import { reconcile } from '.'
 import { parseCipl } from '../cipl'
 import { buildSyntheticCipl, simpleShipment } from '../../test/synthetic/cipl'
 import type { ParsedCipl } from '../types'
+import { blockersBesidesDataset } from '../../test/checks'
 
 const CONTROLLED = { eccn: 'EAR99', sme: 'N', license: 'NLR' }
 
@@ -40,7 +41,7 @@ describe('the currency the values are stated in', () => {
     // be perfectly correct, so this is raised rather than used to stop the filing.
     const parsed = await pricedIn('')
     expect(currencyCheck(parsed)).toMatchObject({ severity: 'warning', passed: false, actual: 'not stated' })
-    expect(reconcile(parsed, null, CONTROLLED).canGenerate).toBe(true)
+    expect(blockersBesidesDataset(reconcile(parsed, null, CONTROLLED).checks)).toEqual([])
   })
 
   it('is judged on the set actually used, not on the ones excluded', async () => {
