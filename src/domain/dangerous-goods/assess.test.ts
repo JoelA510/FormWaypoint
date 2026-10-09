@@ -122,6 +122,7 @@ describe('the workbook power drills', () => {
   it('does not require the CAO label on Section II packages offered cargo-only by choice', () => {
     const result = assess(drills)
     expect(check(result, 'dg.aircraft')!.detail).toContain('label is not applied')
+    expect(result.packages.length).toBeGreaterThan(0)
     for (const p of result.packages) {
       expect(p.hazardCommunication.join(' ')).not.toContain('Cargo Aircraft Only')
     }

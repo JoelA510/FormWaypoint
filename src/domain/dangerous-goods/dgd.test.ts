@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { extractTextPages, rowText } from '../cipl/extract-text'
 import { PDFDocument, StandardFonts } from 'pdf-lib'
 import { consignment, entry, overpack, pkg } from './test-support'
 import { assess } from './assess'
@@ -420,6 +421,7 @@ describe('annotations that are wider than their column', () => {
       { overpacks: [overpack('o1', { marks, count: 12 })] },
     )
     const declaration = buildDeclaration(shipment, assess(shipment))
+    expect(declaration.pages.length).toBeGreaterThan(0)
     for (const page of declaration.pages) {
       const rows = page.lines.reduce(
         (sum, l) => sum + Math.max(l.properShippingName.length, l.quantityAndType.length) + l.annotations.length,
@@ -637,6 +639,7 @@ describe('a package too tall for one sheet', () => {
       { overpacks: [overpack('o1', { marks: '#A001, #A002, #A003, #A004, #A005', count: 5 })] },
     )
     const declaration = buildDeclaration(tall, assess(tall))
+    expect(declaration.pages.length).toBeGreaterThan(0)
     for (const page of declaration.pages) {
       const rows = page.lines.reduce(
         (sum, l) => sum + Math.max(l.properShippingName.length, l.quantityAndType.length) + l.annotations.length,
@@ -770,4 +773,29 @@ describe('A181 across two chemistries in one package', () => {
       'Lithium metal batteries packed with equipment',
     ])
   })
+})
+
+describe('what the rendered declaration says', () => {
+  // The rendering tests above count pages and fields. These read the drawn text back, so a
+  // figure printed in the wrong column, or not printed, fails.
+  it('prints each line’s UN number, class and packing instruction in their own columns, in order', async () => {
+    const declaration = buildDeclaration(workbook, assess(workbook))
+    expect(declaration.lines.length).toBeGreaterThan(0)
+    const { bytes } = await renderDeclaration(declaration)
+    const pages = await extractTextPages(bytes)
+    const rows = pages.flatMap((p) => p.rows)
+
+    for (const line of declaration.lines) {
+      const row = rows.find((r) => r.items.some((i) => i.str.trim() === line.unNumber))
+      expect(row, `a row for ${line.unNumber}`).toBeDefined()
+      const at = (text: string) => row!.items.find((i) => i.str.trim() === text)?.x
+      const un = at(line.unNumber)
+      const cls = at(line.classOrDivision)
+      const pi = at(line.packingInstruction)
+      expect([un, cls, pi].every((x) => x != null), `${line.unNumber} row: ${rowText(row!)}`).toBe(true)
+      expect(un!).toBeLessThan(cls!)
+      expect(cls!).toBeLessThan(pi!)
+      expect(rowText(row!)).toContain(line.properShippingName[0])
+    }
+  }, 60_000)
 })

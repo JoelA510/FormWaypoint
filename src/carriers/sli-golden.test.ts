@@ -8,6 +8,7 @@ import { createScheduleBIndex, type ScheduleBIndex } from '../domain/schedule-b'
 import { reconcile } from '../domain/reconcile'
 import { buildDraft, defaultShipmentSettings, type CompanyProfile } from '../domain/draft'
 import { buildSyntheticCipl, simpleShipment } from '../test/synthetic/cipl'
+import { buildOmronCiPdf, simpleOmronCi } from '../test/synthetic/omron-ci'
 import type { ParsedCipl } from '../domain/types'
 import { getAdapter } from './registry'
 import type { SliDraft } from './types'
@@ -203,4 +204,89 @@ describe('every box on the CEVA SLI', () => {
     expect(values['DOES CONTAIN DANGEROUS GOODS']).toBe('PE')
     expect(values['DOES NOT CONTAIN DANGEROUS GOODS']).toBeUndefined()
   })
+})
+
+/**
+ * The Omron form (00004-00202) on the Nippon Express SLI, box for box.
+ *
+ * Its header is read differently from the other layouts, so it gets its own golden: SHIP DATE
+ * (not the invoice date) is the date of exportation, the country comes from the end of the
+ * consignee block, and the controls are stated per line rather than entered. Weights are
+ * supplied per part, as this form prints none per line.
+ *
+ *   8537.10.9060  Japan 3 @ $50, 0.4 kg each  -> foreign,  3, 1.200 kg, $150.00, 5A992.c
+ *   8544.42.0000  US    4 @ $10, 0.5 kg each  -> domestic, 4, 2.000 kg,  $40.00, EAR99
+ *   shipped 08/12/2026 (invoiced 08/10/2026); DAP Singapore; freight prepaid.
+ */
+describe('every box on the Nippon Express SLI from an Omron commercial invoice', () => {
+  const spec = () => {
+    const base = simpleOmronCi()
+    return {
+      ...base,
+      shipDate: '08/12/2026',
+      lines: base.lines.map((l) => (l.partNumber === '20000-0002' ? { ...l, hts: '8537.10.9060' } : l)),
+    }
+  }
+
+  it('matches the invoice, box for box', async () => {
+    const parsed = await parseCipl('ci.pdf', await buildOmronCiPdf(spec()))
+    expect(parsed.format).toBe('omron-ci')
+    const adapter = getAdapter('nippon-express')
+    const result = reconcile(parsed, scheduleB, {
+      eccn: null,
+      sme: null,
+      license: null,
+      unitWeightsByPart: { '10000-0001': 0.5, '20000-0002': 0.4 },
+      maxRows: adapter.maxCommodityRows,
+    })
+    expect(result.checks.filter((c) => c.severity === 'blocking' && !c.passed).map((c) => c.id)).toEqual([])
+    const draft = buildDraft(result, PROFILE, defaultShipmentSettings(adapter), adapter)
+    const blank = new Uint8Array(fs.readFileSync(path.join(ROOT, 'public/templates', path.basename(adapter.templateUrl))))
+    const filled = await adapter.fill(blank, draft)
+    expect(await readBack(filled.bytes)).toEqual({
+      '1a. USPPI': 'Example Exporter, Inc.\r100 Example Way\rExampleville CA 94000\rPat Example / 555-0100',
+      '1b USPPI IRS NO or ID NO': '00-0000000',
+      'ZIP CODE': '94000',
+      '1c1 PARTIES': 'RELATED',
+      '2 DATE OF EXPORTATION': '08-12-2026',
+      '4a2 ULTIMATE CONSIGNEE Complete name  address and contact name  tel if available':
+        'Example Consignee Pte. Ltd.\r1 Harbour Way\rSingapore 018989\rSingapore',
+      '4b2 CNEE TYPE': 'RESELLER',
+      '5a FORWARDING AGENT': 'Nippon Express USA, Inc.',
+      '6 POINT OF ORIGIN OR FTZ NO Must be 7digit Legacy or 9digit ACE format': 'California',
+      '7 COUNTRY OF ULTIMATE DESTINATION': 'Singapore',
+      '9a MODE': 'AIR',
+      '16b HAZMAT': 'NO',
+      '18b CONTAINER': 'NO',
+      '20b RET': 'NO',
+      INSURANCE: 'NO',
+      FREIGHT: 'PP',
+      JETPAK: 'NO',
+      TERM: 'DD',
+      INCOTERM: 'DAP',
+      'NAMED PLACE/PORT': 'Singapore',
+      '22.01 DF1': 'F',
+      '22.02 SB1': '8537.10.9060',
+      '22.03 sB UNIT1': '3',
+      '22.04 UOM1': 'NO',
+      '22.05 WEIGHT1': '1.200',
+      '22.07 ECCN1': '5A992.c',
+      '22.08 SME1': 'N',
+      '22.09 LICENSE1': 'NLR',
+      '22.10 VALUE1': '150.00',
+      '23.01 DF2': 'D',
+      '23.02 SB2': '8544.42.0000',
+      '23.03 SB UNI2': '4',
+      '23.04UOM2': 'NO',
+      '23.05WEIGHT2': '2.000',
+      '23.07ECCN2': 'EAR99',
+      '23.08SME2': 'N',
+      '23.09LICENSE2': 'NLR',
+      '23.10VALUE2': '40.00',
+      '33c TITLE': 'Shipping Lead',
+      '33e EMAIL ADDRESS': 'pat@example.com',
+      '33f TEL': '555-0101',
+      '33g DATE': '08-12-2026',
+    })
+  }, 60_000)
 })
