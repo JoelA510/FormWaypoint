@@ -15,6 +15,7 @@
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:real": "node scripts/test-real.mjs",
     "data:schedule-b": "node scripts/build-schedule-b.mjs",
     "check": "npm run typecheck && npm run lint && npm run test && npm run build",
     "tauri": "tauri",

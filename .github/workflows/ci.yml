@@ -5,9 +5,10 @@ on:
     branches: [main]
   pull_request:
 
-# `npm run check` is the single gate: typecheck, lint, the regression tests against
-# real shipments, and a production build. It is the same command run locally, so CI
-# cannot drift from what a developer sees.
+# `npm run check` is the single gate: typecheck, lint, the tests, and a production build.
+# It is the same command run locally, so CI cannot drift from what a developer sees. The
+# real-shipment suites skip here (the documents are never committed); the run says so in
+# its job summary, and `npm run test:real` runs them where the documents are.
 jobs:
   check:
     runs-on: ubuntu-latest

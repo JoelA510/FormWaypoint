@@ -15,5 +15,7 @@ export default defineConfig({
     globals: true,
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
     testTimeout: 30_000,
+    // Announces, or with FW_REQUIRE_FIXTURES=1 fails on, real-shipment suites that would skip.
+    globalSetup: ['src/test/fixtures-setup.ts'],
   },
 })

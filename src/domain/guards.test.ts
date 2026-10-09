@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseCipl } from './cipl'
-import { hasFixtures, readFixture, fixtureFile } from '../test/fixtures'
+import { buildSyntheticCipl, simpleShipment } from '../test/synthetic/cipl'
 import { createScheduleBIndex, type ScheduleBIndex } from './schedule-b'
 import { reconcile, resolveDestinationCountry, joinInvoiceToPacking } from './reconcile'
 import { applyCarrierDefaults, buildDraft, checkDraft, defaultShipmentSettings, EMPTY_PROFILE, type CompanyProfile } from './draft'
@@ -38,19 +38,16 @@ let parsed: ParsedCipl
 let scheduleB: ScheduleBIndex
 
 beforeAll(async () => {
-  // Every suite in this file is gated on the shipment documents, but this hook is not
-  // gated by them skipping. Without the guard, adding one test that needs no fixture
-  // would fail the whole file wherever the documents are absent.
-  if (!hasFixtures()) return
-  parsed = await parseCipl(fixtureFile('vendorA1'), readFixture('vendorA1'))
+  // A synthetic shipment, not a customer's: every guard here is about the draft and the
+  // reconciliation rules, which any well-formed CIPL exercises, so none of these may skip
+  // where the real shipment documents are absent.
+  parsed = await parseCipl('synthetic.pdf', await buildSyntheticCipl(simpleShipment()))
   scheduleB = createScheduleBIndex(
     JSON.parse(fs.readFileSync(path.join(HERE, '../../public/data/schedule-b.json'), 'utf8')),
   )
 }, 60_000)
 
-// Shipment documents are customer data and are not committed. Without them this
-// suite cannot run; the assertions themselves are checked in and unaffected.
-describe.skipIf(!hasFixtures())('a form nobody signed for cannot be generated', () => {
+describe('a form nobody signed for cannot be generated', () => {
   const nippon = getAdapter('nippon-express')
 
   it('blocks on an empty exporter profile', () => {
@@ -98,7 +95,7 @@ describe.skipIf(!hasFixtures())('a form nobody signed for cannot be generated', 
   })
 })
 
-describe.skipIf(!hasFixtures())('switching carriers', () => {
+describe('switching carriers', () => {
   it('applies the new carrier defaults instead of carrying the old ones over', () => {
     const nippon = getAdapter('nippon-express')
     const ceva = getAdapter('ceva')
@@ -131,7 +128,7 @@ describe.skipIf(!hasFixtures())('switching carriers', () => {
   })
 })
 
-describe.skipIf(!hasFixtures())('dates', () => {
+describe('dates', () => {
   it('reads the wordings these documents actually use', () => {
     expect(parseLooseDate('July 20, 2026')).toEqual([2026, 7, 20])
     expect(parseLooseDate('Jul 20, 2026')).toEqual([2026, 7, 20])
@@ -152,7 +149,7 @@ describe.skipIf(!hasFixtures())('dates', () => {
   })
 })
 
-describe.skipIf(!hasFixtures())('country of ultimate destination', () => {
+describe('country of ultimate destination', () => {
   it('never accepts a postal line as a country', () => {
     const header = {
       ...parsed.headers.FC,
@@ -182,7 +179,7 @@ describe.skipIf(!hasFixtures())('country of ultimate destination', () => {
   })
 })
 
-describe.skipIf(!hasFixtures())('invoice-to-packing-list join', () => {
+describe('invoice-to-packing-list join', () => {
   const packingLine = (over: Partial<SourceLine>): SourceLine => ({
     id: 'p1',
     documentSet: 'FC',
@@ -234,7 +231,7 @@ describe.skipIf(!hasFixtures())('invoice-to-packing-list join', () => {
   })
 })
 
-describe.skipIf(!hasFixtures())('reconciliation cannot fail open', () => {
+describe('reconciliation cannot fail open', () => {
   it('blocks when the packing-list weight total could not be read', () => {
     const withoutWeights: ParsedCipl = {
       ...parsed,
@@ -266,7 +263,7 @@ describe.skipIf(!hasFixtures())('reconciliation cannot fail open', () => {
   })
 })
 
-describe.skipIf(!hasFixtures())('source line identity', () => {
+describe('source line identity', () => {
   it('distinguishes every physical line', () => {
     const ids = parsed.lines.map((l) => l.id)
     expect(new Set(ids).size).toBe(ids.length)
