@@ -17,6 +17,15 @@ import type { KeyingOptions } from '../carriers/keying-sheet/options'
 import type { DgConsignment } from '../domain/dangerous-goods/types'
 import type { CheckResult, SLILine } from '../domain/types'
 import { partKey } from '../domain/part-key'
+import {
+  decodeConsignees,
+  decodeDgConsignments,
+  decodeItems,
+  decodeOverrides,
+  decodePartOverrides,
+  decodeProfile,
+  decodeShipments,
+} from './decode'
 
 const DB_NAME = 'formwaypoint'
 const DB_VERSION = 5
@@ -372,7 +381,7 @@ function db(): Promise<Schema> {
 
 export const indexedDbStore: LocalStore = {
   async getProfile() {
-    return (await (await db()).get('profile', 'current')) ?? null
+    return decodeProfile(await (await db()).get('profile', 'current'))
   },
   async getKeyingOptions() {
     return (await (await db()).get('profile', 'keyingOptions')) ?? null
@@ -386,17 +395,18 @@ export const indexedDbStore: LocalStore = {
 
   async getConsignee(name) {
     if (!name) return null
-    return (await (await db()).get('consignees', name)) ?? null
+    const raw: unknown = await (await db()).get('consignees', name)
+    return raw == null ? null : (decodeConsignees([raw])[0] ?? null)
   },
   async saveConsignee(record) {
     await (await db()).put('consignees', record)
   },
   async listConsignees() {
-    return (await (await db()).getAll('consignees')) as ConsigneeRecord[]
+    return decodeConsignees(await (await db()).getAll('consignees'))
   },
 
   async listOverrides() {
-    return (await (await db()).getAll('overrides')) as OverrideRecord[]
+    return decodeOverrides(await (await db()).getAll('overrides'))
   },
   async saveOverride(record) {
     await (await db()).put('overrides', record)
@@ -406,7 +416,7 @@ export const indexedDbStore: LocalStore = {
   },
 
   async listPartOverrides() {
-    return (await (await db()).getAll('partWeights')) as PartOverrideRecord[]
+    return decodePartOverrides(await (await db()).getAll('partWeights'))
   },
   async savePartOverride(partNumber, description, patch) {
     const tx = (await db()).transaction('partWeights', 'readwrite')
@@ -440,7 +450,7 @@ export const indexedDbStore: LocalStore = {
   },
 
   async listItems() {
-    return (await (await db()).getAll('items')) as ItemLibraryEntry[]
+    return decodeItems(await (await db()).getAll('items'))
   },
   async replaceItems(entries) {
     // One transaction: a library half-replaced by a failed write would silently mix two
@@ -460,7 +470,7 @@ export const indexedDbStore: LocalStore = {
   },
 
   async listShipments(limit = 50) {
-    const all = (await (await db()).getAll('shipments')) as ShipmentRecord[]
+    const all = decodeShipments(await (await db()).getAll('shipments'))
     return all.sort((a, b) => b.processedAt.localeCompare(a.processedAt)).slice(0, limit)
   },
   async saveShipment(record) {
@@ -477,7 +487,7 @@ export const indexedDbStore: LocalStore = {
    * hundred rows.
    */
   async listDgConsignments(limit) {
-    const all = (await (await db()).getAll('dgConsignments')) as DgConsignmentRecord[]
+    const all = decodeDgConsignments(await (await db()).getAll('dgConsignments'))
     const newestFirst = all.sort((a, b) => b.preparedAt.localeCompare(a.preparedAt))
     return limit == null ? newestFirst : newestFirst.slice(0, limit)
   },

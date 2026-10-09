@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { consignment, entry, overpack, pkg } from './test-support'
 import { assess, overpackOrder } from './assess'
 import { buildChecklist } from './checklist'
+import { DG_SOURCE_NOTICE } from './lithium'
 import { buildDeclaration, retainUntil } from './dgd'
 import { localDate } from '../../lib/report'
 
@@ -275,5 +276,13 @@ describe('the prepared date shown beside the retention date', () => {
     // Taking the date off the ISO string instead would show a UTC day, and the pair would
     // read a day short of the two years the table exists to evidence.
     expect(keepUntil).toBe(`${Number(shown.slice(0, 4)) + 2}${shown.slice(4)}`)
+  })
+})
+
+describe('the source of the rules', () => {
+  it('prints on every checklist that the figures are unverified against the current DGR', () => {
+    const shipment = consignment([pkg('p1', [entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 7 })])])
+    const markdown = buildChecklist(shipment, assess(shipment), '2026-08-06')
+    expect(markdown.split('\n').slice(0, 4).join('\n')).toContain(DG_SOURCE_NOTICE)
   })
 })

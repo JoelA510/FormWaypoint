@@ -30,6 +30,7 @@ import { assess, overpackOrder, packageCountInConsignment } from '../domain/dang
 import { buildChecklist } from '../domain/dangerous-goods/checklist'
 import { buildDeclaration, formatKg, retainUntil } from '../domain/dangerous-goods/dgd'
 import {
+  DG_SOURCE_NOTICE,
   CHEMISTRY_LABELS,
   CONFIGURATION_LABELS,
   FORM_LABELS,
@@ -1322,7 +1323,7 @@ function RequirementsPanel({
   )
 }
 
-function DeclarationPanel({
+export function DeclarationPanel({
   declaration,
   assessment,
   busy,
@@ -1343,6 +1344,10 @@ function DeclarationPanel({
   onGenerate: () => void
   onChecklist: () => void
 }) {
+  // Not saved: asked again each time the screen is opened, because the gap it acknowledges
+  // stays open until a qualified person has checked these rules against the current DGR.
+  const [acknowledged, setAcknowledged] = useState(false)
+  const blocked = !assessment.canGenerate || busy || !acknowledged
   return (
     <Card>
       <CardHeader
@@ -1361,6 +1366,19 @@ function DeclarationPanel({
             and is wrong is the worst thing this tool could produce.
           </p>
         ) : null}
+
+        <div role="note" className="space-y-2 rounded-md border border-[var(--color-warn)] bg-[var(--color-warn-soft)] px-3 py-2 text-sm">
+          <p>{DG_SOURCE_NOTICE}</p>
+          <label className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={acknowledged}
+              onChange={(e) => setAcknowledged(e.target.checked)}
+            />
+            <span>I will check this consignment against the current DGR before the declaration is signed.</span>
+          </label>
+        </div>
 
         {assessment.declarationRequired && declaration.lines.length ? (
           <div className="overflow-x-auto">
@@ -1401,11 +1419,11 @@ function DeclarationPanel({
 
         <div className="flex flex-wrap items-center gap-3">
           {assessment.declarationRequired ? (
-            <Button variant="primary" onClick={onGenerate} disabled={!assessment.canGenerate || busy}>
+            <Button variant="primary" onClick={onGenerate} disabled={blocked}>
               {busy ? 'Generating…' : 'Download the Shipper’s Declaration'}
             </Button>
           ) : null}
-          <Button onClick={onChecklist} disabled={!assessment.canGenerate || busy}>
+          <Button onClick={onChecklist} disabled={blocked}>
             Download the package checklist
           </Button>
           <span className="text-xs text-[var(--color-ink-faint)]">

@@ -39,6 +39,17 @@ export type Chemistry = 'lithium-ion' | 'lithium-metal' | 'sodium-ion'
  */
 export type CellOrBattery = 'cell' | 'battery'
 
+/**
+ * Where every figure in this workflow comes from, and what it has not been checked against.
+ * Shown on the screen and printed on the checklist until a person qualified to sign a Shipper's
+ * Declaration has checked the rules against the current DGR (docs/adr/0003).
+ */
+export const DG_SOURCE_NOTICE =
+  'Not verified against the current IATA Dangerous Goods Regulations. Every figure comes from the ' +
+  'Labelmaster Shipping Lithium Batteries course materials (Student Guide rev. 02/01/2026, Supplemental ' +
+  'Appendix rev. 01/01/2025), and state and operator variations are not held here. Check every entry against ' +
+  'the current DGR before the declaration is signed.'
+
 /** How the cells travel relative to the equipment they power (Student Guide fig. 2-8). */
 export type Configuration = 'standalone' | 'packed-with-equipment' | 'contained-in-equipment'
 
