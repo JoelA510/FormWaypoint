@@ -1,0 +1,16 @@
+# cargo deny: advisories for the Rust dependencies that ship (audit finding 8.6).
+#
+# Only the Windows target is checked. The app is built and shipped for Windows alone, and the
+# Linux webview stack (gtk-rs 0.18) carries "unmaintained" advisories for crates the Windows
+# binary never links.
+[graph]
+targets = ["x86_64-pc-windows-msvc"]
+
+[advisories]
+# Every vulnerability fails, in any crate. "Unmaintained" fails for this crate's own direct
+# dependencies, the ones this repository can replace. Tauri itself pulls in the rust-unic crates
+# (RUSTSEC-2025-0075, -0080, -0081, -0098, -0100: unmaintained, no vulnerability, no upgrade), and
+# those are Tauri's to replace; they surface again when its dependencies change.
+unmaintained = "workspace"
+# Ignore one only with its ID, a reason and a review date.
+ignore = []
