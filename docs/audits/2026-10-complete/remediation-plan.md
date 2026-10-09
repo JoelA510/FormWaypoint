@@ -2,8 +2,8 @@
 
 Repo: **JoelA510/FormWaypoint** · Plan drawn up: 2026-10-08 · Source audit: [`audit.md`](./audit.md)
 
-**Status:** NOT STARTED as of 2026-10-08. Waiting on the owner's go for the dated item D1 and
-Milestone 1.
+**Status:** IN PROGRESS as of 2026-10-09. D1 in review; Milestone 1 next. The owner reviews
+and approves each pull request before it merges.
 
 End state: every audit area at "no blocker/high findings", end-to-end coverage of the critical
 journey, a released build installed and smoke-tested, docs current. Measured against: a shipper at
@@ -26,8 +26,8 @@ closes audit findings 12.1, 12.2 and 12.3. Each workflow, and what replaces it:
 | 07-pre-pr-review | Lint, test, build, checklist, review draft | `review-change` and `pre-pr` | Retire. |
 | 09-browser-verification | Golden-path integration tests and a click-through | none | **Needs rewriting, not converting**: it describes another app (Planter, Dashboard, `.jsx`). Its intent becomes M3a item M3.4 (the journey test). Don't run `/migrate-workflows` on it. |
 | 10-master-review-orchestrator | Loops debt audit, refactor, design, browser, review, docs | `complete` | Retire. It calls two workflows that don't exist. |
-| 11-remote-pr-review | Reviews a PR through GitHub and posts the review | `review-change` (reports; doesn't post) | Retire, unless the owner wants reviews posted to GitHub. Then convert with `/migrate-workflows` and repoint it at AGENTS.md. |
-| 12-start-feature | From an issue: branch, plan, assign | `plan-change` for the plan only | Owner's call: drop it, or convert with `/migrate-workflows`. |
+| 11-remote-pr-review | Reviews a PR through GitHub and posts the review | `review-change` (reports; doesn't post) | Retire (owner's go, 2026-10-09). |
+| 12-start-feature | From an issue: branch, plan, assign | `plan-change` for the plan only | Drop (owner's go, 2026-10-09). |
 | 13-debt-sync | Syncs DEBT_REPORT.md items to GitHub issues | none | Drop. Its input doesn't exist; this plan is the debt register. |
 | 14-log-lesson | Appends a lesson, then `git commit -am` | every skill's "Keeping a lesson" step (`prompts/README.md`) | Retire. Its target file doesn't exist, and `commit -am` sweeps in unrelated changes. |
 
