@@ -53,15 +53,15 @@ const VENDOR: CompanyProfile = {
   usppiName: 'Vendor A Manufacturing, Inc.',
   usppiAddressLines: ['4225 Hacienda Drive', 'Pleasanton CA 94588', 'UNITED STATES OF AMERICA'],
   usppiZip: '94588',
-  usppiEin: '94-2900635',
-  contactName: 'Joel Abraham',
-  contactPhone: '+19252453400',
+  usppiEin: '00-0000000',
+  contactName: 'Pat Example',
+  contactPhone: '+15550100100',
   pointOfOrigin: 'California',
-  signerName: 'Joel Abraham',
+  signerName: 'Pat Example',
   signerTitle: 'Logistics Specialist',
-  signerEmail: 'joel.abraham@vendor.com',
-  signerPhone: '925-245-8170',
-  signerInitials: 'JA',
+  signerEmail: 'pat@example.com',
+  signerPhone: '555-010-0101',
+  signerInitials: 'PE',
 }
 
 /** One reviewed commodity row, for the suites that build rows rather than parse them. */
@@ -179,10 +179,10 @@ describe.skipIf(!hasFixtures())('Nippon Express — vendorA1', () => {
   it('writes the header values from the filed SLI', async () => {
     const { values } = await generate('vendorA1', 'nippon-express')
 
-    expect(values['1b USPPI IRS NO or ID NO']).toBe('94-2900635')
+    expect(values['1b USPPI IRS NO or ID NO']).toBe('00-0000000')
     expect(values['ZIP CODE']).toBe('94588')
     expect(values['1a. USPPI']).toContain('Vendor A Manufacturing, Inc.')
-    expect(values['1a. USPPI']).toContain('Joel Abraham / +19252453400')
+    expect(values['1a. USPPI']).toContain('Pat Example / +15550100100')
 
     // Invoice date, not the later "on or about July 25" sailing date.
     expect(values['2 DATE OF EXPORTATION']).toBe('07-20-2026')
@@ -237,7 +237,7 @@ describe.skipIf(!hasFixtures())('Nippon Express — vendorA1', () => {
   it('leaves the signature fields for a human', async () => {
     const { values, filled } = await generate('vendorA1', 'nippon-express')
     expect(values['33c TITLE']).toBe('Logistics Specialist')
-    expect(values['33e EMAIL ADDRESS']).toBe('joel.abraham@vendor.com')
+    expect(values['33e EMAIL ADDRESS']).toBe('pat@example.com')
     expect(values['33g DATE']).toBe('07-20-2026')
     // No signature is ever applied automatically.
     expect(Object.keys(filled.written)).not.toContain('33a Signature2')
@@ -287,7 +287,7 @@ describe.skipIf(!hasFixtures())('CEVA — vendorA3', () => {
 
   it('writes the header values from the filed SLI', async () => {
     const { values } = await generate('vendorA3', 'ceva')
-    expect(values.USPPI).toBe('94-2900635')
+    expect(values.USPPI).toBe('00-0000000')
     expect(values.ZipCode).toBe('94588')
     expect(values['Point of Origin']).toBe('California')
     expect(values['Country of Ultimate']).toBe('Netherlands')
@@ -311,8 +311,8 @@ describe.skipIf(!hasFixtures())('CEVA — vendorA3', () => {
     const { values } = await generate('vendorA3', 'ceva')
     // CEVA's ECCN box is "when required"; EAR99 belongs in the Nippon form, not this one.
     expect(values.ECCN).toBeUndefined()
-    expect(values['DOES NOT CONTAIN DANGEROUS GOODS']).toBe('JA')
-    expect(values['Duly Authorized']).toBe('Joel Abraham')
+    expect(values['DOES NOT CONTAIN DANGEROUS GOODS']).toBe('PE')
+    expect(values['Duly Authorized']).toBe('Pat Example')
   })
 
   it('produces a PDF that still opens and keeps its form', async () => {
@@ -433,13 +433,13 @@ describe.skipIf(!hasFixtures())('CEVA fields that were mapped but not written', 
     const base = buildDraft(result, VENDOR, defaultShipmentSettings(adapter), adapter)
 
     const safe = await readBack((await adapter.fill(template('ceva-sli.pdf'), base)).bytes)
-    expect(safe['DOES NOT CONTAIN DANGEROUS GOODS']).toBe('JA')
+    expect(safe['DOES NOT CONTAIN DANGEROUS GOODS']).toBe('PE')
     expect(safe['DOES CONTAIN DANGEROUS GOODS']).toBeUndefined()
 
     // Previously a hazardous shipment left *both* boxes blank, declaring nothing.
     const hazardous = await adapter.fill(template('ceva-sli.pdf'), { ...base, hazardous: true })
     const values = await readBack(hazardous.bytes)
-    expect(values['DOES CONTAIN DANGEROUS GOODS']).toBe('JA')
+    expect(values['DOES CONTAIN DANGEROUS GOODS']).toBe('PE')
     expect(values['DOES NOT CONTAIN DANGEROUS GOODS']).toBeUndefined()
     expect(hazardous.warnings.join(' ')).toMatch(/shipper’s declaration/)
   })

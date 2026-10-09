@@ -116,7 +116,7 @@ describe('weights', () => {
           netWeightKg: 0.3,
           exportCode: '8536.50.9065',
           reason: 'Switch, not a conductor',
-          enteredBy: 'Joel Abraham',
+          enteredBy: 'Pat Example',
         }),
       ],
       [entry({})],
@@ -124,7 +124,7 @@ describe('weights', () => {
     const weight = set.actionable.find((c) => c.field === 'weight')!
     const code = set.actionable.find((c) => c.field === 'code')!
     expect(weight).toMatchObject({ reason: '', enteredBy: '' })
-    expect(code).toMatchObject({ reason: 'Switch, not a conductor', enteredBy: 'Joel Abraham' })
+    expect(code).toMatchObject({ reason: 'Switch, not a conductor', enteredBy: 'Pat Example' })
     expect(renderLibraryChangesCsv(set).split('\n')[2]).not.toContain('Switch, not a conductor')
   })
 })
@@ -143,7 +143,7 @@ describe('with no library imported', () => {
 describe('rendering', () => {
   const set = libraryChanges(
     [
-      entered({ exportCode: '8536.50.9065', reason: 'Switch, not a conductor', enteredBy: 'Joel Abraham' }),
+      entered({ exportCode: '8536.50.9065', reason: 'Switch, not a conductor', enteredBy: 'Pat Example' }),
       entered({ partNumber: 'BBB-2', description: 'BRACKET', netWeightKg: 1.5 }),
     ],
     [entry({}), entry({ partNumber: 'BBB-2', description: 'BRACKET', netWeightKg: null })],
@@ -152,7 +152,7 @@ describe('rendering', () => {
   it('keeps the reason and the name against a code change', () => {
     const log = renderLibraryChangeLog(set, { today: '2026-07-29', librarySource: 'ItemTag.xlsx' })
     expect(log).toContain('Switch, not a conductor')
-    expect(log).toContain('Joel Abraham')
+    expect(log).toContain('Pat Example')
     expect(log).toContain('Compared against: ItemTag.xlsx')
   })
 

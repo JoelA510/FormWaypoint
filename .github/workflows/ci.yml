@@ -27,6 +27,18 @@ jobs:
       - name: Typecheck, lint, test and build
         run: npm run check
 
-      - name: Audit production dependencies
-        run: npm audit --omit=dev --audit-level=high
-        continue-on-error: true
+      # Every dependency, dev included, and it fails the run: a compromised build tool ships
+      # in the installer as surely as a runtime one. Policy: docs/dependency-policy.md.
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
+  rust-advisories:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # Advisories for the Rust crates the Windows build ships (src-tauri/deny.toml).
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: src-tauri/Cargo.toml
+          command: check advisories

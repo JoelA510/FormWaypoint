@@ -23,15 +23,15 @@ const COMPLETE_PROFILE: CompanyProfile = {
   usppiName: 'Vendor A Manufacturing, Inc.',
   usppiAddressLines: ['4225 Hacienda Drive'],
   usppiZip: '94588',
-  usppiEin: '94-2900635',
-  contactName: 'Joel Abraham',
-  contactPhone: '+19252453400',
+  usppiEin: '00-0000000',
+  contactName: 'Pat Example',
+  contactPhone: '+15550100100',
   pointOfOrigin: 'California',
-  signerName: 'Joel Abraham',
+  signerName: 'Pat Example',
   signerTitle: 'Logistics Specialist',
-  signerEmail: 'joel.abraham@vendor.com',
-  signerPhone: '925-245-8170',
-  signerInitials: 'JA',
+  signerEmail: 'pat@example.com',
+  signerPhone: '555-010-0101',
+  signerInitials: 'PE',
 }
 
 let parsed: ParsedCipl
