@@ -16,7 +16,7 @@
 
 use std::fs;
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use tauri::Manager;
 
@@ -65,13 +65,16 @@ fn output_directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 /// signed, annotated or filed. Browsers do this for the same reason, and an operator who
 /// has just clicked the button twice should end up with two files rather than a silently
 /// replaced one.
-fn unique_path(dir: &PathBuf, name: &str) -> Result<PathBuf, String> {
+fn unique_path(dir: &Path, name: &str) -> Result<PathBuf, String> {
     let first = safe_join(dir, name)?;
     if !first.exists() {
         return Ok(first);
     }
     let path = PathBuf::from(name);
-    let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let suffix = path
         .extension()
         .map(|e| format!(".{}", e.to_string_lossy()))
@@ -89,7 +92,7 @@ fn unique_path(dir: &PathBuf, name: &str) -> Result<PathBuf, String> {
 ///
 /// The webview picks these names, so a path separator or a `..` in one would let a bug in
 /// the page write outside the data directory.
-fn safe_join(dir: &PathBuf, name: &str) -> Result<PathBuf, String> {
+fn safe_join(dir: &Path, name: &str) -> Result<PathBuf, String> {
     let looks_like_a_path = name.is_empty()
         || name.contains('/')
         || name.contains('\\')
@@ -109,8 +112,8 @@ fn safe_join(dir: &PathBuf, name: &str) -> Result<PathBuf, String> {
 /// proxy is picked up from the environment, since a workstation that can only reach the
 /// internet through one would otherwise just time out.
 fn build_agent() -> Result<ureq::Agent, String> {
-    let connector = native_tls::TlsConnector::new()
-        .map_err(|e| format!("Could not initialise TLS: {e}"))?;
+    let connector =
+        native_tls::TlsConnector::new().map_err(|e| format!("Could not initialise TLS: {e}"))?;
     let mut builder = ureq::AgentBuilder::new()
         .tls_connector(std::sync::Arc::new(connector))
         .timeout(std::time::Duration::from_secs(120));
@@ -152,7 +155,11 @@ async fn fetch_concordance() -> Result<String, String> {
 }
 
 #[tauri::command]
-fn write_data_file(app: tauri::AppHandle, name: String, contents: String) -> Result<String, String> {
+fn write_data_file(
+    app: tauri::AppHandle,
+    name: String,
+    contents: String,
+) -> Result<String, String> {
     let dir = data_directory(&app)?;
     let path = safe_join(&dir, &name)?;
     fs::write(&path, contents).map_err(|e| format!("Could not write {}: {e}", path.display()))?;
@@ -202,7 +209,9 @@ fn open_output(app: tauri::AppHandle, path: String) -> Result<(), String> {
     }
 
     #[cfg(target_os = "windows")]
-    let launched = std::process::Command::new("explorer.exe").arg(&target).spawn();
+    let launched = std::process::Command::new("explorer.exe")
+        .arg(&target)
+        .spawn();
     #[cfg(target_os = "macos")]
     let launched = std::process::Command::new("open").arg(&target).spawn();
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -293,7 +302,10 @@ mod tests {
             "/etc/passwd",
             "C:\\Windows\\System32\\drivers\\etc\\hosts",
         ] {
-            assert!(safe_join(&dir, name).is_err(), "should have refused {name:?}");
+            assert!(
+                safe_join(&dir, name).is_err(),
+                "should have refused {name:?}"
+            );
         }
     }
 }

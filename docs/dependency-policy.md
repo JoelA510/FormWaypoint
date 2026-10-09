@@ -3,7 +3,9 @@
 How this project decides whether a known-vulnerable dependency can ship. The gates are
 `npm audit --audit-level=high` for the npm dependencies and `cargo deny check advisories`
 (`src-tauri/deny.toml`) for the Rust ones. Both run in CI on every pull request and on pushes to
-`main` (`.github/workflows/ci.yml`), and weekly (`.github/workflows/audit.yml`).
+`main` (`.github/workflows/ci.yml`), and weekly (`.github/workflows/audit.yml`). cargo-deny is
+pinned by version and checksum in `.github/actions/cargo-deny/action.yml`, outside Dependabot's
+view: bump it there by hand.
 
 ## The bar
 
