@@ -316,12 +316,11 @@ Every blocker (audit findings 5.1, 6.1, 8.1), plus the enforcement floor. Two pu
 
 ## Milestone 2b: security and saved data
 
-> **M2.6. Saved records have no version or validation** **Reduced 2026-10-09:** this milestone
-> validates on read (`src/store/decode.ts`) without changing the stored shape; the `schemaVersion`
-> stamp and the migration test move to M4.2, beside the updater that will first change a shape.
-> The original item follows.
-> (4.6, medium; resolves 2.2. Graded into
+> **M2.6. Saved records have no version or validation** (4.6, medium; resolves 2.2. Graded into
 > this milestone because the updater (M4.2) makes every release read the last release's records)
+> - **Reduced 2026-10-09:** this milestone validates on read (`src/store/decode.ts`) without
+>   changing the stored shape; the `schemaVersion` stamp and the migration test move to M4.2,
+>   beside the updater that will first change a shape. The original item follows.
 > - **Fix approach:**
 >   - `schemaVersion` on every record.
 >   - A validating decoder per store that fills defaults, quarantines records it can't read into
@@ -450,6 +449,10 @@ Every blocker (audit findings 5.1, 6.1, 8.1), plus the enforcement floor. Two pu
 > - **Diff class:** minimal diff.
 
 > **M3.4. No end-to-end journey test; the Rust command surface is untested** (6.9, medium)
+> **Split 2026-10-09:** the command contract test landed with Milestone 3's tests. The journey
+> test did not: two attempts to drive the whole app in jsdom failed on browser APIs jsdom lacks
+> (file bytes, fetch of static files, IndexedDB), and each stand-in moves the test further from
+> the app. It moves to a Playwright test in real Chromium (M3.11 below).
 > - **Fix approach:**
 >   - One journey test (Vitest with jsdom and Testing Library): load the synthetic CIPL, review,
 >     pick a carrier, generate, assert the delivered bytes are a filled SLI.
@@ -534,6 +537,16 @@ Every blocker (audit findings 5.1, 6.1, 8.1), plus the enforcement floor. Two pu
 > - **Test gate:** an unguarded index added to a parser fails typecheck.
 > - **Rollback:** revert.
 > - **Diff class:** flagged refactor (it touches all three parsers; agree first).
+
+> **M3.11. A journey test in a real browser** (from M3.4, medium)
+> - **Fix approach:** Playwright against `vite preview`, in Chromium: upload the synthetic CIPL,
+>   fill the exporter profile, pick a carrier, generate, and read the downloaded SLI's boxes back.
+>   Adds `@playwright/test` (a dev dependency, flagged).
+> - **Files touched:** `e2e/journey.spec.ts` (new), `playwright.config.ts` (new), `package.json`,
+>   `.github/workflows/ci.yml` · **Depends on:** M3.6 · **Effort:** M
+> - **Acceptance criteria and test gate:** removing the generate button's handler fails it.
+> - **Rollback:** revert.
+> - **Diff class:** minimal diff (new test tier).
 
 **Milestone exit:**
 - [ ] Each test gate shown failing with its fix reverted.
