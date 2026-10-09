@@ -1,0 +1,4 @@
+{
+  "visibility": "public",
+  "packs": ["node", "vite-spa", "tauri"]
+}
