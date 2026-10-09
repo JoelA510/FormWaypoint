@@ -56,6 +56,7 @@ import {
 import { DangerousGoodsPanel } from './features/dangerous-goods'
 import { newConsignment, type DgConsignment } from './domain/dangerous-goods/types'
 import type { ParsedCipl } from './domain/types'
+import { APP_VERSION, exportDiagnostics, setErrorContext } from './lib/error-log'
 
 /**
  * The two workflows this application holds, kept apart on purpose.
@@ -103,6 +104,12 @@ export function App() {
   // to a glance at the standard flow would be its own kind of data loss.
   const [dgConsignment, setDgConsignment] = useState<DgConsignment>(newConsignment)
   const [scheduleB, setScheduleB] = useState<ScheduleBIndex | null>(null)
+  const [diagnostics, setDiagnostics] = useState<string | null>(null)
+
+  // What the local error log records beside each entry: where the app was, never what it read.
+  useEffect(() => {
+    setErrorContext({ workflow, scheduleB: scheduleB?.generatedAt ?? 'not loaded' })
+  }, [workflow, scheduleB])
   const [scheduleBPayload, setScheduleBPayload] = useState<RawPayload | null>(null)
   const [scheduleBError, setScheduleBError] = useState<string | null>(null)
   /**
@@ -967,6 +974,22 @@ export function App() {
       </main>
 
       <footer className="mx-auto max-w-6xl px-5 pb-10 text-xs text-[var(--color-ink-faint)]">
+        <p className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span>FormWaypoint {APP_VERSION}</span>
+          <button
+            type="button"
+            className="underline hover:text-[var(--color-ink)]"
+            onClick={() =>
+              void exportDiagnostics(bridge).then(
+                (d) => setDiagnostics(`Diagnostics saved to ${d.path ?? d.fileName}`),
+                (e: unknown) => setDiagnostics(`Could not export diagnostics: ${e instanceof Error ? e.message : String(e)}`),
+              )
+            }
+          >
+            Export diagnostics
+          </button>
+          {diagnostics ? <span role="status">{diagnostics}</span> : null}
+        </p>
         {workflow === 'standard' ? (
           <>
             Documents are parsed and forms are filled in this browser. Nothing is uploaded. Schedule B data comes from
