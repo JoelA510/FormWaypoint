@@ -84,10 +84,10 @@ jobs:
           persist-credentials: false
 
       # Advisories for the Rust crates the Windows build ships (src-tauri/deny.toml).
-      - uses: EmbarkStudios/cargo-deny-action@b66acf5e9fe20f8aba065be86778a8a4c846f902 # v2
-        with:
-          manifest-path: src-tauri/Cargo.toml
-          command: check advisories
+      - uses: $/.github/actions/cargo-deny
+      - name: Check advisories
+        working-directory: src-tauri
+        run: cargo deny check advisories
 
   # The workflows themselves: unpinned actions, template injection, over-broad tokens.
   workflows:
