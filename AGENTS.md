@@ -32,7 +32,7 @@ paperwork on their own Windows machine.
 | `npm run lint` | ESLint, including `jsx-a11y`. |
 | `npm run typecheck` | `tsc -b --noEmit`. |
 | `npm run check` | The gate CI runs: typecheck, lint, test, build. Run before considering any change done. |
-| `cargo test` (in `src-tauri/`) | The Rust tests. CI runs them only in the Desktop build workflow today. |
+| `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` (in `src-tauri/`) | The Rust gates; CI runs all three on Windows on every pull request, on the toolchain `src-tauri/rust-toolchain.toml` pins. |
 
 Cloud and background agents start from a fresh clone: run `npm ci` before anything else. No setup
 hook is wired up yet.

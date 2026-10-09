@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
 
+# Read-only by default; no job here writes to the repository.
+permissions:
+  contents: read
+
 # `npm run check` is the single gate: typecheck, lint, the tests, and a production build.
 # It is the same command run locally, so CI cannot drift from what a developer sees. The
 # real-shipment suites skip here (the documents are never committed); the run says so in
@@ -13,11 +17,13 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          node-version: '24'
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version-file: .nvmrc
           cache: 'npm'
           cache-dependency-path: package-lock.json
 
@@ -32,13 +38,67 @@ jobs:
       - name: Audit dependencies
         run: npm audit --audit-level=high
 
+  # The native side, on the platform it ships for: formatting, lint with warnings denied, and
+  # the Rust tests, before merge rather than after it. The toolchain is the one
+  # src-tauri/rust-toolchain.toml pins.
+  rust:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      # The shell embeds the built web app, so it has to exist before the Rust compiles.
+      - name: Build the web app
+        run: |
+          npm ci
+          npm run build
+
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          workspaces: src-tauri
+
+      - name: Format
+        working-directory: src-tauri
+        run: cargo fmt --check
+
+      - name: Lint
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        working-directory: src-tauri
+        run: cargo test
+
   rust-advisories:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       # Advisories for the Rust crates the Windows build ships (src-tauri/deny.toml).
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: EmbarkStudios/cargo-deny-action@b66acf5e9fe20f8aba065be86778a8a4c846f902 # v2
         with:
           manifest-path: src-tauri/Cargo.toml
           command: check advisories
+
+  # The workflows themselves: unpinned actions, template injection, over-broad tokens.
+  workflows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install zizmor
+        run: pipx install zizmor==1.30.1
+
+      - name: Audit the workflows
+        run: zizmor --offline --min-severity low .github/workflows

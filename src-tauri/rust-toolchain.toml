@@ -1,0 +1,6 @@
+# The Rust that builds the shipped binary, the same on every machine and in CI. Raise it on
+# purpose, in its own pull request; the updater plugin needs 1.90 or later.
+[toolchain]
+channel = "1.97.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"
