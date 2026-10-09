@@ -61,8 +61,9 @@ files this repo hasn't edited.
    state the concrete cost of the status quo and the risk of the change, then wait for the
    call.
 3. **Never embed secrets.** The app reads two build-time variables, both non-secret parser
-   markers, by name in `src/domain/cipl/parse-vendor-b.ts`; any new one is read by name, never
-   through `import.meta.env` as a whole. Keep `.env.example` current with every new variable.
+   markers, in `src/domain/cipl/parse-vendor-b.ts` (today through `import.meta.env` as a whole,
+   which the plan replaces). Read any new one by name, never the whole object, and keep
+   `.env.example` current with every new variable.
 4. **Report honestly.** Label every claim as *statically reviewed* (you read it), *executed*
    (you ran it), or *fully validated* (you ran it and verified the outcome). Never claim
    tests passed without running them.
