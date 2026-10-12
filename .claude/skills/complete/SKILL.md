@@ -18,7 +18,8 @@ instruction set; this skill only wires it up. Then:
    assume private on GitHub Free for whatever can't be read, as the prompt's inputs say.
    `[COMPLETE_MEANS]`
    is the highest-leverage field — everything downstream is ordered against it — so if it's
-   missing, ask for the missing fields in one question before starting.
+   missing, derive it from the README, product docs, or spec and state it as an assumption.
+   Ask, in one question, only when the repository gives nothing to derive it from.
 2. **Honor the ground rules throughout:** the existing stack and conventions override this
    template and every reference; minimal diffs; flag refactors before making them; label
    every finding statically reviewed / executed / fully validated; never claim a test ran
@@ -31,7 +32,9 @@ instruction set; this skill only wires it up. Then:
    itself. The audit skeleton (baseline gate table, twelve areas, file-path evidence, severity,
    verification labels, refuted findings, coverage limits) and the remediation-plan skeleton
    (item fields, fixed ordering, small independently shippable milestones, or the single-PR
-   form for a small project) are copied into a dated folder, `docs/audits/YYYY-MM-<slug>/`. Before reporting, run
+   form for a small project) are copied into a dated folder, `docs/audits/YYYY-MM-<slug>/`, or a
+   dated folder wherever the repo already keeps its plans and audits: its convention wins, as the
+   prompt says. Before reporting, run
    `LC_ALL=C grep -nE '[^]A-Za-z0-9_]\[[A-Z][^]]*\]([^([]|$)|^\[[A-Z][^]]*\]([^(:[]|$)|<!-- GUIDANCE'` on every artifact you produced; it must print
    nothing. From the template checkout, also run `node scripts/check-placeholders.mjs` on
    them; it catches a half-deleted guidance comment the grep can't see. Where the target lacks
