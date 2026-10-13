@@ -4,9 +4,6 @@ Two prompts. **Stage 0** surveys a project and names the questions worth a disco
 of work. **Stage 1** runs one of those passes. Treat both as a menu, not a form: fill every `{{PLACEHOLDER}}`,
 delete any block the task doesn't need, then search for leftover `{{` before pasting.
 
-The NO ASTERISKS selection-discovery prompt is a filled-in Stage 1. The SquadLogic WBGT prompt is a Stage 1 with
-the decision mode set to "recommend" and a build phase.
-
 ---
 
 ## Stage 0: find the discovery candidates
@@ -148,7 +145,7 @@ Out of scope (note as follow-ups; don't do)
 - **Pick the decision mode deliberately.** Choose "options, no recommendation" when the call is a judgment
   that's yours (creative work, values, authorship). Choose "recommend" for engineering choices with a
   checkable right answer.
-- **Confirm items, not summaries.** When you confirm something, look at the list itself. On NO ASTERISKS a
+- **Confirm items, not summaries.** When you confirm something, look at the list itself. On one project a
   confirmation was given on a model-built list of four that turned out wrong; the review caught it, but the
   constraint above is there so the session raises it without needing a review.
 - **Keep the prompt free of the expected answers.** "Done looks like" states coverage ("covers the logs, the
@@ -167,9 +164,3 @@ about your projects.
 | Youth sports league app | Role scoping and row-level access; which privacy rules apply to minors' data (verify, don't assume); external APIs and what the browser can call |
 | Web-app game | The game-state model and save compatibility across versions; determinism; a performance budget; asset licenses |
 | Long-form writing | What's settled versus invented; what depends on what (setups and payoffs); provenance and authorship; who is a real person |
-
-## Where to keep it
-
-The repo template is the natural home: as a project skill (`.claude/skills/discovery/SKILL.md`), every repo
-made from the template starts with it, and Claude Code can run it by name. NO ASTERISKS already keeps its
-logging checklist as a skill the same way (`.claude/skills/log-batch/SKILL.md`).

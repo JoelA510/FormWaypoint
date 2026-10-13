@@ -46,7 +46,7 @@ work, for the open questions worth a discovery pass, `plan-change` to agree a la
 building it, `root-cause` for a defect whose cause is unknown, `review-change` for an adversarial
 review, `pre-pr` before a change leaves your hands, `verify` before each commit (Claude Code runs
 it on its own), `template-update` to take a template release. They come from the template
-(https://github.com/JoelA510/repo-build-template), delivered by its `process:apply`; don't edit
+(https://github.com/JoelA510/agent-ready-template), delivered by its `process:apply`; don't edit
 them here. Report a gap in one, or a lesson whose check would hold in other repositories, to the
 template (an issue or pull request there), and take the fix with a re-apply, which updates only
 files this repo hasn't edited.
