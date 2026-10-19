@@ -10,6 +10,10 @@
  *
  * Nothing here is uploaded, and nothing here is inferred. Every field the regulations turn on
  * is asked, and an unanswered one blocks rather than defaults.
+ *
+ * The one thing it takes from the standard flow is the CIPL already loaded there, and only
+ * when asked (ADR 0004): parties, the reference and one entry per part, into blank fields. The
+ * count and weight it states are offered beside each entry, a click each, never filled.
  */
 import { useCallback, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
 import {
@@ -29,6 +33,8 @@ import { ChecksPanel } from './review'
 import { assess, overpackOrder, packageCountInConsignment } from '../domain/dangerous-goods/assess'
 import { buildChecklist } from '../domain/dangerous-goods/checklist'
 import { buildDeclaration, formatKg, retainUntil } from '../domain/dangerous-goods/dgd'
+import { applyCiplSeed, type CiplSeed, type FigureOffer, type SeedPart } from '../domain/dangerous-goods/cipl-seed'
+import { partKey } from '../domain/part-key'
 import {
   DG_SOURCE_NOTICE,
   CHEMISTRY_LABELS,
@@ -97,6 +103,9 @@ export function DangerousGoodsPanel({
   consignment,
   onConsignmentChange: setConsignment,
   onPrepared,
+  cipl = null,
+  ciplLinks = {},
+  onCiplLinks,
 }: {
   /** The exporter profile the standard flow already holds; the shipper block is seeded from it. */
   profile: CompanyProfile
@@ -111,11 +120,17 @@ export function DangerousGoodsPanel({
    * to …" over a rejected write would leave the file on disk with nothing behind it.
    */
   onPrepared: (record: DgConsignmentRecord) => void | Promise<void>
+  /** What the CIPL loaded in Standard Shipping offers; null when none is loaded. */
+  cipl?: CiplSeed | null
+  /** Entry id → part key, for entries the CIPL added. Held above, like the consignment. */
+  ciplLinks?: Record<string, string>
+  onCiplLinks?: (links: Record<string, string>) => void
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [warnings, setWarnings] = useState<string[]>([])
   const [saved, setSaved] = useState<Delivery | null>(null)
+  const [ciplNotes, setCiplNotes] = useState<string[] | null>(null)
 
   const assessment = useMemo(() => assess(consignment), [consignment])
   const declaration = useMemo(() => buildDeclaration(consignment, assessment), [consignment, assessment])
@@ -128,6 +143,24 @@ export function DangerousGoodsPanel({
   const seedShipper = useCallback(() => {
     patch({ shipper: { name: profile.usppiName, addressLines: profile.usppiAddressLines } })
   }, [patch, profile])
+
+  // From the consignment as rendered rather than inside a state updater: the notes and links
+  // describe exactly the consignment that was filled, and an updater may run twice.
+  const fillFromCipl = useCallback(() => {
+    if (!cipl) return
+    const applied = applyCiplSeed(consignment, cipl, nextDgId)
+    setConsignment(applied.consignment)
+    setCiplNotes(applied.notes)
+    onCiplLinks?.(applied.links)
+  }, [cipl, consignment, setConsignment, onCiplLinks])
+
+  const partFor = useCallback(
+    (entryId: string): SeedPart | undefined => {
+      const key = ciplLinks[entryId]
+      return key ? cipl?.parts.find((p) => partKey(p.partNumber) === key) : undefined
+    },
+    [cipl, ciplLinks],
+  )
 
   const updatePackage = useCallback((id: string, changes: Partial<DgPackage>) => {
     setConsignment((prev) => ({
@@ -282,6 +315,34 @@ export function DangerousGoodsPanel({
 
   return (
     <>
+      {cipl ? (
+        <Card>
+          <CardHeader
+            title="From the CIPL"
+            description={
+              `${cipl.source.fileName}${cipl.source.invoiceNumber ? `, invoice ${cipl.source.invoiceNumber}` : ''}, ` +
+              'as loaded in Standard Shipping. Fills blank fields only: the consignee, the shipper’s reference and, ' +
+              'for a one-carton CIPL, one battery entry per part. Count and net weight are offered beside each entry; ' +
+              'nothing a classification turns on comes from the CIPL.'
+            }
+            actions={
+              <Button size="sm" onClick={fillFromCipl}>
+                Fill from the CIPL
+              </Button>
+            }
+          />
+          {ciplNotes ? (
+            <CardBody>
+              <p role="status" className="text-sm">
+                {ciplNotes.length
+                  ? ciplNotes.join(' ')
+                  : 'Nothing to fill: every field the CIPL can fill already holds what it says.'}
+              </p>
+            </CardBody>
+          ) : null}
+        </Card>
+      ) : null}
+
       <Card>
         <CardHeader
           title="Consignment"
@@ -304,6 +365,7 @@ export function DangerousGoodsPanel({
                 onClick={() => {
                   if (!window.confirm('Clear this consignment and start a new one?')) return
                   setConsignment(newConsignment())
+                  setCiplNotes(null)
                   setSaved(null)
                   setWarnings([])
                   setError(null)
@@ -335,7 +397,10 @@ export function DangerousGoodsPanel({
 
           <div className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Airport of departure" hint="Full airport or city name — not a code.">
+              <Field
+                label="Airport of departure"
+                hint={routeHint('Full airport or city name — not a code.', 'shipped from', cipl?.routeHint.shippedFrom)}
+              >
                 {(id) => (
                   <Input
                     id={id}
@@ -345,7 +410,10 @@ export function DangerousGoodsPanel({
                   />
                 )}
               </Field>
-              <Field label="Airport of destination" hint="Full airport or city name — not a code.">
+              <Field
+                label="Airport of destination"
+                hint={routeHint('Full airport or city name — not a code.', 'discharge port', cipl?.routeHint.dischargePort)}
+              >
                 {(id) => (
                   <Input
                     id={id}
@@ -467,6 +535,7 @@ export function DangerousGoodsPanel({
         onUpdatePackage={updatePackage}
         onUpdateEntry={updateEntry}
         onChange={setConsignment}
+        partFor={partFor}
       />
 
       <RequirementsPanel consignment={consignment} assessment={assessment} />
@@ -550,6 +619,38 @@ export function DangerousGoodsPanel({
   )
 }
 
+/**
+ * The CIPL's route, beside the airport field it relates to and never in it: the city the goods
+ * ship from is not always the airport on the air waybill.
+ */
+function routeHint(base: string, what: string, value: string | null | undefined): string {
+  return value ? `${base} The CIPL’s ${what}: ${value}.` : base
+}
+
+/** A figure the CIPL offers for one field, copied only on a click. */
+function CiplFigure({
+  offer,
+  current,
+  onUse,
+}: {
+  offer: FigureOffer
+  current: number | null
+  onUse: (value: number) => void
+}) {
+  if (offer.value === null) {
+    return <p className="text-xs text-[var(--color-ink-faint)]">No CIPL figure: {offer.why}</p>
+  }
+  if (current === offer.value) {
+    return <p className="text-xs text-[var(--color-ink-faint)]">Matches the CIPL ({offer.label}).</p>
+  }
+  const value = offer.value
+  return (
+    <Button size="sm" variant="ghost" className="self-start" onClick={() => onUse(value)}>
+      Use CIPL figure ({offer.label})
+    </Button>
+  )
+}
+
 function PartyEditor({
   label,
   party,
@@ -585,12 +686,14 @@ function PackagesEditor({
   onUpdatePackage,
   onUpdateEntry,
   onChange,
+  partFor,
 }: {
   consignment: DgConsignment
   assessment: ReturnType<typeof assess>
   onUpdatePackage: (id: string, changes: Partial<DgPackage>) => void
   onUpdateEntry: (packageId: string, entryId: string, changes: Partial<BatteryEntry>) => void
   onChange: (next: DgConsignment) => void
+  partFor: (entryId: string) => SeedPart | undefined
 }) {
   const addPackage = () =>
     onChange({ ...consignment, packages: [...consignment.packages, emptyPackage(nextDgId('pkg-'), nextDgId('ent-'))] })
@@ -816,6 +919,7 @@ function PackagesEditor({
                       </div>
                       <EntryEditor
                         entry={entry}
+                        ciplPart={partFor(entry.id)}
                         onChange={(changes) => onUpdateEntry(pkg.id, entry.id, changes)}
                       />
                       {classification ? (
@@ -946,11 +1050,20 @@ function PackagesEditor({
 
 function EntryEditor({
   entry,
+  ciplPart,
   onChange,
 }: {
   entry: BatteryEntry
+  /** The CIPL part this entry was added for, whose figures it may offer. */
+  ciplPart?: SeedPart
   onChange: (changes: Partial<BatteryEntry>) => void
 }) {
+  // For equipment the CIPL's pieces are devices and its net weight includes them; both fields
+  // want the batteries alone, so neither figure is offered.
+  const equipmentRefusal: FigureOffer = {
+    value: null,
+    why: 'the CIPL counts and weighs the equipment, and this field wants the batteries alone.',
+  }
   const isMetal = entry.spec.chemistry === 'lithium-metal'
   const setSpec = (changes: Partial<BatteryEntry['spec']>) => onChange({ spec: { ...entry.spec, ...changes } })
   const number = (value: string) => (value.trim() === '' ? null : Number(value))
@@ -1033,29 +1146,47 @@ function EntryEditor({
             )}
           </Field>
         )}
-        <Field label="Net battery weight per package (kg)" hint="The batteries only — not the equipment or the box.">
-          {(id) => (
-            <Input
-              id={id}
-              type="number"
-              step="0.001"
-              min={0}
-              value={entry.netWeightKgPerPackage ?? ''}
-              onChange={(e) => onChange({ netWeightKgPerPackage: number(e.target.value) })}
+        <div className="flex flex-col gap-1">
+          <Field label="Net battery weight per package (kg)" hint="The batteries only — not the equipment or the box.">
+            {(id) => (
+              <Input
+                id={id}
+                type="number"
+                step="0.001"
+                min={0}
+                value={entry.netWeightKgPerPackage ?? ''}
+                onChange={(e) => onChange({ netWeightKgPerPackage: number(e.target.value) })}
+              />
+            )}
+          </Field>
+          {ciplPart ? (
+            <CiplFigure
+              offer={entry.articleLevel === 'equipment' ? equipmentRefusal : ciplPart.netWeightKg}
+              current={entry.netWeightKgPerPackage}
+              onUse={(value) => onChange({ netWeightKgPerPackage: value })}
             />
-          )}
-        </Field>
-        <Field label="How many per package" hint="Decides the marking exemption for equipment.">
-          {(id) => (
-            <Input
-              id={id}
-              type="number"
-              min={0}
-              value={entry.countPerPackage ?? ''}
-              onChange={(e) => onChange({ countPerPackage: number(e.target.value) })}
+          ) : null}
+        </div>
+        <div className="flex flex-col gap-1">
+          <Field label="How many per package" hint="Decides the marking exemption for equipment.">
+            {(id) => (
+              <Input
+                id={id}
+                type="number"
+                min={0}
+                value={entry.countPerPackage ?? ''}
+                onChange={(e) => onChange({ countPerPackage: number(e.target.value) })}
+              />
+            )}
+          </Field>
+          {ciplPart ? (
+            <CiplFigure
+              offer={entry.articleLevel === 'equipment' ? equipmentRefusal : ciplPart.count}
+              current={entry.countPerPackage}
+              onUse={(value) => onChange({ countPerPackage: value })}
             />
-          )}
-        </Field>
+          ) : null}
+        </div>
         <Field label="Article level" hint="What is physically in the box, at the level its type is tested.">
           {(id) => (
             <Select

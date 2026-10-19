@@ -1,9 +1,9 @@
 # 0004. The dangerous goods workflow may read the CIPL loaded in Standard Shipping, one way, on request
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-19
-- **Deciders:** the owner (Joel Abraham), on agreement of
-  `docs/changes/2026-10-19-cipl-prefill-into-dg.md`
+- **Deciders:** the owner (Joel Abraham), agreeing
+  `docs/changes/2026-10-19-cipl-prefill-into-dg.md` on 2026-10-19 with option C for the figures
 - **Applies to:** `src/App.tsx`, `src/features/dangerous-goods.tsx`, a new
   `src/domain/dangerous-goods/cipl-seed.ts`
 

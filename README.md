@@ -111,6 +111,15 @@ arithmetic, the other asks what is in a box and tells you what the regulations m
 Folding dangerous goods into the standard flow would put a hazard question in front of every
 ordinary shipment, which is how hazard questions come to be answered without being read.
 
+**Filling from the CIPL.** With a CIPL loaded in Standard Shipping, **Fill from the CIPL** on
+the dangerous goods tab copies the consignee (as the SLI has it, destination country
+included) and the invoice number as shipper's reference into blank fields, and for a
+one-carton CIPL adds one battery entry per part. The count and net weight per package it
+states are offered beside each entry, a click each, and only where the CIPL's totals prove
+them; otherwise the field says why there is no figure. The airports get the CIPL's route as
+a hint, never a value, and nothing a classification turns on comes from the CIPL
+(docs/adr/0004-dangerous-goods-reads-the-cipl.md).
+
 **What it classifies.** Lithium ion, lithium metal and sodium ion, as cells or batteries,
 standalone or packed with or contained in the equipment they power. From those four facts and
 the energy content it derives the UN number, proper shipping name, packing instruction and

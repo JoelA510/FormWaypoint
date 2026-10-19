@@ -1,6 +1,6 @@
 # Prefill the dangerous goods consignment from the CIPL already loaded
 
-Kind: FEATURE · Drawn up: 2026-10-19 · Owner: Joel Abraham · Status: PROPOSED
+Kind: FEATURE · Drawn up: 2026-10-19 · Owner: Joel Abraham · Status: DONE
 
 ## Why
 
@@ -67,7 +67,7 @@ in memory; the DG tab is not given it (`src/App.tsx:759-767`, statically reviewe
   (`src/features/dangerous-goods.tsx:1-12`, `src/App.tsx:61-69`) — DEPARTS: the DG tab reads the
   CIPL. The reason for that design (no hazard questions in the standard flow) is kept: data flows
   one way, standard to DG, and the standard flow gains nothing. Recorded in
-  `docs/adr/0004-dangerous-goods-reads-the-cipl.md` (Proposed). Work waits for it.
+  `docs/adr/0004-dangerous-goods-reads-the-cipl.md`, accepted 2026-10-19.
 - **AGENTS.md rule 14, stop and agree a plan first** — APPLIES on two counts: how a dangerous
   goods figure (count, net weight) is chosen, and how a figure is rounded (the summed net weight).
   This plan is that agreement; nothing is built before it.
@@ -104,9 +104,11 @@ interface SeedPart {
   count: { value: number } | { value: null; why: string }
   netWeightKg: { value: number } | { value: null; why: string }
 }
-function ciplSeed(parsed: ParsedCipl, reconciliation: Reconciliation, draft: SliDraft): CiplSeed
+// consignee: the SLI draft's ultimate consignee, passed in by App.tsx so this module stays
+// free of carrier types
+function ciplSeed(parsed: ParsedCipl, reconciliation: Reconciliation, consignee: DgParty): CiplSeed
 function applyCiplSeed(c: DgConsignment, seed: CiplSeed, newId: (p: string) => string):
-  { consignment: DgConsignment; kept: string[]; links: Record<string, string> }
+  { consignment: DgConsignment; notes: string[]; links: Record<string, string> }
 ```
 
 A part's **count** is offered only when the CIPL states one carton, the `total-quantity` check
@@ -165,47 +167,54 @@ politely; covered by `jsx-a11y`.
 
 ## Tasks
 
-- [ ] 1. ADR 0004 accepted and `docs/product.md` confirmed by the owner — proved by: manual
-      sign-off (a decision, not code).
-- [ ] 2. `ciplSeed` in `src/domain/dangerous-goods/cipl-seed.ts` — proved by `cipl-seed.test.ts`
+- [x] 1. ADR 0004 accepted by the owner (2026-10-19). `docs/product.md` is still a draft
+      awaiting the owner's confirmation; nothing in this change depends on a line of it.
+- [x] 2. `ciplSeed` in `src/domain/dangerous-goods/cipl-seed.ts` — proved by `cipl-seed.test.ts`
       on synthetic CIPLs: a one-carton PCS shipment with one part over four lines offers count
       12 and net weight exactly 2.124 (the summed lines equal the header total); two cartons
       offer neither, with the reason; a failed `total-weight` offers no weight; an unweighted
       layout (`providesWeights: false`) offers no weight; a non-count unit offers no count;
       consignee equals `draft.ultimateConsignee`. Shown failing first with the rounding removed.
-- [ ] 3. `applyCiplSeed` — proved by `cipl-seed.test.ts`: fills blank consignee and reference;
+- [x] 3. `applyCiplSeed` — proved by `cipl-seed.test.ts`: fills blank consignee and reference;
       keeps a typed consignee and lists it in `kept`; replaces only an untouched single package's
       single empty entry; leaves a touched package alone; never changes any field on the
       Unchanged list (deep-equality on those fields before and after); returns a link per seeded
       entry.
-- [ ] 4. Wire the seed through `App.tsx` and add the card — proved by
+- [x] 4. Wire the seed through `App.tsx` and add the card — proved by
       `src/features/dangerous-goods.test.tsx`: no card without a seed; with one, the file name
       and invoice number are shown and Fill sets consignee and reference; the status line names
       what was kept.
-- [ ] 5. Figure buttons on count and net weight — proved by `dangerous-goods.test.tsx`: an offered
+- [x] 5. Figure buttons on count and net weight — proved by `dangerous-goods.test.tsx`: an offered
       figure fills its field only on click; a refused figure shows its reason and no button; the
       net weight button disappears when the article level is set to equipment.
-- [ ] 6. Update the two header comments to cite ADR 0004, and the README and `roadmap.md` DG
+- [x] 6. Update the two header comments to cite ADR 0004, and the README and `roadmap.md` DG
       sections — proved by: review; no behavior.
 
 ## Done when
 
-- [ ] Every task's test passes, and the "Unchanged" list has a test each (the standard-flow
+- [x] Every task's test passes, and the "Unchanged" list has a test each (the standard-flow
       suites passing unchanged cover the first).
-- [ ] `npm run check` passes, and every new check was shown failing first.
-- [ ] docs/product.md, the README, `roadmap.md` and ADR 0004 are updated where this change moved
-      them.
+- [x] `npm run check` passes, and every new check was shown failing first.
+- [x] The README, `roadmap.md` and ADR 0004 are updated. docs/product.md needed no change
+      from this work.
 
-## Open questions
+## Decisions taken
 
-1. **Blocking: how the dangerous goods figures are offered.** Recommended above: (C) a one-click
-   button per field, only where the reconciliation proved the figure. The alternatives are
-   (A) offer no count or weight at all, filling only parties, reference and descriptions; or
-   (B) show the CIPL figure as read-only text beside the field for the person to type. (A) is the
-   most conservative and leaves the most retyping; (B) keeps the friction but brings back
-   transcription errors, which is what the tool exists to remove.
-2. Airports: shown as a hint and not filled (recommended), or filled from the "shipped from" city
-   and the discharge port's city? The declaration takes a full airport or city name, but the
-   shipping city is not always the departure airport.
-3. Shipper's reference: is the invoice number the right value for box 4, or does this shipper use
-   another reference (the sales order, the SLI's shipment reference)?
+Agreed with the owner on 2026-10-19:
+
+1. Dangerous goods figures: option C, a one-click offer per field where the reconciliation
+   proves the figure.
+2. Airports: the CIPL's route as a hint beside each field, never a value.
+3. Shipper's reference: the invoice number.
+
+## What the build taught
+
+- `ciplSeed` reads weights from the packing-list lines, not the merged lines: reconciliation
+  fills a packing-list gap from the item library onto the merged line, and that figure is not
+  the document's. Covered by a test.
+- An entered figure in Standard Shipping makes the totals prove the entered figure, not the
+  document's, so no figure is offered once one exists. Covered by a test.
+- Run against the reported real CIPL in the browser, the seeded entry shows the default
+  chemistry's classification (lithium ion, UN3480) for a lithium metal part before anyone has
+  answered the chemistry. That is the existing-defaults risk above, now observed, and the fix
+  is still its own change.

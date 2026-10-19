@@ -55,6 +55,7 @@ import {
 } from './store/local-store'
 import { DangerousGoodsPanel } from './features/dangerous-goods'
 import { newConsignment, type DgConsignment } from './domain/dangerous-goods/types'
+import { ciplSeed } from './domain/dangerous-goods/cipl-seed'
 import type { ParsedCipl } from './domain/types'
 import { APP_VERSION, exportDiagnostics, setErrorContext } from './lib/error-log'
 
@@ -65,6 +66,9 @@ import { APP_VERSION, exportDiagnostics, setErrorContext } from './lib/error-log
  * fail in different ways. Putting the lithium battery questions in front of every ordinary
  * shipment would make them noise, and noise is how a hazard question comes to be answered
  * without being read.
+ *
+ * Data crosses in one direction only: the dangerous goods tab may fill its blank fields from
+ * the CIPL loaded here, when asked (ADR 0004). Nothing about dangerous goods comes back.
  */
 type Workflow = 'standard' | 'dangerous-goods'
 
@@ -103,6 +107,13 @@ export function App() {
   // half-entered dangerous goods consignment is measured, weighed, looked-up work; losing it
   // to a glance at the standard flow would be its own kind of data loss.
   const [dgConsignment, setDgConsignment] = useState<DgConsignment>(newConsignment)
+  // Which dangerous goods entries the CIPL added, so they can offer its figures. Never
+  // persisted: the ids are this session's, and a stale one simply offers nothing.
+  const [dgCiplLinks, setDgCiplLinks] = useState<Record<string, string>>({})
+  const addDgCiplLinks = useCallback(
+    (links: Record<string, string>) => setDgCiplLinks((prev) => ({ ...prev, ...links })),
+    [],
+  )
   const [scheduleB, setScheduleB] = useState<ScheduleBIndex | null>(null)
   const [diagnostics, setDiagnostics] = useState<string | null>(null)
 
@@ -402,6 +413,19 @@ export function App() {
   const draft = useMemo(
     () => (reconciliation ? buildDraft(reconciliation, profile, settings, adapter) : null),
     [reconciliation, profile, settings, adapter],
+  )
+
+  // The consignee from the draft rather than the header, so the destination country a person
+  // confirmed or overrode here is the one the declaration gets too.
+  const dgSeed = useMemo(
+    () =>
+      parsed && reconciliation && draft
+        ? ciplSeed(parsed, reconciliation, {
+            name: draft.ultimateConsignee.name,
+            addressLines: draft.ultimateConsignee.addressLines,
+          })
+        : null,
+    [parsed, reconciliation, draft],
   )
 
   // The document checks prove what the CIPL says; the draft checks cover the fields a
@@ -764,6 +788,9 @@ export function App() {
             consignment={dgConsignment}
             onConsignmentChange={setDgConsignment}
             onPrepared={handleDgPrepared}
+            cipl={dgSeed}
+            ciplLinks={dgCiplLinks}
+            onCiplLinks={addDgCiplLinks}
           />
         ) : (
           <>
