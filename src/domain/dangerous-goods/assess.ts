@@ -41,6 +41,9 @@ import {
 import {
   ARTICLE_LEVEL_PHRASES,
   PROHIBITED_CO_PACKED_CLASSES,
+  isAnswered,
+  unansweredQuestions,
+  type AnsweredEntry,
   type BatteryEntry,
   type DgConsignment,
   type DgPackage,
@@ -55,7 +58,8 @@ const SOC_BASIS_NAMES: Record<StateOfChargeBasis, string> = {
 }
 
 export interface EntryAssessment {
-  entry: BatteryEntry
+  /** Answered entries only; an unanswered one is in `PackageAssessment.unanswered`. */
+  entry: AnsweredEntry
   packageId: string
   classification: AirClassification
 }
@@ -63,6 +67,8 @@ export interface EntryAssessment {
 export interface PackageAssessment {
   pkg: DgPackage
   entries: EntryAssessment[]
+  /** Entries with a classification question still open: not classified, and blocking. */
+  unanswered: BatteryEntry[]
   /** Net battery weight in **one** package, summed over its entries. */
   netWeightKg: number
   /** Marks and labels this package must carry, after the consignment-level exemptions. */
@@ -75,6 +81,12 @@ export interface PackageAssessment {
 
 export interface DgAssessment {
   packages: PackageAssessment[]
+  /**
+   * False while any entry is unanswered. The aircraft, the declaration requirement and the
+   * classifications then describe only the entries that are answered, and must not be shown
+   * as the consignment's verdict.
+   */
+  complete: boolean
   /** One per distinct classification in the consignment, in first-seen order. */
   classifications: AirClassification[]
   /** The least restrictive aircraft type the contents permit. */
@@ -279,7 +291,7 @@ export function assess(consignment: DgConsignment): DgAssessment {
   )
 
   for (const pkg of consignment.packages) {
-    const entries: EntryAssessment[] = pkg.entries.map((entry) => ({
+    const entries: EntryAssessment[] = pkg.entries.filter(isAnswered).map((entry) => ({
       entry,
       packageId: pkg.id,
       classification: classifyForAir(entry.spec, { prepareToSectionI: entry.prepareToSectionI }),
@@ -293,12 +305,14 @@ export function assess(consignment: DgConsignment): DgAssessment {
       if (!byKey.has(key)) byKey.set(key, classification)
     }
 
-    const netWeightKg = kg(entries.reduce((sum, e) => sum + (e.entry.netWeightKgPerPackage ?? 0), 0))
+    // Every entry, answered or not: the package weighs what it weighs while a question is open.
+    const netWeightKg = kg(pkg.entries.reduce((sum, e) => sum + (e.netWeightKgPerPackage ?? 0), 0))
     const exemption = batteryMarkExemption(entries, totalPackages)
 
     packages.push({
       pkg,
       entries,
+      unanswered: pkg.entries.filter((e) => !isAnswered(e)),
       netWeightKg,
       // Through `applyA181`, like the declaration, the checklist and the shared-packaging
       // count. The marks go on the box, and a box holding one UN number both packed with
@@ -326,6 +340,7 @@ export function assess(consignment: DgConsignment): DgAssessment {
   ]
 
   checks.push(...structureChecks(consignment))
+  checks.push(...unansweredChecks(consignment))
   for (const assessment of packages) {
     checks.push(...entryChecks(assessment))
     checks.push(...packageChecks(assessment, consignment))
@@ -338,6 +353,7 @@ export function assess(consignment: DgConsignment): DgAssessment {
 
   return {
     packages,
+    complete: packages.every((p) => p.unanswered.length === 0),
     classifications,
     requiredAircraft,
     declarationRequired,
@@ -391,6 +407,34 @@ function structureChecks(consignment: DgConsignment): CheckResult[] {
       passed: empty.length === 0,
     },
   ]
+}
+
+/**
+ * One blocking check per entry whose classification questions are not all answered.
+ *
+ * Numbered as the screen and the paperwork number packages, so "package 2" here is the box
+ * the editor calls Package 2.
+ */
+function unansweredChecks(consignment: DgConsignment): CheckResult[] {
+  return overpackOrder(consignment.packages, (p) => p.overpackId).flatMap((pkg, packageIndex) =>
+    pkg.entries.flatMap((entry, entryIndex) => {
+      const open = unansweredQuestions(entry)
+      if (!open.length) return []
+      const name = entry.description || `Battery type ${entryIndex + 1} in package ${packageIndex + 1}`
+      return [
+        {
+          id: `dg.unanswered.${pkg.id}/${entry.id}`,
+          severity: 'blocking' as const,
+          title: `${name}: described`,
+          detail:
+            `Not answered: ${open.join(', ')}. Nothing about this battery type is classified until they are — ` +
+            'the classification is what the UN number, the limits and every mark follow from, and it is not ' +
+            'assumed.',
+          passed: false,
+        },
+      ]
+    }),
+  )
 }
 
 /** Everything that is true or false about one battery type, regardless of its package. */
@@ -534,7 +578,7 @@ function entryChecks(assessment: PackageAssessment): CheckResult[] {
  * irrespective of whether the cells it is composed of are of a tested type, so the summary
  * has to name the assembled article.
  */
-function testSummaryCheck(entry: BatteryEntry, ref: string, name: string): CheckResult {
+function testSummaryCheck(entry: AnsweredEntry, ref: string, name: string): CheckResult {
   // The exception is written against button cells *installed in equipment* — the phrase is
   // the whole of it. A loose button cell is an ordinary standalone cell and needs its
   // summary like any other; reading the flag without the configuration let a UN3480
@@ -617,7 +661,7 @@ function testSummaryCheck(entry: BatteryEntry, ref: string, name: string): Check
  * appliance that is right; for a self-propelled apparatus designed to carry goods it may not
  * be, and a misdeclared UN number is a substantive rejection rather than a formatting one.
  */
-function vehicleCheck(entry: BatteryEntry, ref: string, name: string): CheckResult {
+function vehicleCheck(entry: AnsweredEntry, ref: string, name: string): CheckResult {
   const passed = entry.vehicleDetermination === 'not-a-vehicle'
   return {
     id: `dg.vehicle.${ref}`,

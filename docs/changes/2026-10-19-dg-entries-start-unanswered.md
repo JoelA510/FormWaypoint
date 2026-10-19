@@ -1,6 +1,6 @@
 # Battery entries start unanswered instead of pre-classified
 
-Kind: BUGFIX · Drawn up: 2026-10-19 · Owner: Joel Abraham · Status: PROPOSED
+Kind: BUGFIX · Drawn up: 2026-10-19 · Owner: Joel Abraham · Status: DONE
 
 ## Why
 
@@ -158,11 +158,11 @@ fit the widened type. Records are never loaded back into the editor (they are on
 
 ## Tasks
 
-- [ ] 1. Types, `emptyEntry`, `unansweredQuestions` and `isAnswered` — proved by
+- [x] 1. Types, `emptyEntry`, `unansweredQuestions` and `isAnswered` — proved by
       `types.test.ts` (new): a fresh entry lists all five questions; each answered in turn drops
       off the list; a fully answered entry passes `isAnswered`; `wattHours` and `lithiumContentG`
       are not on the list (the energy check already covers them).
-- [ ] 2. `assess` partitions entries and adds `dg.unanswered` and `complete` — proved by
+- [x] 2. `assess` partitions entries and adds `dg.unanswered` and `complete` — proved by
       `assess.test.ts`:
       - `assess(newConsignment())` has no classifications, `complete: false`,
         `canGenerate: false`, and a failing `dg.unanswered.*` check naming all five questions;
@@ -172,31 +172,36 @@ fit the widened type. Records are never loaded back into the editor (they are on
         as alone and keeps both net weights in its total.
 
       Shown failing first against today's `emptyEntry`.
-- [ ] 3. Declaration and checklist over a mixed consignment — proved by `dgd.test.ts` and
+- [x] 3. Declaration and checklist over a mixed consignment — proved by `dgd.test.ts` and
       `checklist.test.ts`: both build without throwing from a consignment with an unanswered
       entry, and neither mentions it as classified.
-- [ ] 4. UI: "Not answered" options, the chemistry-first energy field, the incomplete badge and
+- [x] 4. UI: "Not answered" options, the chemistry-first energy field, the incomplete badge and
       the per-entry line — proved by `dangerous-goods.test.tsx`:
       - a fresh panel shows "classification incomplete" and no UN number;
       - choosing the chemistry reveals the matching energy field;
       - answering all five shows the classification line;
       - the CIPL-filled entry shows "Not classified".
-- [ ] 5. Old records still render — proved by `dangerous-goods.test.tsx`: the history panel
+- [x] 5. Old records still render — proved by `dangerous-goods.test.tsx`: the history panel
       lists a record whose consignment holds a fully answered entry in the old shape.
-- [ ] 6. Docs: the README DG section and `roadmap.md`, saying entries start unanswered — proved
+- [x] 6. Docs: the README DG section and `roadmap.md`, saying entries start unanswered — proved
       by: review; no behavior.
 
 ## Done when
 
-- [ ] Every task's test passes, and the "Unchanged" list has a test each.
-- [ ] `npm run check` passes, and every new check was shown failing first.
-- [ ] The README and `roadmap.md` are updated. docs/product.md needs no change.
+- [x] Every task's test passes, and the "Unchanged" list has a test each.
+- [x] `npm run check` passes, and every new check was shown failing first.
+- [x] The README and `roadmap.md` are updated. docs/product.md needs no change.
 
-## Open questions
+## Decisions taken
 
-1. **Blocking: should condition be in this change?** Recommended yes. It defaults to "Sound -
-   undamaged, not for disposal" in exactly the way chemistry defaults, and it decides whether the
-   battery is forbidden by air (damaged or defective) or falls under the recycling provisions.
-   Leaving it out keeps the change to the four classification inputs and keeps the condition
-   default as it is.
-2. Not blocking: should the sibling defaults under "Out of scope" get their own plan next?
+Agreed with the owner on 2026-10-19: condition is included. The sibling defaults under "Out of
+scope" get their own plan next.
+
+## What the build taught
+
+- `test-support.ts`'s `entry()` builder had been inheriting `condition: 'sound'` from
+  `emptyEntry`. It now states it, which is the builder's stated job ("everything the shipper is
+  responsible for is already answered"). No existing test changed otherwise.
+- The panel's own help text names UN3480 and UN3090, so a UI test asserting "no UN number on
+  screen" passes or fails on prose. The tests match the classification line's shape
+  ("Class 9 · PI") instead.

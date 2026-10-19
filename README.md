@@ -111,6 +111,13 @@ arithmetic, the other asks what is in a box and tells you what the regulations m
 Folding dangerous goods into the standard flow would put a hazard question in front of every
 ordinary shipment, which is how hazard questions come to be answered without being read.
 
+**Nothing starts answered.** A new battery type's chemistry, cell or battery, shipping
+configuration, article level and condition all read "Not answered". Until every one is chosen
+the battery type is not classified, a blocking check names what is open, and the consignment
+shows "classification incomplete" rather than a verdict on goods nobody has described. The
+energy field waits for the chemistry, so a lithium metal battery is asked for its lithium
+content rather than offered a watt-hour box.
+
 **Filling from the CIPL.** With a CIPL loaded in Standard Shipping, **Fill from the CIPL** on
 the dangerous goods tab copies the consignee (as the SLI has it, destination country
 included) and the invoice number as shipper's reference into blank fields, and for a

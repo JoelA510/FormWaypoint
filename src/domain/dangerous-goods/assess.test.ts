@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest'
 import { consignment, entry, overpack, pkg } from './test-support'
 import { assess, packageCountInConsignment } from './assess'
+import { emptyEntry, newConsignment } from './types'
 
 function check(result: ReturnType<typeof assess>, idPrefix: string) {
   return result.checks.find((c) => c.id.startsWith(idPrefix))
@@ -1584,5 +1585,51 @@ describe('the button-cell test-summary exception', () => {
 
   it('excepts them once they are installed in equipment', () => {
     expect(check(assess(buttonCells('contained-in-equipment')), 'dg.test-summary.p1')).toMatchObject({ passed: true })
+  })
+})
+
+describe('a battery type nobody has described', () => {
+  // emptyEntry, not the test-support builder: this is the entry a person gets on screen.
+  const fresh = (): ReturnType<typeof emptyEntry> => emptyEntry('ent-new')
+
+  it('is not classified, blocks generation, and says which questions are open', () => {
+    const result = assess(newConsignment())
+    expect(result.classifications).toEqual([])
+    expect(result.complete).toBe(false)
+    expect(result.canGenerate).toBe(false)
+    const open = result.checks.find((c) => c.id.startsWith('dg.unanswered.'))
+    expect(open).toMatchObject({ severity: 'blocking', passed: false })
+    expect(open?.detail).toContain('chemistry, cell or battery, shipping configuration, article level, condition')
+  })
+
+  it('no longer classifies as lithium ion when only a watt-hour figure was typed', () => {
+    // The reported failure: a lithium metal pack, rated in Wh from its label, every other
+    // figure filled in, chemistry never opened. It used to classify as UN3480 PI 965 IB.
+    const e = fresh()
+    const typed = consignment([
+      pkg('p1', [{ ...e, spec: { ...e.spec, wattHours: 2.4 }, netWeightKgPerPackage: 2.124, countPerPackage: 12 }]),
+    ])
+    const result = assess(typed)
+    expect(result.classifications.map((c) => c.unNumber)).not.toContain('UN3480')
+    expect(result.classifications).toEqual([])
+    expect(result.canGenerate).toBe(false)
+  })
+
+  it('leaves the answered entry beside it classified exactly as it would be alone, and keeps both weights', () => {
+    const answered = entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 7 })
+    const alone = assess(consignment([pkg('p1', [answered])]))
+    const mixed = assess(consignment([pkg('p1', [answered, { ...fresh(), netWeightKgPerPackage: 0.5 }])]))
+    expect(mixed.packages[0].entries.map((e) => e.classification)).toEqual(
+      alone.packages[0].entries.map((e) => e.classification),
+    )
+    expect(mixed.packages[0].unanswered.map((e) => e.id)).toEqual(['ent-new'])
+    expect(mixed.packages[0].netWeightKg).toBe(7.5)
+    expect(alone.complete).toBe(true)
+    expect(mixed.complete).toBe(false)
+  })
+
+  it('names an unanswered entry by its description when it has one', () => {
+    const result = assess(consignment([pkg('p1', [{ ...fresh(), description: 'backup battery packs' }])]))
+    expect(result.checks.find((c) => c.id.startsWith('dg.unanswered.'))?.title).toBe('backup battery packs: described')
   })
 })

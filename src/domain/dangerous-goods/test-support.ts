@@ -23,6 +23,7 @@ export function entry(id: string, spec: Partial<BatterySpec>, overrides: Partial
       ...spec,
     },
     articleLevel: 'battery-pack',
+    condition: 'sound',
     netWeightKgPerPackage: 1,
     testSummaryScope: 'battery-pack',
     testSummaryReference: 'TR-2026-0041',

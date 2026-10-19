@@ -49,6 +49,7 @@ import {
   emptyOverpack,
   emptyPackage,
   newConsignment,
+  unansweredQuestions,
   nextDgId,
   PROHIBITED_CO_PACKED_CLASSES,
   type ArticleLevel,
@@ -349,12 +350,24 @@ export function DangerousGoodsPanel({
           description="One or more packages from one shipper, at one time and one address, to one consignee."
           actions={
             <div className="flex items-center gap-2">
-              <Badge tone={assessment.declarationRequired ? 'warn' : 'accent'}>
-                {assessment.declarationRequired ? 'declaration required' : 'Section II — no declaration'}
-              </Badge>
-              <Badge tone={assessment.requiredAircraft === 'cargo-aircraft-only' ? 'block' : 'neutral'}>
-                {assessment.requiredAircraft === 'cargo-aircraft-only' ? 'cargo aircraft only' : 'passenger permitted'}
-              </Badge>
+              {/*
+                One badge while anything is undescribed. The two verdicts below are computed
+                from the answered entries only, and on an empty consignment they read
+                "Section II — no declaration, passenger permitted" about goods nobody has
+                described.
+              */}
+              {assessment.complete ? (
+                <>
+                  <Badge tone={assessment.declarationRequired ? 'warn' : 'accent'}>
+                    {assessment.declarationRequired ? 'declaration required' : 'Section II — no declaration'}
+                  </Badge>
+                  <Badge tone={assessment.requiredAircraft === 'cargo-aircraft-only' ? 'block' : 'neutral'}>
+                    {assessment.requiredAircraft === 'cargo-aircraft-only' ? 'cargo aircraft only' : 'passenger permitted'}
+                  </Badge>
+                </>
+              ) : (
+                <Badge tone="warn">classification incomplete</Badge>
+              )}
               {/*
                 Explicit, because this consignment now survives a tab switch. Held state with
                 no way to clear it is how the next shipment inherits the last one's figures.
@@ -444,7 +457,9 @@ export function DangerousGoodsPanel({
               <Field
                 label="Aircraft"
                 hint={
-                  assessment.requiredAircraft === 'cargo-aircraft-only'
+                  !assessment.complete
+                    ? 'What the contents allow is known once every battery type is described.'
+                    : assessment.requiredAircraft === 'cargo-aircraft-only'
                     ? 'The contents restrict this to cargo aircraft only.'
                     : 'A consignment the goods allow on a passenger aircraft may still be offered as cargo only.'
                 }
@@ -922,6 +937,11 @@ function PackagesEditor({
                         ciplPart={partFor(entry.id)}
                         onChange={(changes) => onUpdateEntry(pkg.id, entry.id, changes)}
                       />
+                      {unansweredQuestions(entry).length ? (
+                        <p className="mt-3 border-t pt-2 text-sm text-[var(--color-ink-soft)]">
+                          Not classified: answer {unansweredQuestions(entry).join(', ')}.
+                        </p>
+                      ) : null}
                       {classification ? (
                         <p className="mt-3 border-t pt-2 text-sm">
                           <span className="font-semibold tabular">{classification.unNumber}</span>{' '}
@@ -1075,9 +1095,10 @@ function EntryEditor({
           {(id) => (
             <Select
               id={id}
-              value={entry.spec.chemistry}
-              onChange={(e) => setSpec({ chemistry: e.target.value as Chemistry })}
+              value={entry.spec.chemistry ?? ''}
+              onChange={(e) => setSpec({ chemistry: e.target.value ? (e.target.value as Chemistry) : null })}
             >
+              <option value="">Not answered</option>
               {(Object.keys(CHEMISTRY_LABELS) as Chemistry[]).map((value) => (
                 <option key={value} value={value}>
                   {CHEMISTRY_LABELS[value]}
@@ -1090,9 +1111,10 @@ function EntryEditor({
           {(id) => (
             <Select
               id={id}
-              value={entry.spec.form}
-              onChange={(e) => setSpec({ form: e.target.value as CellOrBattery })}
+              value={entry.spec.form ?? ''}
+              onChange={(e) => setSpec({ form: e.target.value ? (e.target.value as CellOrBattery) : null })}
             >
+              <option value="">Not answered</option>
               {(Object.keys(FORM_LABELS) as CellOrBattery[]).map((value) => (
                 <option key={value} value={value}>
                   {FORM_LABELS[value]}
@@ -1105,9 +1127,10 @@ function EntryEditor({
           {(id) => (
             <Select
               id={id}
-              value={entry.spec.configuration}
-              onChange={(e) => setSpec({ configuration: e.target.value as Configuration })}
+              value={entry.spec.configuration ?? ''}
+              onChange={(e) => setSpec({ configuration: e.target.value ? (e.target.value as Configuration) : null })}
             >
+              <option value="">Not answered</option>
               {(Object.keys(CONFIGURATION_LABELS) as Configuration[]).map((value) => (
                 <option key={value} value={value}>
                   {CONFIGURATION_LABELS[value]}
@@ -1119,7 +1142,14 @@ function EntryEditor({
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {isMetal ? (
+        {entry.spec.chemistry == null ? (
+          // Which figure is asked depends on the chemistry: grams of lithium for lithium metal,
+          // watt-hours otherwise. Offering watt-hours before it is answered is how a lithium
+          // metal battery came to be rated in Wh and classified as lithium ion.
+          <p className="self-end pb-2 text-sm text-[var(--color-ink-soft)]">
+            Choose the chemistry to enter the watt-hours or lithium content.
+          </p>
+        ) : isMetal ? (
           <Field label="Lithium content per cell/battery (g)" hint="Not the package total.">
             {(id) => (
               <Input
@@ -1191,9 +1221,10 @@ function EntryEditor({
           {(id) => (
             <Select
               id={id}
-              value={entry.articleLevel}
-              onChange={(e) => onChange({ articleLevel: e.target.value as ArticleLevel })}
+              value={entry.articleLevel ?? ''}
+              onChange={(e) => onChange({ articleLevel: e.target.value ? (e.target.value as ArticleLevel) : null })}
             >
+              <option value="">Not answered</option>
               {(Object.keys(ARTICLE_LEVEL_LABELS) as ArticleLevel[]).map((value) => (
                 <option key={value} value={value}>
                   {ARTICLE_LEVEL_LABELS[value]}
@@ -1318,9 +1349,10 @@ function EntryEditor({
           {(id) => (
             <Select
               id={id}
-              value={entry.condition}
-              onChange={(e) => onChange({ condition: e.target.value as BatteryCondition })}
+              value={entry.condition ?? ''}
+              onChange={(e) => onChange({ condition: e.target.value ? (e.target.value as BatteryCondition) : null })}
             >
+              <option value="">Not answered</option>
               {(Object.keys(CONDITION_LABELS) as BatteryCondition[]).map((value) => (
                 <option key={value} value={value}>
                   {CONDITION_LABELS[value]}
@@ -1408,6 +1440,12 @@ function RequirementsPanel({
         description="Marks, labels and the air waybill wording — the whole of the hazard communication for a Section II consignment."
       />
       <CardBody className="space-y-4">
+        {!assessment.complete ? (
+          <p className="rounded-md border border-[var(--color-warn)] bg-[var(--color-warn-soft)] px-3 py-2 text-sm">
+            Incomplete: a battery type is not fully described, so it is not classified and nothing it requires is
+            listed here. Answer the questions the checks name.
+          </p>
+        ) : null}
         {assessment.airWaybillStatements.length ? (
           <div className="rounded-md border bg-[var(--color-sunken)] px-3 py-2">
             <p className="text-xs font-semibold tracking-wide text-[var(--color-ink-soft)] uppercase">
