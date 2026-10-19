@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { emptyEntry, isAnswered, unansweredQuestions, type BatteryEntry } from './types'
+import { emptyEntry, emptyOverpack, emptyPackage, isAnswered, unansweredQuestions, type BatteryEntry } from './types'
 
 describe('what a battery entry still needs answering', () => {
   it('starts with every classification question open, not pre-answered', () => {
@@ -35,5 +35,12 @@ describe('what a battery entry still needs answering', () => {
       condition: 'sound',
     }
     expect(isAnswered(answered)).toBe(true)
+  })
+})
+
+describe('what a new package and overpack say before anyone fills them in', () => {
+  it('names no packaging, counts nothing, and leaves co-packing unanswered', () => {
+    expect(emptyPackage('p1', 'e1')).toMatchObject({ packagingType: '', count: 0, coPackedWithProhibitedClass: null })
+    expect(emptyOverpack('o1')).toMatchObject({ count: 0, coPackedWithProhibitedClass: null })
   })
 })

@@ -7,7 +7,8 @@
 import { describe, expect, it } from 'vitest'
 import { consignment, entry, overpack, pkg } from './test-support'
 import { assess, packageCountInConsignment } from './assess'
-import { emptyEntry, newConsignment } from './types'
+import { emptyEntry, emptyPackage, newConsignment } from './types'
+import { buildDeclaration } from './dgd'
 
 function check(result: ReturnType<typeof assess>, idPrefix: string) {
   return result.checks.find((c) => c.id.startsWith(idPrefix))
@@ -1631,5 +1632,70 @@ describe('a battery type nobody has described', () => {
   it('names an unanswered entry by its description when it has one', () => {
     const result = assess(consignment([pkg('p1', [{ ...fresh(), description: 'backup battery packs' }])]))
     expect(result.checks.find((c) => c.id.startsWith('dg.unanswered.'))?.title).toBe('backup battery packs: described')
+  })
+})
+
+describe('a package nobody has described', () => {
+  // The panel's own package, holding a fully answered Section IB battery type: only the box
+  // is left as the panel made it.
+  const sectionIB = () => entry('e1', { chemistry: 'lithium-metal', lithiumContentG: 0.9 }, { netWeightKgPerPackage: 2.124, wattHourMarkedOnCase: false })
+  const panelPackage = (entries = [sectionIB()]) => ({ ...emptyPackage('p1', 'unused'), entries, grossWeightKg: 3, equipmentNetWeightKg: 0 })
+
+  it('no longer declares a box type or a count nobody gave', () => {
+    const shipment = consignment([panelPackage()])
+    const result = assess(shipment)
+    expect(result.canGenerate).toBe(false)
+    expect(result.complete).toBe(false)
+    expect(JSON.stringify(buildDeclaration(shipment, result).lines)).not.toContain('Fibreboard box')
+    expect(check(result, 'dg.described-packaging.p1')).toMatchObject({ severity: 'blocking', passed: false })
+    expect(check(result, 'dg.package-count')).toMatchObject({ passed: false })
+    expect(check(result, 'dg.package-count')!.detail).toContain('is not stated')
+    expect(check(result, 'dg.co-pack.p1')).toMatchObject({ severity: 'blocking', passed: false })
+    expect(check(result, 'dg.co-pack.p1')!.detail).toMatch(/^Not answered/)
+  })
+
+  it('blocks on a blank packaging only where a declaration is required, and warns otherwise', () => {
+    const drills = entry('e1', { configuration: 'contained-in-equipment', wattHours: 76 }, {
+      netWeightKgPerPackage: 1.5,
+      countPerPackage: 3,
+      stateOfChargePercent: 20,
+    })
+    const excepted = assess(consignment([pkg('p1', [drills], { packagingType: '' })]))
+    expect(excepted.declarationRequired).toBe(false)
+    expect(check(excepted, 'dg.described-packaging.p1')).toMatchObject({ severity: 'warning', passed: false })
+    expect(excepted.canGenerate).toBe(true)
+
+    const regulated = assess(consignment([pkg('p1', [sectionIB()], { packagingType: '  ' })]))
+    expect(check(regulated, 'dg.described-packaging.p1')).toMatchObject({ severity: 'blocking', passed: false })
+
+    const described = assess(consignment([pkg('p1', [sectionIB()])]))
+    expect(check(described, 'dg.described-packaging.p1')).toMatchObject({ passed: true })
+  })
+
+  it('reads co-packing three ways', () => {
+    const answer = (value: boolean | null) =>
+      check(assess(consignment([pkg('p1', [sectionIB()], { coPackedWithProhibitedClass: value })])), 'dg.co-pack.p1')!
+    expect(answer(null)).toMatchObject({ passed: false })
+    expect(answer(true)).toMatchObject({ passed: false })
+    expect(answer(true).detail).toContain('Repack the other goods separately')
+    expect(answer(false)).toMatchObject({ passed: true })
+    expect(answer(false).detail).not.toContain('declared')
+  })
+
+  it('reads overpack co-packing three ways, and counts an overpack nobody counted as unstated', () => {
+    const inOverpack = (over: Parameters<typeof overpack>[1]) =>
+      assess(consignment([pkg('p1', [sectionIB()], { overpackId: 'o1' })], { overpacks: [overpack('o1', over)] }))
+    expect(check(inOverpack({ coPackedWithProhibitedClass: null }), 'dg.overpack-co-pack')).toMatchObject({ passed: false })
+    expect(check(inOverpack({ coPackedWithProhibitedClass: null }), 'dg.overpack-co-pack')!.detail).toMatch(/^Not answered/)
+    expect(check(inOverpack({ coPackedWithProhibitedClass: false }), 'dg.overpack-co-pack')).toMatchObject({ passed: true })
+    expect(inOverpack({ count: 0 }).complete).toBe(false)
+    expect(check(inOverpack({ count: 0 }), 'dg.overpack-count')).toMatchObject({ passed: false })
+    expect(inOverpack({}).complete).toBe(true)
+  })
+
+  it('is incomplete while a package count is unstated, though every battery is answered', () => {
+    const result = assess(consignment([pkg('p1', [sectionIB()], { count: 0 })]))
+    expect(result.packages[0].unanswered).toEqual([])
+    expect(result.complete).toBe(false)
   })
 })

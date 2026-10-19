@@ -1,6 +1,6 @@
 # Package and overpack fields start unanswered where a default speaks for the shipper
 
-Kind: BUGFIX · Drawn up: 2026-10-19 · Owner: Joel Abraham · Status: PROPOSED
+Kind: BUGFIX · Drawn up: 2026-10-19 · Owner: Joel Abraham · Status: DONE
 
 ## Why
 
@@ -28,8 +28,8 @@ check shouldn't report "declared" for an answer nobody gave (AGENTS.md project r
     only to two packages or fewer. A count left at 1 for a consignment of three boxes makes that
     exemption easier to grant (statically reviewed, `batteryMarkExemption` in `assess.ts`).
 - **After:**
-  - **Packaging** starts blank. A new blocking check, `dg.packaging-type.<package>`, fails on a
-    blank description. Today a blank one is filed as the word "package" (`dgd.ts:273`,
+  - **Packaging** starts blank. A new check, `dg.described-packaging.<package>`, fails on a blank
+    description: blocking where the package needs a declaration, a warning on an excepted one. Today a blank one is filed as the word "package" (`dgd.ts:273`,
     `checklist.ts:143`).
   - **Package count** and **overpack count** start unstated and show as blank inputs. The
     existing `dg.package-count` and `dg.overpack-count` checks already refuse a count that isn't
@@ -69,7 +69,7 @@ reviewed):
 
 - **Project rules 1 and 2** — brings the code into line: no unchosen figure or description on
   the declaration, and no compliance answer given by default.
-- **Project rule 4** — FOLLOWS: one new blocking check (`dg.packaging-type`), shown failing
+- **Project rule 4** — FOLLOWS: one new check (`dg.described-packaging`, blocking or warning), shown failing
   first; the co-packing checks gain a blocking "not answered" state rather than passing.
 - **AGENTS.md rule 14** — APPLIES: the shape of a persisted record (`coPackedWithProhibitedClass`
   widens to `boolean | null` on `DgPackage` and `Overpack`, both stored in
@@ -96,9 +96,10 @@ reviewed):
 
 **Checks** (`assess.ts`):
 
-- New `dg.packaging-type.<package>`, blocking, in `packageChecks`. Title: "<label>: packaging
-  described". Fails when `packagingType.trim()` is empty, with the detail "The declaration names
-  the packaging (for example 'Fibreboard box'); it is not assumed."
+- New `dg.described-packaging.<package>` in `packageChecks`: blocking when the package needs a
+  declaration, a warning otherwise. Title: "<label>: packaging described". Fails when
+  `packagingType.trim()` is empty, with a detail saying the declaration names the packaging
+  (blocking case) or that the bench checklist does (warning case).
 - `dg.co-pack.<package>` gets three cases:
   - `null` fails: "Not answered: whether this box also holds dangerous goods that may not travel
     with lithium batteries", followed by the list;
@@ -106,13 +107,15 @@ reviewed):
   - `false` passes, with "Nothing prohibited in the same outer packaging" followed by the list.
     It no longer says "declared".
 - The overpack co-packing check (`conflicted`, `assess.ts:1661`) blocks on `null` the same way.
-- `dg.package-count` and `dg.overpack-count` need no logic change. Their detail for a count of 0
-  should read "How many identical packages is not stated" instead of the half-a-box wording,
-  which is about non-integers.
+- `dg.package-count` needs no logic change; its detail for a count of 0 reads "how many identical
+  packages is not stated" instead of the half-a-box wording, which is about non-integers.
+  `dg.overpack-count` already says "Say how many there are" and is unchanged.
 
 **Labels.** `packageLabel` (`assess.ts:280`) falls back to "package" for a blank description.
-That is right for check titles and stays. The declaration and checklist fallbacks to "package"
-stay too: they are only reachable while `dg.packaging-type` blocks generation.
+That is right for check titles and stays. The declaration's fallback is reachable only while
+`dg.described-packaging` blocks, since only declaration packages reach the declaration. The bench
+checklist's fallback is reachable for an excepted package left blank, under the warning: it
+prints "package", which is the agreed outcome for Section II.
 
 **UI** (`src/features/dangerous-goods.tsx`):
 
@@ -121,7 +124,8 @@ stay too: they are only reachable while `dg.packaging-type` blocks generation.
 - **Counts:** the package count and overpack count inputs show blank for 0 (`value={count || ''}`).
 - **Co-packing:** the two "Also holds prohibited dangerous goods" toggles become `Select`s with
   Not answered / No / Yes, under the same labels and hints.
-- **Badge:** the "1 package · 0 kg" badge reads "packages not counted" while any count is 0.
+- **Badges:** the "1 package · 0 kg" badge reads "packages not counted" while any count is 0, and
+  the consignment badge reads "packages incomplete" while a count or co-packing answer is open.
 - Native controls with visible labels; nothing new for keyboard or screen readers.
 
 **Persistence.** No IndexedDB change. Records are written only through the downloads, which a
@@ -142,36 +146,45 @@ hold booleans and whole counts, which still fit.
 
 ## Tasks
 
-- [ ] 1. Defaults and widened types, with `test-support` stating the answered values — proved
+- [x] 1. Defaults and widened types, with `test-support` stating the answered values — proved
       by `types.test.ts`: `emptyPackage` and `emptyOverpack` start with a blank packaging, count
       0 and co-packing `null`. Also by every existing DG suite passing unchanged.
-- [ ] 2. `dg.packaging-type` — proved by `assess.test.ts`:
+- [x] 2. `dg.described-packaging` — proved by `assess.test.ts`:
       - a blank packaging fails it and blocks generation;
       - a described one passes;
       - the executed reproduction above no longer declares "Fibreboard box" unless one was
         typed.
 
       Shown failing first against today's `emptyPackage`.
-- [ ] 3. Three-way co-packing on packages and overpacks — proved by `assess.test.ts`: `null`
+- [x] 3. Three-way co-packing on packages and overpacks — proved by `assess.test.ts`: `null`
       blocks with "Not answered", `true` blocks as today, `false` passes without "declared".
-- [ ] 4. `complete` covers unstated counts and unanswered co-packing — proved by
+- [x] 4. `complete` covers unstated counts and unanswered co-packing — proved by
       `assess.test.ts`: a consignment with every battery answered but a package count of 0 has
       `complete: false`.
-- [ ] 5. UI: blank count inputs, the three-way selects, the badge — proved by
+- [x] 5. UI: blank count inputs, the three-way selects, the badge — proved by
       `dangerous-goods.test.tsx`:
       - a fresh panel shows blank packaging and count, and co-packing "Not answered";
       - choosing "No" and typing a count of 1 and a packaging description clears those checks.
-- [ ] 6. README DG section and `roadmap.md` — proved by: review.
+- [x] 6. README DG section and `roadmap.md` — proved by: review.
 
 ## Done when
 
-- [ ] Every task's test passes, and the "Unchanged" list has a test each.
-- [ ] `npm run check` passes, and every new check was shown failing first.
-- [ ] The README and `roadmap.md` are updated. docs/product.md needs no change.
+- [x] Every task's test passes, and the "Unchanged" list has a test each.
+- [x] `npm run check` passes, and every new check was shown failing first.
+- [x] The README and `roadmap.md` are updated. docs/product.md needs no change.
 
-## Open questions
+## Decisions taken
 
-1. **Blocking: should a blank packaging description block every package, or only where a
-   declaration is required?** Recommended: every package. The bench checklist prints it for
-   Section II packages too, and the forwarder reads it. The alternative blocks only for
-   Sections IA, IB and I and lets a Section II checklist read "package".
+Agreed with the owner on 2026-10-19: a blank packaging description blocks only where the package
+needs a declaration, and is a warning on an excepted (Section II) package.
+
+## What the build taught
+
+- The check was first named `dg.packaging-type`, which existing tests matched by the prefix
+  `dg.packaging` (the UN specification packaging check). It is `dg.described-packaging`.
+- The consignment badge distinguishes "classification incomplete" (a battery question open)
+  from "packages incomplete" (a count or co-packing answer open), and the package badge reads
+  "packages not counted" instead of "0 packages".
+- Not done here, and worth deciding separately: the CIPL fill could offer the package count
+  when the CIPL states one carton. That is a dangerous goods figure, so it needs its own
+  agreement (rule 14).

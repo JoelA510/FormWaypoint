@@ -125,6 +125,14 @@ const choose = async (label: string, value: string) => {
   })
 }
 
+const type = async (label: string, value: string) => {
+  const input = control<HTMLInputElement>(label)
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+}
+
 describe('filling the consignment from the CIPL', () => {
   const container = { get textContent() { return view().textContent } }
 
@@ -275,5 +283,33 @@ describe('a battery type nobody has described yet', () => {
     await mount(null, [old])
     expect(view().textContent).toContain('AWB-1')
     expect(view().textContent).toContain('PI 968 IB')
+  })
+})
+
+describe('a package nobody has described yet', () => {
+  it('starts with no packaging, no count and co-packing unanswered', async () => {
+    await mount(null)
+    expect(control<HTMLInputElement>('Packaging').value).toBe('')
+    expect(control<HTMLInputElement>('Identical packages').value).toBe('')
+    expect(control<HTMLSelectElement>('Also holds prohibited dangerous goods').value).toBe('')
+    expect(view().textContent).toContain('packages not counted')
+  })
+
+  it('is complete only once the box is described as well as the batteries', async () => {
+    await mount(null)
+    await choose('Chemistry', 'lithium-metal')
+    await choose('Cell or battery', 'battery')
+    await choose('Shipping configuration', 'standalone')
+    await choose('Article level', 'battery-pack')
+    await choose('Condition', 'sound')
+    expect(view().textContent).toContain('packages incomplete')
+
+    await type('Identical packages', '1')
+    expect(view().textContent).not.toContain('packages not counted')
+    await type('Packaging', 'Fibreboard box')
+    expect(view().textContent).toContain('packages incomplete')
+    await choose('Also holds prohibited dangerous goods', 'no')
+    expect(view().textContent).not.toContain('packages incomplete')
+    expect(view().textContent).not.toContain('classification incomplete')
   })
 })

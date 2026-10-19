@@ -205,6 +205,10 @@ export interface DgPackage {
    * rather than two overpacks between which some number of boxes has been divided — and the
    * declaration's own package count, which is the total across every overpack, is derived
    * from the two numbers rather than typed.
+   *
+   * Zero is "not stated", and the count checks refuse it: a new package starts at zero rather
+   * than one, because one is a figure nobody typed and it decides the two-package battery mark
+   * exemption.
    */
   count: number
   /**
@@ -242,8 +246,11 @@ export interface DgPackage {
    * flammable gases, Class 3 flammable liquids, Division 4.1 flammable solids, and Division
    * 5.1 oxidizers. Division 1.4S is expressly permitted, which is the part most often got
    * wrong in the restrictive direction.
+   *
+   * Null until answered. Defaulted to false, the co-packing check passed on a box nobody had
+   * said anything about.
    */
-  coPackedWithProhibitedClass: boolean
+  coPackedWithProhibitedClass: boolean | null
 
   entries: BatteryEntry[]
   /** The overpack these packages travel in, if any. */
@@ -279,8 +286,11 @@ export interface Overpack {
    * visible; a crate does not.
    */
   innerMarksVisible: boolean
-  /** Whether this overpack also holds packages of dangerous goods lithium may not travel with. */
-  coPackedWithProhibitedClass: boolean
+  /**
+   * Whether this overpack also holds packages of dangerous goods lithium may not travel with.
+   * Null until answered, like the package's.
+   */
+  coPackedWithProhibitedClass: boolean | null
 }
 
 export interface DgParty {
@@ -439,20 +449,23 @@ export function emptyEntry(id: string): BatteryEntry {
 export function emptyPackage(id: string, entryId: string): DgPackage {
   return {
     id,
-    packagingType: 'Fibreboard box',
-    count: 1,
+    // Blank, zero and unanswered: each of these reaches the declaration or a check, and a
+    // default would put the shipper's name to a box type, a count or a co-packing answer they
+    // never gave.
+    packagingType: '',
+    count: 0,
     unSpecificationMark: '',
     packagingAuthorizationLimitKg: null,
     grossWeightKg: null,
     equipmentNetWeightKg: null,
-    coPackedWithProhibitedClass: false,
+    coPackedWithProhibitedClass: null,
     entries: [emptyEntry(entryId)],
     overpackId: null,
   }
 }
 
 export function emptyOverpack(id: string): Overpack {
-  return { id, marks: '', count: 1, innerMarksVisible: false, coPackedWithProhibitedClass: false }
+  return { id, marks: '', count: 0, innerMarksVisible: false, coPackedWithProhibitedClass: null }
 }
 
 /**

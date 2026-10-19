@@ -116,7 +116,10 @@ configuration, article level and condition all read "Not answered". Until every 
 the battery type is not classified, a blocking check names what is open, and the consignment
 shows "classification incomplete" rather than a verdict on goods nobody has described. The
 energy field waits for the chemistry, so a lithium metal battery is asked for its lithium
-content rather than offered a watt-hour box.
+content rather than offered a watt-hour box. The same holds for the box: a new package has no
+packaging description, no count and an unanswered co-packing question, and overpacks start
+uncounted and unanswered too. A blank packaging blocks wherever the package needs a
+declaration, because the declaration prints it, and is a warning on an excepted package.
 
 **Filling from the CIPL.** With a CIPL loaded in Standard Shipping, **Fill from the CIPL** on
 the dangerous goods tab copies the consignee (as the SLI has it, destination country

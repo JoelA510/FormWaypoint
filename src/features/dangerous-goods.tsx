@@ -366,7 +366,11 @@ export function DangerousGoodsPanel({
                   </Badge>
                 </>
               ) : (
-                <Badge tone="warn">classification incomplete</Badge>
+                <Badge tone="warn">
+                  {assessment.packages.some((p) => p.unanswered.length)
+                    ? 'classification incomplete'
+                    : 'packages incomplete'}
+                </Badge>
               )}
               {/*
                 Explicit, because this consignment now survives a tab switch. Held state with
@@ -635,6 +639,31 @@ export function DangerousGoodsPanel({
 }
 
 /**
+ * A yes/no question that starts unanswered. A checkbox can't: unticked already reads as "no".
+ */
+function CoPackSelect({
+  id,
+  value,
+  onChange,
+}: {
+  id: string
+  value: boolean | null
+  onChange: (next: boolean | null) => void
+}) {
+  return (
+    <Select
+      id={id}
+      value={value == null ? '' : value ? 'yes' : 'no'}
+      onChange={(e) => onChange(e.target.value === '' ? null : e.target.value === 'yes')}
+    >
+      <option value="">Not answered</option>
+      <option value="no">No</option>
+      <option value="yes">Yes</option>
+    </Select>
+  )
+}
+
+/**
  * The CIPL's route, beside the airport field it relates to and never in it: the city the goods
  * ship from is not always the airport on the air waybill.
  */
@@ -756,10 +785,15 @@ function PackagesEditor({
         description="One entry per battery type in the box. The limits are per package; the marking exemptions are per consignment."
         actions={
           <div className="flex items-center gap-2">
-            <Badge tone="neutral">
-              {assessment.totals.packages} package{assessment.totals.packages === 1 ? '' : 's'} ·{' '}
-              {formatKg(assessment.totals.netWeightKg)} kg
-            </Badge>
+            {/* "0 packages" while a count is unstated would read as a count. */}
+            {consignment.packages.some((p) => p.count === 0) ? (
+              <Badge tone="warn">packages not counted</Badge>
+            ) : (
+              <Badge tone="neutral">
+                {assessment.totals.packages} package{assessment.totals.packages === 1 ? '' : 's'} ·{' '}
+                {formatKg(assessment.totals.netWeightKg)} kg
+              </Badge>
+            )}
             <Button size="sm" onClick={addPackage}>
               Add package
             </Button>
@@ -812,7 +846,8 @@ function PackagesEditor({
                       id={id}
                       type="number"
                       min={1}
-                      value={pkg.count}
+                      // Blank for zero, which is "not stated": a new package starts there.
+                      value={pkg.count || ''}
                       onChange={(e) => onUpdatePackage(pkg.id, { count: Number(e.target.value) || 0 })}
                     />
                   )}
@@ -903,18 +938,22 @@ function PackagesEditor({
                     />
                   )}
                 </Field>
-                <div className="self-end pb-1">
-                  <Toggle
-                    label="Also holds prohibited dangerous goods"
-                    checked={pkg.coPackedWithProhibitedClass}
-                    onChange={(next) => onUpdatePackage(pkg.id, { coPackedWithProhibitedClass: next })}
-                    hint={
-                      `Not permitted in the same outer packaging: ${PROHIBITED_CO_PACKED_CLASSES.join('; ')}. ` +
-                      'Division 1.4S is permitted, and Divisions 4.2, 4.3 and 5.2, Class 8 and Division 2.2 are ' +
-                      'not on the list.'
-                    }
-                  />
-                </div>
+                <Field
+                  label="Also holds prohibited dangerous goods"
+                  hint={
+                    `Not permitted in the same outer packaging: ${PROHIBITED_CO_PACKED_CLASSES.join('; ')}. ` +
+                    'Division 1.4S is permitted, and Divisions 4.2, 4.3 and 5.2, Class 8 and Division 2.2 are ' +
+                    'not on the list.'
+                  }
+                >
+                  {(id) => (
+                    <CoPackSelect
+                      id={id}
+                      value={pkg.coPackedWithProhibitedClass}
+                      onChange={(next) => onUpdatePackage(pkg.id, { coPackedWithProhibitedClass: next })}
+                    />
+                  )}
+                </Field>
               </div>
 
               <div className="mt-4 space-y-3">
@@ -1017,7 +1056,7 @@ function PackagesEditor({
                       id={id}
                       type="number"
                       min={1}
-                      value={overpack.count}
+                      value={overpack.count || ''}
                       // Zero, like the package count beside it, not one. Coerced to one, a
                       // cleared box silently under-counted the consignment: the package
                       // total is the product of the two, so six packages read as two, the
@@ -1050,12 +1089,18 @@ function PackagesEditor({
                   onChange={(next) => updateOverpack(overpack.id, { innerMarksVisible: next })}
                   hint="Otherwise every one of them is reproduced on the exterior."
                 />
-                <Toggle
+                <Field
                   label="Also holds prohibited dangerous goods"
-                  checked={overpack.coPackedWithProhibitedClass}
-                  onChange={(next) => updateOverpack(overpack.id, { coPackedWithProhibitedClass: next })}
                   hint="The same list applies to an overpack as to an outer packaging."
-                />
+                >
+                  {(id) => (
+                    <CoPackSelect
+                      id={id}
+                      value={overpack.coPackedWithProhibitedClass}
+                      onChange={(next) => updateOverpack(overpack.id, { coPackedWithProhibitedClass: next })}
+                    />
+                  )}
+                </Field>
               </div>
               <Button size="sm" variant="ghost" onClick={() => removeOverpack(overpack.id)}>
                 Remove overpack
@@ -1442,8 +1487,8 @@ function RequirementsPanel({
       <CardBody className="space-y-4">
         {!assessment.complete ? (
           <p className="rounded-md border border-[var(--color-warn)] bg-[var(--color-warn-soft)] px-3 py-2 text-sm">
-            Incomplete: a battery type is not fully described, so it is not classified and nothing it requires is
-            listed here. Answer the questions the checks name.
+            Incomplete: a battery type, a package or overpack count, or a co-packing question is not answered, so
+            what is listed here may not be everything the consignment needs. Answer the questions the checks name.
           </p>
         ) : null}
         {assessment.airWaybillStatements.length ? (

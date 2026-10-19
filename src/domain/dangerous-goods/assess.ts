@@ -82,9 +82,10 @@ export interface PackageAssessment {
 export interface DgAssessment {
   packages: PackageAssessment[]
   /**
-   * False while any entry is unanswered. The aircraft, the declaration requirement and the
-   * classifications then describe only the entries that are answered, and must not be shown
-   * as the consignment's verdict.
+   * False while any entry is unanswered, any package or overpack in use has no stated count,
+   * or any co-packing question is open. The aircraft, the declaration requirement, the
+   * classifications and the marks then describe only part of the consignment, and must not be
+   * shown as its verdict.
    */
   complete: boolean
   /** One per distinct classification in the consignment, in first-seen order. */
@@ -353,7 +354,13 @@ export function assess(consignment: DgConsignment): DgAssessment {
 
   return {
     packages,
-    complete: packages.every((p) => p.unanswered.length === 0),
+    complete:
+      packages.every(
+        (p) => p.unanswered.length === 0 && p.pkg.count > 0 && p.pkg.coPackedWithProhibitedClass != null,
+      ) &&
+      consignment.overpacks
+        .filter((o) => consignment.packages.some((p) => p.overpackId === o.id))
+        .every((o) => o.count > 0 && o.coPackedWithProhibitedClass != null),
     classifications,
     requiredAircraft,
     declarationRequired,
@@ -399,10 +406,13 @@ function structureChecks(consignment: DgConsignment): CheckResult[] {
       severity: 'blocking',
       title: 'Every package description covers at least one package',
       detail: empty.length
-        ? `${empty.map((p) => p.packagingType || 'a package').join(', ')} — a count that is not a whole number ` +
-          'of packages would put “0 Fibreboard box x 7 kg”, or half a box, on the declaration and put the ' +
-          'batteries it describes wrongly into the consignment total. Remove the description, or say how many ' +
-          'there are.'
+        ? empty.every((p) => p.count === 0)
+          ? `${empty.map((p) => p.packagingType || 'a package').join(', ')} — how many identical packages is not ` +
+            'stated. Say how many there are.'
+          : `${empty.map((p) => p.packagingType || 'a package').join(', ')} — a count that is not a whole number ` +
+            'of packages would put “0 Fibreboard box x 7 kg”, or half a box, on the declaration and put the ' +
+            'batteries it describes wrongly into the consignment total. Remove the description, or say how many ' +
+            'there are.'
         : 'Each package description states how many identical packages it covers.',
       passed: empty.length === 0,
     },
@@ -1136,21 +1146,43 @@ function packageChecks(assessment: PackageAssessment, consignment: DgConsignment
   // --- Weights -----------------------------------------------------------
   checks.push(weightChecks(assessment, consignment))
 
+  // --- Packaging description ---------------------------------------------
+  // Printed on the declaration's packing line, so a blank one blocks wherever a declaration is
+  // required; for an excepted package it reaches only the bench checklist, and warns.
+  const described = pkg.packagingType.trim() !== ''
+  checks.push({
+    id: `dg.described-packaging.${pkg.id}`,
+    severity: assessment.declarationRequired ? 'blocking' : 'warning',
+    title: `${label}: packaging described`,
+    detail: described
+      ? `Described as “${pkg.packagingType.trim()}”.`
+      : 'The packaging is not described. ' +
+        (assessment.declarationRequired
+          ? 'The declaration names it on the packing line (for example “Fibreboard box”), and it is not assumed.'
+          : 'No declaration is required for this package, but the bench checklist names it.'),
+    passed: described,
+    refs: [pkg.id],
+  })
+
   // --- Co-packing --------------------------------------------------------
   checks.push({
     id: `dg.co-pack.${pkg.id}`,
     severity: 'blocking',
     title: `${label}: nothing packed with it that may not be`,
-    detail: pkg.coPackedWithProhibitedClass
-      ? 'Cells and batteries must not be packed in the same outer packaging with ' +
-        `${PROHIBITED_CO_PACKED_CLASSES.join(', ')}. Repack the other goods separately.`
-      : // The list's own length is not a fact about this box. Interpolated, it read "No
-        // 5-way conflict declared" on every compliant package — a number describing the
-        // regulation, printed as though it described the packing.
-        'Nothing prohibited declared in the same outer packaging. The prohibited list is exactly: ' +
-        `${PROHIBITED_CO_PACKED_CLASSES.join('; ')}. Division 1.4S is permitted, and Divisions 4.2, 4.3 and ` +
-        '5.2, Class 8 and Division 2.2 do not appear in it.',
-    passed: !pkg.coPackedWithProhibitedClass,
+    detail:
+      pkg.coPackedWithProhibitedClass == null
+        ? 'Not answered: whether this box also holds dangerous goods that may not travel with lithium ' +
+          `batteries. The prohibited list is exactly: ${PROHIBITED_CO_PACKED_CLASSES.join('; ')}.`
+        : pkg.coPackedWithProhibitedClass
+          ? 'Cells and batteries must not be packed in the same outer packaging with ' +
+            `${PROHIBITED_CO_PACKED_CLASSES.join(', ')}. Repack the other goods separately.`
+          : // The list's own length is not a fact about this box. Interpolated, it read "No
+            // 5-way conflict declared" on every compliant package — a number describing the
+            // regulation, printed as though it described the packing.
+            'Nothing prohibited in the same outer packaging. The prohibited list is exactly: ' +
+            `${PROHIBITED_CO_PACKED_CLASSES.join('; ')}. Division 1.4S is permitted, and Divisions 4.2, 4.3 and ` +
+            '5.2, Class 8 and Division 2.2 do not appear in it.',
+    passed: pkg.coPackedWithProhibitedClass === false,
     refs: [pkg.id],
   })
 
@@ -1658,7 +1690,8 @@ function overpackChecks(consignment: DgConsignment, packages: PackageAssessment[
     passed: true,
   })
 
-  const conflicted = used.filter((o) => o.coPackedWithProhibitedClass)
+  const conflicted = used.filter((o) => o.coPackedWithProhibitedClass === true)
+  const unansweredCoPack = used.filter((o) => o.coPackedWithProhibitedClass == null)
   checks.push({
     id: 'dg.overpack-co-pack',
     severity: 'blocking',
@@ -1667,8 +1700,11 @@ function overpackChecks(consignment: DgConsignment, packages: PackageAssessment[
       ? 'Packages containing cells or batteries must not be placed in an overpack with packages containing ' +
         `${PROHIBITED_CO_PACKED_CLASSES.join(', ')}. The prohibition applies to the overpack exactly as it ` +
         'applies to the outer packaging.'
-      : 'No prohibited packages declared in the overpack. The same list applies here as to the package itself.',
-    passed: conflicted.length === 0,
+      : unansweredCoPack.length
+        ? `Not answered for ${unansweredCoPack.map((o) => o.marks.trim() || 'an overpack').join(', ')}: whether ` +
+          `it also holds packages of ${PROHIBITED_CO_PACKED_CLASSES.join(', ')}.`
+        : 'No prohibited packages in the overpack. The same list applies here as to the package itself.',
+    passed: conflicted.length === 0 && unansweredCoPack.length === 0,
   })
 
   return checks
