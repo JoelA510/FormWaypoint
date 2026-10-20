@@ -33,7 +33,15 @@ import { ChecksPanel } from './review'
 import { assess, overpackOrder, packageCountInConsignment } from '../domain/dangerous-goods/assess'
 import { buildChecklist } from '../domain/dangerous-goods/checklist'
 import { buildDeclaration, formatKg, retainUntil } from '../domain/dangerous-goods/dgd'
-import { applyCiplSeed, ciplLink, type CiplSeed, type FigureOffer, type SeedPart } from '../domain/dangerous-goods/cipl-seed'
+import {
+  applyCiplSeed,
+  ciplFiguresApply,
+  ciplLink,
+  withoutCiplFigures,
+  type CiplSeed,
+  type FigureOffer,
+  type SeedPart,
+} from '../domain/dangerous-goods/cipl-seed'
 import {
   DG_SOURCE_NOTICE,
   CHEMISTRY_LABELS,
@@ -755,6 +763,13 @@ function PackagesEditor({
     return ciplPackageCount
   }
 
+  // A package that stops being the CIPL's one carton gives back the entry figures it took from it.
+  const entriesWithoutCiplFigures = (pkg: DgPackage): BatteryEntry[] =>
+    pkg.entries.map((e) => {
+      const part = partFor(e.id)
+      return part ? { ...e, ...withoutCiplFigures(e, part) } : e
+    })
+
   // The entry figures are the CIPL's whole carton. They are per-package figures only while the
   // carton is the one package, so they wait for that package count — offered above — rather
   // than doubling the consignment when two packages are typed.
@@ -767,8 +782,15 @@ function PackagesEditor({
     return null
   }
 
+  // A second description ends the one-carton reading too, so the first gives its figures back.
   const addPackage = () =>
-    onChange({ ...consignment, packages: [...consignment.packages, emptyPackage(nextDgId('pkg-'), nextDgId('ent-'))] })
+    onChange({
+      ...consignment,
+      packages: [
+        ...consignment.packages.map((p) => ({ ...p, entries: entriesWithoutCiplFigures(p) })),
+        emptyPackage(nextDgId('pkg-'), nextDgId('ent-')),
+      ],
+    })
 
   const removePackage = (id: string) =>
     onChange({ ...consignment, packages: consignment.packages.filter((p) => p.id !== id) })
@@ -878,7 +900,10 @@ function PackagesEditor({
                         min={1}
                         // Blank for zero, which is "not stated": a new package starts there.
                         value={pkg.count || ''}
-                        onChange={(e) => onUpdatePackage(pkg.id, { count: Number(e.target.value) || 0 })}
+                        onChange={(e) => {
+                          const count = Number(e.target.value) || 0
+                          onUpdatePackage(pkg.id, count === 1 ? { count } : { count, entries: entriesWithoutCiplFigures(pkg) })
+                        }}
                       />
                     )}
                   </Field>
@@ -905,7 +930,10 @@ function PackagesEditor({
                     <Select
                       id={id}
                       value={pkg.overpackId ?? ''}
-                      onChange={(e) => onUpdatePackage(pkg.id, { overpackId: e.target.value || null })}
+                      onChange={(e) => {
+                        const overpackId = e.target.value || null
+                        onUpdatePackage(pkg.id, overpackId ? { overpackId, entries: entriesWithoutCiplFigures(pkg) } : { overpackId })
+                      }}
                     >
                       <option value="">None</option>
                       {consignment.overpacks.map((o, i) => (
@@ -1174,23 +1202,24 @@ function EntryEditor({
   // Becoming equipment takes back a CIPL figure the entry still holds: for equipment those are
   // the devices' pieces and weight, and the fields want the batteries alone. Only a figure equal
   // to the CIPL's is taken back; one the person typed is theirs.
-  const articleLevelChange = (articleLevel: ArticleLevel | null): Partial<BatteryEntry> => {
-    const changes: Partial<BatteryEntry> = { articleLevel }
-    if (articleLevel !== 'equipment' || !ciplPart) return changes
-    if (ciplPart.count.value !== null && entry.countPerPackage === ciplPart.count.value) changes.countPerPackage = null
-    if (ciplPart.netWeightKg.value !== null && entry.netWeightKgPerPackage === ciplPart.netWeightKg.value) {
-      changes.netWeightKgPerPackage = null
-    }
-    return changes
+  // A change that makes the CIPL's figures stop applying (equipment, or no longer standalone)
+  // takes back the ones the entry still holds; see `withoutCiplFigures`.
+  const kindChange = (changes: Partial<BatteryEntry>): Partial<BatteryEntry> => {
+    const next = { ...entry, ...changes }
+    return ciplPart && !ciplFiguresApply(next) ? { ...changes, ...withoutCiplFigures(entry, ciplPart) } : changes
   }
-  // Unanswered is treated like equipment: until the article level says these are batteries,
-  // the CIPL's pieces and weight may be devices.
+  // Unanswered is treated like equipment: until the article level and configuration say these
+  // are batteries on their own, the CIPL's pieces and weight may be devices.
   const articleRefusal: FigureOffer | null =
     entry.articleLevel === 'equipment'
       ? equipmentRefusal
       : entry.articleLevel == null
         ? { value: null, why: 'answer the article level first; for equipment the CIPL counts and weighs the devices.' }
-        : null
+        : entry.spec.configuration == null
+          ? { value: null, why: 'answer the shipping configuration first; with equipment the CIPL may count and weigh the devices.' }
+          : entry.spec.configuration !== 'standalone'
+            ? { value: null, why: 'with equipment the CIPL may count and weigh the devices, and this field wants the batteries alone.' }
+            : null
   const isMetal = entry.spec.chemistry === 'lithium-metal'
   const setSpec = (changes: Partial<BatteryEntry['spec']>) => onChange({ spec: { ...entry.spec, ...changes } })
   const number = (value: string) => (value.trim() === '' ? null : Number(value))
@@ -1235,7 +1264,13 @@ function EntryEditor({
             <Select
               id={id}
               value={entry.spec.configuration ?? ''}
-              onChange={(e) => setSpec({ configuration: e.target.value ? (e.target.value as Configuration) : null })}
+              onChange={(e) =>
+                onChange(
+                  kindChange({
+                    spec: { ...entry.spec, configuration: e.target.value ? (e.target.value as Configuration) : null },
+                  }),
+                )
+              }
             >
               <option value="">Not answered</option>
               {(Object.keys(CONFIGURATION_LABELS) as Configuration[]).map((value) => (
@@ -1329,7 +1364,7 @@ function EntryEditor({
             <Select
               id={id}
               value={entry.articleLevel ?? ''}
-              onChange={(e) => onChange(articleLevelChange(e.target.value ? (e.target.value as ArticleLevel) : null))}
+              onChange={(e) => onChange(kindChange({ articleLevel: e.target.value ? (e.target.value as ArticleLevel) : null }))}
             >
               <option value="">Not answered</option>
               {(Object.keys(ARTICLE_LEVEL_LABELS) as ArticleLevel[]).map((value) => (

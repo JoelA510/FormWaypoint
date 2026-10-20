@@ -128,8 +128,9 @@ one-carton CIPL adds one battery entry per part. The count and net weight per pa
 states are offered beside each entry, a click each, and only where the CIPL's own printed
 totals prove them. A one-carton CIPL offers a package count of one the same way, and the
 entry figures wait until that count is one, since they are the whole carton, and until the
-article level says the goods are batteries rather than devices. Otherwise the field says why
-there is no figure. If Standard Shipping could not show every line of the CIPL was read, the
+entry is answered as a standalone battery type that is not equipment: with equipment, packed
+or contained, the CIPL's line may be the devices. A copied figure is taken back if the entry or
+its package later stops qualifying. Otherwise the field says why there is no figure. If Standard Shipping could not show every line of the CIPL was read, the
 fill adds no entries and offers nothing. The airports get the CIPL's route as
 a hint, never a value, and nothing a classification turns on comes from the CIPL
 (docs/adr/0004-dangerous-goods-reads-the-cipl.md).

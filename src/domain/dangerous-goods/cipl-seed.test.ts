@@ -74,8 +74,9 @@ describe('what a CIPL offers the dangerous goods consignment', () => {
   })
 
   it('offers no weight for a line the packing list did not weigh, whatever reconciliation filled in', async () => {
-    // A packing-list gap is filled from the item library during reconciliation; that figure
-    // sits on the merged line and is not the document's.
+    // Defensive: today reconciliation fills merged-line weights from the item library only for
+    // layouts that print none, which the seed refuses already. A merged line without a
+    // packing-list partner still must not lend its weight as the document's.
     const seed = await seedOf(batteryShipment(), (r) => ({
       ...r,
       mergedLines: r.mergedLines.map((l, i) => (i === 0 ? { ...l, packingListLineId: undefined } : l)),
@@ -142,6 +143,16 @@ describe('what a CIPL offers the dangerous goods consignment', () => {
     expect(notes.join(' ')).toMatch(/Added no battery entries: Standard Shipping could not show/)
     // Who the goods are for is still on the document.
     expect(consignment.consignee).toEqual(CONSIGNEE)
+  })
+
+  it('treats a packing-list line no invoice line claimed as something in the box with no entry', async () => {
+    // A warning for the SLI, which files the invoice; a missing battery type for a declaration.
+    const seed = await seedOf(batteryShipment(), (r) => ({
+      ...r,
+      checks: [...r.checks, { id: 'packing-orphans', severity: 'warning', title: 'Packing lines matched', detail: '', passed: false }],
+    }))
+    expect(seed.incomplete).toMatch(/could not show every line/)
+    expect(value(seed.parts[0].count)).toBeNull()
   })
 
   it('is not held up by a blocking check that says nothing about which parts are in the box', async () => {

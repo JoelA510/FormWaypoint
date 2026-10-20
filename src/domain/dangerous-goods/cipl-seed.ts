@@ -16,7 +16,7 @@ import { distinctParts, partKey } from '../part-key'
 import { printsQuantityTotal } from '../reconcile'
 import { canonicalUnit } from '../schedule-b'
 import { roundPrecise } from '../units'
-import { emptyEntry, type DgConsignment, type DgParty } from './types'
+import { emptyEntry, type BatteryEntry, type DgConsignment, type DgParty } from './types'
 
 /** A figure the person may copy into a field, or why there is none. */
 export type FigureOffer = { value: number; label: string } | { value: null; why: string }
@@ -78,8 +78,12 @@ export function ciplSeed(parsed: ParsedCipl, reconciliation: Reconciliation, con
   const { header, mergedLines, checks } = reconciliation
   const passed = (id: string) => checks.some((c) => c.id === id && c.passed)
 
+  // A packing-list line no invoice line claimed is a warning for the SLI, which files the
+  // invoice; for a declaration it is something in the box with no entry, so it counts here.
   const failed = checks.find(
-    (c) => COMPLETENESS_CHECKS.includes(c.id) && c.severity === 'blocking' && !c.passed,
+    (c) =>
+      !c.passed &&
+      ((COMPLETENESS_CHECKS.includes(c.id) && c.severity === 'blocking') || c.id === 'packing-orphans'),
   )
   const incomplete = failed
     ? `Standard Shipping could not show every line of the CIPL was read (${failed.title.toLowerCase()} failed).`
@@ -179,6 +183,29 @@ export function ciplSeed(parsed: ParsedCipl, reconciliation: Reconciliation, con
  */
 export function ciplLink(source: CiplSeed['source'], partNumber: string): string {
   return [source.fileName, source.invoiceNumber, partKey(partNumber)].join('\u0000')
+}
+
+/**
+ * The entry fields to clear when a CIPL figure the entry still holds no longer applies: the
+ * entry became equipment, or not standalone, or its package stopped being the one carton.
+ * Only a figure equal to the CIPL's is cleared; one the person typed is theirs.
+ */
+export function withoutCiplFigures(entry: BatteryEntry, part: SeedPart): Partial<BatteryEntry> {
+  const changes: Partial<BatteryEntry> = {}
+  if (part.count.value !== null && entry.countPerPackage === part.count.value) changes.countPerPackage = null
+  if (part.netWeightKg.value !== null && entry.netWeightKgPerPackage === part.netWeightKg.value) {
+    changes.netWeightKgPerPackage = null
+  }
+  return changes
+}
+
+/**
+ * Whether the CIPL's pieces and weight for a part can be this entry's batteries. Only for a
+ * standalone battery type that is not equipment: with equipment, packed or contained, the
+ * CIPL's line may be the devices, and the fields want the batteries alone.
+ */
+export function ciplFiguresApply(entry: BatteryEntry): boolean {
+  return entry.articleLevel != null && entry.articleLevel !== 'equipment' && entry.spec.configuration === 'standalone'
 }
 
 export interface AppliedSeed {

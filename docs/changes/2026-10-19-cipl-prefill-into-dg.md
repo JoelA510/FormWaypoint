@@ -132,10 +132,11 @@ no card.
 - The card sits above the consignment card and uses the existing `Card`, `Button` and `Badge`.
   Its states: no CIPL (not rendered); CIPL loaded (file name, invoice number, Fill button); after
   filling (a `role="status"` line saying what was set and what was kept).
-- The figure buttons are `Button size="sm"` beside the input, labelled with the figure and unit,
-  with `aria-describedby` pointing at the source line. The net weight button is hidden when the
-  entry's article level is *equipment*: the CIPL's net weight then includes the equipment, and the
-  field wants the batteries only.
+- The figure buttons are `Button size="sm"` beside the input, their accessible name carrying the
+  figure and unit ("Use CIPL figure (12 PCS)"); a refused figure is a visible line of text saying
+  why. (Drawn up with `aria-describedby` to a source line; the label made it redundant, and it was
+  not built.) The figures are refused unless the entry is a standalone battery type that is not
+  equipment: with equipment, packed or contained, the CIPL's line may be the devices.
 - Neither button is pressed for the person: each offered figure needs its own click.
 
 **Failure.** `ciplSeed` throws on nothing it receives from a successful parse. A header without an
@@ -245,11 +246,26 @@ Codex's review of the pull request then found two more, also fixed:
   does. Changing an entry to equipment after copying them takes back any figure still equal to
   the CIPL's, since for equipment it is the devices'; a figure the person typed is kept.
 
+The owner's single review pass before merging found four more, also fixed:
+
+- The figures were offered for a battery type contained in or packed with equipment at article
+  level "battery pack", which is how the existing tests model those entries; there the CIPL's
+  line may be the laptops, not their batteries. `ciplFiguresApply` now requires a standalone,
+  non-equipment entry, and a configuration change away from standalone takes copied figures
+  back, as equipment does.
+- A packing-list line no invoice line claimed (`packing-orphans`, a warning for the SLI) did not
+  stop the fill, leaving something in the box with no entry. It now counts as incomplete.
+- A carton figure stayed in place after the package count changed from one, or the package went
+  into an overpack or got a sibling description, doubling the consignment. Those changes now take
+  the figures back (`withoutCiplFigures`).
+- The panel test for an incomplete CIPL never clicked Fill and could not fail; it now does and
+  asserts the refusal note.
+
 ## What the build taught
 
-- `ciplSeed` reads weights from the packing-list lines, not the merged lines: reconciliation
-  fills a packing-list gap from the item library onto the merged line, and that figure is not
-  the document's. Covered by a test.
+- `ciplSeed` reads weights from the packing-list lines, not the merged lines. Today that is
+  defensive: reconciliation fills merged-line weights from the item library only for layouts
+  that print none, which the seed refuses anyway. Covered by a test.
 - An entered figure in Standard Shipping makes the totals prove the entered figure, not the
   document's, so no figure is offered once one exists. Covered by a test.
 - Run against the reported real CIPL in the browser, the seeded entry showed the default

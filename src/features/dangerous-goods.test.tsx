@@ -176,6 +176,7 @@ describe('filling the consignment from the CIPL', () => {
     expect(button('Use CIPL figure (12 PCS)')).toBeUndefined()
     expect(view().textContent).toContain('No CIPL figure: answer the article level first')
     await choose('Article level', 'battery-pack')
+    await choose('Shipping configuration', 'standalone')
     const count = () => control<HTMLInputElement>('How many per package').value
     const weight = () => control<HTMLInputElement>('Net battery weight per package (kg)').value
     expect(count()).toBe('')
@@ -198,6 +199,7 @@ describe('filling the consignment from the CIPL', () => {
     await click(button('Fill from the CIPL'))
     await click(button('Use CIPL figure (1 carton)'))
     await choose('Article level', 'battery-pack')
+    await choose('Shipping configuration', 'standalone')
     expect(container.textContent).toContain('No CIPL figure: The CIPL’s weights do not reconcile.')
     expect(button(/2\.124 kg/)).toBeUndefined()
     expect(button('Use CIPL figure (12 PCS)')).toBeDefined()
@@ -217,15 +219,45 @@ describe('filling the consignment from the CIPL', () => {
     await mount(SEED)
     await click(button('Fill from the CIPL'))
     await choose('Article level', 'battery-pack')
+    await choose('Shipping configuration', 'standalone')
     await type('Identical packages', '2')
     expect(button(/Use CIPL figure \((12 PCS|2\.124 kg)\)/)).toBeUndefined()
     expect(view().textContent).toContain('No CIPL figure: offered once Identical packages is 1')
   })
 
   it('adds no entries and offers nothing from a CIPL whose lines were not all accounted for', async () => {
-    await mount({ ...SEED, incomplete: 'Standard Shipping could not show every line of the CIPL was read.' })
+    const why = 'Standard Shipping could not show every line of the CIPL was read.'
+    await mount({ ...SEED, incomplete: why, packageCount: { value: null, why } })
+    await click(button('Fill from the CIPL'))
+    expect(view().querySelector('[role="status"]')?.textContent).toContain(`Added no battery entries: ${why}`)
     expect(view().textContent).not.toContain('Use CIPL figure')
-    // The seed itself carries the refusal into the notes; see cipl-seed.test.ts.
+    expect(view().textContent).not.toContain('Not classified: answer chemistry, cell or battery, shipping configuration, article level, condition. ')
+  })
+
+  it('offers no figure for a battery type with equipment, and takes back one already copied', async () => {
+    await mount(SEED)
+    await click(button('Fill from the CIPL'))
+    await click(button('Use CIPL figure (1 carton)'))
+    await choose('Article level', 'battery-pack')
+    await choose('Shipping configuration', 'standalone')
+    await click(button('Use CIPL figure (2.124 kg)'))
+    await choose('Shipping configuration', 'contained-in-equipment')
+    expect(control<HTMLInputElement>('Net battery weight per package (kg)').value).toBe('')
+    expect(button(/Use CIPL figure \((12 PCS|2\.124 kg)\)/)).toBeUndefined()
+    expect(view().textContent).toContain('with equipment the CIPL may count and weigh the devices')
+  })
+
+  it('takes back the carton figures when the package count stops being one', async () => {
+    await mount(SEED)
+    await click(button('Fill from the CIPL'))
+    await click(button('Use CIPL figure (1 carton)'))
+    await choose('Article level', 'battery-pack')
+    await choose('Shipping configuration', 'standalone')
+    await click(button('Use CIPL figure (12 PCS)'))
+    await click(button('Use CIPL figure (2.124 kg)'))
+    await type('Identical packages', '2')
+    expect(control<HTMLInputElement>('How many per package').value).toBe('')
+    expect(control<HTMLInputElement>('Net battery weight per package (kg)').value).toBe('')
   })
 
   it('offers nothing for an entry added from a different CIPL', async () => {
@@ -259,6 +291,7 @@ describe('filling the consignment from the CIPL', () => {
     await click(button('Fill from the CIPL'))
     await click(button('Use CIPL figure (1 carton)'))
     await choose('Article level', 'battery-pack')
+    await choose('Shipping configuration', 'standalone')
     await click(button('Use CIPL figure (12 PCS)'))
     await type('Net battery weight per package (kg)', '1.5')
     await choose('Article level', 'equipment')
@@ -308,6 +341,7 @@ describe('a battery type nobody has described yet', () => {
     await choose('Cell or battery', 'battery')
     await choose('Shipping configuration', 'standalone')
     await choose('Article level', 'battery-pack')
+    await choose('Shipping configuration', 'standalone')
     expect(view().textContent).toMatch(/Not classified: answer condition\./)
     await choose('Condition', 'sound')
     expect(view().textContent).toMatch(/UN3090\s*Lithium metal batteries\s*· Class 9 · PI 968/)
@@ -378,6 +412,7 @@ describe('a package nobody has described yet', () => {
     await choose('Cell or battery', 'battery')
     await choose('Shipping configuration', 'standalone')
     await choose('Article level', 'battery-pack')
+    await choose('Shipping configuration', 'standalone')
     await choose('Condition', 'sound')
     expect(view().textContent).toContain('packages incomplete')
 
