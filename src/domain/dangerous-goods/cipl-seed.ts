@@ -42,8 +42,33 @@ export interface CiplSeed {
    * there are.
    */
   packageCount: FigureOffer
+  /**
+   * Why the CIPL's parts may not be the whole shipment, when reconciliation could not show they
+   * are. Set, no entries are added and no figure is offered.
+   */
+  incomplete: string | null
   parts: SeedPart[]
 }
+
+/**
+ * The reconciliation checks that prove every line of the document was read and accounted for.
+ *
+ * Deliberately not every blocking check: Schedule B codes, export control, values and the
+ * carrier's row capacity can block the SLI without making the list of parts any less complete.
+ * These are the ones whose failure means a part may be missing, so seeding entries from the
+ * parts that were read would leave the missing battery type off the declaration in silence.
+ */
+const COMPLETENESS_CHECKS = [
+  'document-complete',
+  'header-readable',
+  'single-document-set',
+  'rows-present',
+  'line-coverage',
+  'packing-summary',
+  'quantities-usable',
+  'line-quantities',
+  'total-quantity',
+]
 
 /**
  * @param consignee The SLI draft's ultimate consignee, so the destination country a person
@@ -53,13 +78,20 @@ export function ciplSeed(parsed: ParsedCipl, reconciliation: Reconciliation, con
   const { header, mergedLines, checks } = reconciliation
   const passed = (id: string) => checks.some((c) => c.id === id && c.passed)
 
+  const failed = checks.find(
+    (c) => COMPLETENESS_CHECKS.includes(c.id) && c.severity === 'blocking' && !c.passed,
+  )
+  const incomplete = failed
+    ? `Standard Shipping could not show every line of the CIPL was read (${failed.title.toLowerCase()} failed).`
+    : null
+
   // Refusals shared by every part, in the order a person would want them explained.
-  const perPackage =
+  const perPackage = incomplete ?? (
     header.cartons === 1
       ? null
       : header.cartons == null
         ? 'The CIPL states no carton count, so how much of it is in one package is unknown.'
-        : `The CIPL states ${header.cartons} cartons and does not say which carton holds which line.`
+        : `The CIPL states ${header.cartons} cartons and does not say which carton holds which line.`)
   const entered = reconciliation.enteredFigures.length
     ? 'Figures were entered over the document in Standard Shipping, so the CIPL no longer proves this one.'
     : null
@@ -125,8 +157,10 @@ export function ciplSeed(parsed: ParsedCipl, reconciliation: Reconciliation, con
     shippersReference: header.invoiceNumber.trim(),
     routeHint: { shippedFrom: header.shippedFrom || null, dischargePort: header.dischargePort || null },
     cartons: header.cartons,
-    packageCount:
-      header.cartons === 1
+    incomplete,
+    packageCount: incomplete
+      ? { value: null, why: incomplete }
+      : header.cartons === 1
         ? { value: 1, label: '1 carton' }
         : {
             value: null,
@@ -203,6 +237,8 @@ export function applyCiplSeed(
     JSON.stringify(only.entries[0]) === JSON.stringify(emptyEntry(only.entries[0].id))
   if (!seed.parts.length) {
     // Nothing to add; a CIPL with no parts has already failed reconciliation loudly.
+  } else if (seed.incomplete) {
+    notes.push(`Added no battery entries: ${seed.incomplete}`)
   } else if (seed.cartons !== 1) {
     notes.push(
       seed.cartons == null

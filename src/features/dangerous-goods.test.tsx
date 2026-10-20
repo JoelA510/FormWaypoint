@@ -50,6 +50,7 @@ const SEED: CiplSeed = {
   routeHint: { shippedFrom: 'San Francisco', dischargePort: 'Amsterdam, Netherlands' },
   cartons: 1,
   packageCount: { value: 1, label: '1 carton' },
+  incomplete: null,
   parts: [
     {
       partNumber: '20000-0001',
@@ -171,6 +172,10 @@ describe('filling the consignment from the CIPL', () => {
     expect(button('Use CIPL figure (12 PCS)')).toBeUndefined()
     expect(view().textContent).toContain('No CIPL figure: offered once Identical packages is 1')
     await click(button('Use CIPL figure (1 carton)'))
+    // And only once the article level says these are batteries, not devices.
+    expect(button('Use CIPL figure (12 PCS)')).toBeUndefined()
+    expect(view().textContent).toContain('No CIPL figure: answer the article level first')
+    await choose('Article level', 'battery-pack')
     const count = () => control<HTMLInputElement>('How many per package').value
     const weight = () => control<HTMLInputElement>('Net battery weight per package (kg)').value
     expect(count()).toBe('')
@@ -192,6 +197,7 @@ describe('filling the consignment from the CIPL', () => {
     })
     await click(button('Fill from the CIPL'))
     await click(button('Use CIPL figure (1 carton)'))
+    await choose('Article level', 'battery-pack')
     expect(container.textContent).toContain('No CIPL figure: The CIPL’s weights do not reconcile.')
     expect(button(/2\.124 kg/)).toBeUndefined()
     expect(button('Use CIPL figure (12 PCS)')).toBeDefined()
@@ -210,9 +216,16 @@ describe('filling the consignment from the CIPL', () => {
   it('stops offering the carton as a per-package figure once two packages are typed', async () => {
     await mount(SEED)
     await click(button('Fill from the CIPL'))
+    await choose('Article level', 'battery-pack')
     await type('Identical packages', '2')
     expect(button(/Use CIPL figure \((12 PCS|2\.124 kg)\)/)).toBeUndefined()
     expect(view().textContent).toContain('No CIPL figure: offered once Identical packages is 1')
+  })
+
+  it('adds no entries and offers nothing from a CIPL whose lines were not all accounted for', async () => {
+    await mount({ ...SEED, incomplete: 'Standard Shipping could not show every line of the CIPL was read.' })
+    expect(view().textContent).not.toContain('Use CIPL figure')
+    // The seed itself carries the refusal into the notes; see cipl-seed.test.ts.
   })
 
   it('offers nothing for an entry added from a different CIPL', async () => {

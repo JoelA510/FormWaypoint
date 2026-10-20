@@ -126,6 +126,33 @@ describe('what a CIPL offers the dangerous goods consignment', () => {
     expect(value(seed.parts[0].count)).toBeNull()
   })
 
+  it('adds no entries and offers nothing when a line of the CIPL may be missing', async () => {
+    const seed = await seedOf(batteryShipment(), (r) => ({
+      ...r,
+      checks: r.checks.map((c) => (c.id === 'line-coverage' ? { ...c, passed: false } : c)),
+    }))
+    expect(seed.incomplete).toMatch(/could not show every line of the CIPL was read/)
+    expect(value(seed.packageCount)).toBeNull()
+    expect(value(seed.parts[0].count)).toBeNull()
+    expect(value(seed.parts[0].netWeightKg)).toBeNull()
+    const before = newConsignment()
+    const { consignment, notes, links } = applyCiplSeed(before, seed, newId)
+    expect(consignment.packages).toEqual(before.packages)
+    expect(links).toEqual({})
+    expect(notes.join(' ')).toMatch(/Added no battery entries: Standard Shipping could not show/)
+    // Who the goods are for is still on the document.
+    expect(consignment.consignee).toEqual(CONSIGNEE)
+  })
+
+  it('is not held up by a blocking check that says nothing about which parts are in the box', async () => {
+    const seed = await seedOf(batteryShipment(), (r) => ({
+      ...r,
+      checks: [...r.checks, { id: 'row-capacity', severity: 'blocking', title: 'Rows fit', detail: '', passed: false }],
+    }))
+    expect(seed.incomplete).toBeNull()
+    expect(value(seed.parts[0].count)).toBe(12)
+  })
+
   it('offers nothing once a figure was entered over the document', async () => {
     const seed = await seedOf(batteryShipment(), (r) => ({
       ...r,

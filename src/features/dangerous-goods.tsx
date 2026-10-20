@@ -1171,6 +1171,14 @@ function EntryEditor({
     value: null,
     why: 'the CIPL counts and weighs the equipment, and this field wants the batteries alone.',
   }
+  // Unanswered is treated like equipment: until the article level says these are batteries,
+  // the CIPL's pieces and weight may be devices.
+  const articleRefusal: FigureOffer | null =
+    entry.articleLevel === 'equipment'
+      ? equipmentRefusal
+      : entry.articleLevel == null
+        ? { value: null, why: 'answer the article level first; for equipment the CIPL counts and weighs the devices.' }
+        : null
   const isMetal = entry.spec.chemistry === 'lithium-metal'
   const setSpec = (changes: Partial<BatteryEntry['spec']>) => onChange({ spec: { ...entry.spec, ...changes } })
   const number = (value: string) => (value.trim() === '' ? null : Number(value))
@@ -1278,7 +1286,7 @@ function EntryEditor({
           </Field>
           {ciplPart ? (
             <CiplFigure
-              offer={entry.articleLevel === 'equipment' ? equipmentRefusal : (ciplRefusal ?? ciplPart.netWeightKg)}
+              offer={ciplRefusal ?? articleRefusal ?? ciplPart.netWeightKg}
               current={entry.netWeightKgPerPackage}
               onUse={(value) => onChange({ netWeightKgPerPackage: value })}
             />
@@ -1298,7 +1306,7 @@ function EntryEditor({
           </Field>
           {ciplPart ? (
             <CiplFigure
-              offer={entry.articleLevel === 'equipment' ? equipmentRefusal : (ciplRefusal ?? ciplPart.count)}
+              offer={ciplRefusal ?? articleRefusal ?? ciplPart.count}
               current={entry.countPerPackage}
               onUse={(value) => onChange({ countPerPackage: value })}
             />

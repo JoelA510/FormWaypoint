@@ -231,6 +231,19 @@ An independent review of the branch before the pull request found, and this chan
   `dg.declaration-fields` and `dg.aircraft` checks while the consignment was incomplete. They
   now wait for `complete`, which also holds counts to whole numbers, as the count checks do.
 
+Codex's review of the pull request then found two more, also fixed:
+
+- Entries were seeded from the lines that were read even when a reconciliation check showing
+  every line was accounted for had failed (`packing-summary`, `line-coverage` and the like), so
+  a missed battery type would be left off in silence. `COMPLETENESS_CHECKS` in the seed names
+  those checks. If one fails, no entries are added and nothing is offered. Checks that cannot
+  change which parts are in the box (Schedule B, export control, values, row capacity) do not
+  hold the fill up; gating on every blocking check failed 16 existing fill tests, because a
+  missing Schedule B dataset alone is blocking.
+- The entry figures were offered while the article level was still unanswered, before anyone
+  had said the goods were batteries and not devices. Unanswered now refuses them, as equipment
+  does.
+
 ## What the build taught
 
 - `ciplSeed` reads weights from the packing-list lines, not the merged lines: reconciliation
