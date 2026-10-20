@@ -13,6 +13,7 @@
  */
 import type { ParsedCipl, Reconciliation } from '../types'
 import { distinctParts, partKey } from '../part-key'
+import { printsQuantityTotal } from '../reconcile'
 import { canonicalUnit } from '../schedule-b'
 import { roundPrecise } from '../units'
 import { emptyEntry, type DgConsignment, type DgParty } from './types'
@@ -63,7 +64,13 @@ export function ciplSeed(parsed: ParsedCipl, reconciliation: Reconciliation, con
     ? 'Figures were entered over the document in Standard Shipping, so the CIPL no longer proves this one.'
     : null
   const countRefusal =
-    perPackage ?? entered ?? (passed('total-quantity') ? null : 'The CIPL’s quantities do not reconcile to its printed total.')
+    perPackage ??
+    entered ??
+    (!printsQuantityTotal(parsed.format)
+      ? 'This CIPL layout prints no quantity total of its own to prove the count against.'
+      : passed('total-quantity')
+        ? null
+        : 'The CIPL’s quantities do not reconcile to its printed total.')
   const weightRefusal =
     perPackage ??
     entered ??
@@ -132,11 +139,19 @@ export function ciplSeed(parsed: ParsedCipl, reconciliation: Reconciliation, con
   }
 }
 
+/**
+ * What ties a seeded entry to its part *on this CIPL*. Keyed by the part alone, an entry added
+ * from one CIPL offered another CIPL's figures for the same part number once that was loaded.
+ */
+export function ciplLink(source: CiplSeed['source'], partNumber: string): string {
+  return [source.fileName, source.invoiceNumber, partKey(partNumber)].join('\u0000')
+}
+
 export interface AppliedSeed {
   consignment: DgConsignment
   /** One sentence per thing set or left alone, for the status line. */
   notes: string[]
-  /** Seeded entry id → part key, so the entry can show that part's figure offers. */
+  /** Seeded entry id → `ciplLink`, so the entry can show that part's figure offers. */
   links: Record<string, string>
 }
 
@@ -199,7 +214,7 @@ export function applyCiplSeed(
   } else {
     const entries = seed.parts.map((part) => {
       const entry = { ...emptyEntry(newId('ent-')), description: part.description }
-      links[entry.id] = partKey(part.partNumber)
+      links[entry.id] = ciplLink(seed.source, part.partNumber)
       return entry
     })
     next = { ...next, packages: [{ ...only, entries }] }

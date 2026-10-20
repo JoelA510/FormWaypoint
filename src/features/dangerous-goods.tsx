@@ -33,8 +33,7 @@ import { ChecksPanel } from './review'
 import { assess, overpackOrder, packageCountInConsignment } from '../domain/dangerous-goods/assess'
 import { buildChecklist } from '../domain/dangerous-goods/checklist'
 import { buildDeclaration, formatKg, retainUntil } from '../domain/dangerous-goods/dgd'
-import { applyCiplSeed, type CiplSeed, type FigureOffer, type SeedPart } from '../domain/dangerous-goods/cipl-seed'
-import { partKey } from '../domain/part-key'
+import { applyCiplSeed, ciplLink, type CiplSeed, type FigureOffer, type SeedPart } from '../domain/dangerous-goods/cipl-seed'
 import {
   DG_SOURCE_NOTICE,
   CHEMISTRY_LABELS,
@@ -157,8 +156,8 @@ export function DangerousGoodsPanel({
 
   const partFor = useCallback(
     (entryId: string): SeedPart | undefined => {
-      const key = ciplLinks[entryId]
-      return key ? cipl?.parts.find((p) => partKey(p.partNumber) === key) : undefined
+      const link = ciplLinks[entryId]
+      return link && cipl ? cipl.parts.find((p) => ciplLink(cipl.source, p.partNumber) === link) : undefined
     },
     [cipl, ciplLinks],
   )
@@ -756,6 +755,18 @@ function PackagesEditor({
     return ciplPackageCount
   }
 
+  // The entry figures are the CIPL's whole carton. They are per-package figures only while the
+  // carton is the one package, so they wait for that package count — offered above — rather
+  // than doubling the consignment when two packages are typed.
+  const entryOfferRefusal = (pkg: DgPackage): FigureOffer | null => {
+    const gate = packageCountOffer(pkg)
+    if (gate && gate.value === null) return gate
+    if (pkg.count !== 1) {
+      return { value: null, why: 'offered once Identical packages is 1, the CIPL’s one carton.' }
+    }
+    return null
+  }
+
   const addPackage = () =>
     onChange({ ...consignment, packages: [...consignment.packages, emptyPackage(nextDgId('pkg-'), nextDgId('ent-'))] })
 
@@ -803,7 +814,7 @@ function PackagesEditor({
         actions={
           <div className="flex items-center gap-2">
             {/* "0 packages" while a count is unstated would read as a count. */}
-            {consignment.packages.some((p) => p.count === 0) ? (
+            {consignment.packages.some((p) => packageCountInConsignment(p, consignment) === 0) ? (
               <Badge tone="warn">packages not counted</Badge>
             ) : (
               <Badge tone="neutral">
@@ -1001,6 +1012,7 @@ function PackagesEditor({
                       <EntryEditor
                         entry={entry}
                         ciplPart={partFor(entry.id)}
+                        ciplRefusal={entryOfferRefusal(pkg)}
                         onChange={(changes) => onUpdateEntry(pkg.id, entry.id, changes)}
                       />
                       {unansweredQuestions(entry).length ? (
@@ -1143,11 +1155,14 @@ function PackagesEditor({
 function EntryEditor({
   entry,
   ciplPart,
+  ciplRefusal,
   onChange,
 }: {
   entry: BatteryEntry
   /** The CIPL part this entry was added for, whose figures it may offer. */
   ciplPart?: SeedPart
+  /** Why this entry's package can't take the part's figures as per-package ones, if it can't. */
+  ciplRefusal: FigureOffer | null
   onChange: (changes: Partial<BatteryEntry>) => void
 }) {
   // For equipment the CIPL's pieces are devices and its net weight includes them; both fields
@@ -1263,7 +1278,7 @@ function EntryEditor({
           </Field>
           {ciplPart ? (
             <CiplFigure
-              offer={entry.articleLevel === 'equipment' ? equipmentRefusal : ciplPart.netWeightKg}
+              offer={entry.articleLevel === 'equipment' ? equipmentRefusal : (ciplRefusal ?? ciplPart.netWeightKg)}
               current={entry.netWeightKgPerPackage}
               onUse={(value) => onChange({ netWeightKgPerPackage: value })}
             />
@@ -1283,7 +1298,7 @@ function EntryEditor({
           </Field>
           {ciplPart ? (
             <CiplFigure
-              offer={entry.articleLevel === 'equipment' ? equipmentRefusal : ciplPart.count}
+              offer={entry.articleLevel === 'equipment' ? equipmentRefusal : (ciplRefusal ?? ciplPart.count)}
               current={entry.countPerPackage}
               onUse={(value) => onChange({ countPerPackage: value })}
             />
@@ -1596,7 +1611,9 @@ export function DeclarationPanel({
         description={
           assessment.declarationRequired
             ? 'A Shipper’s Declaration in the IATA format, and the bench checklist that goes with it.'
-            : 'No declaration is required for a Section II consignment — the checklist is the deliverable.'
+            : !assessment.complete
+              ? 'Whether a declaration is required is known once every battery type and package is described.'
+              : 'No declaration is required for a Section II consignment — the checklist is the deliverable.'
         }
         actions={assessment.canGenerate ? <Badge tone="pass">checks passed</Badge> : <Badge tone="block">blocked</Badge>}
       />

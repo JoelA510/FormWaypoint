@@ -167,6 +167,10 @@ describe('filling the consignment from the CIPL', () => {
   it('puts a figure in its field only on that field’s own click', async () => {
     await mount(SEED)
     await click(button('Fill from the CIPL'))
+    // The carton is one package only once the package count says so.
+    expect(button('Use CIPL figure (12 PCS)')).toBeUndefined()
+    expect(view().textContent).toContain('No CIPL figure: offered once Identical packages is 1')
+    await click(button('Use CIPL figure (1 carton)'))
     const count = () => control<HTMLInputElement>('How many per package').value
     const weight = () => control<HTMLInputElement>('Net battery weight per package (kg)').value
     expect(count()).toBe('')
@@ -187,6 +191,7 @@ describe('filling the consignment from the CIPL', () => {
       parts: [{ ...SEED.parts[0], netWeightKg: { value: null, why: 'The CIPL’s weights do not reconcile.' } }],
     })
     await click(button('Fill from the CIPL'))
+    await click(button('Use CIPL figure (1 carton)'))
     expect(container.textContent).toContain('No CIPL figure: The CIPL’s weights do not reconcile.')
     expect(button(/2\.124 kg/)).toBeUndefined()
     expect(button('Use CIPL figure (12 PCS)')).toBeDefined()
@@ -202,6 +207,24 @@ describe('filling the consignment from the CIPL', () => {
     expect(view().textContent).toContain('Matches the CIPL (1 carton).')
   })
 
+  it('stops offering the carton as a per-package figure once two packages are typed', async () => {
+    await mount(SEED)
+    await click(button('Fill from the CIPL'))
+    await type('Identical packages', '2')
+    expect(button(/Use CIPL figure \((12 PCS|2\.124 kg)\)/)).toBeUndefined()
+    expect(view().textContent).toContain('No CIPL figure: offered once Identical packages is 1')
+  })
+
+  it('offers nothing for an entry added from a different CIPL', async () => {
+    await mount(SEED)
+    await click(button('Fill from the CIPL'))
+    const other: CiplSeed = { ...SEED, source: { fileName: 'other.pdf', invoiceNumber: 'S0000099' } }
+    const r = root!
+    await act(async () => r.render(<Harness cipl={other} />))
+    expect(button(/Use CIPL figure \((12 PCS|2\.124 kg)\)/)).toBeUndefined()
+    expect(button('Use CIPL figure (1 carton)')).toBeUndefined()
+  })
+
   it('offers no package count once there is a second package description', async () => {
     await mount(SEED)
     await click(button('Fill from the CIPL'))
@@ -210,13 +233,21 @@ describe('filling the consignment from the CIPL', () => {
     expect(view().textContent).toContain('No CIPL figure: the consignment has more than one package description')
   })
 
+  it('states no "no declaration" or passenger verdict on goods nobody has described', async () => {
+    await mount(null)
+    expect(view().textContent).not.toContain('No declaration is required for a Section II consignment')
+    expect(view().textContent).not.toContain('Every package in this consignment is prepared to Section II')
+    expect(view().textContent).not.toContain('remain permitted on passenger aircraft')
+    expect(view().textContent).toContain('Whether a declaration is required is known once every battery type and package is described.')
+  })
+
   it('offers neither figure once the entry is equipment', async () => {
     await mount(SEED)
     await click(button('Fill from the CIPL'))
+    await click(button('Use CIPL figure (1 carton)'))
     await choose('Article level', 'equipment')
     // The entry's two figures; the package count still holds, one carton being one package.
     expect(button(/Use CIPL figure \((12 PCS|2\.124 kg)\)/)).toBeUndefined()
-    expect(button('Use CIPL figure (1 carton)')).toBeDefined()
     expect(container.textContent).toContain('the CIPL counts and weighs the equipment')
   })
 })
@@ -332,5 +363,17 @@ describe('a package nobody has described yet', () => {
     await choose('Also holds prohibited dangerous goods', 'no')
     expect(view().textContent).not.toContain('packages incomplete')
     expect(view().textContent).not.toContain('classification incomplete')
+  })
+})
+
+describe('a package in an overpack nobody has counted', () => {
+  it('reads "packages not counted", not "0 packages"', async () => {
+    await mount(null)
+    await type('Identical packages', '1')
+    expect(view().textContent).not.toContain('packages not counted')
+    await click(button('Add overpack'))
+    await choose('Overpack', [...control<HTMLSelectElement>('Overpack').options].find((o) => o.value)!.value)
+    expect(view().textContent).toContain('packages not counted')
+    expect(view().textContent).not.toMatch(/\b0 packages ·/)
   })
 })

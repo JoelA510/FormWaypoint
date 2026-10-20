@@ -213,6 +213,24 @@ Agreed with the owner on 2026-10-19:
    overpack, where the count would mean packages per overpack. Proved by `cipl-seed.test.ts`
    and `dangerous-goods.test.tsx`.
 
+## Review fixes (2026-10-20)
+
+An independent review of the branch before the pull request found, and this change fixed:
+
+- The count offer trusted `total-quantity` on layouts whose quantity total is the sum of their
+  own lines (the in-house form, `vendor-b`), so a misread line would be offered as proved.
+  `printsQuantityTotal` in `reconcile` is now the one place that decides this, and the seed
+  refuses the count where it is false.
+- The entry figures (the whole carton) were offered whatever the package count, so typing two
+  packages and clicking them doubled the consignment. They now wait until the package count is
+  one.
+- Links between seeded entries and parts were keyed by part number alone, so loading another
+  CIPL with the same part offered its figures. They now carry the CIPL's file and invoice
+  number (`ciplLink`).
+- The "no declaration" and passenger verdicts were still stated by the Generate card and the
+  `dg.declaration-fields` and `dg.aircraft` checks while the consignment was incomplete. They
+  now wait for `complete`, which also holds counts to whole numbers, as the count checks do.
+
 ## What the build taught
 
 - `ciplSeed` reads weights from the packing-list lines, not the merged lines: reconciliation
@@ -220,7 +238,6 @@ Agreed with the owner on 2026-10-19:
   the document's. Covered by a test.
 - An entered figure in Standard Shipping makes the totals prove the entered figure, not the
   document's, so no figure is offered once one exists. Covered by a test.
-- Run against the reported real CIPL in the browser, the seeded entry shows the default
-  chemistry's classification (lithium ion, UN3480) for a lithium metal part before anyone has
-  answered the chemistry. That is the existing-defaults risk above, now observed, and the fix
-  is still its own change.
+- Run against the reported real CIPL in the browser, the seeded entry showed the default
+  chemistry's classification (lithium ion, UN3480) for a lithium metal part before anyone had
+  answered the chemistry. Fixed in `docs/changes/2026-10-19-dg-entries-start-unanswered.md`.

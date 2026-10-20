@@ -3,7 +3,8 @@ import { parseCipl } from '../cipl'
 import { reconcile } from '../reconcile'
 import { buildSyntheticCipl, simpleShipment, type SyntheticCipl, type SyntheticLine } from '../../test/synthetic/cipl'
 import type { ParsedCipl, Reconciliation } from '../types'
-import { applyCiplSeed, ciplSeed, type CiplSeed, type FigureOffer } from './cipl-seed'
+import { applyCiplSeed, ciplLink, ciplSeed, type CiplSeed, type FigureOffer } from './cipl-seed'
+import { buildOmronCiPdf, simpleOmronCi } from '../../test/synthetic/omron-ci'
 import { emptyEntry, newConsignment, type DgConsignment } from './types'
 
 const CONTROLLED = { eccn: 'EAR99', sme: 'N', license: 'NLR' }
@@ -142,6 +143,19 @@ describe('what a CIPL offers the dangerous goods consignment', () => {
     expect(why(seed.parts[0].netWeightKg)).toMatch(/states no weights/)
   })
 
+  it('offers no count from a layout whose quantity total is the sum of its own lines', async () => {
+    // The in-house form prints no quantity total; its header total is derived from the lines,
+    // so `total-quantity` agreeing with it would "prove" a misread line.
+    const parsed = await parseCipl('ci.pdf', await buildOmronCiPdf({ ...simpleOmronCi(), pieces: 1 }))
+    const seed = ciplSeed(parsed, reconcile(parsed, null, CONTROLLED), CONSIGNEE)
+    expect(seed.cartons).toBe(1)
+    expect(seed.parts.length).toBeGreaterThan(0)
+    for (const part of seed.parts) {
+      expect(value(part.count)).toBeNull()
+      expect(why(part.count)).toMatch(/prints no quantity total/)
+    }
+  })
+
   it('offers no count for a quantity that is not a count of items', async () => {
     const parsed = await parseCipl('synthetic.pdf', await buildSyntheticCipl(batteryShipment()))
     const reconciliation = reconcile(parsed, null, CONTROLLED)
@@ -188,7 +202,7 @@ describe('filling the consignment from the seed', () => {
     expect(consignment.shippersReference).toBe('S0000042')
     const [entry] = consignment.packages[0].entries
     expect(entry.description).toContain('20000-0001')
-    expect(links).toEqual({ [entry.id]: '20000-0001' })
+    expect(links).toEqual({ [entry.id]: ciplLink(seed.source, '20000-0001') })
     // Count and weight are offers, not fills.
     expect(entry.countPerPackage).toBeNull()
     expect(entry.netWeightKgPerPackage).toBeNull()

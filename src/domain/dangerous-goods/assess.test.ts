@@ -1699,3 +1699,33 @@ describe('a package nobody has described', () => {
     expect(result.complete).toBe(false)
   })
 })
+
+describe('verdicts on a consignment that is not fully described', () => {
+  it('states no aircraft or "no declaration" verdict while anything is open', () => {
+    const result = assess(newConsignment())
+    expect(check(result, 'dg.declaration-fields')!.detail).toMatch(/decided once every battery type and package/)
+    expect(check(result, 'dg.declaration-fields')!.title).not.toContain('No Shipper')
+    expect(check(result, 'dg.aircraft')!.detail).toBe('Decided once every battery type and package is described.')
+  })
+
+  it('still states them once everything is answered', () => {
+    const drills = entry('e1', { configuration: 'contained-in-equipment', wattHours: 76 }, {
+      netWeightKgPerPackage: 1.5,
+      countPerPackage: 3,
+      stateOfChargePercent: 20,
+    })
+    const result = assess(consignment([pkg('p1', [drills])]))
+    expect(result.complete).toBe(true)
+    expect(check(result, 'dg.declaration-fields')!.title).toBe('No Shipper’s Declaration required')
+  })
+
+  it('holds the count to a whole number, as the count check does', () => {
+    const result = assess(consignment([pkg('p1', [entry('e1', { wattHours: 95 })], { count: 0.5 })]))
+    expect(result.complete).toBe(false)
+  })
+
+  it('does not title a package "0 ×" while its count is unstated', () => {
+    const result = assess(consignment([pkg('p1', [entry('e1', { wattHours: 95 })], { count: 0 })]))
+    expect(check(result, 'dg.co-pack.p1')!.title).toBe('Fibreboard box (count not stated): nothing packed with it that may not be')
+  })
+})

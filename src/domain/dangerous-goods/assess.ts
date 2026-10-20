@@ -278,7 +278,9 @@ export function packageCountInConsignment(pkg: DgPackage, consignment: DgConsign
  * packages rather than one described twice.
  */
 function packageLabel(pkg: DgPackage, consignment: DgConsignment): string {
-  return `${packageCountInConsignment(pkg, consignment)} × ${pkg.packagingType || 'package'}`
+  const count = packageCountInConsignment(pkg, consignment)
+  // "0 × package" reads as a count; zero is "not stated".
+  return count > 0 ? `${count} × ${pkg.packagingType || 'package'}` : `${pkg.packagingType || 'package'} (count not stated)`
 }
 
 export function assess(consignment: DgConsignment): DgAssessment {
@@ -340,6 +342,16 @@ export function assess(consignment: DgConsignment): DgAssessment {
     ...new Set(classifications.map((c) => airWaybillStatement(c, consignment.aircraft))),
   ]
 
+  // Counts held to what the count checks hold them to: a whole number of at least one.
+  const counted = (n: number) => Number.isInteger(n) && n >= 1
+  const complete =
+    packages.every(
+      (p) => p.unanswered.length === 0 && counted(p.pkg.count) && p.pkg.coPackedWithProhibitedClass != null,
+    ) &&
+    consignment.overpacks
+      .filter((o) => consignment.packages.some((p) => p.overpackId === o.id))
+      .every((o) => counted(o.count) && o.coPackedWithProhibitedClass != null)
+
   checks.push(...structureChecks(consignment))
   checks.push(...unansweredChecks(consignment))
   for (const assessment of packages) {
@@ -347,20 +359,14 @@ export function assess(consignment: DgConsignment): DgAssessment {
     checks.push(...packageChecks(assessment, consignment))
   }
   checks.push(
-    ...consignmentChecks(consignment, packages, airWaybillStatements, requiredAircraft, declarationRequired),
+    ...consignmentChecks(consignment, packages, airWaybillStatements, requiredAircraft, declarationRequired, complete),
   )
 
   const grossStated = packages.every((p) => p.pkg.grossWeightKg != null)
 
   return {
     packages,
-    complete:
-      packages.every(
-        (p) => p.unanswered.length === 0 && p.pkg.count > 0 && p.pkg.coPackedWithProhibitedClass != null,
-      ) &&
-      consignment.overpacks
-        .filter((o) => consignment.packages.some((p) => p.overpackId === o.id))
-        .every((o) => o.count > 0 && o.coPackedWithProhibitedClass != null),
+    complete,
     classifications,
     requiredAircraft,
     declarationRequired,
@@ -1374,6 +1380,12 @@ function consignmentChecks(
   statements: string[],
   requiredAircraft: AircraftLimitation,
   declarationRequired: boolean,
+  /**
+   * False while something is undescribed. The aircraft and "no declaration" verdicts are then
+   * about part of the consignment, and stating them would be the permissive verdict on goods
+   * nobody has described that the badge already withholds.
+   */
+  complete: boolean,
 ): CheckResult[] {
   const checks: CheckResult[] = []
 
@@ -1427,16 +1439,18 @@ function consignmentChecks(
     // declaration and stays permitted on passenger aircraft, so labelling it would
     // misstate what is in the box. Both CAO branches therefore have to say *which*
     // packages — unqualified, "the CAO label goes on" labels the excepted ones too.
-    detail: cargoOnlyLabelWording(
-      requiredAircraft,
-      consignment.aircraft,
-      declarationRequired,
-      // A package with no entries in it is not an excepted package — it is an empty
-      // description, which `dg.structure` is already holding the consignment on. Saying
-      // "the Section II packages carry no Class 9 label" when there are none names goods
-      // that are not in the consignment.
-      packages.some((p) => p.entries.length > 0 && !p.declarationRequired),
-    ),
+    detail: !complete
+      ? 'Decided once every battery type and package is described.'
+      : cargoOnlyLabelWording(
+          requiredAircraft,
+          consignment.aircraft,
+          declarationRequired,
+          // A package with no entries in it is not an excepted package — it is an empty
+          // description, which `dg.structure` is already holding the consignment on. Saying
+          // "the Section II packages carry no Class 9 label" when there are none names goods
+          // that are not in the consignment.
+          packages.some((p) => p.entries.length > 0 && !p.declarationRequired),
+        ),
     passed: true,
   })
 
@@ -1493,6 +1507,15 @@ function consignmentChecks(
         'electronic draft to the forwarder for review before printing and signing — it is cheaper than a ' +
         'resubmission cycle, and forwarder dangerous goods approval is a distinct step that has taken several ' +
         'business days.',
+      passed: true,
+    })
+  } else if (!complete) {
+    // Nothing answered so far needs a declaration, which is not the same as none being needed.
+    checks.push({
+      id: 'dg.declaration-fields',
+      severity: 'info',
+      title: 'Shipper’s Declaration',
+      detail: 'Whether a declaration is required is decided once every battery type and package is described.',
       passed: true,
     })
   } else {
