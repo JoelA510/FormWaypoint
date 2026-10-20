@@ -1,7 +1,6 @@
 # FormWaypoint: product
 
-Last changed: 2026-10-19 (first draft, from README.md, AGENTS.md and the ADRs; awaiting the owner's
-confirmation)
+Last changed: 2026-10-20 (accepted as drafted by the owner)
 
 ## Mission
 
@@ -52,3 +51,4 @@ Not a user: the forwarder or carrier, who receive the forms but never run the to
 | Date | Change | Why |
 | --- | --- | --- |
 | 2026-10-19 | First version | Drafted for the CIPL-to-DG prefill plan; `prompts/plan-change.md` plans against it |
+| 2026-10-20 | Accepted as drafted | The owner's confirmation; no line changed |

@@ -31,7 +31,8 @@ when the goods are the batteries themselves.
 We will let the DG tab read the CIPL already parsed and reconciled in Standard Shipping, in one
 direction only and only when the person asks. A **Fill from the CIPL** button sets the consignee,
 the shipper's reference and, for a one-carton CIPL, one entry per part, and fills blank fields
-only. A dangerous goods figure (count per package, net weight per package) is never filled by that
+only. A dangerous goods figure (count per package, net weight per package, and the package count
+itself, added 2026-10-20) is never filled by that
 button. It is offered field by field, on a click, and only where the reconciliation proved it
 against the CIPL's printed totals. No classification input is ever set from the CIPL. The
 Standard Shipping flow neither shows nor learns anything about dangerous goods.

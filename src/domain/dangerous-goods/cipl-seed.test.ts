@@ -91,6 +91,13 @@ describe('what a CIPL offers the dangerous goods consignment', () => {
     expect(seed.routeHint).toEqual({ shippedFrom: 'San Francisco', dischargePort: 'Amsterdam, Netherlands' })
   })
 
+  it('offers a package count of one for a one-carton CIPL, and none for more', async () => {
+    expect((await seedOf(batteryShipment())).packageCount).toEqual({ value: 1, label: '1 carton' })
+    const two = await seedOf(batteryShipment({ cartons: 2 }))
+    expect(value(two.packageCount)).toBeNull()
+    expect(why(two.packageCount)).toMatch(/2 cartons/)
+  })
+
   it('offers no per-package figure when the CIPL spans two cartons, and says why', async () => {
     const seed = await seedOf(batteryShipment({ cartons: 2 }))
     for (const part of seed.parts) {

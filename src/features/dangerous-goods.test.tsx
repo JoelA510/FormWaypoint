@@ -49,6 +49,7 @@ const SEED: CiplSeed = {
   shippersReference: 'S0000042',
   routeHint: { shippedFrom: 'San Francisco', dischargePort: 'Amsterdam, Netherlands' },
   cartons: 1,
+  packageCount: { value: 1, label: '1 carton' },
   parts: [
     {
       partNumber: '20000-0001',
@@ -191,11 +192,31 @@ describe('filling the consignment from the CIPL', () => {
     expect(button('Use CIPL figure (12 PCS)')).toBeDefined()
   })
 
+  it('offers the package count on the package its entries went into, on a click', async () => {
+    await mount(SEED)
+    expect(button('Use CIPL figure (1 carton)')).toBeUndefined()
+    await click(button('Fill from the CIPL'))
+    expect(control<HTMLInputElement>('Identical packages').value).toBe('')
+    await click(button('Use CIPL figure (1 carton)'))
+    expect(control<HTMLInputElement>('Identical packages').value).toBe('1')
+    expect(view().textContent).toContain('Matches the CIPL (1 carton).')
+  })
+
+  it('offers no package count once there is a second package description', async () => {
+    await mount(SEED)
+    await click(button('Fill from the CIPL'))
+    await click(button('Add package'))
+    expect(button('Use CIPL figure (1 carton)')).toBeUndefined()
+    expect(view().textContent).toContain('No CIPL figure: the consignment has more than one package description')
+  })
+
   it('offers neither figure once the entry is equipment', async () => {
     await mount(SEED)
     await click(button('Fill from the CIPL'))
     await choose('Article level', 'equipment')
-    expect(button(/Use CIPL figure/)).toBeUndefined()
+    // The entry's two figures; the package count still holds, one carton being one package.
+    expect(button(/Use CIPL figure \((12 PCS|2\.124 kg)\)/)).toBeUndefined()
+    expect(button('Use CIPL figure (1 carton)')).toBeDefined()
     expect(container.textContent).toContain('the CIPL counts and weighs the equipment')
   })
 })

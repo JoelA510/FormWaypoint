@@ -167,8 +167,8 @@ politely; covered by `jsx-a11y`.
 
 ## Tasks
 
-- [x] 1. ADR 0004 accepted by the owner (2026-10-19). `docs/product.md` is still a draft
-      awaiting the owner's confirmation; nothing in this change depends on a line of it.
+- [x] 1. ADR 0004 accepted by the owner (2026-10-19); `docs/product.md` accepted as drafted
+      (2026-10-20).
 - [x] 2. `ciplSeed` in `src/domain/dangerous-goods/cipl-seed.ts` — proved by `cipl-seed.test.ts`
       on synthetic CIPLs: a one-carton PCS shipment with one part over four lines offers count
       12 and net weight exactly 2.124 (the summed lines equal the header total); two cartons
@@ -206,6 +206,12 @@ Agreed with the owner on 2026-10-19:
    proves the figure.
 2. Airports: the CIPL's route as a hint beside each field, never a value.
 3. Shipper's reference: the invoice number.
+4. Added 2026-10-20, on the owner's instruction to follow the recommendation: the package count
+   is offered the same way as the entry figures, a click, never filled. The offer is "1 carton"
+   when the CIPL states one carton. It appears only on the package the CIPL's entries were added
+   to, only while that package is the consignment's only description, and only outside an
+   overpack, where the count would mean packages per overpack. Proved by `cipl-seed.test.ts`
+   and `dangerous-goods.test.tsx`.
 
 ## What the build taught
 

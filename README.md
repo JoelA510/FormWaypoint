@@ -126,7 +126,8 @@ the dangerous goods tab copies the consignee (as the SLI has it, destination cou
 included) and the invoice number as shipper's reference into blank fields, and for a
 one-carton CIPL adds one battery entry per part. The count and net weight per package it
 states are offered beside each entry, a click each, and only where the CIPL's totals prove
-them; otherwise the field says why there is no figure. The airports get the CIPL's route as
+them, and a one-carton CIPL offers a package count of one the same way; otherwise the field
+says why there is no figure. The airports get the CIPL's route as
 a hint, never a value, and nothing a classification turns on comes from the CIPL
 (docs/adr/0004-dangerous-goods-reads-the-cipl.md).
 

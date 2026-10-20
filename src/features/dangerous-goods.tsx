@@ -555,6 +555,7 @@ export function DangerousGoodsPanel({
         onUpdateEntry={updateEntry}
         onChange={setConsignment}
         partFor={partFor}
+        ciplPackageCount={cipl?.packageCount ?? null}
       />
 
       <RequirementsPanel consignment={consignment} assessment={assessment} />
@@ -731,6 +732,7 @@ function PackagesEditor({
   onUpdateEntry,
   onChange,
   partFor,
+  ciplPackageCount,
 }: {
   consignment: DgConsignment
   assessment: ReturnType<typeof assess>
@@ -738,7 +740,22 @@ function PackagesEditor({
   onUpdateEntry: (packageId: string, entryId: string, changes: Partial<BatteryEntry>) => void
   onChange: (next: DgConsignment) => void
   partFor: (entryId: string) => SeedPart | undefined
+  ciplPackageCount: FigureOffer | null
 }) {
+  // Offered only on the package the CIPL's entries were added to, and only where one package
+  // description is the whole consignment and its count means packages, not packages per
+  // overpack.
+  const packageCountOffer = (pkg: DgPackage): FigureOffer | null => {
+    if (!ciplPackageCount || !pkg.entries.some((e) => partFor(e.id))) return null
+    if (consignment.packages.length !== 1) {
+      return { value: null, why: 'the consignment has more than one package description, and the CIPL does not say which holds what.' }
+    }
+    if (pkg.overpackId) {
+      return { value: null, why: 'in an overpack this is the count per overpack, which the CIPL does not state.' }
+    }
+    return ciplPackageCount
+  }
+
   const addPackage = () =>
     onChange({ ...consignment, packages: [...consignment.packages, emptyPackage(nextDgId('pkg-'), nextDgId('ent-'))] })
 
@@ -808,6 +825,7 @@ function PackagesEditor({
         {overpackOrder(consignment.packages, (p) => p.overpackId).map((pkg, index) => {
           const assessed = assessment.packages.find((p) => p.pkg.id === pkg.id)
           const total = packageCountInConsignment(pkg, consignment)
+          const countOffer = packageCountOffer(pkg)
           return (
             <div key={pkg.id} className="rounded-md border bg-[var(--color-sunken)] p-4">
               <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
@@ -837,21 +855,30 @@ function PackagesEditor({
                     />
                   )}
                 </Field>
-                <Field
-                  label="Identical packages"
-                  hint={pkg.overpackId ? 'Per overpack.' : 'In the consignment.'}
-                >
-                  {(id) => (
-                    <Input
-                      id={id}
-                      type="number"
-                      min={1}
-                      // Blank for zero, which is "not stated": a new package starts there.
-                      value={pkg.count || ''}
-                      onChange={(e) => onUpdatePackage(pkg.id, { count: Number(e.target.value) || 0 })}
+                <div className="flex flex-col gap-1">
+                  <Field
+                    label="Identical packages"
+                    hint={pkg.overpackId ? 'Per overpack.' : 'In the consignment.'}
+                  >
+                    {(id) => (
+                      <Input
+                        id={id}
+                        type="number"
+                        min={1}
+                        // Blank for zero, which is "not stated": a new package starts there.
+                        value={pkg.count || ''}
+                        onChange={(e) => onUpdatePackage(pkg.id, { count: Number(e.target.value) || 0 })}
+                      />
+                    )}
+                  </Field>
+                  {countOffer ? (
+                    <CiplFigure
+                      offer={countOffer}
+                      current={pkg.count || null}
+                      onUse={(value) => onUpdatePackage(pkg.id, { count: value })}
                     />
-                  )}
-                </Field>
+                  ) : null}
+                </div>
                 <Field label="UN specification mark" hint="Required at Sections I and IA.">
                   {(id) => (
                     <Input

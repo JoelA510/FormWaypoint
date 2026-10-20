@@ -35,6 +35,12 @@ export interface CiplSeed {
   /** Shown beside the airport fields, never filled: a shipping city is not a departure airport. */
   routeHint: { shippedFrom: string | null; dischargePort: string | null }
   cartons: number | null
+  /**
+   * The package count to offer the package the CIPL's entries went into. One carton is one
+   * package; several cartons say nothing about how many identical packages of one description
+   * there are.
+   */
+  packageCount: FigureOffer
   parts: SeedPart[]
 }
 
@@ -112,6 +118,16 @@ export function ciplSeed(parsed: ParsedCipl, reconciliation: Reconciliation, con
     shippersReference: header.invoiceNumber.trim(),
     routeHint: { shippedFrom: header.shippedFrom || null, dischargePort: header.dischargePort || null },
     cartons: header.cartons,
+    packageCount:
+      header.cartons === 1
+        ? { value: 1, label: '1 carton' }
+        : {
+            value: null,
+            why:
+              header.cartons == null
+                ? 'The CIPL states no carton count.'
+                : `The CIPL states ${header.cartons} cartons, not how many identical packages of one description.`,
+          },
     parts,
   }
 }

@@ -185,6 +185,5 @@ needs a declaration, and is a warning on an excepted (Section II) package.
 - The consignment badge distinguishes "classification incomplete" (a battery question open)
   from "packages incomplete" (a count or co-packing answer open), and the package badge reads
   "packages not counted" instead of "0 packages".
-- Not done here, and worth deciding separately: the CIPL fill could offer the package count
-  when the CIPL states one carton. That is a dangerous goods figure, so it needs its own
-  agreement (rule 14).
+- Left out of this change and done separately on 2026-10-20 (see the CIPL plan's decision 4):
+  the CIPL fill offers the package count when the CIPL states one carton.
