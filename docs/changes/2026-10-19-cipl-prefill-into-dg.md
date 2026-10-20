@@ -242,7 +242,8 @@ Codex's review of the pull request then found two more, also fixed:
   missing Schedule B dataset alone is blocking.
 - The entry figures were offered while the article level was still unanswered, before anyone
   had said the goods were batteries and not devices. Unanswered now refuses them, as equipment
-  does.
+  does. Changing an entry to equipment after copying them takes back any figure still equal to
+  the CIPL's, since for equipment it is the devices'; a figure the person typed is kept.
 
 ## What the build taught
 

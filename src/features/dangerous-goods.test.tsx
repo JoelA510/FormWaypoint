@@ -254,6 +254,18 @@ describe('filling the consignment from the CIPL', () => {
     expect(view().textContent).toContain('Whether a declaration is required is known once every battery type and package is described.')
   })
 
+  it('takes back the CIPL figures when the entry becomes equipment, and keeps typed ones', async () => {
+    await mount(SEED)
+    await click(button('Fill from the CIPL'))
+    await click(button('Use CIPL figure (1 carton)'))
+    await choose('Article level', 'battery-pack')
+    await click(button('Use CIPL figure (12 PCS)'))
+    await type('Net battery weight per package (kg)', '1.5')
+    await choose('Article level', 'equipment')
+    expect(control<HTMLInputElement>('How many per package').value).toBe('')
+    expect(control<HTMLInputElement>('Net battery weight per package (kg)').value).toBe('1.5')
+  })
+
   it('offers neither figure once the entry is equipment', async () => {
     await mount(SEED)
     await click(button('Fill from the CIPL'))

@@ -1171,6 +1171,18 @@ function EntryEditor({
     value: null,
     why: 'the CIPL counts and weighs the equipment, and this field wants the batteries alone.',
   }
+  // Becoming equipment takes back a CIPL figure the entry still holds: for equipment those are
+  // the devices' pieces and weight, and the fields want the batteries alone. Only a figure equal
+  // to the CIPL's is taken back; one the person typed is theirs.
+  const articleLevelChange = (articleLevel: ArticleLevel | null): Partial<BatteryEntry> => {
+    const changes: Partial<BatteryEntry> = { articleLevel }
+    if (articleLevel !== 'equipment' || !ciplPart) return changes
+    if (ciplPart.count.value !== null && entry.countPerPackage === ciplPart.count.value) changes.countPerPackage = null
+    if (ciplPart.netWeightKg.value !== null && entry.netWeightKgPerPackage === ciplPart.netWeightKg.value) {
+      changes.netWeightKgPerPackage = null
+    }
+    return changes
+  }
   // Unanswered is treated like equipment: until the article level says these are batteries,
   // the CIPL's pieces and weight may be devices.
   const articleRefusal: FigureOffer | null =
@@ -1317,7 +1329,7 @@ function EntryEditor({
             <Select
               id={id}
               value={entry.articleLevel ?? ''}
-              onChange={(e) => onChange({ articleLevel: e.target.value ? (e.target.value as ArticleLevel) : null })}
+              onChange={(e) => onChange(articleLevelChange(e.target.value ? (e.target.value as ArticleLevel) : null))}
             >
               <option value="">Not answered</option>
               {(Object.keys(ARTICLE_LEVEL_LABELS) as ArticleLevel[]).map((value) => (
