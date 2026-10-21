@@ -1,7 +1,7 @@
 [package]
 name = "formwaypoint"
 version = "0.1.0"
-description = "Turns a CIPL into a completed carrier Shipper's Letter of Instruction"
+description = "Turns a CIPL into a completed carrier Shipper's Letter of Instruction, and prepares the Shipper's Declaration for lithium batteries by air"
 authors = ["FormWaypoint"]
 edition = "2021"
 rust-version = "1.77"

@@ -9,12 +9,12 @@ Two shipping workflows, kept apart on purpose:
   and produces the **Shipper's Declaration for Dangerous Goods** and the package checklist
   that goes with it.
 
-Everything runs in the browser. The CIPL is parsed locally, the carrier's blank PDF form is
-filled locally, and nothing is uploaded — there is no backend, no account, and no network
+Everything runs on your machine, in the Windows desktop app or a browser. The CIPL is parsed
+locally, the carrier's blank PDF form is filled locally, and nothing is uploaded — there is no backend, no account, and no network
 call carrying shipment data.
 
 ```bash
-npm install
+npm ci
 npm run dev            # browser, http://localhost:5173
 npm run desktop:dev    # desktop window (needs a Rust toolchain)
 ```
@@ -28,11 +28,11 @@ but a Windows runner.
 | Format | Shape | Weights | ECCN |
 | --- | --- | --- | --- |
 | Vendor A (FC/TP1 dual-currency) | Invoice + packing list, printed twice (USD and destination currency) | per line | not stated |
-| the vendor shipment (`SHIPMENT#`) | Commercial invoice + master packing list, single copy | **none — supplied per part** | stated per line |
+| Vendor B (`SHIPMENT#`) | Commercial invoice + master packing list, single copy | **none — supplied per part** | stated per line |
 | Omron Commercial Invoice (form 00004-00202) | The in-house fixed-grid invoice, read from the **.xlsx workbook itself** or a PDF printed from it — **any number of pages** | **none — supplied per part** | full triplet (ECCN, license, SME) stated per line |
 
 The format is detected from the document and dispatched to its own parser; everything
-downstream is shared. Adding a third means adding a detector and a parser, nothing else.
+downstream is shared. Adding another means adding a detector and a parser, nothing else.
 
 The in-house form holds eight commodity lines to a page, and a longer shipment runs onto
 further pages — one sheet per page in the workbook (`P1`, `P2`, …), one page per page in a
@@ -105,8 +105,8 @@ reconciliation engine contain no carrier-specific logic.
 
 ## Dangerous goods — lithium batteries by air
 
-A separate tab, sharing nothing with the CIPL flow but the design language and the checks
-panel. The two jobs have almost nothing in common: one reads a document and proves its
+A separate tab. It reads the CIPL only when asked (**Filling from the CIPL**, below), and
+never puts a hazard question in front of an ordinary shipment. The two jobs have little in common: one reads a document and proves its
 arithmetic, the other asks what is in a box and tells you what the regulations make of it.
 Folding dangerous goods into the standard flow would put a hazard question in front of every
 ordinary shipment, which is how hazard questions come to be answered without being read.
@@ -232,7 +232,7 @@ out to be wrong in both directions.
 ## Item library
 
 An item master exported from your ERP can be imported (`.xlsx`, `.csv`, `.tsv`) to supply
-what a CIPL cannot: the net weight of each part, for the format that prints none. Columns
+what a CIPL cannot: the net weight of each part, for the formats that print none. Columns
 are matched by heading rather than position, so differently-shaped exports read without
 configuration — `Part Number` / `Current Export HTS` / `Weight (G)` and `2nd Item Number` /
 `Harmonized Shipping Code` / `Net Weight` land in the same fields. The `.xlsx` reader is
@@ -276,7 +276,7 @@ manufacture the parts a document cannot support:
 
 ## Verification
 
-A clean checkout runs every test that needs no shipment document — several hundred, and
+A clean checkout runs every test that needs no shipment document — more than a thousand, and
 `npm run check` prints the count. They cover the parsers, the reconciliation engine, the
 Schedule B validator, the carrier adapters and the guards, using synthetic documents built
 to reproduce each supported layout without reproducing anyone's data. Among them, a golden
@@ -424,15 +424,16 @@ Kept in IndexedDB on this machine only, and clearable from the History panel:
 
 - the exporter profile (USPPI name, EIN, signer details),
 - per-consignee values that are not on the CIPL (EORI/USCI, consignee type, destination country),
-- net weight per part, for the format that states none,
+- net weight per part, for the formats that state none,
 - approved classification overrides with their reason and approver,
 - processed shipments, for autofill and audit,
+- the imported item library,
+- prepared dangerous goods consignments, kept for their two-year retention period: clearing
+  leaves the ones still inside it.
 
-- the imported item library.
-
-`localStore` in `src/store/local-store.ts` is the seam for a desktop build: it is the one
-place an implementation is named, so a Tauri packaging replaces that single assignment with
-a file-backed `LocalStore` and no calling code changes.
+`localStore` in `src/store/local-store.ts` is the one place an implementation is named. The
+browser and the desktop builds both use IndexedDB; the desktop keeps its data under the
+bundle identifier `com.formwaypoint.app`.
 
 ## Project layout
 
@@ -444,19 +445,19 @@ src/
     reconcile/   document-set selection, line joining, grouping, checks
     schedule-b/  Census dataset lookup and validation
     item-library/  item-master import and commodity-number screening
-    dangerous-goods/  IATA classification, consignment assessment, the declaration
+    dangerous-goods/  IATA classification, consignment assessment, the declaration, the CIPL fill
     draft.ts     assembles reviewed values for a carrier form
   carriers/
     nippon-express/   field map + adapter
     ceva/             field map + adapter
     keying-sheet/     FedEx Ship Manager / UPS WorldShip
     dgd/              the Shipper's Declaration, drawn rather than filled
-  features/      upload, review, manual fields, output, dangerous goods
+  features/      upload, review, manual fields, output, item library, Schedule B refresh, dangerous goods
   store/         local persistence
 public/
   templates/     blank carrier forms
   data/          Schedule B dataset
-src-tauri/       the desktop shell: four commands, no decisions
+src-tauri/       the desktop shell: seven commands, no plugins, no decisions
 ```
 
 ## History
