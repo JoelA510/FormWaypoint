@@ -210,6 +210,15 @@ const UNREADABLE_HEADER: ShipmentHeader = {
   totalMeasurementM3: null,
 }
 
+/**
+ * Whether a layout prints a quantity total of its own. Only `vendor-a` does; the others' header
+ * total is the sum of their own lines, so `total-quantity` agreeing with it proves nothing
+ * about a misread line.
+ */
+export function printsQuantityTotal(format: ParsedCipl['format']): boolean {
+  return format === 'vendor-a'
+}
+
 export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, options: ReconcileOptions): Reconciliation {
   const { set, reason, currency } = selectDocumentSet(parsed, options.forceSet)
   // `selectDocumentSet` falls back to a set name when nothing was recognised, so the header
@@ -358,7 +367,7 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
         `Read ${parsed.pageCount} page(s), and the document says nothing that contradicts that.`,
       passed: !parsed.incompleteReason,
     },
-    ...totalsChecks(header, mergedLines, sliLines, parsed.providesWeights, parsed.format !== 'vendor-a'),
+    ...totalsChecks(header, mergedLines, sliLines, parsed.providesWeights, !printsQuantityTotal(parsed.format)),
     ...partTotalChecks(mergedLines, parsed.partTotals),
     ...lineageChecks(mergedLines, packingLines, sliLines),
     ...partCodeChecks(mergedLines, index, options.itemsByPart),

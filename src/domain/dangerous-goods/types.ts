@@ -26,7 +26,7 @@
  * carrier as distinct from the forwarder, and a state of charge that is measured rather than
  * asserted.
  */
-import type { BatterySpec } from './lithium'
+import type { BatterySpec, CellOrBattery, Chemistry, Configuration } from './lithium'
 
 /**
  * The condition of the cells or batteries.
@@ -81,11 +81,27 @@ export type StateOfChargeBasis = 'rated-capacity' | 'rated-design-capacity' | 'i
  */
 export type VehicleDetermination = 'not-a-vehicle' | 'is-a-vehicle' | 'not-determined'
 
+/**
+ * What decides the classification, as far as the person has answered it.
+ *
+ * The same fields as `BatterySpec`, each able to be unanswered. A new entry used to start as
+ * a lithium ion standalone battery, which classified as UN3480 before anyone had said what
+ * was in the box — and on a lithium metal shipment, was the wrong UN number from the first
+ * render. Null is "not answered", and an entry with any of these null is not classified.
+ */
+export interface BatterySpecAnswers {
+  chemistry: Chemistry | null
+  form: CellOrBattery | null
+  configuration: Configuration | null
+  wattHours: number | null
+  lithiumContentG: number | null
+}
+
 /** One battery type inside one package. */
 export interface BatteryEntry {
   id: string
   /** What decides the classification. */
-  spec: BatterySpec
+  spec: BatterySpecAnswers
   /** The goods as the shipper describes them, for the review screen. Never filed. */
   description: string
   /**
@@ -96,7 +112,7 @@ export interface BatteryEntry {
    * *battery* for the thresholds and a *battery-pack* here, and its modules are a different
    * article at both.
    */
-  articleLevel: ArticleLevel
+  articleLevel: ArticleLevel | null
   /**
    * Net weight of the cells or batteries of this type in **one** package, in kilograms.
    *
@@ -162,7 +178,7 @@ export interface BatteryEntry {
    * rather than a marking task the packer can pick up later.
    */
   wattHourMarkedOnCase: boolean
-  condition: BatteryCondition
+  condition: BatteryCondition | null
   /**
    * For batteries with equipment: whether that equipment is a vehicle.
    *
@@ -189,6 +205,10 @@ export interface DgPackage {
    * rather than two overpacks between which some number of boxes has been divided — and the
    * declaration's own package count, which is the total across every overpack, is derived
    * from the two numbers rather than typed.
+   *
+   * Zero is "not stated", and the count checks refuse it: a new package starts at zero rather
+   * than one, because one is a figure nobody typed and it decides the two-package battery mark
+   * exemption.
    */
   count: number
   /**
@@ -226,8 +246,11 @@ export interface DgPackage {
    * flammable gases, Class 3 flammable liquids, Division 4.1 flammable solids, and Division
    * 5.1 oxidizers. Division 1.4S is expressly permitted, which is the part most often got
    * wrong in the restrictive direction.
+   *
+   * Null until answered. Defaulted to false, the co-packing check passed on a box nobody had
+   * said anything about.
    */
-  coPackedWithProhibitedClass: boolean
+  coPackedWithProhibitedClass: boolean | null
 
   entries: BatteryEntry[]
   /** The overpack these packages travel in, if any. */
@@ -263,8 +286,11 @@ export interface Overpack {
    * visible; a crate does not.
    */
   innerMarksVisible: boolean
-  /** Whether this overpack also holds packages of dangerous goods lithium may not travel with. */
-  coPackedWithProhibitedClass: boolean
+  /**
+   * Whether this overpack also holds packages of dangerous goods lithium may not travel with.
+   * Null until answered, like the package's.
+   */
+  coPackedWithProhibitedClass: boolean | null
 }
 
 export interface DgParty {
@@ -334,6 +360,34 @@ export interface DgConsignment {
   operatorVariationsChecked: boolean
 }
 
+/** An entry with every question its classification and condition check turn on answered. */
+export type AnsweredEntry = BatteryEntry & {
+  spec: BatterySpec
+  articleLevel: ArticleLevel
+  condition: BatteryCondition
+}
+
+/**
+ * The questions still open on an entry, in the words the screen labels them with.
+ *
+ * The energy figure is not among them: it is asked by its own check, which can say which
+ * figure and against what threshold, and a battery whose rating is unknown is still
+ * classifiable to its UN number.
+ */
+export function unansweredQuestions(entry: BatteryEntry): string[] {
+  return [
+    entry.spec.chemistry == null ? 'chemistry' : null,
+    entry.spec.form == null ? 'cell or battery' : null,
+    entry.spec.configuration == null ? 'shipping configuration' : null,
+    entry.articleLevel == null ? 'article level' : null,
+    entry.condition == null ? 'condition' : null,
+  ].filter((q): q is string => q !== null)
+}
+
+export function isAnswered(entry: BatteryEntry): entry is AnsweredEntry {
+  return unansweredQuestions(entry).length === 0
+}
+
 export const EMPTY_PARTY: DgParty = { name: '', addressLines: [] }
 
 export function emptyConsignment(): DgConsignment {
@@ -365,15 +419,16 @@ export function emptyConsignment(): DgConsignment {
 export function emptyEntry(id: string): BatteryEntry {
   return {
     id,
+    // Unanswered, all five: see `BatterySpecAnswers`.
     spec: {
-      chemistry: 'lithium-ion',
-      form: 'battery',
-      configuration: 'standalone',
+      chemistry: null,
+      form: null,
+      configuration: null,
       wattHours: null,
       lithiumContentG: null,
     },
     description: '',
-    articleLevel: 'battery-pack',
+    articleLevel: null,
     netWeightKgPerPackage: null,
     countPerPackage: null,
     buttonCellsInEquipment: false,
@@ -386,7 +441,7 @@ export function emptyEntry(id: string): BatteryEntry {
     stateOfChargeMeasuredAt: '',
     stateOfChargeMeasuredBy: '',
     wattHourMarkedOnCase: false,
-    condition: 'sound',
+    condition: null,
     vehicleDetermination: 'not-determined',
   }
 }
@@ -394,20 +449,23 @@ export function emptyEntry(id: string): BatteryEntry {
 export function emptyPackage(id: string, entryId: string): DgPackage {
   return {
     id,
-    packagingType: 'Fibreboard box',
-    count: 1,
+    // Blank, zero and unanswered: each of these reaches the declaration or a check, and a
+    // default would put the shipper's name to a box type, a count or a co-packing answer they
+    // never gave.
+    packagingType: '',
+    count: 0,
     unSpecificationMark: '',
     packagingAuthorizationLimitKg: null,
     grossWeightKg: null,
     equipmentNetWeightKg: null,
-    coPackedWithProhibitedClass: false,
+    coPackedWithProhibitedClass: null,
     entries: [emptyEntry(entryId)],
     overpackId: null,
   }
 }
 
 export function emptyOverpack(id: string): Overpack {
-  return { id, marks: '', count: 1, innerMarksVisible: false, coPackedWithProhibitedClass: false }
+  return { id, marks: '', count: 0, innerMarksVisible: false, coPackedWithProhibitedClass: null }
 }
 
 /**

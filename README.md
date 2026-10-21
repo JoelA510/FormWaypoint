@@ -111,6 +111,30 @@ arithmetic, the other asks what is in a box and tells you what the regulations m
 Folding dangerous goods into the standard flow would put a hazard question in front of every
 ordinary shipment, which is how hazard questions come to be answered without being read.
 
+**Nothing starts answered.** A new battery type's chemistry, cell or battery, shipping
+configuration, article level and condition all read "Not answered". Until every one is chosen
+the battery type is not classified, a blocking check names what is open, and the consignment
+shows "classification incomplete" rather than a verdict on goods nobody has described. The
+energy field waits for the chemistry, so a lithium metal battery is asked for its lithium
+content rather than offered a watt-hour box. The same holds for the box: a new package has no
+packaging description, no count and an unanswered co-packing question, and overpacks start
+uncounted and unanswered too. A blank packaging blocks wherever the package needs a
+declaration, because the declaration prints it, and is a warning on an excepted package.
+
+**Filling from the CIPL.** With a CIPL loaded in Standard Shipping, **Fill from the CIPL** on
+the dangerous goods tab copies the consignee (as the SLI has it, destination country
+included) and the invoice number as shipper's reference into blank fields, and for a
+one-carton CIPL adds one battery entry per part. The count and net weight per package it
+states are offered beside each entry, a click each, and only where the CIPL's own printed
+totals prove them. A one-carton CIPL offers a package count of one the same way, and the
+entry figures wait until that count is one, since they are the whole carton, and until the
+entry is answered as a standalone battery type that is not equipment: with equipment, packed
+or contained, the CIPL's line may be the devices. A copied figure is taken back if the entry or
+its package later stops qualifying. Otherwise the field says why there is no figure. If Standard Shipping could not show every line of the CIPL was read, the
+fill adds no entries and offers nothing. The airports get the CIPL's route as
+a hint, never a value, and nothing a classification turns on comes from the CIPL
+(docs/adr/0004-dangerous-goods-reads-the-cipl.md).
+
 **What it classifies.** Lithium ion, lithium metal and sodium ion, as cells or batteries,
 standalone or packed with or contained in the equipment they power. From those four facts and
 the energy content it derives the UN number, proper shipping name, packing instruction and
