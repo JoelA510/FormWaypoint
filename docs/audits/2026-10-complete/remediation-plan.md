@@ -2,11 +2,15 @@
 
 Repo: **JoelA510/FormWaypoint** · Plan drawn up: 2026-10-08 · Source audit: [`audit.md`](./audit.md)
 
-**Status:** IN PROGRESS as of 2026-10-21. D1, Milestone 1 (#58, #59, #60), Milestone 2a and 2b
-(#61, #62, #63) and Milestones 3a and 3b (#68, #69) merged; Milestones 4 and 5 not started.
-Outside the plan, #78 added the dangerous goods fill from the CIPL and unanswered-by-default DG
-fields (see "Discovered during execution"). Milestone 1 closes on the owner's three actions (ruleset import, `npm run test:real`, the GitHub Support
-request). The owner approves each pull request before it merges.
+**Status:** IN PROGRESS as of 2026-10-21. D1, Milestone 1 (#58, #59, #60) and Milestone 2a and 2b
+(#61, #62, #63) merged. Milestone 3 is part done: M3.1-M3.4, M3.6, M3.8 and M3.9 merged, and M3.7
+apart from ESLint 10 (#68, #69); M3.5 (coverage), M3.10 (unchecked index reads), M3.11 (browser
+journey test) and the ESLint 10 half of M3.7 are open, and its exit criteria unchecked, so Milestone
+3 is the current milestone. Milestone 4 is not started; #79 covers part of M5.9 and M5.10 (roadmap
+and README drift). Outside the plan, #78 added the dangerous goods fill from the CIPL and
+unanswered-by-default DG fields (see "Discovered during execution"). Milestone 1 closes on the
+owner's three actions (ruleset import, `npm run test:real`, the GitHub Support request). The owner
+approves each pull request before it merges.
 
 End state: every audit area at "no blocker/high findings", end-to-end coverage of the critical
 journey, a released build installed and smoke-tested, docs current. Measured against: a shipper at

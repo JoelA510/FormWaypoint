@@ -8,7 +8,8 @@ Two workflows, deliberately separate.
 
 **Standard shipping** turns a combined commercial invoice & packing list into a completed
 carrier Shipper's Letter of Instruction, on this machine. Three CIPL formats and two carriers
-are supported end to end, verified against real, manually-processed shipments.
+are supported end to end. The two vendor formats are verified against real, manually-processed
+shipments; the in-house form so far only against synthetic documents.
 
 **Dangerous goods — air** classifies lithium, lithium metal and sodium ion batteries under the
 IATA DGR, checks a consignment against the limits its classification carries, and produces the
