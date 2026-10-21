@@ -10,6 +10,10 @@
  *
  * Nothing here is uploaded, and nothing here is inferred. Every field the regulations turn on
  * is asked, and an unanswered one blocks rather than defaults.
+ *
+ * The one thing it takes from the standard flow is the CIPL already loaded there, and only
+ * when asked (ADR 0004): parties, the reference and one entry per part, into blank fields. The
+ * count and weight it states are offered beside each entry, a click each, never filled.
  */
 import { useCallback, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
 import {
@@ -30,6 +34,15 @@ import { assess, overpackOrder, packageCountInConsignment } from '../domain/dang
 import { buildChecklist } from '../domain/dangerous-goods/checklist'
 import { buildDeclaration, formatKg, retainUntil } from '../domain/dangerous-goods/dgd'
 import {
+  applyCiplSeed,
+  ciplFiguresApply,
+  ciplLink,
+  withoutCiplFigures,
+  type CiplSeed,
+  type FigureOffer,
+  type SeedPart,
+} from '../domain/dangerous-goods/cipl-seed'
+import {
   DG_SOURCE_NOTICE,
   CHEMISTRY_LABELS,
   CONFIGURATION_LABELS,
@@ -43,6 +56,7 @@ import {
   emptyOverpack,
   emptyPackage,
   newConsignment,
+  unansweredQuestions,
   nextDgId,
   PROHIBITED_CO_PACKED_CLASSES,
   type ArticleLevel,
@@ -97,6 +111,9 @@ export function DangerousGoodsPanel({
   consignment,
   onConsignmentChange: setConsignment,
   onPrepared,
+  cipl = null,
+  ciplLinks = {},
+  onCiplLinks,
 }: {
   /** The exporter profile the standard flow already holds; the shipper block is seeded from it. */
   profile: CompanyProfile
@@ -111,11 +128,17 @@ export function DangerousGoodsPanel({
    * to …" over a rejected write would leave the file on disk with nothing behind it.
    */
   onPrepared: (record: DgConsignmentRecord) => void | Promise<void>
+  /** What the CIPL loaded in Standard Shipping offers; null when none is loaded. */
+  cipl?: CiplSeed | null
+  /** Entry id → part key, for entries the CIPL added. Held above, like the consignment. */
+  ciplLinks?: Record<string, string>
+  onCiplLinks?: (links: Record<string, string>) => void
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [warnings, setWarnings] = useState<string[]>([])
   const [saved, setSaved] = useState<Delivery | null>(null)
+  const [ciplNotes, setCiplNotes] = useState<string[] | null>(null)
 
   const assessment = useMemo(() => assess(consignment), [consignment])
   const declaration = useMemo(() => buildDeclaration(consignment, assessment), [consignment, assessment])
@@ -128,6 +151,24 @@ export function DangerousGoodsPanel({
   const seedShipper = useCallback(() => {
     patch({ shipper: { name: profile.usppiName, addressLines: profile.usppiAddressLines } })
   }, [patch, profile])
+
+  // From the consignment as rendered rather than inside a state updater: the notes and links
+  // describe exactly the consignment that was filled, and an updater may run twice.
+  const fillFromCipl = useCallback(() => {
+    if (!cipl) return
+    const applied = applyCiplSeed(consignment, cipl, nextDgId)
+    setConsignment(applied.consignment)
+    setCiplNotes(applied.notes)
+    onCiplLinks?.(applied.links)
+  }, [cipl, consignment, setConsignment, onCiplLinks])
+
+  const partFor = useCallback(
+    (entryId: string): SeedPart | undefined => {
+      const link = ciplLinks[entryId]
+      return link && cipl ? cipl.parts.find((p) => ciplLink(cipl.source, p.partNumber) === link) : undefined
+    },
+    [cipl, ciplLinks],
+  )
 
   const updatePackage = useCallback((id: string, changes: Partial<DgPackage>) => {
     setConsignment((prev) => ({
@@ -282,18 +323,62 @@ export function DangerousGoodsPanel({
 
   return (
     <>
+      {cipl ? (
+        <Card>
+          <CardHeader
+            title="From the CIPL"
+            description={
+              `${cipl.source.fileName}${cipl.source.invoiceNumber ? `, invoice ${cipl.source.invoiceNumber}` : ''}, ` +
+              'as loaded in Standard Shipping. Fills blank fields only: the consignee, the shipper’s reference and, ' +
+              'for a one-carton CIPL, one battery entry per part. Count and net weight are offered beside each entry; ' +
+              'nothing a classification turns on comes from the CIPL.'
+            }
+            actions={
+              <Button size="sm" onClick={fillFromCipl}>
+                Fill from the CIPL
+              </Button>
+            }
+          />
+          {ciplNotes ? (
+            <CardBody>
+              <p role="status" className="text-sm">
+                {ciplNotes.length
+                  ? ciplNotes.join(' ')
+                  : 'Nothing to fill: every field the CIPL can fill already holds what it says.'}
+              </p>
+            </CardBody>
+          ) : null}
+        </Card>
+      ) : null}
+
       <Card>
         <CardHeader
           title="Consignment"
           description="One or more packages from one shipper, at one time and one address, to one consignee."
           actions={
             <div className="flex items-center gap-2">
-              <Badge tone={assessment.declarationRequired ? 'warn' : 'accent'}>
-                {assessment.declarationRequired ? 'declaration required' : 'Section II — no declaration'}
-              </Badge>
-              <Badge tone={assessment.requiredAircraft === 'cargo-aircraft-only' ? 'block' : 'neutral'}>
-                {assessment.requiredAircraft === 'cargo-aircraft-only' ? 'cargo aircraft only' : 'passenger permitted'}
-              </Badge>
+              {/*
+                One badge while anything is undescribed. The two verdicts below are computed
+                from the answered entries only, and on an empty consignment they read
+                "Section II — no declaration, passenger permitted" about goods nobody has
+                described.
+              */}
+              {assessment.complete ? (
+                <>
+                  <Badge tone={assessment.declarationRequired ? 'warn' : 'accent'}>
+                    {assessment.declarationRequired ? 'declaration required' : 'Section II — no declaration'}
+                  </Badge>
+                  <Badge tone={assessment.requiredAircraft === 'cargo-aircraft-only' ? 'block' : 'neutral'}>
+                    {assessment.requiredAircraft === 'cargo-aircraft-only' ? 'cargo aircraft only' : 'passenger permitted'}
+                  </Badge>
+                </>
+              ) : (
+                <Badge tone="warn">
+                  {assessment.packages.some((p) => p.unanswered.length)
+                    ? 'classification incomplete'
+                    : 'packages incomplete'}
+                </Badge>
+              )}
               {/*
                 Explicit, because this consignment now survives a tab switch. Held state with
                 no way to clear it is how the next shipment inherits the last one's figures.
@@ -304,6 +389,7 @@ export function DangerousGoodsPanel({
                 onClick={() => {
                   if (!window.confirm('Clear this consignment and start a new one?')) return
                   setConsignment(newConsignment())
+                  setCiplNotes(null)
                   setSaved(null)
                   setWarnings([])
                   setError(null)
@@ -335,7 +421,10 @@ export function DangerousGoodsPanel({
 
           <div className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Airport of departure" hint="Full airport or city name — not a code.">
+              <Field
+                label="Airport of departure"
+                hint={routeHint('Full airport or city name — not a code.', 'shipped from', cipl?.routeHint.shippedFrom)}
+              >
                 {(id) => (
                   <Input
                     id={id}
@@ -345,7 +434,10 @@ export function DangerousGoodsPanel({
                   />
                 )}
               </Field>
-              <Field label="Airport of destination" hint="Full airport or city name — not a code.">
+              <Field
+                label="Airport of destination"
+                hint={routeHint('Full airport or city name — not a code.', 'discharge port', cipl?.routeHint.dischargePort)}
+              >
                 {(id) => (
                   <Input
                     id={id}
@@ -376,7 +468,9 @@ export function DangerousGoodsPanel({
               <Field
                 label="Aircraft"
                 hint={
-                  assessment.requiredAircraft === 'cargo-aircraft-only'
+                  !assessment.complete
+                    ? 'What the contents allow is known once every battery type is described.'
+                    : assessment.requiredAircraft === 'cargo-aircraft-only'
                     ? 'The contents restrict this to cargo aircraft only.'
                     : 'A consignment the goods allow on a passenger aircraft may still be offered as cargo only.'
                 }
@@ -467,6 +561,8 @@ export function DangerousGoodsPanel({
         onUpdatePackage={updatePackage}
         onUpdateEntry={updateEntry}
         onChange={setConsignment}
+        partFor={partFor}
+        ciplPackageCount={cipl?.packageCount ?? null}
       />
 
       <RequirementsPanel consignment={consignment} assessment={assessment} />
@@ -550,6 +646,63 @@ export function DangerousGoodsPanel({
   )
 }
 
+/**
+ * A yes/no question that starts unanswered. A checkbox can't: unticked already reads as "no".
+ */
+function CoPackSelect({
+  id,
+  value,
+  onChange,
+}: {
+  id: string
+  value: boolean | null
+  onChange: (next: boolean | null) => void
+}) {
+  return (
+    <Select
+      id={id}
+      value={value == null ? '' : value ? 'yes' : 'no'}
+      onChange={(e) => onChange(e.target.value === '' ? null : e.target.value === 'yes')}
+    >
+      <option value="">Not answered</option>
+      <option value="no">No</option>
+      <option value="yes">Yes</option>
+    </Select>
+  )
+}
+
+/**
+ * The CIPL's route, beside the airport field it relates to and never in it: the city the goods
+ * ship from is not always the airport on the air waybill.
+ */
+function routeHint(base: string, what: string, value: string | null | undefined): string {
+  return value ? `${base} The CIPL’s ${what}: ${value}.` : base
+}
+
+/** A figure the CIPL offers for one field, copied only on a click. */
+function CiplFigure({
+  offer,
+  current,
+  onUse,
+}: {
+  offer: FigureOffer
+  current: number | null
+  onUse: (value: number) => void
+}) {
+  if (offer.value === null) {
+    return <p className="text-xs text-[var(--color-ink-faint)]">No CIPL figure: {offer.why}</p>
+  }
+  if (current === offer.value) {
+    return <p className="text-xs text-[var(--color-ink-faint)]">Matches the CIPL ({offer.label}).</p>
+  }
+  const value = offer.value
+  return (
+    <Button size="sm" variant="ghost" className="self-start" onClick={() => onUse(value)}>
+      Use CIPL figure ({offer.label})
+    </Button>
+  )
+}
+
 function PartyEditor({
   label,
   party,
@@ -585,15 +738,59 @@ function PackagesEditor({
   onUpdatePackage,
   onUpdateEntry,
   onChange,
+  partFor,
+  ciplPackageCount,
 }: {
   consignment: DgConsignment
   assessment: ReturnType<typeof assess>
   onUpdatePackage: (id: string, changes: Partial<DgPackage>) => void
   onUpdateEntry: (packageId: string, entryId: string, changes: Partial<BatteryEntry>) => void
   onChange: (next: DgConsignment) => void
+  partFor: (entryId: string) => SeedPart | undefined
+  ciplPackageCount: FigureOffer | null
 }) {
+  // Offered only on the package the CIPL's entries were added to, and only where one package
+  // description is the whole consignment and its count means packages, not packages per
+  // overpack.
+  const packageCountOffer = (pkg: DgPackage): FigureOffer | null => {
+    if (!ciplPackageCount || !pkg.entries.some((e) => partFor(e.id))) return null
+    if (consignment.packages.length !== 1) {
+      return { value: null, why: 'the consignment has more than one package description, and the CIPL does not say which holds what.' }
+    }
+    if (pkg.overpackId) {
+      return { value: null, why: 'in an overpack this is the count per overpack, which the CIPL does not state.' }
+    }
+    return ciplPackageCount
+  }
+
+  // A package that stops being the CIPL's one carton gives back the entry figures it took from it.
+  const entriesWithoutCiplFigures = (pkg: DgPackage): BatteryEntry[] =>
+    pkg.entries.map((e) => {
+      const part = partFor(e.id)
+      return part ? { ...e, ...withoutCiplFigures(e, part) } : e
+    })
+
+  // The entry figures are the CIPL's whole carton. They are per-package figures only while the
+  // carton is the one package, so they wait for that package count — offered above — rather
+  // than doubling the consignment when two packages are typed.
+  const entryOfferRefusal = (pkg: DgPackage): FigureOffer | null => {
+    const gate = packageCountOffer(pkg)
+    if (gate && gate.value === null) return gate
+    if (pkg.count !== 1) {
+      return { value: null, why: 'offered once Identical packages is 1, the CIPL’s one carton.' }
+    }
+    return null
+  }
+
+  // A second description ends the one-carton reading too, so the first gives its figures back.
   const addPackage = () =>
-    onChange({ ...consignment, packages: [...consignment.packages, emptyPackage(nextDgId('pkg-'), nextDgId('ent-'))] })
+    onChange({
+      ...consignment,
+      packages: [
+        ...consignment.packages.map((p) => ({ ...p, entries: entriesWithoutCiplFigures(p) })),
+        emptyPackage(nextDgId('pkg-'), nextDgId('ent-')),
+      ],
+    })
 
   const removePackage = (id: string) =>
     onChange({ ...consignment, packages: consignment.packages.filter((p) => p.id !== id) })
@@ -638,10 +835,15 @@ function PackagesEditor({
         description="One entry per battery type in the box. The limits are per package; the marking exemptions are per consignment."
         actions={
           <div className="flex items-center gap-2">
-            <Badge tone="neutral">
-              {assessment.totals.packages} package{assessment.totals.packages === 1 ? '' : 's'} ·{' '}
-              {formatKg(assessment.totals.netWeightKg)} kg
-            </Badge>
+            {/* "0 packages" while a count is unstated would read as a count. */}
+            {consignment.packages.some((p) => packageCountInConsignment(p, consignment) === 0) ? (
+              <Badge tone="warn">packages not counted</Badge>
+            ) : (
+              <Badge tone="neutral">
+                {assessment.totals.packages} package{assessment.totals.packages === 1 ? '' : 's'} ·{' '}
+                {formatKg(assessment.totals.netWeightKg)} kg
+              </Badge>
+            )}
             <Button size="sm" onClick={addPackage}>
               Add package
             </Button>
@@ -656,6 +858,7 @@ function PackagesEditor({
         {overpackOrder(consignment.packages, (p) => p.overpackId).map((pkg, index) => {
           const assessed = assessment.packages.find((p) => p.pkg.id === pkg.id)
           const total = packageCountInConsignment(pkg, consignment)
+          const countOffer = packageCountOffer(pkg)
           return (
             <div key={pkg.id} className="rounded-md border bg-[var(--color-sunken)] p-4">
               <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
@@ -685,20 +888,33 @@ function PackagesEditor({
                     />
                   )}
                 </Field>
-                <Field
-                  label="Identical packages"
-                  hint={pkg.overpackId ? 'Per overpack.' : 'In the consignment.'}
-                >
-                  {(id) => (
-                    <Input
-                      id={id}
-                      type="number"
-                      min={1}
-                      value={pkg.count}
-                      onChange={(e) => onUpdatePackage(pkg.id, { count: Number(e.target.value) || 0 })}
+                <div className="flex flex-col gap-1">
+                  <Field
+                    label="Identical packages"
+                    hint={pkg.overpackId ? 'Per overpack.' : 'In the consignment.'}
+                  >
+                    {(id) => (
+                      <Input
+                        id={id}
+                        type="number"
+                        min={1}
+                        // Blank for zero, which is "not stated": a new package starts there.
+                        value={pkg.count || ''}
+                        onChange={(e) => {
+                          const count = Number(e.target.value) || 0
+                          onUpdatePackage(pkg.id, count === 1 ? { count } : { count, entries: entriesWithoutCiplFigures(pkg) })
+                        }}
+                      />
+                    )}
+                  </Field>
+                  {countOffer ? (
+                    <CiplFigure
+                      offer={countOffer}
+                      current={pkg.count || null}
+                      onUse={(value) => onUpdatePackage(pkg.id, { count: value })}
                     />
-                  )}
-                </Field>
+                  ) : null}
+                </div>
                 <Field label="UN specification mark" hint="Required at Sections I and IA.">
                   {(id) => (
                     <Input
@@ -714,7 +930,10 @@ function PackagesEditor({
                     <Select
                       id={id}
                       value={pkg.overpackId ?? ''}
-                      onChange={(e) => onUpdatePackage(pkg.id, { overpackId: e.target.value || null })}
+                      onChange={(e) => {
+                        const overpackId = e.target.value || null
+                        onUpdatePackage(pkg.id, overpackId ? { overpackId, entries: entriesWithoutCiplFigures(pkg) } : { overpackId })
+                      }}
                     >
                       <option value="">None</option>
                       {consignment.overpacks.map((o, i) => (
@@ -785,18 +1004,22 @@ function PackagesEditor({
                     />
                   )}
                 </Field>
-                <div className="self-end pb-1">
-                  <Toggle
-                    label="Also holds prohibited dangerous goods"
-                    checked={pkg.coPackedWithProhibitedClass}
-                    onChange={(next) => onUpdatePackage(pkg.id, { coPackedWithProhibitedClass: next })}
-                    hint={
-                      `Not permitted in the same outer packaging: ${PROHIBITED_CO_PACKED_CLASSES.join('; ')}. ` +
-                      'Division 1.4S is permitted, and Divisions 4.2, 4.3 and 5.2, Class 8 and Division 2.2 are ' +
-                      'not on the list.'
-                    }
-                  />
-                </div>
+                <Field
+                  label="Also holds prohibited dangerous goods"
+                  hint={
+                    `Not permitted in the same outer packaging: ${PROHIBITED_CO_PACKED_CLASSES.join('; ')}. ` +
+                    'Division 1.4S is permitted, and Divisions 4.2, 4.3 and 5.2, Class 8 and Division 2.2 are ' +
+                    'not on the list.'
+                  }
+                >
+                  {(id) => (
+                    <CoPackSelect
+                      id={id}
+                      value={pkg.coPackedWithProhibitedClass}
+                      onChange={(next) => onUpdatePackage(pkg.id, { coPackedWithProhibitedClass: next })}
+                    />
+                  )}
+                </Field>
               </div>
 
               <div className="mt-4 space-y-3">
@@ -816,8 +1039,15 @@ function PackagesEditor({
                       </div>
                       <EntryEditor
                         entry={entry}
+                        ciplPart={partFor(entry.id)}
+                        ciplRefusal={entryOfferRefusal(pkg)}
                         onChange={(changes) => onUpdateEntry(pkg.id, entry.id, changes)}
                       />
+                      {unansweredQuestions(entry).length ? (
+                        <p className="mt-3 border-t pt-2 text-sm text-[var(--color-ink-soft)]">
+                          Not classified: answer {unansweredQuestions(entry).join(', ')}.
+                        </p>
+                      ) : null}
                       {classification ? (
                         <p className="mt-3 border-t pt-2 text-sm">
                           <span className="font-semibold tabular">{classification.unNumber}</span>{' '}
@@ -893,7 +1123,7 @@ function PackagesEditor({
                       id={id}
                       type="number"
                       min={1}
-                      value={overpack.count}
+                      value={overpack.count || ''}
                       // Zero, like the package count beside it, not one. Coerced to one, a
                       // cleared box silently under-counted the consignment: the package
                       // total is the product of the two, so six packages read as two, the
@@ -926,12 +1156,18 @@ function PackagesEditor({
                   onChange={(next) => updateOverpack(overpack.id, { innerMarksVisible: next })}
                   hint="Otherwise every one of them is reproduced on the exterior."
                 />
-                <Toggle
+                <Field
                   label="Also holds prohibited dangerous goods"
-                  checked={overpack.coPackedWithProhibitedClass}
-                  onChange={(next) => updateOverpack(overpack.id, { coPackedWithProhibitedClass: next })}
                   hint="The same list applies to an overpack as to an outer packaging."
-                />
+                >
+                  {(id) => (
+                    <CoPackSelect
+                      id={id}
+                      value={overpack.coPackedWithProhibitedClass}
+                      onChange={(next) => updateOverpack(overpack.id, { coPackedWithProhibitedClass: next })}
+                    />
+                  )}
+                </Field>
               </div>
               <Button size="sm" variant="ghost" onClick={() => removeOverpack(overpack.id)}>
                 Remove overpack
@@ -946,11 +1182,44 @@ function PackagesEditor({
 
 function EntryEditor({
   entry,
+  ciplPart,
+  ciplRefusal,
   onChange,
 }: {
   entry: BatteryEntry
+  /** The CIPL part this entry was added for, whose figures it may offer. */
+  ciplPart?: SeedPart
+  /** Why this entry's package can't take the part's figures as per-package ones, if it can't. */
+  ciplRefusal: FigureOffer | null
   onChange: (changes: Partial<BatteryEntry>) => void
 }) {
+  // For equipment the CIPL's pieces are devices and its net weight includes them; both fields
+  // want the batteries alone, so neither figure is offered.
+  const equipmentRefusal: FigureOffer = {
+    value: null,
+    why: 'the CIPL counts and weighs the equipment, and this field wants the batteries alone.',
+  }
+  // Becoming equipment takes back a CIPL figure the entry still holds: for equipment those are
+  // the devices' pieces and weight, and the fields want the batteries alone. Only a figure equal
+  // to the CIPL's is taken back; one the person typed is theirs.
+  // A change that makes the CIPL's figures stop applying (equipment, or no longer standalone)
+  // takes back the ones the entry still holds; see `withoutCiplFigures`.
+  const kindChange = (changes: Partial<BatteryEntry>): Partial<BatteryEntry> => {
+    const next = { ...entry, ...changes }
+    return ciplPart && !ciplFiguresApply(next) ? { ...changes, ...withoutCiplFigures(entry, ciplPart) } : changes
+  }
+  // Unanswered is treated like equipment: until the article level and configuration say these
+  // are batteries on their own, the CIPL's pieces and weight may be devices.
+  const articleRefusal: FigureOffer | null =
+    entry.articleLevel === 'equipment'
+      ? equipmentRefusal
+      : entry.articleLevel == null
+        ? { value: null, why: 'answer the article level first; for equipment the CIPL counts and weighs the devices.' }
+        : entry.spec.configuration == null
+          ? { value: null, why: 'answer the shipping configuration first; with equipment the CIPL may count and weigh the devices.' }
+          : entry.spec.configuration !== 'standalone'
+            ? { value: null, why: 'with equipment the CIPL may count and weigh the devices, and this field wants the batteries alone.' }
+            : null
   const isMetal = entry.spec.chemistry === 'lithium-metal'
   const setSpec = (changes: Partial<BatteryEntry['spec']>) => onChange({ spec: { ...entry.spec, ...changes } })
   const number = (value: string) => (value.trim() === '' ? null : Number(value))
@@ -962,9 +1231,10 @@ function EntryEditor({
           {(id) => (
             <Select
               id={id}
-              value={entry.spec.chemistry}
-              onChange={(e) => setSpec({ chemistry: e.target.value as Chemistry })}
+              value={entry.spec.chemistry ?? ''}
+              onChange={(e) => setSpec({ chemistry: e.target.value ? (e.target.value as Chemistry) : null })}
             >
+              <option value="">Not answered</option>
               {(Object.keys(CHEMISTRY_LABELS) as Chemistry[]).map((value) => (
                 <option key={value} value={value}>
                   {CHEMISTRY_LABELS[value]}
@@ -977,9 +1247,10 @@ function EntryEditor({
           {(id) => (
             <Select
               id={id}
-              value={entry.spec.form}
-              onChange={(e) => setSpec({ form: e.target.value as CellOrBattery })}
+              value={entry.spec.form ?? ''}
+              onChange={(e) => setSpec({ form: e.target.value ? (e.target.value as CellOrBattery) : null })}
             >
+              <option value="">Not answered</option>
               {(Object.keys(FORM_LABELS) as CellOrBattery[]).map((value) => (
                 <option key={value} value={value}>
                   {FORM_LABELS[value]}
@@ -992,9 +1263,16 @@ function EntryEditor({
           {(id) => (
             <Select
               id={id}
-              value={entry.spec.configuration}
-              onChange={(e) => setSpec({ configuration: e.target.value as Configuration })}
+              value={entry.spec.configuration ?? ''}
+              onChange={(e) =>
+                onChange(
+                  kindChange({
+                    spec: { ...entry.spec, configuration: e.target.value ? (e.target.value as Configuration) : null },
+                  }),
+                )
+              }
             >
+              <option value="">Not answered</option>
               {(Object.keys(CONFIGURATION_LABELS) as Configuration[]).map((value) => (
                 <option key={value} value={value}>
                   {CONFIGURATION_LABELS[value]}
@@ -1006,7 +1284,14 @@ function EntryEditor({
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {isMetal ? (
+        {entry.spec.chemistry == null ? (
+          // Which figure is asked depends on the chemistry: grams of lithium for lithium metal,
+          // watt-hours otherwise. Offering watt-hours before it is answered is how a lithium
+          // metal battery came to be rated in Wh and classified as lithium ion.
+          <p className="self-end pb-2 text-sm text-[var(--color-ink-soft)]">
+            Choose the chemistry to enter the watt-hours or lithium content.
+          </p>
+        ) : isMetal ? (
           <Field label="Lithium content per cell/battery (g)" hint="Not the package total.">
             {(id) => (
               <Input
@@ -1033,36 +1318,55 @@ function EntryEditor({
             )}
           </Field>
         )}
-        <Field label="Net battery weight per package (kg)" hint="The batteries only — not the equipment or the box.">
-          {(id) => (
-            <Input
-              id={id}
-              type="number"
-              step="0.001"
-              min={0}
-              value={entry.netWeightKgPerPackage ?? ''}
-              onChange={(e) => onChange({ netWeightKgPerPackage: number(e.target.value) })}
+        <div className="flex flex-col gap-1">
+          <Field label="Net battery weight per package (kg)" hint="The batteries only — not the equipment or the box.">
+            {(id) => (
+              <Input
+                id={id}
+                type="number"
+                step="0.001"
+                min={0}
+                value={entry.netWeightKgPerPackage ?? ''}
+                onChange={(e) => onChange({ netWeightKgPerPackage: number(e.target.value) })}
+              />
+            )}
+          </Field>
+          {ciplPart ? (
+            <CiplFigure
+              offer={ciplRefusal ?? articleRefusal ?? ciplPart.netWeightKg}
+              current={entry.netWeightKgPerPackage}
+              onUse={(value) => onChange({ netWeightKgPerPackage: value })}
             />
-          )}
-        </Field>
-        <Field label="How many per package" hint="Decides the marking exemption for equipment.">
-          {(id) => (
-            <Input
-              id={id}
-              type="number"
-              min={0}
-              value={entry.countPerPackage ?? ''}
-              onChange={(e) => onChange({ countPerPackage: number(e.target.value) })}
+          ) : null}
+        </div>
+        <div className="flex flex-col gap-1">
+          <Field label="How many per package" hint="Decides the marking exemption for equipment.">
+            {(id) => (
+              <Input
+                id={id}
+                type="number"
+                min={0}
+                value={entry.countPerPackage ?? ''}
+                onChange={(e) => onChange({ countPerPackage: number(e.target.value) })}
+              />
+            )}
+          </Field>
+          {ciplPart ? (
+            <CiplFigure
+              offer={ciplRefusal ?? articleRefusal ?? ciplPart.count}
+              current={entry.countPerPackage}
+              onUse={(value) => onChange({ countPerPackage: value })}
             />
-          )}
-        </Field>
+          ) : null}
+        </div>
         <Field label="Article level" hint="What is physically in the box, at the level its type is tested.">
           {(id) => (
             <Select
               id={id}
-              value={entry.articleLevel}
-              onChange={(e) => onChange({ articleLevel: e.target.value as ArticleLevel })}
+              value={entry.articleLevel ?? ''}
+              onChange={(e) => onChange(kindChange({ articleLevel: e.target.value ? (e.target.value as ArticleLevel) : null }))}
             >
+              <option value="">Not answered</option>
               {(Object.keys(ARTICLE_LEVEL_LABELS) as ArticleLevel[]).map((value) => (
                 <option key={value} value={value}>
                   {ARTICLE_LEVEL_LABELS[value]}
@@ -1187,9 +1491,10 @@ function EntryEditor({
           {(id) => (
             <Select
               id={id}
-              value={entry.condition}
-              onChange={(e) => onChange({ condition: e.target.value as BatteryCondition })}
+              value={entry.condition ?? ''}
+              onChange={(e) => onChange({ condition: e.target.value ? (e.target.value as BatteryCondition) : null })}
             >
+              <option value="">Not answered</option>
               {(Object.keys(CONDITION_LABELS) as BatteryCondition[]).map((value) => (
                 <option key={value} value={value}>
                   {CONDITION_LABELS[value]}
@@ -1277,6 +1582,12 @@ function RequirementsPanel({
         description="Marks, labels and the air waybill wording — the whole of the hazard communication for a Section II consignment."
       />
       <CardBody className="space-y-4">
+        {!assessment.complete ? (
+          <p className="rounded-md border border-[var(--color-warn)] bg-[var(--color-warn-soft)] px-3 py-2 text-sm">
+            Incomplete: a battery type, a package or overpack count, or a co-packing question is not answered, so
+            what is listed here may not be everything the consignment needs. Answer the questions the checks name.
+          </p>
+        ) : null}
         {assessment.airWaybillStatements.length ? (
           <div className="rounded-md border bg-[var(--color-sunken)] px-3 py-2">
             <p className="text-xs font-semibold tracking-wide text-[var(--color-ink-soft)] uppercase">
@@ -1355,7 +1666,9 @@ export function DeclarationPanel({
         description={
           assessment.declarationRequired
             ? 'A Shipper’s Declaration in the IATA format, and the bench checklist that goes with it.'
-            : 'No declaration is required for a Section II consignment — the checklist is the deliverable.'
+            : !assessment.complete
+              ? 'Whether a declaration is required is known once every battery type and package is described.'
+              : 'No declaration is required for a Section II consignment — the checklist is the deliverable.'
         }
         actions={assessment.canGenerate ? <Badge tone="pass">checks passed</Badge> : <Badge tone="block">blocked</Badge>}
       />

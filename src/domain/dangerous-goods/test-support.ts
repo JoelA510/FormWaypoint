@@ -23,6 +23,7 @@ export function entry(id: string, spec: Partial<BatterySpec>, overrides: Partial
       ...spec,
     },
     articleLevel: 'battery-pack',
+    condition: 'sound',
     netWeightKgPerPackage: 1,
     testSummaryScope: 'battery-pack',
     testSummaryReference: 'TR-2026-0041',
@@ -41,6 +42,9 @@ export function pkg(id: string, entries: BatteryEntry[], overrides: Partial<DgPa
   return {
     ...emptyPackage(id, `${id}-e`),
     entries,
+    packagingType: 'Fibreboard box',
+    count: 1,
+    coPackedWithProhibitedClass: false,
     grossWeightKg: 30,
     equipmentNetWeightKg: 0,
     ...overrides,
@@ -48,7 +52,7 @@ export function pkg(id: string, entries: BatteryEntry[], overrides: Partial<DgPa
 }
 
 export function overpack(id: string, overrides: Partial<Overpack> = {}): Overpack {
-  return { ...emptyOverpack(id), marks: '#A001', ...overrides }
+  return { ...emptyOverpack(id), marks: '#A001', count: 1, coPackedWithProhibitedClass: false, ...overrides }
 }
 
 /** A consignment whose non-battery boxes are all filled in, so only the goods are under test. */

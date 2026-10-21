@@ -168,6 +168,9 @@ Two boundaries are deliberate and should stay:
 
 | Date | Milestone | Details |
 | :--- | :--- | :--- |
+| 2026-10-19 | **DG packages start unanswered** | Packaging description, package and overpack counts and the prohibited co-packing question start blank; a blank packaging blocks where a declaration is required and warns otherwise, and co-packing reads Not answered / No / Yes. |
+| 2026-10-19 | **DG entries start unanswered** | Chemistry, cell or battery, configuration, article level and condition start unanswered and block classification until chosen; a fresh entry no longer classifies as lithium ion (UN3480) before anyone has described it. |
+| 2026-10-19 | **DG fill from the CIPL** | The dangerous goods tab fills its blank consignee, reference and per-part entries from the CIPL loaded in Standard Shipping, and offers each part's count and net weight a click at a time where the CIPL's totals prove them (ADR 0004). |
 | 2026-08-06 | **DG fact check and hardening** | The supplied ORT checklist and domain specification worked through against the PI 965 text and eCFR. UN 38.3 article coverage, three weights, state-of-charge evidence, operating carrier, overpack identity, the corrected co-packing list, packaging authorization limits and the vehicle question all folded in. |
 | 2026-08-06 | **Dangerous goods — air** | Lithium and sodium battery classification, consignment assessment, the Shipper's Declaration drawn to the IATA layout, the package checklist, and two-year retention — behind its own tab, leaving conventional shipping untouched. |
 | 2026-07-28 | **Pre-packaging pass** | Store seam narrowed to one assignment, Schedule B staleness warning, toolchain bumps (vite 8, vitest 4), monorepo leftovers removed. |
