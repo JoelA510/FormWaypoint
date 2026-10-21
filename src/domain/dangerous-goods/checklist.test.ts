@@ -4,6 +4,7 @@ import { assess, overpackOrder } from './assess'
 import { buildChecklist } from './checklist'
 import { DG_SOURCE_NOTICE } from './lithium'
 import { buildDeclaration, retainUntil } from './dgd'
+import { emptyEntry } from './types'
 import { localDate } from '../../lib/report'
 
 
@@ -284,5 +285,20 @@ describe('the source of the rules', () => {
     const shipment = consignment([pkg('p1', [entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 7 })])])
     const markdown = buildChecklist(shipment, assess(shipment), '2026-08-06')
     expect(markdown.split('\n').slice(0, 4).join('\n')).toContain(DG_SOURCE_NOTICE)
+  })
+})
+
+describe('a consignment with a battery type still undescribed', () => {
+  it('still builds a declaration and a checklist, and neither presents it as classified', () => {
+    const answered = entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 7 })
+    const shipment = consignment([pkg('p1', [answered, emptyEntry('e-open')])])
+    const result = assess(shipment)
+    expect(result.canGenerate).toBe(false)
+    const declaration = buildDeclaration(shipment, result)
+    const checklist = buildChecklist(shipment, result, '2026-10-19')
+    const alone = assess(consignment([pkg('p1', [answered])]))
+    // Only the answered entry is on either document.
+    expect(declaration.lines).toEqual(buildDeclaration(consignment([pkg('p1', [answered])]), alone).lines)
+    expect(checklist).not.toMatch(/undefined|null/)
   })
 })
