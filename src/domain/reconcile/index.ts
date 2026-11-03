@@ -57,6 +57,9 @@ const WEIGHT_TOLERANCE = 0.001
 const LIBRARY_WEIGHT_RELATIVE = 0.01
 const PRINTED_WEIGHT_STEP_KG = 0.0005
 
+/** Part numbers named in the missing-from-the-library warning before it says "and N more". */
+const MISSING_PARTS_SHOWN = 10
+
 export interface ReconcileOptions extends AggregationOptions {
   /** Commodity rows one sheet of the target form holds. Beyond it the form continues onto another. */
   maxRows?: number
@@ -1158,6 +1161,34 @@ function partCodeChecks(
     passed: true,
     actual: `${covered.size}/${parts.size}`,
   })
+
+  // A part number the library has never heard of is what a mistyped or changed part number
+  // looks like from here: the CIPL names a part, and the verified record for it is not there to
+  // check anything against. Said once the library is loaded, because without one there is no
+  // record to be missing from. Nothing is filed differently.
+  const missing = new Map<string, string>()
+  const distinct = new Set<string>()
+  for (const { part } of seen.values()) {
+    const key = partKey(part)
+    distinct.add(key)
+    if (!itemsByPart.has(key) && !missing.has(key)) missing.set(key, part.trim() || '(no part number)')
+  }
+  if (missing.size) {
+    const named = [...missing.values()].slice(0, MISSING_PARTS_SHOWN)
+    const more = missing.size - named.length
+    results.push({
+      id: 'item-library-missing',
+      severity: 'warning',
+      title: 'Some parts on the CIPL are not in the item library',
+      detail:
+        `${named.join(', ')}${more > 0 ? ` and ${more} more` : ''} — not found in the imported item master, so ` +
+        'their weight and commodity number could not be checked against it. A mistyped or changed part ' +
+        'number looks like this. If they are genuinely new parts, add them to the library. Nothing is ' +
+        'filed differently.',
+      passed: false,
+      actual: `${missing.size} of ${distinct.size} part(s)`,
+    })
+  }
 
   if (badInLibrary.length) {
     results.push({

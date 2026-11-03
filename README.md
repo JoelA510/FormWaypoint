@@ -264,9 +264,13 @@ block, and never a change to what is filed:
   a gram). Lines counted in anything but pieces are not compared. A layout that prints no
   weights files the library's own, so there is nothing to compare, and the check says so.
 
-Both are aimed at the part whose number or weight was changed upstream, in whatever system
-produced the CIPL. A part missing from the library is not flagged; the coverage line says
-how many were found.
+- **Part not in the library.** A part number on the CIPL that the library does not hold is
+  listed by name, since a mistyped or changed part number looks exactly like this, and its
+  weight and number could not be checked. Only once a library is loaded. If they really are
+  new parts, add them to the library.
+
+All of these are aimed at the part whose number or weight was changed upstream, in whatever
+system produced the CIPL.
 
 A second file can replace the library or merge into it. A weight typed on the review screen
 wins over the library figure, and a library figure never displaces a weight the packing

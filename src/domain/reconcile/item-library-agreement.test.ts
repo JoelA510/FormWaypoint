@@ -222,3 +222,83 @@ describe('CIPL commodity numbers against the item library', () => {
     expect(find(run(entries, lower).checks, 'item-library-conflict')!.passed).toBe(false)
   })
 })
+
+describe('parts on the CIPL that are not in the item library', () => {
+  it('warns, naming each part, when the library does not hold it', () => {
+    // Only 10000-0001 is in the library; 0002 and 0003 are what a mistyped part number looks like.
+    const result = run([item({ partNumber: '10000-0001', netWeightKg: 0.3 })])
+    const check = find(result.checks, 'item-library-missing')!
+    expect(check).toMatchObject({ severity: 'warning', passed: false, actual: '2 of 3 part(s)' })
+    expect(check.detail).toContain('10000-0002, 10000-0003')
+    expect(check.detail).toContain('Nothing is filed differently')
+    // The coverage line is still there, and nothing is blocked because of it.
+    expect(find(result.checks, 'item-library-coverage')).toMatchObject({ actual: '1/3' })
+    expect(result.canGenerate).toBe(run([item({ partNumber: '10000-0001' })], vendorA).canGenerate)
+  })
+
+  it('is silent when every part is in the library', () => {
+    const result = run(
+      ['10000-0001', '10000-0002', '10000-0003'].map((partNumber) => item({ partNumber, netWeightKg: 1 })),
+    )
+    expect(find(result.checks, 'item-library-missing')).toBeUndefined()
+  })
+
+  it('says nothing when no library is loaded, since there is no record to be missing from', () => {
+    expect(find(reconcile(vendorA, scheduleB, CONTROLLED).checks, 'item-library-missing')).toBeUndefined()
+  })
+
+  it('does not call a part missing for its case or padding', () => {
+    const padded: ParsedCipl = {
+      ...vendorA,
+      lines: vendorA.lines.map((l) => ({ ...l, partNumber: ` ${l.partNumber.toLowerCase()} ` })),
+    }
+    const result = run(['10000-0001', '10000-0002', '10000-0003'].map((partNumber) => item({ partNumber })), padded)
+    expect(find(result.checks, 'item-library-missing')).toBeUndefined()
+  })
+
+  it('names a line with no part number rather than dropping it from the list', () => {
+    const blank: ParsedCipl = {
+      ...vendorA,
+      lines: vendorA.lines.map((l) => (l.partNumber === '10000-0003' ? { ...l, partNumber: '' } : l)),
+    }
+    const result = run(['10000-0001', '10000-0002'].map((partNumber) => item({ partNumber })), blank)
+    expect(find(result.checks, 'item-library-missing')!.detail).toContain('(no part number)')
+  })
+
+  it('names each part once however many lines it is on, even under two commodity numbers', () => {
+    // The second copy is classified differently, so the part reaches the check as two
+    // (part, number) pairs; it must still be one part in the list and in the count.
+    const twice: ParsedCipl = {
+      ...vendorA,
+      lines: vendorA.lines.flatMap((l) =>
+        l.partNumber === '10000-0002'
+          ? [l, { ...l, id: `${l.id}-copy`, orderNumber: `${l.orderNumber}9`, classification: '8544.49.0000' }]
+          : [l],
+      ),
+    }
+    const check = find(run([item({ partNumber: '10000-0001' })], twice).checks, 'item-library-missing')!
+    expect(check.detail.match(/10000-0002/g)).toHaveLength(1)
+    expect(check.actual).toBe('2 of 3 part(s)')
+  })
+
+  it('names the first ten and counts the rest', () => {
+    const many: ParsedCipl = {
+      ...vendorA,
+      lines: Array.from({ length: 12 }, (_, i) =>
+        vendorA.lines
+          .filter((l) => l.partNumber === '10000-0001')
+          .map((l) => ({
+            ...l,
+            id: `${l.id}-${i}`,
+            itemId: `${l.itemId}-${i}`,
+            orderNumber: `${l.orderNumber}${i}`,
+            partNumber: `P-${String(i).padStart(2, '0')}`,
+          })),
+      ).flat(),
+    }
+    const check = find(run([item({ partNumber: 'SOMETHING-ELSE' })], many).checks, 'item-library-missing')!
+    expect(check.actual).toBe('12 of 12 part(s)')
+    expect(check.detail).toContain('P-00, P-01, P-02, P-03, P-04, P-05, P-06, P-07, P-08, P-09 and 2 more')
+    expect(check.detail).not.toContain('P-10')
+  })
+})
