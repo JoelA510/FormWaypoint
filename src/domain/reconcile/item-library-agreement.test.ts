@@ -149,6 +149,115 @@ describe('CIPL weights against the item library', () => {
     expect(check.detail).toContain('No part on this CIPL had both')
   })
 
+  // A light single piece: part 0002's packing line re-drawn as 1 PC printing the given weight.
+  const lightPart = (netWeightKg: number, extra: Record<string, unknown> = {}): ParsedCipl => ({
+    ...vendorA,
+    lines: vendorA.lines.map((l) =>
+      l.partNumber === '10000-0002' && l.documentKind === 'PACKING_LIST'
+        ? { ...l, quantity: 1, netWeightKg, ...extra }
+        : l,
+    ),
+  })
+
+  it('treats exactly half a gram as within the printing precision, whatever the float says', () => {
+    // 0.005 - 0.0045 is 0.0005000000000000004 in floating point: half a gram, not past it.
+    const check = find(run([item({ partNumber: '10000-0002', netWeightKg: 0.0045 })], lightPart(0.005)).checks, 'item-library-weights')!
+    expect(check.passed).toBe(true)
+  })
+
+  it('widens the floor on a line the document prints divided, and only on that line', () => {
+    // 0.004 printed against 0.007 from the library is 3 g out. Past the plain half gram, but
+    // inside half a gram per unit of a divisor of 6 (3.5 g).
+    const entries = [item({ partNumber: '10000-0002', netWeightKg: 0.007 })]
+    expect(find(run(entries, lightPart(0.004, { weightDivisor: 6 })).checks, 'item-library-weights')!.passed).toBe(true)
+    expect(find(run(entries, lightPart(0.004)).checks, 'item-library-weights')!.passed).toBe(false)
+  })
+
+  it('leaves a zero-quantity line out of the comparison instead of dividing by it', () => {
+    const zero: ParsedCipl = {
+      ...vendorA,
+      lines: vendorA.lines.map((l) =>
+        l.partNumber === '10000-0001' && l.documentKind === 'PACKING_LIST' ? { ...l, quantity: 0 } : l,
+      ),
+    }
+    const check = find(run([item({ partNumber: '10000-0001', netWeightKg: 0.3 })], zero).checks, 'item-library-weights')!
+    expect(check.passed).toBe(true)
+    expect(check.detail).toContain('No part on this CIPL had both')
+    expect(check.detail).not.toContain('Infinity')
+  })
+
+  it('does not treat a library weight of zero as a weight', () => {
+    const check = find(run([item({ partNumber: '10000-0001', netWeightKg: 0 })]).checks, 'item-library-weights')!
+    expect(check.passed).toBe(true)
+    expect(check.detail).toContain('1 part(s) have no weight in the library')
+  })
+
+  it('counts a part with no library weight once, however many lines it is on', () => {
+    const twice: ParsedCipl = {
+      ...vendorA,
+      lines: vendorA.lines.flatMap((l) =>
+        l.partNumber === '10000-0002' ? [l, { ...l, id: `${l.id}-copy`, orderNumber: `${l.orderNumber}9` }] : [l],
+      ),
+    }
+    const check = find(
+      run([item({ partNumber: '10000-0001', netWeightKg: 0.3 }), item({ partNumber: '10000-0002', netWeightKg: null })], twice).checks,
+      'item-library-weights',
+    )!
+    expect(check.detail).toContain('1 part(s) have no weight in the library')
+  })
+
+  it('lets the line furthest from the library speak for the part', () => {
+    // Two lines of part 0001, library 0.9 each (3.6 kg for 4). The first prints 3.0 kg (0.6 out),
+    // the second 1.2 kg (2.4 out); the warning should quote the second.
+    const lines = vendorA.lines.flatMap((l) => {
+      if (l.partNumber !== '10000-0001') return [l]
+      const copy = {
+        ...l,
+        id: `${l.id}-copy`,
+        orderNumber: `${l.orderNumber}9`,
+        ...(l.documentKind === 'PACKING_LIST' ? { netWeightKg: 3 } : {}),
+      }
+      return [copy, l]
+    })
+    const check = find(run([item({ partNumber: '10000-0001', netWeightKg: 0.9 })], { ...vendorA, lines }).checks, 'item-library-weights')!
+    expect(check.detail).toContain('the CIPL has 1.2 kg for 4 PCS')
+    expect(check.detail).toContain('on 2 lines')
+    expect(check.detail).not.toContain('the CIPL has 3 kg')
+  })
+
+  it('names the first eight disagreeing parts and counts the rest', () => {
+    const many: ParsedCipl = {
+      ...vendorA,
+      lines: Array.from({ length: 12 }, (_, i) =>
+        vendorA.lines
+          .filter((l) => l.partNumber === '10000-0001')
+          .map((l) => ({
+            ...l,
+            id: `${l.id}-${i}`,
+            itemId: `${l.itemId}-${i}`,
+            orderNumber: `${l.orderNumber}${i}`,
+            partNumber: `P-${String(i).padStart(2, '0')}`,
+          })),
+      ).flat(),
+    }
+    const entries = Array.from({ length: 12 }, (_, i) =>
+      item({ partNumber: `P-${String(i).padStart(2, '0')}`, netWeightKg: 0.9 }),
+    )
+    const check = find(run(entries, many).checks, 'item-library-weights')!
+    expect(check.actual).toBe('12 of 12 part(s)')
+    expect(check.detail).toContain('P-07:')
+    expect(check.detail).not.toContain('P-08:')
+    expect(check.detail).toContain('and 4 more part(s)')
+  })
+
+  it('shows a light part’s library weight rather than rounding it to nothing', () => {
+    // 0.00003 kg each against a printed 0.3 kg each: the library figure must still be readable.
+    const check = find(run([item({ partNumber: '10000-0001', netWeightKg: 0.00003 })]).checks, 'item-library-weights')!
+    expect(check.passed).toBe(false)
+    expect(check.detail).toContain('the library has 0.00003 kg each')
+    expect(check.detail).not.toContain('0 kg each')
+  })
+
   it('says a layout that prints no weights has nothing to compare, rather than staying silent', async () => {
     const omron = await parseCipl('ci.pdf', await buildOmronCiPdf(simpleOmronCi()))
     expect(omron.providesWeights).toBe(false)
@@ -206,6 +315,30 @@ describe('CIPL commodity numbers against the item library', () => {
     const result = run([item({ partNumber: '10000-0001', exportCode: '8544420000' })])
     expect(find(result.checks, 'item-library-codes')!.passed).toBe(false)
     expect(find(result.checks, 'item-library-conflict')).toBeUndefined()
+  })
+
+  it('says "(blank)" when the CIPL line carries no commodity number at all', () => {
+    const blank: ParsedCipl = {
+      ...vendorA,
+      lines: vendorA.lines.map((l) => (l.partNumber === '10000-0001' ? { ...l, classification: '' } : l)),
+    }
+    const check = find(run([item({ partNumber: '10000-0001', exportCode: '8544.42.0000' })], blank).checks, 'item-library-conflict')!
+    expect(check.detail).toContain('10000-0001: CIPL says (blank), library says 8544.42.0000')
+  })
+
+  it('lists a part once when it is printed under two spellings', () => {
+    // ' 10000-0001' and '10000-0001' are one part to the library lookup; they were two entries here.
+    const twoSpellings: ParsedCipl = {
+      ...vendorA,
+      lines: vendorA.lines.flatMap((l) =>
+        l.partNumber === '10000-0001'
+          ? [l, { ...l, id: `${l.id}-copy`, orderNumber: `${l.orderNumber}9`, partNumber: ` ${l.partNumber}` }]
+          : [l],
+      ),
+    }
+    const result = run([item({ partNumber: '10000-0001', exportCode: '8504404000' })], twoSpellings)
+    expect(find(result.checks, 'item-library-conflict')!.detail.match(/10000-0001:/g)).toHaveLength(1)
+    expect(find(result.checks, 'item-library-codes')!.detail.match(/10000-0001:/g)).toHaveLength(1)
   })
 
   it('is silent when the library agrees, or holds no number for the part', () => {

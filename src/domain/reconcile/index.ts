@@ -51,14 +51,19 @@ const WEIGHT_TOLERANCE = 0.001
  * One percent is wide enough that rounding in either document never trips it and narrow enough
  * that a changed part, a mistyped digit or a different pack size always does. The floor is the
  * rounding of the printed figure itself (three decimals, so half a gram), which is what
- * dominates on a light part, where one percent is less than the printing can resolve. Both are
- * only for warning: neither figure is changed, and the document's weight is what is filed.
+ * dominates on a light part, where one percent is less than the printing can resolve. A line the
+ * document prints divided (`weightDivisor`, a figure shown as a share of a larger one) widens the
+ * floor by another half gram per unit of the divisor, because that rounding is multiplied back
+ * up, as `reconstructionSlack` allows for in the weight totals. Both are only for warning:
+ * neither figure is changed, and the document's weight is what is filed.
  */
 const LIBRARY_WEIGHT_RELATIVE = 0.01
 const PRINTED_WEIGHT_STEP_KG = 0.0005
 
 /** Part numbers named in the missing-from-the-library warning before it says "and N more". */
 const MISSING_PARTS_SHOWN = 10
+/** Parts named in the weight-disagreement warning before it says "and N more part(s)". */
+const WEIGHT_PARTS_SHOWN = 8
 
 export interface ReconcileOptions extends AggregationOptions {
   /** Commodity rows one sheet of the target form holds. Beyond it the form continues onto another. */
@@ -1090,12 +1095,14 @@ function partCodeChecks(
   // binary to git, grep and anything else that sniffs for one.
   const seen = new Map<string, { part: string; code: string; description: string }>()
   for (const line of merged) {
-    const key = `${line.partNumber}\u0000${line.classification}`
+    // On the part's normalised key, like the library lookup: `abc` and ` ABC ` are one part, and
+    // listing it twice for its two spellings made one disagreement read as two.
+    const key = `${partKey(line.partNumber)}\u0000${line.classification}`
     if (!seen.has(key)) {
       seen.set(key, { part: line.partNumber, code: line.classification, description: line.description })
     }
   }
-  const parts = new Set([...seen.values()].map((s) => s.part))
+  const parts = new Set([...seen.values()].map((s) => partKey(s.part)))
 
   const results: CheckResult[] = []
 
@@ -1131,8 +1138,8 @@ function partCodeChecks(
   for (const { part, code } of seen.values()) {
     const entry = itemsByPart.get(partKey(part))
     if (!entry) continue
-    const first = !covered.has(part)
-    covered.add(part)
+    const first = !covered.has(partKey(part))
+    covered.add(partKey(part))
     if (!entry.exportCode) continue
 
     const screening = screenCode(entry.exportCode, index)
@@ -1167,10 +1174,8 @@ function partCodeChecks(
   // check anything against. Said once the library is loaded, because without one there is no
   // record to be missing from. Nothing is filed differently.
   const missing = new Map<string, string>()
-  const distinct = new Set<string>()
   for (const { part } of seen.values()) {
     const key = partKey(part)
-    distinct.add(key)
     if (!itemsByPart.has(key) && !missing.has(key)) missing.set(key, part.trim() || '(no part number)')
   }
   if (missing.size) {
@@ -1186,7 +1191,7 @@ function partCodeChecks(
         'number looks like this. If they are genuinely new parts, add them to the library. Nothing is ' +
         'filed differently.',
       passed: false,
-      actual: `${missing.size} of ${distinct.size} part(s)`,
+      actual: `${missing.size} of ${parts.size} part(s)`,
     })
   }
 
@@ -1258,7 +1263,9 @@ function libraryWeightChecks(
   }
 
   const packingById = new Map(packingLines.map((l) => [l.id, l] as const))
-  const kg = (value: number) => String(roundPrecise(value, 4))
+  // Four places for ordinary weights, seven below 100 g: a light part's library weight read
+  // "0 kg each" at four, which names a disagreement and hides the figure it is about.
+  const kg = (value: number) => String(roundPrecise(value, Math.abs(value) >= 0.1 ? 4 : 7))
 
   type Finding = { part: string; lines: number; qty: number; uom: string; printed: number; library: number; expected: number }
   const byPart = new Map<string, Finding>()
@@ -1324,7 +1331,7 @@ function libraryWeightChecks(
     ]
   }
 
-  const shown = [...byPart.values()].slice(0, 8)
+  const shown = [...byPart.values()].slice(0, WEIGHT_PARTS_SHOWN)
   const more = byPart.size - shown.length
   return [
     {

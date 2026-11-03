@@ -261,7 +261,8 @@ block, and never a change to what is filed:
 - **Net weight**, for layouts that print a weight on each line. The line's printed net weight
   is compared with the library's per-unit weight times the quantity, and flagged when the
   difference is larger than both 1% of the expected weight and the printing precision (half
-  a gram). Lines counted in anything but pieces are not compared. A layout that prints no
+  a gram, more on a line the document prints divided). Lines counted in anything but pieces
+  are not compared. A layout that prints no
   weights files the library's own, so there is nothing to compare, and the check says so.
 
 - **Part not in the library.** A part number on the CIPL that the library does not hold is
