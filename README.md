@@ -251,6 +251,23 @@ Two decisions are put to you rather than guessed:
   the library disagrees, that disagreement is reported and the existing override mechanism
   is how a filing actually changes.
 
+**Warnings when the CIPL and the library disagree.** The library is the verified record, so a
+processed CIPL is compared against it part by part and any difference is a warning, never a
+block, and never a change to what is filed:
+
+- **Commodity number.** The number on the CIPL against the library's, by digits, so
+  punctuation alone is not a difference. A library number that is itself badly written or
+  missing from the Census file is reported as that, and the disagreement is still stated.
+- **Net weight**, for layouts that print a weight on each line. The line's printed net weight
+  is compared with the library's per-unit weight times the quantity, and flagged when it
+  differs by more than 1% or by more than the printing precision (half a gram), whichever
+  is larger. Lines counted in anything but pieces are not compared. A layout that prints no
+  weights files the library's own, so there is nothing to compare, and the check says so.
+
+Both are aimed at the part whose number or weight was changed upstream, in whatever system
+produced the CIPL. A part missing from the library is not flagged; the coverage line says
+how many were found.
+
 A second file can replace the library or merge into it. A weight typed on the review screen
 wins over the library figure, and a library figure never displaces a weight the packing
 list itself prints.

@@ -16,6 +16,7 @@ import type {
   SourceLine,
 } from '../types'
 import {
+  canonicalUnit,
   checkClassification,
   formatScheduleB,
   normalizeScheduleB,
@@ -42,6 +43,19 @@ export * from './lines'
 /** Tolerance for comparing a sum of rounded lines against a printed document total. */
 const MONEY_TOLERANCE = 0.01
 const WEIGHT_TOLERANCE = 0.001
+
+/**
+ * How far a CIPL line's printed net weight may sit from the item library's figure before it is
+ * called a disagreement: the larger of a relative band and the printing precision.
+ *
+ * One percent is wide enough that rounding in either document never trips it and narrow enough
+ * that a changed part, a mistyped digit or a different pack size always does. The floor is the
+ * rounding of the printed figure itself (three decimals, so half a gram), which is what
+ * dominates on a light part, where one percent is less than the printing can resolve. Both are
+ * only for warning: neither figure is changed, and the document's weight is what is filed.
+ */
+const LIBRARY_WEIGHT_RELATIVE = 0.01
+const PRINTED_WEIGHT_STEP_KG = 0.0005
 
 export interface ReconcileOptions extends AggregationOptions {
   /** Commodity rows one sheet of the target form holds. Beyond it the form continues onto another. */
@@ -371,6 +385,7 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
     ...partTotalChecks(mergedLines, parsed.partTotals),
     ...lineageChecks(mergedLines, packingLines, sliLines),
     ...partCodeChecks(mergedLines, index, options.itemsByPart),
+    ...libraryWeightChecks(mergedLines, packingLines, parsed.providesWeights, options.itemsByPart),
     ...partCodeOverrideChecks(mergedLines, options.codesByPart),
     ...classificationChecks(sliLines, mergedLines, index),
     ...exportControlChecks(options, mergedLines),
@@ -1123,7 +1138,12 @@ function partCodeChecks(
       if (first && (index || screening.status === 'malformed')) {
         badInLibrary.push({ part, code: entry.exportCode, reason: screening.reason })
       }
-    } else if (normalizeScheduleB(entry.exportCode) !== normalizeScheduleB(code)) {
+    }
+    // Independent of whether the library's number is itself sound. A library number that is
+    // badly written, or not in the Census file, used to hide a disagreement behind its own
+    // fault: the reader was told the master record was malformed and never that the CIPL
+    // classifies the part differently. The digits decide, so punctuation alone is not one.
+    if (normalizeScheduleB(entry.exportCode) !== normalizeScheduleB(code)) {
       disagreeing.push({ part, document: code, library: entry.exportCode })
     }
   }
@@ -1157,13 +1177,146 @@ function partCodeChecks(
       severity: 'warning',
       title: 'The CIPL and the item library classify some parts differently',
       detail:
-        disagreeing.map((d) => `${d.part}: CIPL says ${d.document}, library says ${d.library}`).join(' · ') +
+        disagreeing
+          .map((d) => `${d.part}: CIPL says ${d.document || '(blank)'}, library says ${d.library}`)
+          .join(' · ') +
         '. The CIPL number is what will be filed — record an override if the library is the correct one.',
       passed: false,
     })
   }
 
   return results
+}
+
+/**
+ * Net weights printed on the CIPL against the item library's per-unit weight for the same part.
+ *
+ * Warning only, and nothing is changed: the weight filed is the one on the document. What this
+ * is for is the part that was edited upstream, a weight or a part number changed in the system
+ * that generates the CIPL, so the document no longer agrees with the verified master record.
+ *
+ * Only where the layout prints weights. A layout that prints none takes its weights *from* the
+ * library, where a comparison would be a figure against itself; that is said in a passing
+ * check rather than the comparison quietly never happening.
+ *
+ * The printed weight and quantity are read from the packing-list lines themselves, not the
+ * merged ones: a figure typed on the review screen is written over the merged line, and the
+ * disagreement worth reporting is the document's, not the reviewer's.
+ */
+function libraryWeightChecks(
+  merged: MergedLine[],
+  packingLines: SourceLine[],
+  providesWeights: boolean,
+  itemsByPart?: Map<string, ItemLibraryEntry>,
+): CheckResult[] {
+  if (!itemsByPart?.size) return []
+  const title = 'CIPL weights agree with the item library'
+
+  if (!providesWeights) {
+    return [
+      {
+        id: 'item-library-weights',
+        severity: 'info',
+        title,
+        detail:
+          'This layout prints no weights, so the weights filed are the item library’s own (or the per-part table’s) ' +
+          'and there is nothing on the CIPL to compare them with.',
+        passed: true,
+      },
+    ]
+  }
+
+  const packingById = new Map(packingLines.map((l) => [l.id, l] as const))
+  const kg = (value: number) => String(roundPrecise(value, 4))
+
+  type Finding = { part: string; lines: number; qty: number; uom: string; printed: number; library: number; expected: number }
+  const byPart = new Map<string, Finding>()
+  const compared = new Set<string>()
+  let noLibraryWeight = 0
+  const seenNoWeight = new Set<string>()
+
+  for (const line of merged) {
+    const key = partKey(line.partNumber)
+    const entry = itemsByPart.get(key)
+    if (!entry) continue
+    if (entry.netWeightKg == null || !(entry.netWeightKg > 0)) {
+      if (!seenNoWeight.has(key)) {
+        seenNoWeight.add(key)
+        noLibraryWeight += 1
+      }
+      continue
+    }
+    const packing = line.packingListLineId ? packingById.get(line.packingListLineId) : undefined
+    // A weight per unit says nothing about a line counted in kilograms or dozens, and a line
+    // with no readable weight is already blocked by `weights-present`.
+    if (!packing || packing.netWeightKg == null || canonicalUnit(packing.uom) !== 'NO' || !(packing.quantity > 0)) continue
+
+    compared.add(key)
+    const expected = entry.netWeightKg * packing.quantity
+    const tolerance = Math.max(
+      PRINTED_WEIGHT_STEP_KG * (1 + (packing.weightDivisor ?? 0)),
+      LIBRARY_WEIGHT_RELATIVE * expected,
+    )
+    const difference = Math.abs(packing.netWeightKg - expected)
+    if (difference <= tolerance + 1e-9) continue
+
+    const held = byPart.get(key)
+    const finding: Finding = {
+      part: line.partNumber,
+      lines: (held?.lines ?? 0) + 1,
+      qty: packing.quantity,
+      uom: packing.uom.trim().toUpperCase(),
+      printed: packing.netWeightKg,
+      library: entry.netWeightKg,
+      expected,
+    }
+    // The line furthest out speaks for the part; the count says how many lines disagree.
+    byPart.set(key, held && Math.abs(held.printed - held.expected) >= difference ? { ...held, lines: finding.lines } : finding)
+  }
+
+  const skipped = noLibraryWeight
+    ? ` ${noLibraryWeight} part(s) have no weight in the library and were not compared.`
+    : ''
+
+  if (!byPart.size) {
+    return [
+      {
+        id: 'item-library-weights',
+        severity: 'info',
+        title,
+        detail: compared.size
+          ? `${compared.size} part(s) were compared with the item library, and each agrees within rounding.${skipped}`
+          : `No part on this CIPL had both a library weight and a countable printed weight to compare.${skipped}`,
+        passed: true,
+        actual: `${compared.size} compared`,
+      },
+    ]
+  }
+
+  const shown = [...byPart.values()].slice(0, 8)
+  const more = byPart.size - shown.length
+  return [
+    {
+      id: 'item-library-weights',
+      severity: 'warning',
+      title: 'The CIPL weights disagree with the item library for some parts',
+      detail:
+        shown
+          .map(
+            (f) =>
+              `${f.part}: the CIPL has ${kg(f.printed)} kg for ${f.qty} ${f.uom} (${kg(f.printed / f.qty)} kg each), ` +
+              `the library has ${kg(f.library)} kg each (${kg(f.expected)} kg for ${f.qty})` +
+              (f.lines > 1 ? `, on ${f.lines} lines` : ''),
+          )
+          .join(' · ') +
+        (more > 0 ? ` · and ${more} more part(s)` : '') +
+        '. The weight on the CIPL is what will be filed. Check whether the part number or its weight was changed ' +
+        'in the system that produced this document, or whether the library is out of date.' +
+        skipped,
+      passed: false,
+      actual: `${byPart.size} of ${compared.size} part(s)`,
+    },
+  ]
 }
 
 /**
