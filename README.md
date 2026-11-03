@@ -259,9 +259,9 @@ block, and never a change to what is filed:
   punctuation alone is not a difference. A library number that is itself badly written or
   missing from the Census file is reported as that, and the disagreement is still stated.
 - **Net weight**, for layouts that print a weight on each line. The line's printed net weight
-  is compared with the library's per-unit weight times the quantity, and flagged when it
-  differs by more than 1% or by more than the printing precision (half a gram), whichever
-  is larger. Lines counted in anything but pieces are not compared. A layout that prints no
+  is compared with the library's per-unit weight times the quantity, and flagged when the
+  difference is larger than both 1% of the expected weight and the printing precision (half
+  a gram). Lines counted in anything but pieces are not compared. A layout that prints no
   weights files the library's own, so there is nothing to compare, and the check says so.
 
 Both are aimed at the part whose number or weight was changed upstream, in whatever system
