@@ -2,10 +2,15 @@
 
 Repo: **JoelA510/FormWaypoint** · Plan drawn up: 2026-10-08 · Source audit: [`audit.md`](./audit.md)
 
-**Status:** IN PROGRESS as of 2026-10-09. D1, Milestone 1 (#58, #59, #60) and Milestone 2a and
-2b part 1 (#61, #62) merged; Milestone 2b part 2 (M2.6 reduced, M2.10) in review. Milestone 1
-closes on the owner's three actions (ruleset import, `npm run test:real`, the GitHub Support
-request). The owner approves each pull request before it merges.
+**Status:** IN PROGRESS as of 2026-10-21. D1, Milestone 1 (#58, #59, #60) and Milestone 2a and 2b
+(#61, #62, #63) merged. Milestone 3 is part done: M3.1-M3.4, M3.6, M3.8 and M3.9 merged, and M3.7
+apart from ESLint 10 (#68, #69); M3.5 (coverage), M3.10 (unchecked index reads), M3.11 (browser
+journey test) and the ESLint 10 half of M3.7 are open, and its exit criteria unchecked, so Milestone
+3 is the current milestone. Milestone 4 is not started; #79 covers part of M5.9 and M5.10 (roadmap
+and README drift). Outside the plan, #78 added the dangerous goods fill from the CIPL and
+unanswered-by-default DG fields (see "Discovered during execution"). Milestone 1 closes on the
+owner's three actions (ruleset import, `npm run test:real`, the GitHub Support request). The owner
+approves each pull request before it merges.
 
 End state: every audit area at "no blocker/high findings", end-to-end coverage of the critical
 journey, a released build installed and smoke-tested, docs current. Measured against: a shipper at
@@ -857,6 +862,11 @@ partly automated by M4.2's signature check.
   scheduled.
 - 2026-10-09: CEVA row values are whole dollars by the form's instruction, against the owner's
   2-decimal rule for currency; the owner kept whole dollars (ADR 0002).
+- 2026-10-19: a real lithium metal shipment showed every new DG battery entry pre-answered as
+  lithium ion, so it classified as UN3480 before anyone described it, and packages defaulted
+  their box type, count and co-packing answer (high; fixed in #78 with the CIPL fill, ADR 0004,
+  plans in `docs/changes/`).
+- 2026-10-20: `npm audit` went red on a new vite advisory (launch-editor); vite 8.3.4 taken in #78.
 
 ## Deferred with reason
 

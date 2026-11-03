@@ -561,9 +561,9 @@ export function clearOutcome(
 /**
  * The store the application talks to.
  *
- * This assignment is the entire desktop seam: a Tauri build replaces it with a
- * file-backed `LocalStore` and no calling code changes, because nothing outside this
- * module names an implementation.
+ * The one place an implementation is named. The desktop build uses IndexedDB too, inside
+ * the webview, under the bundle identifier; a different store would replace this assignment
+ * and no calling code would change.
  */
 export const localStore: LocalStore = indexedDbStore
 

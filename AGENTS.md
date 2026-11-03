@@ -7,9 +7,10 @@ rule here, not in a per-tool file.
 ## What this is
 
 FormWaypoint turns a combined commercial invoice & packing list (CIPL) into a completed carrier
-Shipper's Letter of Instruction (SLI), and classifies lithium and sodium ion batteries for air
-under the IATA DGR to produce a Shipper's Declaration. It is used by a shipper preparing export
-paperwork on their own Windows machine.
+Shipper's Letter of Instruction (SLI), and classifies lithium ion, lithium metal and sodium ion
+batteries for air under the IATA DGR to produce a Shipper's Declaration. It is used by a shipper
+preparing export paperwork on their own Windows machine. What it is for and refuses to become:
+`docs/product.md`.
 
 - **Stack:** one React 19 + Vite + TypeScript app, styled with Tailwind v4, reading PDFs with
   `pdfjs-dist` and filling them with `pdf-lib`. It runs in the browser or inside a Tauri 2 shell
@@ -19,7 +20,8 @@ paperwork on their own Windows machine.
   `src/domain/`, carrier adapters in `src/carriers/`, the native commands in
   `src-tauri/src/lib.rs`.
 - **Current plan:** `docs/audits/2026-10-complete/remediation-plan.md`. Work toward the current
-  milestone's exit criteria; flag anything that belongs to a later one.
+  milestone's exit criteria; flag anything that belongs to a later one. Plans for individual
+  changes are in `docs/changes/`.
 
 ## Commands
 

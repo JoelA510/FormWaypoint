@@ -1,13 +1,16 @@
 # Deployment
 
-FormWaypoint is a static site. There is no API, no database, no Redis and no OCR service to
-run — the CIPL is parsed and the carrier form is filled in the browser, so a build output
-plus any static host is the whole deployment.
+FormWaypoint ships as a **Windows desktop app**: a per-user NSIS installer built by the
+**Desktop build** workflow (run it from the Actions tab; the artifact is
+`FormWaypoint-windows-installer`). There is no API, no database and no server to run: the CIPL
+is parsed, the carrier form filled and the Shipper's Declaration drawn on the machine, so there
+is nothing to secure server-side. The one network call is the desktop's Schedule B refresh, a
+fixed census.gov URL fetched in Rust.
 
-That also means there is nothing to secure server-side: shipment data never reaches a
-server, because there isn't one.
+The same app also builds as a static web site. That build is not deployed today; read the
+caveat under **Hosting the web build** before putting it anywhere.
 
-## Build
+## Build the web app
 
 ```bash
 npm ci
@@ -17,7 +20,11 @@ npm run build      # -> dist/
 `dist/` contains the app, the blank carrier templates (`dist/templates/`) and the Schedule B
 dataset (`dist/data/schedule-b.json`). Serve it as-is.
 
-## Hosting
+## Hosting the web build
+
+The web build has no Content Security Policy yet; the desktop shell has one in
+`src-tauri/tauri.conf.json`. Add a matching meta CSP, with a test, before hosting it
+(remediation plan, 8.13).
 
 Any static host works — GitHub Pages, Netlify, Vercel, S3 + CloudFront, or a directory
 behind nginx. Two requirements:
@@ -48,8 +55,10 @@ npm run check
 
 The header of the running app shows which build of the dataset is loaded.
 
-## Desktop packaging
+## Desktop build
 
-`LocalStore` in `src/store/local-store.ts` is the seam: a Tauri build swaps the IndexedDB
-implementation for a file-backed one and the rest of the app is unchanged. Nothing in the
-build above needs to move first.
+The Tauri 2 shell in `src-tauri/` wraps the same web build. It can only be built on Windows,
+which is why it runs in CI (`.github/workflows/desktop.yml`, on demand) rather than locally;
+`npm run desktop:dev` runs it in a window where a Rust toolchain is installed. Data stays in
+IndexedDB inside the webview, kept under the bundle identifier `com.formwaypoint.app`, which
+must not change or installed copies lose their saved data.

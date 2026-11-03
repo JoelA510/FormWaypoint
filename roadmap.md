@@ -1,14 +1,15 @@
 # FormWaypoint Roadmap
 
-**Last Updated**: 2026-08-06
+**Last Updated**: 2026-10-21
 
 ## Current focus
 
 Two workflows, deliberately separate.
 
 **Standard shipping** turns a combined commercial invoice & packing list into a completed
-carrier Shipper's Letter of Instruction, on this machine. Two CIPL formats and two carriers
-are supported end to end, verified against real, manually-processed shipments.
+carrier Shipper's Letter of Instruction, on this machine. Three CIPL formats and two carriers
+are supported end to end. The two vendor formats are verified against real, manually-processed
+shipments; the in-house form so far only against synthetic documents.
 
 **Dangerous goods — air** classifies lithium, lithium metal and sodium ion batteries under the
 IATA DGR, checks a consignment against the limits its classification carries, and produces the
@@ -50,9 +51,12 @@ B refresh, which cannot work in a browser.
 | **Shipper's Declaration** | ✅ Done | Drawn to the IATA layout rather than filled, since no blank form exists to fetch. Red hatched margins, struck-out aircraft and shipment type, real page x of y, overpack wording in all three of its forms, forwarder boxes left fillable, signature block empty. |
 | **Package checklist** | ✅ Done | Markdown to print and work through — the only deliverable for a Section II consignment, where the battery mark and the air waybill statement carry the whole of the hazard communication. |
 | **DG retention** | ✅ Done | Prepared consignments recorded locally with the date the two-year retention obligation runs to. |
-| **Regression suite** | ✅ Done | 336 TypeScript tests: five real shipments across both CIPL formats, plus the lithium battery course's own worked scenarios, plus Rust unit tests for the shell's path handling. |
-| **Desktop packaging seam** | ✅ Done | `localStore` is the single named implementation; a Tauri build replaces one assignment. Windows-only target; WebView2 covers every platform API the app uses. |
-| **Desktop build (.exe)** | ✅ Done | Tauri v2 shell; the Windows installer is built by the `Desktop build` workflow. Four Rust commands and no decisions. TLS goes through the OS certificate store, so a corporate inspection CA is trusted, and an environment proxy is honoured. |
+| **In-house Commercial Invoice format** | ✅ Done | Form 00004-00202, read from the .xlsx workbook or a PDF printed from it, any number of pages; weights supplied per part. |
+| **DG fill from the CIPL** | ✅ Done | Consignee, reference and one entry per part from the CIPL loaded in Standard Shipping; count, net weight and package count offered a click at a time, only where the CIPL's own totals prove them (ADR 0004). |
+| **Nothing pre-answered (DG)** | ✅ Done | Battery classification inputs, condition, packaging, counts and co-packing start unanswered and block until chosen. |
+| **Regression suite** | ✅ Done | 1,070 TypeScript tests on synthetic documents and the lithium battery course's own worked scenarios, 104 more against six real shipments where those (gitignored) documents are present, and Rust unit tests for the shell's path handling. |
+| **Desktop packaging seam** | ✅ Done | `localStore` is the single named implementation, IndexedDB in the browser and in the desktop webview alike. Windows-only target; WebView2 covers every platform API the app uses. |
+| **Desktop build (.exe)** | ✅ Done | Tauri v2 shell; the Windows installer is built by the `Desktop build` workflow. Seven Rust commands, no plugins and no decisions. TLS goes through the OS certificate store, so a corporate inspection CA is trusted, and an environment proxy is honoured. |
 | **Schedule B revision diff** | ✅ Done | `src/domain/schedule-b/revision.ts` — diffs two datasets, intersects the result with the item library by part, and renders the change log and CSV worklist. Pure logic, no filesystem or network. |
 | **In-app Schedule B refresh** | ✅ Done | Downloads the concordance, diffs it, writes the change log and CSV worklist, then replaces the dataset. Verified end to end against the live Census server in a packaged binary. |
 | **More carriers** | 📅 Planned | One adapter each. The parser and reconciler carry no carrier-specific logic. |
@@ -106,7 +110,9 @@ knowingly absent:
   workflow it would serve.
 - **A governed battery master.** Keyed on manufacturer, model and revision, with article level
   and composition, so the engine resolves which revision is physically in the box rather than
-  which is on the drawing. Today each consignment is described from scratch.
+  which is on the drawing. Today battery facts are answered fresh for each consignment; only the
+  parties, the reference, part descriptions and proved counts and weights come from the CIPL
+  (ADR 0004).
 - **Scoped approval objects, annual production run evidence, and personnel qualification
   gating.** All three are how the prototype, low-production-run and A99 paths would actually
   clear rather than simply block.
@@ -154,15 +160,6 @@ Two boundaries are deliberate and should stay:
 - **Item-master cleanup.** One imported library flags 1,456 of 2,856 rows — import-HTS
   numbers filed where Schedule B numbers belong. The tool lists them by part; correcting
   them in the source system is a separate effort.
-
-## Known residue
-
-- `npm audit` reports 6 high dev-only advisories, all one chain: eslint 9 →
-  `@eslint/config-array` → `minimatch@3` → `brace-expansion@1`, whose DoS fix exists only
-  in `brace-expansion@5` (a breaking API change no eslint-9-compatible release consumes).
-  Escaping it requires eslint 10, which `eslint-plugin-jsx-a11y` does not yet support —
-  dropping a11y linting to silence lint-time advisories is the wrong trade. Nothing from
-  this chain ships: `npm audit --omit=dev` is clean, and CI audits with `--omit=dev`.
 
 ## Project history
 
