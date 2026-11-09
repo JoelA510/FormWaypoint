@@ -247,10 +247,12 @@ describe('naming the part on a missing or invalid commodity number', () => {
   const index = createScheduleBIndex({
     source: 'test',
     generatedAt: '2026-07-01',
-    count: 2,
+    count: 3,
     codes: {
       '8544420000': { d: 'INSULATED ELECTRIC CONDUCTORS', u: ['NO'] },
       '9031498000': { d: 'MEASURING OR CHECKING INSTRUMENTS', u: ['NO'] },
+      // A unit the piece count cannot be restated in, and no wording shared with the goods.
+      '4010390000': { d: 'CONVEYOR BELTS', u: ['M2'] },
     },
   })
 
@@ -277,11 +279,24 @@ describe('naming the part on a missing or invalid commodity number', () => {
     expect(active.map((c) => c.title)).toEqual(['8479.90.9540 (part 10000-0002) is an active Schedule B number'])
   })
 
+  it('names the part on a unit or description mismatch', async () => {
+    const { checks } = await withCodes('8544.42.0000', '4010.39.0000')
+    expect(failing(checks, 'sb-uom').map((c) => c.title)).toEqual([
+      '4010.39.0000 (part 10000-0002) quantity is reported in the required unit',
+    ])
+    expect(failing(checks, 'sb-applicability').map((c) => c.title)).toEqual([
+      '4010.39.0000 (part 10000-0002) matches the goods described',
+    ])
+  })
+
   it('leaves a passing check’s title alone', async () => {
     const { checks } = await withCodes('8544.42.0000', '8544.42.0000')
     expect(checks.filter((c) => c.id.startsWith('sb-active')).map((c) => c.title)).toEqual([
       '8544.42.0000 is an active Schedule B number',
       '9031.49.8000 is an active Schedule B number',
     ])
+    const units = checks.filter((c) => c.id.startsWith('sb-uom'))
+    expect(units.length).toBeGreaterThan(0)
+    expect(units.every((c) => c.passed && !c.title.includes('(part'))).toBe(true)
   })
 })
