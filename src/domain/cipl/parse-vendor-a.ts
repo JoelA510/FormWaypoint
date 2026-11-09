@@ -48,12 +48,14 @@ const FIGURE_COLUMN_MIN = 380
 const FIGURES_PER_ROW = 3
 
 /**
- * A commodity number, dotted or not. The documents print `####.##.####`, but one line of a
- * real shipment printed `8479909540`; matching only the dotted form dropped the code and the
- * unit read beside it. Kept as printed: `screenCode` reports the spelling as malformed, and
- * `formatScheduleB` writes it dotted on the form.
+ * A commodity number as text, dotted or not. The documents print `####.##.####`, but one line
+ * of a real shipment printed `8479909540`; matching only the dotted form dropped the code and
+ * the unit read beside it. Kept as printed: `screenCode` reports the spelling as malformed,
+ * and `formatScheduleB` writes it dotted on the form. Which *cell* is the code is decided by
+ * `classificationCellIn`, because ten bare digits could as well be a lot id or order number.
  */
 const CLASSIFICATION = /^\d{4}(?:\.\d{2}\.\d{4}|\d{6})$/
+const DOTTED_CLASSIFICATION = /^\d{4}\.\d{2}\.\d{4}$/
 const LINE_NUMBER = /^\d{4}$/
 const ORDER_NUMBER = /^[0-9][0-9A-Z]{7,}$/
 const CURRENCY = /^[A-Z]{3}$/
@@ -1070,10 +1072,27 @@ function detailRowsBegin(rows: TextRow[], upTo: number): number {
   return 0
 }
 
-/** The row carrying a block's commodity number. */
+/**
+ * Where on a row its commodity number is, or -1.
+ *
+ * A dotted code is unmistakable wherever it sits. An undotted one counts only as the row's
+ * first cell, the classification column: the line-number row carries the lot id second, and
+ * an all-digit lot id taken as the code would replace the real one printed on the row below.
+ */
+function classificationCellIn(row: TextRow): number {
+  const dotted = row.items.findIndex((it) => DOTTED_CLASSIFICATION.test(it.str))
+  if (dotted !== -1) return dotted
+  return row.items.length && CLASSIFICATION.test(row.items[0].str) ? 0 : -1
+}
+
+/**
+ * The row carrying a block's commodity number. Searched from the row after the block's start,
+ * which is the order-number row and never carries one, so an all-digit order number is not
+ * taken for an undotted code.
+ */
 function classificationRowIn(rows: TextRow[], from: number, to: number): number {
-  for (let i = from; i < Math.min(to, rows.length); i++) {
-    if (rows[i].items.some((it) => CLASSIFICATION.test(it.str))) return i
+  for (let i = from + 1; i < Math.min(to, rows.length); i++) {
+    if (classificationCellIn(rows[i]) !== -1) return i
   }
   return -1
 }
@@ -1182,7 +1201,7 @@ function readBlockCore(block: TextRow[]): BlockCore | null {
   let classificationRowIdx = -1
   for (let i = 1; i < block.length; i++) {
     const items = block[i].items
-    const idx = items.findIndex((it) => CLASSIFICATION.test(it.str))
+    const idx = classificationCellIn(block[i])
     if (idx !== -1) {
       classification = items[idx].str
       // Immediately right of the classification: unit of measure, then currency columns.
