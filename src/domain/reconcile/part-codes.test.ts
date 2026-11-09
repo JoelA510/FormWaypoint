@@ -9,6 +9,7 @@ import { aggregateLines, applyUnitWeights } from './lines'
 import { reconcile } from '.'
 import { overrideCodes, overrideWeights, type PartOverrideRecord } from '../../store/local-store'
 import { libraryWeights } from '../item-library'
+import { createScheduleBIndex } from '../schedule-b'
 import { buildSyntheticCipl, simpleShipment } from '../../test/synthetic/cipl'
 import { parseCipl } from '../cipl'
 import type { CheckResult, MergedLine } from '../types'
@@ -237,4 +238,50 @@ const weightRecord = (partNumber: string, netWeightKg: number): PartOverrideReco
   netWeightKg,
   description: '',
   updatedAt: '2026-07-30T00:00:00.000Z',
+})
+
+describe('naming the part on a missing or invalid commodity number', () => {
+  // A row is fixed against its part in the item master, so a failing code check that names
+  // only a row, or prints a blank code as " is 10 digits", leaves the reader to work out which
+  // part it means.
+  const index = createScheduleBIndex({
+    source: 'test',
+    generatedAt: '2026-07-01',
+    count: 2,
+    codes: {
+      '8544420000': { d: 'INSULATED ELECTRIC CONDUCTORS', u: ['NO'] },
+      '9031498000': { d: 'MEASURING OR CHECKING INSTRUMENTS', u: ['NO'] },
+    },
+  })
+
+  const withCodes = async (first: string, second: string) => {
+    const shipment = simpleShipment()
+    shipment.lines[0].classification = first
+    shipment.lines[1].classification = second
+    return reconcile(await parseCipl('synthetic.pdf', await buildSyntheticCipl(shipment)), index, CONTROLLED)
+  }
+
+  const failing = (checks: CheckResult[], prefix: string) => checks.filter((c) => c.id.startsWith(prefix) && !c.passed)
+
+  it('names the part whose line states no code', async () => {
+    const { checks } = await withCodes('', '8544.42.0000')
+    const [format] = failing(checks, 'sb-format')
+    expect(format.title).toBe('A commodity number is stated (part 10000-0001)')
+    expect(format.detail).toContain('no commodity number for 10000-0001')
+    expect(format.detail).not.toContain('10000-0002')
+  })
+
+  it('names the part whose code is not in the Census file, read from an undotted printing', async () => {
+    const { checks } = await withCodes('8544.42.0000', '8479909540')
+    const active = failing(checks, 'sb-active')
+    expect(active.map((c) => c.title)).toEqual(['8479.90.9540 (part 10000-0002) is an active Schedule B number'])
+  })
+
+  it('leaves a passing check’s title alone', async () => {
+    const { checks } = await withCodes('8544.42.0000', '8544.42.0000')
+    expect(checks.filter((c) => c.id.startsWith('sb-active')).map((c) => c.title)).toEqual([
+      '8544.42.0000 is an active Schedule B number',
+      '9031.49.8000 is an active Schedule B number',
+    ])
+  })
 })

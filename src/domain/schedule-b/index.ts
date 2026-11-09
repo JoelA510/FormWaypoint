@@ -287,6 +287,16 @@ export interface ClassificationSubject {
   reachableUnits?: string[]
   /** Reference for the UI, e.g. an SLI line index. */
   ref?: string
+  /**
+   * Part numbers on the row. Named in a failing code check: the fix is made against the part
+   * in the item master, and a row number means nothing there.
+   */
+  parts?: string[]
+}
+
+/** The row's part numbers, each once, blanks dropped. */
+function namedParts(parts: string[] | undefined): string[] {
+  return [...new Set((parts ?? []).map((p) => p.trim()).filter(Boolean))]
 }
 
 /**
@@ -301,13 +311,23 @@ export function checkClassification(subject: ClassificationSubject, index: Sched
 
   // --- 1. Ten digits ------------------------------------------------------
   const isTenDigits = digits.length === 10
+  const named = namedParts(subject.parts)
+  // ` (part A)` / ` (parts A, B)`, added to a failing code check's title.
+  const parts = named.length ? ` (${named.length === 1 ? 'part' : 'parts'} ${named.join(', ')})` : ''
   results.push({
     id: `sb-format:${subject.ref ?? digits}`,
     severity: 'blocking',
-    title: `${pretty} is 10 digits`,
+    title: isTenDigits
+      ? `${pretty} is 10 digits`
+      : digits.length === 0
+        ? `A commodity number is stated${parts}`
+        : `${pretty}${parts} is 10 digits`,
     detail: isTenDigits
       ? 'Schedule B numbers are exactly 10 digits once punctuation is removed.'
-      : `Found ${digits.length} digit(s). Both carrier forms require exactly 10.`,
+      : digits.length === 0
+        ? `The document states no commodity number for ${named.length ? named.join(', ') : 'this row'}. ` +
+          'Both carrier forms require one; correct the CIPL or enter the code for the part.'
+        : `Found ${digits.length} digit(s). Both carrier forms require exactly 10.`,
     passed: isTenDigits,
     expected: '10 digits',
     actual: `${digits.length} digits`,
@@ -320,7 +340,7 @@ export function checkClassification(subject: ClassificationSubject, index: Sched
   results.push({
     id: `sb-active:${subject.ref ?? digits}`,
     severity: 'blocking',
-    title: `${pretty} is an active Schedule B number`,
+    title: `${pretty}${entry ? '' : parts} is an active Schedule B number`,
     detail: entry
       ? entry.description
       : `Not present in the Census Bureau commodity file (${index.generatedAt}). The code is either ` +

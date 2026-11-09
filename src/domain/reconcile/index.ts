@@ -1461,6 +1461,7 @@ function classificationChecks(
           canRestate({ quantity: line.quantity, uom: line.sourceUom, weightKg: line.weightKg }, unit),
         ),
         ref: `row-${i + 1}`,
+        parts: line.sourceLineIds.map((id) => byId.get(id)?.partNumber ?? ''),
       },
       index,
     )

@@ -802,3 +802,54 @@ describe('a model code printed where a heading goes', () => {
     expect(invoiceLines(pages)[0].description).toBe('BUNDLE, PACKXPERT 4.0')
   })
 })
+
+describe('a commodity number printed without its dots', () => {
+  it('is still read as the line’s classification, as printed, with the unit beside it', () => {
+    // One line of a real shipment printed `8479909540` where every other line printed
+    // `####.##.####`. Matching the dotted form only dropped the code and the `PCS` read beside
+    // it, so the line reached the review screen with no Schedule B and no unit, and the
+    // `part-codes` screening — which exists to report exactly this — never saw the number.
+    const lines = invoiceLines([
+      headerPage(),
+      detailPage(2, [
+        ...block('00000001OP0010', '10000-0001', '8479909540', 'MODEL-A', 'COVER'),
+        ...block('00000002OP0010', '10000-0002', '8479.90.9640', 'MODEL-B', 'PANEL'),
+      ]),
+    ])
+    expect(lines.map((l) => [l.classification, l.uom, l.currency, l.description])).toEqual([
+      ['8479909540', 'PCS', 'USD', 'COVER'],
+      ['8479.90.9640', 'PCS', 'USD', 'PANEL'],
+    ])
+  })
+
+  it('is not taken from an all-digit lot id beside the line number', () => {
+    // Ten bare digits are also what a numeric lot id looks like, and the line-number row comes
+    // first. Taken as the code, it replaced the one printed below and filed `Japan` as the unit.
+    const lines = (code: string) =>
+      invoiceLines([
+        headerPage(),
+        detailPage(2, [
+          row(['00000001OP0010', 72], ['00000001OP0010', 198], ['1', 246]),
+          row(['0001', 72], ['9031498000', 96], ['Japan', 198]),
+          row([code, 72], ['PCS', 408], ['USD', 486], ['USD', 564]),
+          row(['5610', 24], ['MODEL-A', 72], ['10000-0001', 192], ['2', 421], ['10.000', 472], ['20.000', 550]),
+          row(['10000-0001', 72], ['COVER', 192]),
+        ]),
+      ]).map((l) => [l.classification, l.uom, l.currency, l.itemId, l.countryOfOrigin])
+    expect(lines('8544.42.0000')).toEqual([['8544.42.0000', 'PCS', 'USD', '9031498000', 'Japan']])
+    expect(lines('8479909540')).toEqual([['8479909540', 'PCS', 'USD', '9031498000', 'Japan']])
+  })
+
+  it('is not a classification at any other length', () => {
+    // Nine or eleven digits is not a Schedule B number in any spelling; reading one as the
+    // code would file a figure the document does not state as a commodity number.
+    const lines = invoiceLines([
+      headerPage(),
+      detailPage(2, [
+        ...block('00000001OP0010', '10000-0001', '847990954', 'MODEL-A', 'COVER'),
+        ...block('00000002OP0010', '10000-0002', '84799095401', 'MODEL-B', 'PANEL'),
+      ]),
+    ])
+    expect(lines.map((l) => l.classification)).toEqual(['', ''])
+  })
+})
