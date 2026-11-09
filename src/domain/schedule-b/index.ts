@@ -288,7 +288,7 @@ export interface ClassificationSubject {
   /** Reference for the UI, e.g. an SLI line index. */
   ref?: string
   /**
-   * Part numbers on the row. Named in a failing code check: the fix is made against the part
+   * Part numbers on the row. Named in any failing check: the fix is made against the part
    * in the item master, and a row number means nothing there.
    */
   parts?: string[]
@@ -312,7 +312,7 @@ export function checkClassification(subject: ClassificationSubject, index: Sched
   // --- 1. Ten digits ------------------------------------------------------
   const isTenDigits = digits.length === 10
   const named = namedParts(subject.parts)
-  // ` (part A)` / ` (parts A, B)`, added to a failing code check's title.
+  // ` (part A)` / ` (parts A, B)`, added to the title of every check below when it fails.
   const parts = named.length ? ` (${named.length === 1 ? 'part' : 'parts'} ${named.join(', ')})` : ''
   results.push({
     id: `sb-format:${subject.ref ?? digits}`,
@@ -378,7 +378,7 @@ export function checkClassification(subject: ClassificationSubject, index: Sched
     results.push({
       id: `sb-uom:${subject.ref ?? digits}`,
       severity: ok ? 'info' : 'warning',
-      title: `${pretty} quantity is reported in the required unit`,
+      title: `${pretty}${ok ? '' : parts} quantity is reported in the required unit`,
       detail: ok
         ? worked
           ? `Schedule B reports this code in ${required.join(' and ')}, ${worked}.`
@@ -409,7 +409,7 @@ export function checkClassification(subject: ClassificationSubject, index: Sched
   results.push({
     id: `sb-applicability:${subject.ref ?? digits}`,
     severity: plausible ? 'info' : 'warning',
-    title: `${pretty} matches the goods described`,
+    title: `${pretty}${plausible ? '' : parts} matches the goods described`,
     detail: plausible
       ? `Official description "${entry.description}" shares wording with the invoice description.`
       : `Official description is "${entry.description}", which has no wording in common with the invoice ` +
