@@ -47,7 +47,13 @@ const FIGURE_COLUMN_MIN = 380
  */
 const FIGURES_PER_ROW = 3
 
-const CLASSIFICATION = /^\d{4}\.\d{2}\.\d{4}$/
+/**
+ * A commodity number, dotted or not. The documents print `####.##.####`, but one line of a
+ * real shipment printed `8479909540`; matching only the dotted form dropped the code and the
+ * unit read beside it. Kept as printed: `screenCode` reports the spelling as malformed, and
+ * `formatScheduleB` writes it dotted on the form.
+ */
+const CLASSIFICATION = /^\d{4}(?:\.\d{2}\.\d{4}|\d{6})$/
 const LINE_NUMBER = /^\d{4}$/
 const ORDER_NUMBER = /^[0-9][0-9A-Z]{7,}$/
 const CURRENCY = /^[A-Z]{3}$/

@@ -802,3 +802,36 @@ describe('a model code printed where a heading goes', () => {
     expect(invoiceLines(pages)[0].description).toBe('BUNDLE, PACKXPERT 4.0')
   })
 })
+
+describe('a commodity number printed without its dots', () => {
+  it('is still read as the line’s classification, as printed, with the unit beside it', () => {
+    // One line of a real shipment printed `8479909540` where every other line printed
+    // `####.##.####`. Matching the dotted form only dropped the code and the `PCS` read beside
+    // it, so the line reached the review screen with no Schedule B and no unit, and the
+    // `part-codes` screening — which exists to report exactly this — never saw the number.
+    const lines = invoiceLines([
+      headerPage(),
+      detailPage(2, [
+        ...block('00000001OP0010', '10000-0001', '8479909540', 'MODEL-A', 'COVER'),
+        ...block('00000002OP0010', '10000-0002', '8479.90.9640', 'MODEL-B', 'PANEL'),
+      ]),
+    ])
+    expect(lines.map((l) => [l.classification, l.uom, l.currency, l.description])).toEqual([
+      ['8479909540', 'PCS', 'USD', 'COVER'],
+      ['8479.90.9640', 'PCS', 'USD', 'PANEL'],
+    ])
+  })
+
+  it('is not a classification at any other length', () => {
+    // Nine or eleven digits is not a Schedule B number in any spelling; reading one as the
+    // code would file a figure the document does not state as a commodity number.
+    const lines = invoiceLines([
+      headerPage(),
+      detailPage(2, [
+        ...block('00000001OP0010', '10000-0001', '847990954', 'MODEL-A', 'COVER'),
+        ...block('00000002OP0010', '10000-0002', '84799095401', 'MODEL-B', 'PANEL'),
+      ]),
+    ])
+    expect(lines.map((l) => l.classification)).toEqual(['', ''])
+  })
+})
