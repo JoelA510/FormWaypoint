@@ -17,7 +17,7 @@ import { parseCipl } from '../cipl'
 import { createScheduleBIndex, type ScheduleBIndex } from '../schedule-b'
 import { indexByPart, libraryWeights, type ItemLibraryEntry } from '../item-library'
 import { buildSyntheticCipl, simpleShipment } from '../../test/synthetic/cipl'
-import { buildOmronCiPdf, simpleOmronCi } from '../../test/synthetic/omron-ci'
+import { buildInHouseCiPdf, simpleInHouseCi } from '../../test/synthetic/inhouse-ci'
 import type { CheckResult, ParsedCipl } from '../types'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -259,10 +259,10 @@ describe('CIPL weights against the item library', () => {
   })
 
   it('says a layout that prints no weights has nothing to compare, rather than staying silent', async () => {
-    const omron = await parseCipl('ci.pdf', await buildOmronCiPdf(simpleOmronCi()))
-    expect(omron.providesWeights).toBe(false)
+    const inHouse = await parseCipl('ci.pdf', await buildInHouseCiPdf(simpleInHouseCi()))
+    expect(inHouse.providesWeights).toBe(false)
     const entries = [item({ partNumber: '10000-0001', netWeightKg: 0.5 })]
-    const result = run(entries, omron)
+    const result = run(entries, inHouse)
     const check = find(result.checks, 'item-library-weights')!
     expect(check).toMatchObject({ severity: 'info', passed: true })
     expect(check.detail).toContain('prints no weights')

@@ -103,7 +103,7 @@ export function createCevaAdapter(): CarrierAdapter {
       // --- Incoterm --------------------------------------------------------
       //
       // The box is ticked from the *rule*, not from the raw string. What arrives here is
-      // rarely the bare code: the `omron-ci` INCOTERMS box says `DAP Singapore` and the
+      // rarely the bare code: the `inhouse-ci` INCOTERMS box says `DAP Singapore` and the
       // Vendor A trade terms say `FOB Origin - Collect`, and an exact-match test against the
       // box names left both of those unticked — a form filed with no delivery term on it at
       // all, which is what this section exists to prevent.
@@ -178,7 +178,7 @@ export function createCevaAdapter(): CarrierAdapter {
       // `FOB Collect` says something about who pays that a tick on `FOB` does not.
       //
       // Measured by what follows the rule, not by whether the text equals the code. The
-      // `omron-ci` box is hand-typed and `Ex Works` is the same bare rule as `EXW`; comparing
+      // `inhouse-ci` box is hand-typed and `Ex Works` is the same bare rule as `EXW`; comparing
       // strings wrote a special instruction repeating a term the tick already stated.
       // Anything the document put after the rule. The tick states the rule and nothing else,
       // so a place, a payment instruction or any other qualifier has to be written out.
@@ -268,7 +268,7 @@ export function createCevaAdapter(): CarrierAdapter {
       })
 
       // The form has one licence box for the whole shipment. Rows can now carry their own
-      // licences (the `omron-ci` form states one per line), so a mixed shipment gets the
+      // licences (the `inhouse-ci` form states one per line), so a mixed shipment gets the
       // same treatment as a mixed ECCN below: every distinct value is written and the
       // signer is warned, because a single value alone would misstate the other rows.
       const licenses = distinct(draft.lines.map((l) => l.license))

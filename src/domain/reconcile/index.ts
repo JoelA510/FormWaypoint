@@ -743,7 +743,7 @@ function totalsChecks(
   sliLines: SLILine[],
   providesWeights: boolean,
   /**
-   * True for formats (`vendor-b`, `omron-ci`) whose header quantity total is the sum of
+   * True for formats (`vendor-b`, `inhouse-ci`) whose header quantity total is the sum of
    * their own parsed lines, so the total-quantity check cannot catch a line that parsed
    * as zero. For those, a zero-quantity line must block; for a format with a printed
    * total (`vendor-a`), that total already guards misread quantities and a printed zero
@@ -835,7 +835,7 @@ function totalsChecks(
   const weight = roundTo(sliLines.reduce((s, l) => s + l.weightKg, 0), 3)
   if (!providesWeights) {
     if (header.totalNetWeightKg != null) {
-      // No per-line weights, but the header carries a net total (the `omron-ci` form
+      // No per-line weights, but the header carries a net total (the `inhouse-ci` form
       // prints one, typed by the preparer). Both sides are supplied figures rather than
       // document-proved ones, so this is a cross-check between the per-part table and the
       // form — a warning that catches a stale or mistyped unit weight, not proof.
@@ -1476,7 +1476,7 @@ function classificationChecks(
  * export-compliance tool must not make, so an unanswered blanket value is surfaced as an
  * unanswered question rather than filled in.
  *
- * The `omron-ci` form is the exception: it states ECCN, license and SME per line, and a
+ * The `inhouse-ci` form is the exception: it states ECCN, license and SME per line, and a
  * stated value is a classification the exporter already made. A component of the triplet
  * is therefore only "missing" when the blanket value is unset *and* some line does not
  * state its own.
@@ -1523,11 +1523,11 @@ function exportControlChecks(options: ReconcileOptions, merged: MergedLine[]): C
  * vendorB1 states `ECCN: 5A992.C` against its T20 pendant kit, and the SLI filed for it says
  * EAR99. A stated value is a classification the exporter already made, so it wins — but the
  * reviewer is told, because it changes what is being declared. The same rule covers the
- * licence and SME the `omron-ci` form states per line: a stated NLR under an entered
+ * licence and SME the `inhouse-ci` form states per line: a stated NLR under an entered
  * licence number is a downgrade of a person's entry and must not pass silently.
  *
  * "Changes" is judged against the blanket value; with no blanket entered, the unremarkable
- * norms (EAR99 / NLR / N) are not reported, because the `omron-ci` form states them on
+ * norms (EAR99 / NLR / N) are not reported, because the `inhouse-ci` form states them on
  * every line and flagging each one would train the reader to skip the warning.
  */
 function sourceControlChecks(sliLines: SLILine[], merged: MergedLine[], options: ReconcileOptions): CheckResult[] {

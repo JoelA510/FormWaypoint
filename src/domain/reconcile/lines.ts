@@ -270,7 +270,7 @@ export function aggregateLines(lines: MergedLine[], options: AggregationOptions)
     const df = domesticForeign(line.countryOfOrigin)
     // An export-control value printed on the document is authoritative and beats the
     // blanket value. Filing EAR99 over a stated 5A992.C would be a misdeclaration, and the
-    // same holds for a stated license or SME (the `omron-ci` form prints all three per
+    // same holds for a stated license or SME (the `inhouse-ci` form prints all three per
     // line). All three are part of the grouping key: two lines that differ in export
     // control are not one commodity row.
     const { eccn, license, sme } = exportControlFor(line, options)

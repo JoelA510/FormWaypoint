@@ -29,7 +29,7 @@ export const RETIRED_INCOTERMS: Record<string, string> = {
 }
 
 /**
- * Wordings seen instead of the code. The `omron-ci` form is filled by hand and its
+ * Wordings seen instead of the code. The `inhouse-ci` form is filled by hand and its
  * INCOTERMS box has been typed both ways.
  */
 const INCOTERM_PHRASES: [string, string][] = [
@@ -62,7 +62,7 @@ export interface ParsedIncoterm {
  *
  * Both carrier forms record the rule as a tick against a fixed list, so an exact match is
  * the difference between the term being on the form and not being on it at all. What
- * reaches here is rarely exact: the `omron-ci` INCOTERMS box says `DAP Singapore`, the
+ * reaches here is rarely exact: the `inhouse-ci` INCOTERMS box says `DAP Singapore`, the
  * Vendor A trade terms say `FOB Origin - Collect`, and either can be typed in lower case
  * or written out in words. Every one of those is the same rule as the box beside it.
  *

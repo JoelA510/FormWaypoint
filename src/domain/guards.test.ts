@@ -21,8 +21,8 @@ const CONTROLLED = { eccn: 'EAR99', sme: 'N', license: 'NLR' }
 
 const COMPLETE_PROFILE: CompanyProfile = {
   usppiName: 'Vendor A Manufacturing, Inc.',
-  usppiAddressLines: ['4225 Hacienda Drive'],
-  usppiZip: '94588',
+  usppiAddressLines: ['1200 Meridian Drive'],
+  usppiZip: '94000',
   usppiEin: '00-0000000',
   contactName: 'Pat Example',
   contactPhone: '+15550100100',

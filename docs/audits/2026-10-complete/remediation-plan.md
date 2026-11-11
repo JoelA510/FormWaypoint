@@ -13,8 +13,8 @@ owner's three actions (ruleset import, `npm run test:real`, the GitHub Support r
 approves each pull request before it merges.
 
 End state: every audit area at "no blocker/high findings", end-to-end coverage of the critical
-journey, a released build installed and smoke-tested, docs current. Measured against: a shipper at
-Omron installs it on Windows, gets updates without reinstalling, and can produce SLI forms for CIPL
+journey, a released build installed and smoke-tested, docs current. Measured against: a shipper
+installs it on Windows, gets updates without reinstalling, and can produce SLI forms for CIPL
 documentation without the tool ever filing a wrong figure.
 
 ## Dated: Antigravity workflows stop on 2026-10-19 (11 days)
@@ -116,7 +116,7 @@ Every blocker (audit findings 5.1, 6.1, 8.1), plus the enforcement floor. Two pu
 >   weight rows), `src/carriers/keying-sheet/keying-sheet.test.ts`.
 > - **Depends on:** none · **Effort:** S
 > - **Acceptance criteria:** a Vendor B FedEx or UPS sheet shows a blank weight flagged manual;
->   an Omron sheet with GROSS WT filled shows that figure converted.
+>   an in-house sheet with GROSS WT filled shows that figure converted.
 > - **Test gate:** a test with `totalGrossWeightKg: null` asserts a blank weight and a manual
 >   field, for FedEx and UPS. It fails with the `?? netKg` fallback restored.
 > - **Rollback:** revert the PR (restores the old fallback).
@@ -124,7 +124,7 @@ Every blocker (audit findings 5.1, 6.1, 8.1), plus the enforcement floor. Two pu
 
 > **M1.2. No running test checks the figures on either SLI** (6.1, blocker; resolves 6.2)
 > - **Fix approach:** one golden test per carrier, with no fixtures. Run `buildSyntheticCipl` (and
->   `buildOmronCiPdf`) through parse, reconcile, `buildDraft`, the real template fill and
+>   `buildInHouseCiPdf`) through parse, reconcile, `buildDraft`, the real template fill and
 >   read-back. Compare the **entire** field map (header, parties, signature, every weight, value,
 >   quantity and Schedule B box, the hazmat boxes) against expected values written out by hand.
 >   Cover both `hazardous: true` and `false` (6.2).
@@ -208,21 +208,12 @@ Every blocker (audit findings 5.1, 6.1, 8.1), plus the enforcement floor. Two pu
 
 ### Owner action
 
-> **M1.7. Customer CIPLs are reachable through public pull-request refs** (8.1, blocker)
-> - **Fix approach:**
->   1. File a GitHub Support request (Sensitive data removal) asking for `refs/pull/26/head`
->      through `refs/pull/32/head` (or the commits `e1c5aff`, `c7853d0` and their descendants on
->      those refs) to be dereferenced and garbage-collected, and cached views purged. Claude
->      drafts the request; the owner sends it.
->   2. Open the four `legacy/Examples/*.pdf` from `main`'s history yourself. If any is a filled
->      form, that becomes a separate decision: a `main` history rewrite needs your explicit
->      approval.
->   3. Decide whether the customer must be told.
+> **M1.7. Repository-history matter** (8.1, blocker)
+> - **Fix approach:** the owner files a GitHub Support request and decides the follow-up. The
+>   detail is held by the owner.
 > - **Files touched:** none.
 > - **Depends on:** none · **Effort:** S (owner), with Support's turnaround unknown.
-> - **Acceptance criteria:** a fresh blob-less clone that fetches `refs/pull/*/head` lists no
->   file under `src/test/fixtures/`.
-> - **Test gate:** the scan command recorded in `docs/testing.md`, which today lists five files.
+> - **Acceptance criteria:** the owner's re-check comes back clean.
 > - **Rollback:** n/a.
 > - **Diff class:** n/a.
 
@@ -243,9 +234,9 @@ Every blocker (audit findings 5.1, 6.1, 8.1), plus the enforcement floor. Two pu
 >   `rows-present` check and a per-line `values-present` check. The audit record stores `null`,
 >   not 0.
 > - **Files touched:** `src/domain/cipl/parse-vendor-a.ts`, `parse-vendor-b.ts`,
->   `parse-omron-ci.ts`, `src/domain/reconcile/index.ts`, `lines.ts`, `src/App.tsx`, tests.
+>   `parse-inhouse-ci.ts`, `src/domain/reconcile/index.ts`, `lines.ts`, `src/App.tsx`, tests.
 > - **Depends on:** M1.2 · **Effort:** M
-> - **Acceptance criteria:** an Omron document with no headings and no totals band can't
+> - **Acceptance criteria:** an in-house document with no headings and no totals band can't
 >   generate; a line with no value is named.
 > - **Test gate:** synthetic documents with the totals band removed, and with one value blanked,
 >   both block; each passes with the old `?? 0`.
@@ -423,7 +414,7 @@ Every blocker (audit findings 5.1, 6.1, 8.1), plus the enforcement floor. Two pu
 ## Milestone 3a: testing depth
 
 > **M3.1. Vendor B's PDF path is untested end to end** (6.5, high)
-> - **Fix approach:** a synthetic Vendor B PDF builder beside `cipl.ts` and `omron-ci.ts`, run
+> - **Fix approach:** a synthetic Vendor B PDF builder beside `cipl.ts` and `inhouse-ci.ts`, run
 >   through `parseCiplFile` (extraction, detection, the `SHIPMENT#` label) and the golden test
 >   from M1.2.
 > - **Files touched:** `src/test/synthetic/vendor-b.ts` (new), tests · **Depends on:** M1.2 ·
@@ -433,13 +424,13 @@ Every blocker (audit findings 5.1, 6.1, 8.1), plus the enforcement floor. Two pu
 > - **Rollback:** revert.
 > - **Diff class:** minimal diff.
 
-> **M3.2. Omron has no header golden and no Excel-saved workbook test** (6.7, medium)
-> - **Fix approach:** add an Omron case to M1.2's golden test (header, consignee country, ship
+> **M3.2. The in-house form has no header golden and no Excel-saved workbook test** (6.7, medium)
+> - **Fix approach:** add an in-house case to M1.2's golden test (header, consignee country, ship
 >   date). Add a synthetic workbook written in Excel's shared-strings layout (built in the test,
 >   not a customer file).
-> - **Files touched:** `src/carriers/sli-golden.test.ts`, `src/domain/cipl/parse-omron-ci.test.ts` ·
+> - **Files touched:** `src/carriers/sli-golden.test.ts`, `src/domain/cipl/parse-inhouse-ci.test.ts` ·
 >   **Depends on:** M1.2 · **Effort:** S
-> - **Acceptance criteria and test gate:** breaking shared-string lookup in the Omron reader
+> - **Acceptance criteria and test gate:** breaking shared-string lookup in the in-house reader
 >   fails a test.
 > - **Rollback:** revert.
 > - **Diff class:** minimal diff.
@@ -626,10 +617,10 @@ its own.
 >   - (b) **Azure Artifact Signing**: about $9.99 a month for an individual in the US; breaks the
 >     budget.
 >   - (c) **Stay unsigned**: SmartScreen warns on every install, and the shipper clicks through.
->     That works only if Omron's IT allows unsigned software, which is unknown.
+>     That works only if the shipper's IT allows unsigned software, which is unknown.
 >
 >   Recommendation: apply for (a) now (approval takes time), ship M4.1 and M4.2 unsigned meanwhile,
->   and find out (c)'s answer from Omron IT. Update signing (M4.2) doesn't depend on this.
+>   and find out (c)'s answer from the shipper's IT. Update signing (M4.2) doesn't depend on this.
 > - **Files touched:** `tauri.conf.json`, `release.yml`, `docs/code-signing-policy.md` (if (a)) ·
 >   **Depends on:** M4.1 · **Effort:** S once approved
 > - **Acceptance criteria:** the installer's properties show a valid signature with a timestamp.
@@ -831,7 +822,7 @@ Run on Windows, with the installed build.
 1. Install the build from the latest Desktop build artifact (later, from the GitHub Release).
    Expect: it installs per-user, launches, and the footer shows the version (after M1.6). Note any
    SmartScreen or IT block.
-2. Load a real CIPL of each format: Vendor A, the `SHIPMENT#` layout, and Omron as xlsx and as
+2. Load a real CIPL of each format: Vendor A, the `SHIPMENT#` layout, and the in-house form as xlsx and as
    PDF. Expect: no blocking check you can't explain, and the commodity table matches the
    document.
 3. Generate a Nippon Express SLI and a CEVA SLI for one shipment. Compare every box with a form
@@ -844,7 +835,7 @@ Run on Windows, with the installed build.
 6. Install the next build over the current one. Expect: the profile, item library, part weights
    and history are all present.
 7. With M4.2 shipped: install vN by hand, publish vN+1, then start vN. Expect: it offers the
-   update, installs it without a reinstall, and keeps everything from step 6. Repeat on the Omron
+   update, installs it without a reinstall, and keeps everything from step 6. Repeat on the shipper's
    network to confirm GitHub's release downloads get through the proxy.
 8. Induce an error (after M1.6, with a deliberately malformed CIPL that throws). Expect: the error
    screen, not a blank window, and an entry in "Export diagnostics".

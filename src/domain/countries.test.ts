@@ -28,14 +28,14 @@ describe('countryFromAddressLines', () => {
 
   it('returns the canonical name, not the shouted one the form prints', () => {
     expect(countryFromAddressLines(['1 Harbour Way', 'SINGAPORE'])).toBe('Singapore')
-    expect(countryFromAddressLines(['4225 Hacienda Drive', 'United States of America'])).toBe('United States')
+    expect(countryFromAddressLines(['1200 Meridian Drive', 'United States of America'])).toBe('United States')
     expect(countryFromAddressLines(['Some Street', 'U.S.A.'])).toBe('United States')
   })
 
   it('never reads a two-letter segment as a country', () => {
     // `CA` is Canada in the ISO list and California on an address, and there is no version
     // of guessing between them that is safe on a customs declaration.
-    expect(countryFromAddressLines(['4225 Hacienda Drive', 'Pleasanton, CA'])).toBeNull()
+    expect(countryFromAddressLines(['1200 Meridian Drive', 'Springvale, CA'])).toBeNull()
     expect(countryFromAddressLines(['Bangalore, KA 562123'])).toBeNull()
     // The two-letter form is still a code where a column asks for one.
     expect(toIsoAlpha2('CA')).toMatchObject({ code: 'CA', known: true })

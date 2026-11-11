@@ -126,7 +126,7 @@ export function createNipponExpressAdapter(options: NipponOptions = {}): Carrier
       // option on this form's list. Parsed once, for the named place here and the rule below.
       const stated = parseIncoterm(draft.incoterm)
       // The place that qualifies the Incoterm. Taken from the term itself when the operator
-      // left the box alone: an `omron-ci` invoice reading `DAP Singapore` names its place in
+      // left the box alone: an `inhouse-ci` invoice reading `DAP Singapore` names its place in
       // the same string as the rule, and dropping it files a delivery term that does not say
       // where delivery happens.
       //

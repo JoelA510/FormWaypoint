@@ -652,7 +652,7 @@ export function toCountryPickerLabel(name: string | null | undefined): string {
  * countries establishes neither, and box 7 is filled by somebody who can read the page.
  *
  * Matched against the ISO name list and nothing else, so `BIHOR` (a Romanian county) and
- * `410085` are passed over. Two-letter segments are deliberately not accepted: `Pleasanton,
+ * `410085` are passed over. Two-letter segments are deliberately not accepted: `Springvale,
  * CA` would otherwise resolve to Canada.
  */
 export function countryFromAddressLines(lines: readonly (string | null | undefined)[]): string | null {

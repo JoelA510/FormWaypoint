@@ -149,7 +149,7 @@ const MAX_HEADING_GAP = 3
  * tab cites the same number, and matching it would shadow the real form sheet behind it.
  * The commodity-table headings are what only the form carries.
  */
-export function isOmronCiWorkbook(rows: SheetRows): boolean {
+export function isInHouseCiWorkbook(rows: SheetRows): boolean {
   return (
     rows.some((row) => row.some((cell) => cell.includes(DOC_NUMBER))) &&
     rows.some((row) => headingAt(row, TOP_COLUMNS.part) >= 0) &&
@@ -180,7 +180,7 @@ function headingAt(row: string[], heading: string): number {
  * headings, four address bands and four totals bands, and there is no ordering of the
  * search that makes that mean anything.
  */
-interface OmronCiPage {
+interface InHouseCiPage {
   /** Where this page sat in the import: 1 for the first grid handed in. Ids are built on it. */
   index: number
   /**
@@ -233,7 +233,7 @@ const PLACEHOLDER = /^(?:[-–—/\\.]+|n\/?a)$/i
 const PAGE_LABEL = 'PAGE'
 
 /** The Commercial Invoice form as a single page — the shape the workbook reader started at. */
-export function parseOmronCiWorkbook(
+export function parseInHouseCiWorkbook(
   fileName: string,
   rows: SheetRows,
   /**
@@ -248,7 +248,7 @@ export function parseOmronCiWorkbook(
    */
   fromWorkbook = true,
 ): ParsedCipl {
-  return parseOmronCiPages(fileName, [rows], fromWorkbook)
+  return parseInHouseCiPages(fileName, [rows], fromWorkbook)
 }
 
 /**
@@ -265,10 +265,10 @@ export function parseOmronCiWorkbook(
  * pages that do state them — otherwise half a shipment's rows are filed against an order
  * number the header says is something else.
  */
-export function parseOmronCiPages(fileName: string, pages: SheetRows[], fromWorkbook = true): ParsedCipl {
+export function parseInHouseCiPages(fileName: string, pages: SheetRows[], fromWorkbook = true): ParsedCipl {
   const warnings: string[] = []
   const read = pages.map((rows, i) => readPage(rows, i + 1, fromWorkbook))
-  const label = (page: OmronCiPage, warning: string): string =>
+  const label = (page: InHouseCiPage, warning: string): string =>
     read.length > 1 ? `Page ${page.printedPage ?? page.index}: ${warning}` : warning
   for (const page of read) {
     for (const warning of page.warnings) warnings.push(label(page, warning))
@@ -304,7 +304,7 @@ export function parseOmronCiPages(fileName: string, pages: SheetRows[], fromWork
 
   return {
     fileName,
-    format: 'omron-ci',
+    format: 'inhouse-ci',
     providesWeights: false,
     pageCount: pages.length,
     availableSets: ['FC'],
@@ -333,7 +333,7 @@ const emptyParties = (): Parties => ({ shipper: emptyParty(), consignee: emptyPa
  * stated. Those are the two ways the SLI's CONSIGNED TO box and box 7 come out blank, and
  * neither may be silent.
  */
-function mergeParties(pages: OmronCiPage[], warnings: string[]): Parties {
+function mergeParties(pages: InHouseCiPage[], warnings: string[]): Parties {
   const parties = pages.find((page) => page.parties.consignee.name)?.parties ?? pages.find((page) => page.partiesRead)?.parties
   if (!parties) {
     warnings.push(
@@ -351,7 +351,7 @@ function mergeParties(pages: OmronCiPage[], warnings: string[]): Parties {
   return parties
 }
 
-function readPage(rows: SheetRows, index: number, fromWorkbook: boolean): OmronCiPage {
+function readPage(rows: SheetRows, index: number, fromWorkbook: boolean): InHouseCiPage {
   const warnings: string[] = []
 
   // Header grid: first value found for each label anywhere on the sheet. The instructions
@@ -408,7 +408,7 @@ function readPage(rows: SheetRows, index: number, fromWorkbook: boolean): OmronC
 
 /** This page's commodity lines, with the document's order and invoice numbers on them. */
 function readPageLines(
-  page: OmronCiPage,
+  page: InHouseCiPage,
   purchaseOrder: string,
   invoiceNumber: string,
   fromWorkbook: boolean,
@@ -433,7 +433,7 @@ function readPageLines(
  * count are also frequently two pages of different invoices, and the invoice numbers are
  * the more actionable of the two things to be told.
  */
-function pageProblems(pages: OmronCiPage[], fields: Map<string, string>): string[] {
+function pageProblems(pages: InHouseCiPage[], fields: Map<string, string>): string[] {
   const problems: string[] = []
 
   const totals = [...new Set(pages.map((page) => page.printedOf).filter((of) => of != null))]
@@ -492,7 +492,7 @@ function pageProblems(pages: OmronCiPage[], fields: Map<string, string>): string
  * discrepancy is reported here as well, because which of them is wrong is a question for
  * the person holding the paperwork.
  */
-function documentTotal(pages: OmronCiPage[]): { totalValue: number; warnings: string[] } {
+function documentTotal(pages: InHouseCiPage[]): { totalValue: number; warnings: string[] } {
   const warnings: string[] = []
   const subtotals = pages.map((page) => page.subtotal)
   const subtotalSum = subtotals.every((value) => value != null)
@@ -613,7 +613,7 @@ function readLines(
   rows: SheetRows,
   purchaseOrder: string,
   invoiceNumber: string,
-  page: OmronCiPage,
+  page: InHouseCiPage,
   warnings: string[],
   fromWorkbook: boolean,
 ): SourceLine[] {
@@ -918,7 +918,7 @@ function dateText(value: string): string {
 // PDF reader — the same form, printed
 // ---------------------------------------------------------------------------
 
-export function isOmronCiPdf(pages: TextPage[]): boolean {
+export function isInHouseCiPdf(pages: TextPage[]): boolean {
   const first = pages[0]
   if (!first) return false
   const text = first.rows.map(rowText).join(' ')
@@ -935,19 +935,19 @@ export function isOmronCiPdf(pages: TextPage[]): boolean {
  * are assigned by column first and by band (top row vs compliance row) only where two
  * columns share an x position.
  */
-export function parseOmronCiPdf(fileName: string, pages: TextPage[]): ParsedCipl {
+export function parseInHouseCiPdf(fileName: string, pages: TextPage[]): ParsedCipl {
   // Only the pages that are this form. The detector looks at the first page alone, and a
   // print of the invoice with a terms sheet or a signed SLI bound after it would otherwise
   // have those pages read as pages of the form — supplying header values for any box the
   // invoice left blank, and pushing whatever their tables reshaped into. The doc number is
   // printed in the title bar of every page of the form, so it is what tells them apart.
   const own = pages.filter((page) => page.rows.map(rowText).join(' ').includes(DOC_NUMBER))
-  const parsed = parseOmronCiPages(
+  const parsed = parseInHouseCiPages(
     fileName,
     // One page at a time, never the pages' rows concatenated. PDF y restarts on every page,
     // so a second page's blocks collide with the first's by baseline — and the geometry
     // below is all baselines. Each page is reshaped into its own grid and read as the
-    // complete form it is printed as; `parseOmronCiPages` merges them.
+    // complete form it is printed as; `parseInHouseCiPages` merges them.
     own.map((page) => pageToGrid(page)),
     false,
   )
