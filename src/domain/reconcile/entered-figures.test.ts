@@ -11,7 +11,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseCipl } from '../cipl'
 import { buildSyntheticCipl, simpleShipment } from '../../test/synthetic/cipl'
-import { buildOmronCiPdf, simpleOmronCi } from '../../test/synthetic/omron-ci'
+import { buildInHouseCiPdf, simpleInHouseCi } from '../../test/synthetic/inhouse-ci'
 import { createScheduleBIndex, type ScheduleBIndex } from '../schedule-b'
 import { applyRowFigures, reconcile } from '.'
 import type { MergedLine, ParsedCipl, SLILine } from '../types'
@@ -205,8 +205,8 @@ describe('a figure entered against a commodity row', () => {
     // The shipment-wide value is the box's placeholder, so typing it back in to confirm a part
     // is the natural thing to do — and reporting that as a departure leaves a warning about
     // something that did not happen.
-    const spec = simpleOmronCi()
-    const parsed = await parseCipl('ci.pdf', await buildOmronCiPdf(spec))
+    const spec = simpleInHouseCi()
+    const parsed = await parseCipl('ci.pdf', await buildInHouseCiPdf(spec))
     const { checks } = reconcile(parsed, scheduleB, {
       ...CONTROLLED,
       exportControlByPart: { [spec.lines[0].partNumber]: { eccn: 'EAR99' } },
@@ -302,20 +302,20 @@ describe('a figure entered against a commodity row', () => {
 })
 
 describe('export control entered against a part', () => {
-  /** The Omron invoice prints an ECCN per line, which is what a per-part entry has to beat. */
-  const spec = simpleOmronCi()
+  /** The in-house invoice prints an ECCN per line, which is what a per-part entry has to beat. */
+  const spec = simpleInHouseCi()
   const CABLE = spec.lines[0].partNumber
   const CONTROLLER = spec.lines[1].partNumber
 
-  const omron = async (over: Record<string, unknown> = {}) => {
-    const parsed = await parseCipl('ci.pdf', await buildOmronCiPdf(spec))
+  const inHouse = async (over: Record<string, unknown> = {}) => {
+    const parsed = await parseCipl('ci.pdf', await buildInHouseCiPdf(spec))
     return reconcile(parsed, scheduleB, { ...CONTROLLED, ...over })
   }
 
   it('beats the shipment-wide value', async () => {
     // On the commodity rows, not on the merged lines: those stay what the documents said, and
     // an override is a filing decision — exactly as a per-part classification is.
-    const { sliLines, mergedLines } = await omron({ exportControlByPart: { [CABLE]: { eccn: '3A001.a' } } })
+    const { sliLines, mergedLines } = await inHouse({ exportControlByPart: { [CABLE]: { eccn: '3A001.a' } } })
     expect(sliLines.find((l) => l.scheduleB === '8544.42.0000')!.eccn).toBe('3A001.a')
     expect(mergedLines.find((l) => l.partNumber === CABLE)!.eccn).toBe('EAR99')
   })
@@ -323,24 +323,24 @@ describe('export control entered against a part', () => {
   it('beats what the document itself printed', async () => {
     // The second line prints `5A992.c`. A document value is authoritative over the blanket
     // one — but not over a determination the filer made about these goods specifically.
-    const { sliLines, mergedLines } = await omron()
+    const { sliLines, mergedLines } = await inHouse()
     expect(mergedLines.find((l) => l.partNumber === CONTROLLER)!.eccn).toBe('5A992.c')
     expect(sliLines.find((l) => l.scheduleB === '8537.10.9170')!.eccn).toBe('5A992.c')
 
-    const { sliLines: overridden } = await omron({ exportControlByPart: { [CONTROLLER]: { eccn: 'EAR99' } } })
+    const { sliLines: overridden } = await inHouse({ exportControlByPart: { [CONTROLLER]: { eccn: 'EAR99' } } })
     expect(overridden.find((l) => l.scheduleB === '8537.10.9170')!.eccn).toBe('EAR99')
   })
 
   it('falls back field by field', async () => {
     // A part can carry its own ECCN under the shipment's licence.
-    const { sliLines } = await omron({ exportControlByPart: { [CABLE]: { eccn: '3A001.a' } } })
+    const { sliLines } = await inHouse({ exportControlByPart: { [CABLE]: { eccn: '3A001.a' } } })
     const line = sliLines.find((l) => l.eccn === '3A001.a')!
     expect(line.license).toBe('NLR')
     expect(line.sme).toBe('N')
   })
 
   it('names every part it applies to', async () => {
-    const { checks } = await omron({
+    const { checks } = await inHouse({
       exportControlByPart: { [CABLE]: { eccn: '3A001.a', license: 'C33' } },
     })
     const reported = checks.find((c) => c.id === 'export-control-overrides')!
@@ -352,14 +352,14 @@ describe('export control entered against a part', () => {
   })
 
   it('says nothing for a part carrying no entered value', async () => {
-    const { checks } = await omron({ exportControlByPart: { [CABLE]: {} } })
+    const { checks } = await inHouse({ exportControlByPart: { [CABLE]: {} } })
     expect(checks.find((c) => c.id === 'export-control-overrides')).toBeUndefined()
   })
 
   it('splits a commodity row, because export control is part of what a row is', async () => {
-    const { sliLines } = await omron()
+    const { sliLines } = await inHouse()
     const together = sliLines.filter((l) => l.scheduleB === '8544.42.0000')
-    const { sliLines: after } = await omron({ exportControlByPart: { [CABLE]: { eccn: '3A001.a' } } })
+    const { sliLines: after } = await inHouse({ exportControlByPart: { [CABLE]: { eccn: '3A001.a' } } })
     expect(after.filter((l) => l.eccn === '3A001.a')).toHaveLength(1)
     expect(together.length).toBeLessThanOrEqual(after.filter((l) => l.scheduleB === '8544.42.0000').length)
   })

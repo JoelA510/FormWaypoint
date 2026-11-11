@@ -4,7 +4,7 @@ import { reconcile } from '../reconcile'
 import { buildSyntheticCipl, simpleShipment, type SyntheticCipl, type SyntheticLine } from '../../test/synthetic/cipl'
 import type { ParsedCipl, Reconciliation } from '../types'
 import { applyCiplSeed, ciplLink, ciplSeed, type CiplSeed, type FigureOffer } from './cipl-seed'
-import { buildOmronCiPdf, simpleOmronCi } from '../../test/synthetic/omron-ci'
+import { buildInHouseCiPdf, simpleInHouseCi } from '../../test/synthetic/inhouse-ci'
 import { emptyEntry, newConsignment, type DgConsignment } from './types'
 
 const CONTROLLED = { eccn: 'EAR99', sme: 'N', license: 'NLR' }
@@ -184,7 +184,7 @@ describe('what a CIPL offers the dangerous goods consignment', () => {
   it('offers no count from a layout whose quantity total is the sum of its own lines', async () => {
     // The in-house form prints no quantity total; its header total is derived from the lines,
     // so `total-quantity` agreeing with it would "prove" a misread line.
-    const parsed = await parseCipl('ci.pdf', await buildOmronCiPdf({ ...simpleOmronCi(), pieces: 1 }))
+    const parsed = await parseCipl('ci.pdf', await buildInHouseCiPdf({ ...simpleInHouseCi(), pieces: 1 }))
     const seed = ciplSeed(parsed, reconcile(parsed, null, CONTROLLED), CONSIGNEE)
     expect(seed.cartons).toBe(1)
     expect(seed.parts.length).toBeGreaterThan(0)

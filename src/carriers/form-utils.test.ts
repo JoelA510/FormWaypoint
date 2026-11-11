@@ -43,14 +43,14 @@ describe('a box that will not take what it is given', () => {
     const { form } = await loadForm(bytes)
     const ctx = createContext(form)
 
-    setText(ctx, 'ZipCode', '94588-1234')
+    setText(ctx, 'ZipCode', '94000-1234')
     setText(ctx, 'Ultimate Consignee', 'Written all the same')
 
     expect(ctx.written['ZipCode']).toBeUndefined()
     expect(ctx.written['Ultimate Consignee']).toBe('Written all the same')
     expect(ctx.warnings).toHaveLength(1)
     expect(ctx.warnings[0]).toMatch(/ZipCode/)
-    expect(ctx.warnings[0]).toMatch(/94588-1234/)
+    expect(ctx.warnings[0]).toMatch(/94000-1234/)
   })
 
   it('still says so when the box is not there at all', async () => {

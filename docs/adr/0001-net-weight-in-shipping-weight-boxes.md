@@ -27,7 +27,7 @@ weighed (never the net).
 ### Alternative: gross weight per row
 
 Closer to the boxes' captions, but it departs from every form filed so far, and a per-row gross
-exists only for the Vendor A layout; the `SHIPMENT#` layout prints no weights and Omron prints a
+exists only for the Vendor A layout; the `SHIPMENT#` layout prints no weights and the in-house form prints a
 gross total only. Rejected by the owner.
 
 ## Consequences

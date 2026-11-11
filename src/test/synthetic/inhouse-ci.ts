@@ -1,5 +1,5 @@
 /**
- * Builds the Omron Commercial Invoice form (00004-00202) as test fixtures, in both of the
+ * Builds the in-house Commercial Invoice form (00004-00202) as test fixtures, in both of the
  * shapes the parser accepts: the workbook cell grid, and a PDF drawn to the printed form's
  * geometry.
  *
@@ -11,7 +11,7 @@
 import { PDFDocument, StandardFonts, type PDFFont, type PDFPage } from 'pdf-lib'
 import type { SheetRows } from '../../domain/item-library/read-workbook'
 
-export interface OmronCiLine {
+export interface InHouseCiLine {
   partNumber: string
   description: string
   coo: string
@@ -42,7 +42,7 @@ export interface OmronCiLine {
   splitDescription?: boolean
 }
 
-export interface OmronCiSpec {
+export interface InHouseCiSpec {
   invoiceNumber: string
   invoiceDate: string
   /** The form's own SHIP DATE box, which is what dates the SLI. */
@@ -59,7 +59,7 @@ export interface OmronCiSpec {
   pieces?: number
   netWeightKg?: number
   grossWeightKg?: number
-  lines: OmronCiLine[]
+  lines: InHouseCiLine[]
   /** The `PAGE:` box, e.g. `{ at: 2, of: 4 }`. Defaults to `1 of 1`. */
   page?: { at: number; of: number }
   /** Line numbering starts here rather than at 1 — page 2 of a set carries `9`, not `1`. */
@@ -106,7 +106,7 @@ export interface OmronCiSpec {
   omitHeaderGrid?: boolean
 }
 
-export function simpleOmronCi(): OmronCiSpec {
+export function simpleInHouseCi(): InHouseCiSpec {
   return {
     invoiceNumber: 'CI-2026-0001',
     invoiceDate: '08/10/2026',
@@ -149,30 +149,30 @@ export function simpleOmronCi(): OmronCiSpec {
   }
 }
 
-const amountOf = (line: OmronCiLine): number => line.amount ?? Math.round(line.quantity * line.unitPrice * 100) / 100
+const amountOf = (line: InHouseCiLine): number => line.amount ?? Math.round(line.quantity * line.unitPrice * 100) / 100
 
-export const subtotalOf = (spec: OmronCiSpec): number =>
+export const subtotalOf = (spec: InHouseCiSpec): number =>
   Math.round(spec.lines.reduce((sum, line) => sum + amountOf(line), 0) * 100) / 100
 
 /** What the form prints on its `TOTAL (USD)` row: merchandise plus tax and freight. */
-export const grandTotalOf = (spec: OmronCiSpec): number =>
+export const grandTotalOf = (spec: InHouseCiSpec): number =>
   spec.grandTotal ?? Math.round((subtotalOf(spec) + (spec.tax ?? 0) + (spec.freight ?? 0)) * 100) / 100
 
-const pageBox = (spec: OmronCiSpec): string => `${spec.page?.at ?? 1} of ${spec.page?.of ?? 1}`
-const firstLine = (spec: OmronCiSpec): number => spec.firstLineNumber ?? 1
+const pageBox = (spec: InHouseCiSpec): string => `${spec.page?.at ?? 1} of ${spec.page?.of ?? 1}`
+const firstLine = (spec: InHouseCiSpec): number => spec.firstLineNumber ?? 1
 
 /**
  * One invoice across several pages: the same header on each, the lines dealt out in order,
  * and every page carrying the document's grand total under its own subtotal — which is how
  * the real form is issued, and the only shape in which the page checks mean anything.
  */
-export function omronCiPageSpecs(base: OmronCiSpec, linesPerPage: number): OmronCiSpec[] {
-  const pages: OmronCiLine[][] = []
+export function inHouseCiPageSpecs(base: InHouseCiSpec, linesPerPage: number): InHouseCiSpec[] {
+  const pages: InHouseCiLine[][] = []
   for (let i = 0; i < base.lines.length; i += linesPerPage) pages.push(base.lines.slice(i, i + linesPerPage))
   const grandTotal = grandTotalOf(base)
   let lineNumber = 1
   return pages.map((lines, index) => {
-    const spec: OmronCiSpec = {
+    const spec: InHouseCiSpec = {
       ...base,
       lines,
       firstLineNumber: lineNumber,
@@ -192,19 +192,19 @@ export function omronCiPageSpecs(base: OmronCiSpec, linesPerPage: number): Omron
  * The form's cell grid exactly as `readXlsx` returns it: column A is index 0, and merged
  * cells surface at their anchor. Mirrors template 00004-00202 Rev C.
  */
-export function omronCiGrid(spec: OmronCiSpec): SheetRows {
+export function inHouseCiGrid(spec: InHouseCiSpec): SheetRows {
   const money = (value: number): string => value.toFixed(2)
   const grid: SheetRows = [
     [],
-    ['', '', '', '', 'Omron Robotics and Safety Technologies, Inc.'],
-    ['', '', '', '', '4225 Hacienda Drive, Pleasanton, CA 94588, United States of America'],
+    ['', '', '', '', 'Example Motion and Precision Machinery, Inc.'],
+    ['', '', '', '', '1200 Meridian Drive, Springvale, CA 94000, United States of America'],
     [],
     ['', 'COMMERCIAL INVOICE', '', '', '', '', '', '', 'Doc. # 00004-00202   Rev. C'],
     [],
     ['', 'SHIPPER (SHIP FROM / EXPORTER)', '', '', 'CONSIGNEE (SHIP TO)', '', '', 'BILL TO / SOLD TO (IF DIFFERENT)'],
   ]
 
-  const shipper = ['Omron Robotics & Safety Technologies, Inc.', '4225 Hacienda Drive', 'Pleasanton, CA 94588', 'United States of America', 'Contact / Phone:']
+  const shipper = ['Example Motion & Precision Machinery, Inc.', '1200 Meridian Drive', 'Springvale, CA 94000', 'United States of America', 'Contact / Phone:']
   const consignee = [spec.consigneeName, ...spec.consigneeLines]
   const billTo = spec.billToName ? [spec.billToName, ...(spec.billToLines ?? [])] : []
   for (let i = 0; i < 5; i++) {
@@ -255,7 +255,7 @@ export function omronCiGrid(spec: OmronCiSpec): SheetRows {
 }
 
 /** The pages of one invoice as the workbook holds them: one grid per sheet. */
-export const omronCiGrids = (specs: OmronCiSpec[]): SheetRows[] => specs.map(omronCiGrid)
+export const inHouseCiGrids = (specs: InHouseCiSpec[]): SheetRows[] => specs.map(inHouseCiGrid)
 
 // ---------------------------------------------------------------------------
 // Printed PDF
@@ -277,8 +277,8 @@ const COLUMNS = {
 const center = (column: { left: number; width: number }): number => column.left + column.width / 2
 const DESCRIPTION_CENTER = (COLUMNS.d.left + COLUMNS.g.left + COLUMNS.g.width) / 2
 
-export async function buildOmronCiPdf(spec: OmronCiSpec): Promise<ArrayBuffer> {
-  return buildOmronCiPdfPages([spec])
+export async function buildInHouseCiPdf(spec: InHouseCiSpec): Promise<ArrayBuffer> {
+  return buildInHouseCiPdfPages([spec])
 }
 
 /**
@@ -287,10 +287,10 @@ export async function buildOmronCiPdf(spec: OmronCiSpec): Promise<ArrayBuffer> {
  * The pages are separate PDF pages, not a taller one: PDF y restarts on every page, which
  * is exactly what the parser has to cope with and what concatenating rows would destroy.
  */
-export async function buildOmronCiPdfPages(specs: OmronCiSpec[]): Promise<ArrayBuffer> {
+export async function buildInHouseCiPdfPages(specs: InHouseCiSpec[]): Promise<ArrayBuffer> {
   const doc = await PDFDocument.create()
   const font = await doc.embedFont(StandardFonts.Helvetica)
-  for (const spec of specs) drawOmronCiPage(doc.addPage([612, 792]), font, spec)
+  for (const spec of specs) drawInHouseCiPage(doc.addPage([612, 792]), font, spec)
   return (await doc.save()).buffer as ArrayBuffer
 }
 
@@ -299,15 +299,15 @@ export async function buildOmronCiPdfPages(specs: OmronCiSpec[]): Promise<ArrayB
  * list. None of those pages carries the form's document number, which is what tells a page
  * of this invoice from a page that merely travelled with it.
  */
-export async function buildOmronCiPdfWithForeignPage(specs: OmronCiSpec[], text: string): Promise<ArrayBuffer> {
+export async function buildInHouseCiPdfWithForeignPage(specs: InHouseCiSpec[], text: string): Promise<ArrayBuffer> {
   const doc = await PDFDocument.create()
   const font = await doc.embedFont(StandardFonts.Helvetica)
-  for (const spec of specs) drawOmronCiPage(doc.addPage([612, 792]), font, spec)
+  for (const spec of specs) drawInHouseCiPage(doc.addPage([612, 792]), font, spec)
   doc.addPage([612, 792]).drawText(text, { x: 40, y: 700, size: 10, font })
   return (await doc.save()).buffer as ArrayBuffer
 }
 
-function drawOmronCiPage(page: PDFPage, font: PDFFont, spec: OmronCiSpec): void {
+function drawInHouseCiPage(page: PDFPage, font: PDFFont, spec: InHouseCiSpec): void {
   const size = 7
 
   const at = (x: number, y: number, text: string) => {
@@ -317,7 +317,7 @@ function drawOmronCiPage(page: PDFPage, font: PDFFont, spec: OmronCiSpec): void 
     if (text) at(cx - font.widthOfTextAtSize(text, size) / 2, y, text)
   }
 
-  at(COLUMNS.ln.left, 760, 'Omron Robotics and Safety Technologies, Inc.')
+  at(COLUMNS.ln.left, 760, 'Example Motion and Precision Machinery, Inc.')
   at(COLUMNS.ln.left, 745, 'COMMERCIAL INVOICE')
   at(COLUMNS.j.left, 745, 'Doc. # 00004-00202   Rev. C')
 
@@ -339,7 +339,7 @@ function drawOmronCiPage(page: PDFPage, font: PDFFont, spec: OmronCiSpec): void 
   at(bandX.shipper, 720, 'SHIPPER (SHIP FROM / EXPORTER)')
   at(bandX.consignee, 720, 'CONSIGNEE (SHIP TO)')
   at(bandX.billTo, 720, 'BILL TO / SOLD TO (IF DIFFERENT)')
-  const shipper = ['Omron Robotics & Safety Technologies, Inc.', '4225 Hacienda Drive', 'Pleasanton, CA 94588', 'United States of America']
+  const shipper = ['Example Motion & Precision Machinery, Inc.', '1200 Meridian Drive', 'Springvale, CA 94000', 'United States of America']
   const consignee = [spec.consigneeName, ...spec.consigneeLines]
   const billTo = spec.billToName ? [spec.billToName, ...(spec.billToLines ?? [])] : []
   for (let i = 0; i < 5; i++) {
@@ -428,7 +428,7 @@ function drawOmronCiPage(page: PDFPage, font: PDFFont, spec: OmronCiSpec): void 
   centred(center(COLUMNS.k), totalsTop - 42, total)
 }
 
-function drawLines(page: PDFPage, font: PDFFont, spec: OmronCiSpec): void {
+function drawLines(page: PDFPage, font: PDFFont, spec: InHouseCiSpec): void {
   const size = 7
   const at = (x: number, y: number, text: string) => {
     if (text) page.drawText(text, { x, y, size, font })

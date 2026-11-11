@@ -1,5 +1,5 @@
 /**
- * The Omron workbook as Excel saves it.
+ * The in-house workbook as Excel saves it.
  *
  * This repository's own writer stores every string inline, so the round-trip tests never meet
  * the layout Excel writes: text in a shared-strings table, cells holding only an index into it.
@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { parseCiplFile } from '.'
-import { omronCiGrid, simpleOmronCi, subtotalOf } from '../../test/synthetic/omron-ci'
+import { inHouseCiGrid, simpleInHouseCi, subtotalOf } from '../../test/synthetic/inhouse-ci'
 import { zip } from '../../test/zip'
 
 const escape = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -40,11 +40,11 @@ function excelSavedWorkbook(rows: string[][]): Promise<Uint8Array> {
   })
 }
 
-describe('an Omron commercial invoice saved by Excel', () => {
+describe('an in-house commercial invoice saved by Excel', () => {
   it('reads the header and every line through the shared-strings table', async () => {
-    const spec = simpleOmronCi()
-    const parsed = await parseCiplFile('ci.xlsx', await excelSavedWorkbook(omronCiGrid(spec)))
-    expect(parsed.format).toBe('omron-ci')
+    const spec = simpleInHouseCi()
+    const parsed = await parseCiplFile('ci.xlsx', await excelSavedWorkbook(inHouseCiGrid(spec)))
+    expect(parsed.format).toBe('inhouse-ci')
     expect(parsed.headers.FC.invoiceNumber).toBe(spec.invoiceNumber)
     expect(parsed.headers.FC.totalValue).toBeCloseTo(subtotalOf(spec), 2)
     const invoice = parsed.lines.filter((l) => l.documentKind === 'INVOICE')

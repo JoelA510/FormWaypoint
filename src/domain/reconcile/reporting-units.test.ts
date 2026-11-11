@@ -13,7 +13,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseCipl } from '../cipl'
 import { buildSyntheticCipl, simpleShipment } from '../../test/synthetic/cipl'
-import { buildOmronCiPdf, simpleOmronCi } from '../../test/synthetic/omron-ci'
+import { buildInHouseCiPdf, simpleInHouseCi } from '../../test/synthetic/inhouse-ci'
 import { createScheduleBIndex, type ScheduleBIndex } from '../schedule-b'
 import { reconcile } from '.'
 import type { ParsedCipl, SLILine } from '../types'
@@ -195,12 +195,12 @@ describe('a row holding less than half a unit', () => {
   })
 
   it('says so with no weight anywhere, and names the figure it was rounded up from', async () => {
-    // The Omron invoice states a unit per line and no weights at all, so a line invoiced as
+    // The in-house invoice states a unit per line and no weights at all, so a line invoiced as
     // `0.3 KG` files its own figure — rounded whole, to nothing — with no weight behind it.
     // Sending that filer to look at `0 kg` points them at a number the document has not got
     // and is never going to have.
-    const spec = simpleOmronCi()
-    const bytes = await buildOmronCiPdf({
+    const spec = simpleInHouseCi()
+    const bytes = await buildInHouseCiPdf({
       ...spec,
       netWeightKg: undefined,
       grossWeightKg: undefined,

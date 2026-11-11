@@ -296,7 +296,7 @@ function groupKeyFor(line: MergedLine, mode: GroupingMode, index: number, correc
     // Unit and the export-control triplet join the key because the SLI's own rows carry
     // them: `aggregateLines` keys on classification, D/F, ECCN, licence, SME *and*
     // canonical unit. Each triplet member is resolved the way `aggregateLines` resolves it
-    // — a line's printed value (the `omron-ci` form states all three per line), or the
+    // — a line's printed value (the `inhouse-ci` form states all three per line), or the
     // controlled blanket where it prints none. Treating a blank as its own bucket splits a
     // row the filed SLI merges as soon as one line happens to print the controlled value
     // outright, which is the opposite of what this mode is for.

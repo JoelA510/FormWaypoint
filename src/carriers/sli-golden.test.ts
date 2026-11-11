@@ -8,7 +8,7 @@ import { createScheduleBIndex, type ScheduleBIndex } from '../domain/schedule-b'
 import { reconcile } from '../domain/reconcile'
 import { buildDraft, defaultShipmentSettings, type CompanyProfile } from '../domain/draft'
 import { buildSyntheticCipl, simpleShipment } from '../test/synthetic/cipl'
-import { buildOmronCiPdf, simpleOmronCi } from '../test/synthetic/omron-ci'
+import { buildInHouseCiPdf, simpleInHouseCi } from '../test/synthetic/inhouse-ci'
 import type { ParsedCipl } from '../domain/types'
 import { getAdapter } from './registry'
 import type { SliDraft } from './types'
@@ -207,7 +207,7 @@ describe('every box on the CEVA SLI', () => {
 })
 
 /**
- * The Omron form (00004-00202) on the Nippon Express SLI, box for box.
+ * The in-house form (00004-00202) on the Nippon Express SLI, box for box.
  *
  * Its header is read differently from the other layouts, so it gets its own golden: SHIP DATE
  * (not the invoice date) is the date of exportation, the country comes from the end of the
@@ -218,9 +218,9 @@ describe('every box on the CEVA SLI', () => {
  *   8544.42.0000  US    4 @ $10, 0.5 kg each  -> domestic, 4, 2.000 kg,  $40.00, EAR99
  *   shipped 08/12/2026 (invoiced 08/10/2026); DAP Singapore; freight prepaid.
  */
-describe('every box on the Nippon Express SLI from an Omron commercial invoice', () => {
+describe('every box on the Nippon Express SLI from an in-house commercial invoice', () => {
   const spec = () => {
-    const base = simpleOmronCi()
+    const base = simpleInHouseCi()
     return {
       ...base,
       shipDate: '08/12/2026',
@@ -229,8 +229,8 @@ describe('every box on the Nippon Express SLI from an Omron commercial invoice',
   }
 
   it('matches the invoice, box for box', async () => {
-    const parsed = await parseCipl('ci.pdf', await buildOmronCiPdf(spec()))
-    expect(parsed.format).toBe('omron-ci')
+    const parsed = await parseCipl('ci.pdf', await buildInHouseCiPdf(spec()))
+    expect(parsed.format).toBe('inhouse-ci')
     const adapter = getAdapter('nippon-express')
     const result = reconcile(parsed, scheduleB, {
       eccn: null,

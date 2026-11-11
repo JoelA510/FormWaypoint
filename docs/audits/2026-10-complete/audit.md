@@ -5,13 +5,13 @@ Repo: **JoelA510/FormWaypoint** · Commit audited: `36a74ddc75cabb77509a6cd336cd
 `.agents/` and `.claude/`) · Audited: 2026-10-08 · Auditor: Claude Code running
 `prompts/existing-project.md` from JoelA510/repo-build-template main `9ed3142`
 
-Complete means: a shipper at Omron installs it on Windows, gets updates without reinstalling,
+Complete means: a shipper installs it on Windows, gets updates without reinstalling,
 and can produce SLI forms for CIPL documentation without the tool ever filing a wrong figure.
 
 Project inputs, as the owner gave them on 2026-10-08:
 
 - **State:** standard shipping (CIPL to SLI) works end to end for three CIPL formats (Vendor A,
-  the `SHIPMENT#` layout, Omron 00004-00202), filling Nippon Express and CEVA SLIs and FedEx/UPS
+  the `SHIPMENT#` layout, the in-house form 00004-00202), filling Nippon Express and CEVA SLIs and FedEx/UPS
   keying sheets. The dangerous goods (DG) workflow is built but has never been used, so it is
   assumed working, not known working.
 - **Hosting and distribution:** an unsigned NSIS installer downloaded by hand from a GitHub
@@ -147,7 +147,7 @@ plus a Rust binary built on `dtolnay/rust-toolchain@stable` (unpinned; `Cargo.to
 - **Findings:**
   - **2.1** `Medium` `executed (reviewer)`. `tsc -p tsconfig.app.json --noUncheckedIndexedAccess`
     reports 205 errors in non-test source, 129 in the CIPL parsers (parse-vendor-a 70,
-    parse-omron-ci 37, parse-vendor-b 22); `--exactOptionalPropertyTypes` reports 20. In a
+    parse-inhouse-ci 37, parse-vendor-b 22); `--exactOptionalPropertyTypes` reports 20. In a
     parser, an out-of-range index becomes `undefined` and flows into `Number()` or string
     concatenation with no compile error: the shape of several past precision and column bugs.
   - **2.2** `Medium` `statically reviewed`. External data is cast, not validated: nine IndexedDB
@@ -187,11 +187,11 @@ plus a Rust binary built on `dtolnay/rust-toolchain@stable` (unpinned; `Cargo.to
 - **Findings:**
   - **4.1** `Medium` `statically reviewed`. A blank becomes zero, and "nothing read" can pass.
     Unread header totals become 0 (`parse-vendor-a.ts:292-293`, `parse-vendor-b.ts:129,249`,
-    `parse-omron-ci.ts:527`). A line with no value contributes 0 (`reconcile/lines.ts:296,327`),
+    `parse-inhouse-ci.ts:527`). A line with no value contributes 0 (`reconcile/lines.ts:296,327`),
     and no per-line `values-present` check matches `weights-present`. Reconcile has no "at least
     one commodity row" check (`reconcile/index.ts:384`); `parse-vendor-b-shapes.test.ts:301`
-    notes that "every other check compares zero against zero and passes". For Omron, headings
-    not found returns `[]` with a warning (`parse-omron-ci.ts:636-637`); if the totals band is
+    notes that "every other check compares zero against zero and passes". For the in-house form, headings
+    not found returns `[]` with a warning (`parse-inhouse-ci.ts:636-637`); if the totals band is
     also unread, total value compares 0 with 0. The audit record stores
     `totalNetWeightKg ?? 0` (`App.tsx:504`).
   - **4.2** `Medium` `statically reviewed`. CEVA files whole dollars with no floor:
@@ -267,8 +267,8 @@ plus a Rust binary built on `dtolnay/rust-toolchain@stable` (unpinned; `Cargo.to
     and lines 1015 and 1096 print it as "Weight (lbs)" with the note
     `Gross … kg converted`. The Vendor B parser never reads a gross total
     (`parse-vendor-b.ts:279`, `totalGrossWeightKg: null`), so every Vendor B FedEx/UPS sheet
-    understates the package weight under a label that says it's gross. Omron does the same when
-    its GROSS WT cell is blank (`parse-omron-ci.ts:889`). The test at `keying-sheet.test.ts:646`
+    understates the package weight under a label that says it's gross. The in-house form does the same when
+    its GROSS WT cell is blank (`parse-inhouse-ci.ts:889`). The test at `keying-sheet.test.ts:646`
     covers only the case where gross is present. Graded blocker rather than high because it is a
     wrong figure the tool files today, against the one thing "complete" rules out.
   - **5.2** `High` `statically reviewed`. No error boundary. `main.tsx:6` renders without
@@ -296,7 +296,7 @@ plus a Rust binary built on `dtolnay/rust-toolchain@stable` (unpinned; `Cargo.to
   - the FedEx/UPS keying sheets: a 10% weight and value defect fails 14 tests;
   - Vendor A's synthetic builder: page-break split, divided weights, stranded heading;
   - the Vendor B layout checks;
-  - Omron in both xlsx and PDF form (103 tests);
+  - The in-house form in both xlsx and PDF form (103 tests);
   - about 230 DG tests.
 
   The fixture-free carrier tests fill the real blank templates in `public/templates/` and read
@@ -336,8 +336,8 @@ plus a Rust binary built on `dtolnay/rust-toolchain@stable` (unpinned; `Cargo.to
   - **6.6** `Medium` `statically reviewed`. Fixture gating covers blocks that read no document:
     `guards.test.ts:101,134,185` (carrier switching, dates, the invoice-to-packing join) and
     `carriers.test.ts:157` (template verification, which reads only `public/templates`).
-  - **6.7** `Medium` `statically reviewed`. Omron 00004-00202, the owner's own format, has no
-    real-document fixture, and no Omron test fills a carrier form and asserts its header. The
+  - **6.7** `Medium` `statically reviewed`. the in-house form 00004-00202, the owner's own format, has no
+    real-document fixture, and no in-house-form test fills a carrier form and asserts its header. The
     xlsx tests use workbooks from the repo's own writer (inline strings only,
     `src/lib/xlsx.ts:96`); Excel's shared-strings layout is tested only in the item library
     (`item-library.test.ts:156-163`).
@@ -451,7 +451,7 @@ plus a Rust binary built on `dtolnay/rust-toolchain@stable` (unpinned; `Cargo.to
     `certificateThumbprint` (`tauri.conf.json`); the unsigned NSIS installer and bare
     `FormWaypoint.exe` are uploaded (`desktop.yml:55-57`). Windows shows the unknown-publisher
     SmartScreen warning, and an employer that enforces AppLocker or WDAC may block it outright
-    (unknown for Omron). The updater signature (7.1) and an Authenticode signature are separate;
+    (unknown for the shipper's machines). The updater signature (7.1) and an Authenticode signature are separate;
     "complete" needs the first, and the owner wants the second.
   - **8.3** `High` `executed` `node.audit-gate` (§8). CI's dependency audit can't fail
     (`ci.yml:29-31`, `continue-on-error: true`), covers production only, and has no schedule.

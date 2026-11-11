@@ -51,8 +51,8 @@ const CONTROLLED = { eccn: 'EAR99', sme: 'N', license: 'NLR' }
 /** The exporter behind all three sample shipments. */
 const VENDOR: CompanyProfile = {
   usppiName: 'Vendor A Manufacturing, Inc.',
-  usppiAddressLines: ['4225 Hacienda Drive', 'Pleasanton CA 94588', 'UNITED STATES OF AMERICA'],
-  usppiZip: '94588',
+  usppiAddressLines: ['1200 Meridian Drive', 'Springvale CA 94000', 'UNITED STATES OF AMERICA'],
+  usppiZip: '94000',
   usppiEin: '00-0000000',
   contactName: 'Pat Example',
   contactPhone: '+15550100100',
@@ -180,7 +180,7 @@ describe.skipIf(!hasFixtures())('Nippon Express — vendorA1', () => {
     const { values } = await generate('vendorA1', 'nippon-express')
 
     expect(values['1b USPPI IRS NO or ID NO']).toBe('00-0000000')
-    expect(values['ZIP CODE']).toBe('94588')
+    expect(values['ZIP CODE']).toBe('94000')
     expect(values['1a. USPPI']).toContain('Vendor A Manufacturing, Inc.')
     expect(values['1a. USPPI']).toContain('Pat Example / +15550100100')
 
@@ -288,7 +288,7 @@ describe.skipIf(!hasFixtures())('CEVA — vendorA3', () => {
   it('writes the header values from the filed SLI', async () => {
     const { values } = await generate('vendorA3', 'ceva')
     expect(values.USPPI).toBe('00-0000000')
-    expect(values.ZipCode).toBe('94588')
+    expect(values.ZipCode).toBe('94000')
     expect(values['Point of Origin']).toBe('California')
     expect(values['Country of Ultimate']).toBe('Netherlands')
     expect(values['Ultimate Consignee']).toContain('the vendor Europe B.V.')
@@ -615,7 +615,7 @@ describe('reading an Incoterm off a document', () => {
 
   it('reads the rule written out in words', () => {
     expect(parseIncoterm('Ex Works')?.code).toBe('EXW')
-    expect(parseIncoterm('Ex-Works Pleasanton')).toEqual({ code: 'EXW', namedPlace: 'Pleasanton', retired: false })
+    expect(parseIncoterm('Ex-Works Springvale')).toEqual({ code: 'EXW', namedPlace: 'Springvale', retired: false })
     expect(parseIncoterm('Free on Board')?.code).toBe('FOB')
     expect(parseIncoterm('COST, INSURANCE AND FREIGHT')?.code).toBe('CIF')
     // The longer rule wins over the one that is a prefix of it.
@@ -893,7 +893,7 @@ describe('CEVA — recording the Incoterm', () => {
   })
 
   it('ticks the box when the term carries its named place', async () => {
-    // What the `omron-ci` INCOTERMS box actually says. Matched literally against the box
+    // What the `inhouse-ci` INCOTERMS box actually says. Matched literally against the box
     // names, this ticked nothing at all.
     const { values, warnings } = await fillWith({ incoterm: 'DAP Singapore' })
     expect(values.DAP).toBe('checked')
@@ -969,7 +969,7 @@ describe('CEVA — recording the Incoterm', () => {
   })
 
   it('says nothing extra for a rule spelled out in words', async () => {
-    // The `omron-ci` box is hand-typed. `Ex Works` is the same bare rule as `EXW`, and the
+    // The `inhouse-ci` box is hand-typed. `Ex Works` is the same bare rule as `EXW`, and the
     // tick already states it — comparing the text to the code wrote a redundant instruction.
     for (const term of ['Ex Works', 'Free On Board', 'Cost and Freight']) {
       const { values } = await fillWith({ incoterm: term })

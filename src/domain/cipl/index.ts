@@ -10,12 +10,12 @@
 import type { CiplFormat, ParsedCipl } from '../types'
 import { findXlsxSheets, isZip, WorkbookError } from '../item-library/read-workbook'
 import { extractTextPages, rowText, type TextPage } from './extract-text'
-import { isOmronCiPdf, isOmronCiWorkbook, parseOmronCiPages, parseOmronCiPdf } from './parse-omron-ci'
+import { isInHouseCiPdf, isInHouseCiWorkbook, parseInHouseCiPages, parseInHouseCiPdf } from './parse-inhouse-ci'
 import { parseCiplPages as parseVendorAPages } from './parse-vendor-a'
 import { isVendorBFormat, parseVendorBPages } from './parse-vendor-b'
 
 export * from './extract-text'
-export { isOmronCiWorkbook, parseOmronCiPages, parseOmronCiWorkbook } from './parse-omron-ci'
+export { isInHouseCiWorkbook, parseInHouseCiPages, parseInHouseCiWorkbook } from './parse-inhouse-ci'
 
 export interface FormatDescriptor {
   id: CiplFormat
@@ -26,16 +26,16 @@ export interface FormatDescriptor {
 }
 
 /**
- * Order matters: the most specific detector runs first. `omron-ci` is identified by its
+ * Order matters: the most specific detector runs first. `inhouse-ci` is identified by its
  * printed document number; `vendor-b` by its shipment-number banner; the FC/TP1 layout by
  * its currency-set marker plus the invoice-number label.
  */
 export const CIPL_FORMATS: FormatDescriptor[] = [
   {
-    id: 'omron-ci',
-    label: 'Omron Commercial Invoice (form 00004-00202)',
-    matches: isOmronCiPdf,
-    parse: parseOmronCiPdf,
+    id: 'inhouse-ci',
+    label: 'In-house Commercial Invoice (form 00004-00202)',
+    matches: isInHouseCiPdf,
+    parse: parseInHouseCiPdf,
   },
   {
     id: 'vendor-b',
@@ -96,7 +96,7 @@ export async function parseCiplFile(fileName: string, data: ArrayBuffer | Uint8A
   // page, with nothing said.
   let found
   try {
-    found = await findXlsxSheets(bytes, isOmronCiWorkbook)
+    found = await findXlsxSheets(bytes, isInHouseCiWorkbook)
   } catch (error) {
     if (error instanceof WorkbookError) throw new Error(`${fileName}: ${error.message}`)
     throw error
@@ -108,5 +108,5 @@ export async function parseCiplFile(fileName: string, data: ArrayBuffer | Uint8A
         'systems are read from their PDFs.',
     )
   }
-  return parseOmronCiPages(fileName, found.sheets)
+  return parseInHouseCiPages(fileName, found.sheets)
 }

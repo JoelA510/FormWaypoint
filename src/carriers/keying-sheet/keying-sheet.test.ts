@@ -113,8 +113,8 @@ function fixture(lines: MergedLine[], rows: SLILine[]): Reconciliation {
 const draft = (over: Partial<SliDraft> = {}): SliDraft =>
   ({
     usppiName: 'Vendor A Manufacturing, Inc.',
-    usppiAddressLines: ['4225 Hacienda Drive', 'Pleasanton CA 94588'],
-    usppiZip: '94588',
+    usppiAddressLines: ['1200 Meridian Drive', 'Springvale CA 94000'],
+    usppiZip: '94000',
     usppiEin: '',
     usppiContactName: '',
     usppiContactPhone: '',
@@ -669,7 +669,7 @@ describe('FedEx Ship Manager sheet', () => {
 })
 
 describe('a CIPL that prints no gross weight', () => {
-  // Vendor B never prints one, and an Omron form can leave GROSS WT blank. The package weight
+  // Vendor B never prints one, and an in-house form can leave GROSS WT blank. The package weight
   // is then the operator's to enter: the net weight is not a stand-in for what the carrier
   // will weigh.
   const withGross = (gross: number | null) => {

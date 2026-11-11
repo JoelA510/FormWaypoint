@@ -29,12 +29,12 @@ export type DocumentKind = 'INVOICE' | 'PACKING_LIST'
  *   TP1 in the destination currency), with per-line net and gross weights.
  * `vendor-b` — the SAP-style shipment-banner commercial invoice and master packing
  *   list. Single currency, carries an ECCN column, and **has no weights at all**.
- * `omron-ci` — the in-house Commercial Invoice form (doc 00004-00202): a fixed grid
+ * `inhouse-ci` — the in-house Commercial Invoice form (doc 00004-00202): a fixed grid
  *   filled in by hand, read from the .xlsx workbook itself or from a PDF printed from
  *   it. Invoice only — no packing list and no per-line weights — but it is the one
  *   layout that states the full export-control triplet (ECCN, license, SME) per line.
  */
-export type CiplFormat = 'vendor-a' | 'vendor-b' | 'omron-ci'
+export type CiplFormat = 'vendor-a' | 'vendor-b' | 'inhouse-ci'
 
 /** Where a value came from. Rendered next to every field on the review screen. */
 export type Provenance =
@@ -130,7 +130,7 @@ export interface SourceLine {
   /**
    * License number, exception, or `NLR`, when the document states one per line.
    *
-   * Only the `omron-ci` form does. Same rule as `eccn`: a stated value is a
+   * Only the `inhouse-ci` form does. Same rule as `eccn`: a stated value is a
    * classification the exporter already made, so it beats the blanket value.
    */
   license?: string
