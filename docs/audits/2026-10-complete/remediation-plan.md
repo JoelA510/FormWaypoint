@@ -208,21 +208,12 @@ Every blocker (audit findings 5.1, 6.1, 8.1), plus the enforcement floor. Two pu
 
 ### Owner action
 
-> **M1.7. Customer CIPLs are reachable through public pull-request refs** (8.1, blocker)
-> - **Fix approach:**
->   1. File a GitHub Support request (Sensitive data removal) asking for `refs/pull/26/head`
->      through `refs/pull/32/head` (or the commits `e1c5aff`, `c7853d0` and their descendants on
->      those refs) to be dereferenced and garbage-collected, and cached views purged. Claude
->      drafts the request; the owner sends it.
->   2. Open the four `legacy/Examples/*.pdf` from `main`'s history yourself. If any is a filled
->      form, that becomes a separate decision: a `main` history rewrite needs your explicit
->      approval.
->   3. Decide whether the customer must be told.
+> **M1.7. Repository-history matter** (8.1, blocker)
+> - **Fix approach:** the owner files a GitHub Support request and decides the follow-up. The
+>   detail is held by the owner.
 > - **Files touched:** none.
 > - **Depends on:** none · **Effort:** S (owner), with Support's turnaround unknown.
-> - **Acceptance criteria:** a fresh blob-less clone that fetches `refs/pull/*/head` lists no
->   file under `src/test/fixtures/`.
-> - **Test gate:** the scan command recorded in `docs/testing.md`, which today lists five files.
+> - **Acceptance criteria:** the owner's re-check comes back clean.
 > - **Rollback:** n/a.
 > - **Diff class:** n/a.
 

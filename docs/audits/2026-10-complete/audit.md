@@ -97,7 +97,7 @@ plus a Rust binary built on `dtolnay/rust-toolchain@stable` (unpinned; `Cargo.to
 | 5 | Error handling | Blocker | FedEx/UPS keying sheets key net weight as "Gross" whenever the CIPL prints no gross. No error boundary. |
 | 6 | Testing | Blocker | 947 tests pass, yet a 10% error planted in every SLI weight and value passes them all. |
 | 7 | CI/CD | High | CI runs the gate on PRs but isn't required; no release, versioning, updater or rollback. |
-| 8 | Security | Blocker | Five customer CIPLs reachable through public pull-request refs. Installer unsigned. |
+| 8 | Security | Blocker | A repository-history matter for the owner (8.1). Installer unsigned. |
 | 9 | Observability | High | No logging, no error capture, no visible version. |
 | 10 | Performance | Low | pdf.js lazy; pdf-lib (about 408 kB) and the DG workflow load eagerly. |
 | 11 | Accessibility & UX completeness | Medium | Every control labelled; several token pairs fail AA contrast; no live regions or focus management. |
@@ -445,18 +445,8 @@ plus a Rust binary built on `dtolnay/rust-toolchain@stable` (unpinned; `Cargo.to
     production npm licenses are permissive.
   - The scorecard passes `tauri.capabilities-scoped`, `tauri.csp` and `core.workflow-caches`.
 - **Findings:**
-  - **8.1** `Blocker` `executed`. Customer shipment documents are publicly reachable. Five CIPL
-    PDFs added under `src/test/fixtures/` in commits `e1c5aff` and `c7853d0` (2026-07-27) were
-    squash-merged away from `main`, but GitHub keeps every pull request's head ref, and refs
-    `refs/pull/26/head` through `refs/pull/32/head` still contain them (a blob-less clone of the
-    public repository, listing file names only; no document was opened). Commit `1e181f5`
-    recorded that they "remain in the history … reachable". Their file names carry document
-    numbers, so this record doesn't repeat them. They are a customer's commercial paperwork: part
-    numbers, values, consignees and classifications. The owner can't delete pull-request refs;
-    GitHub Support can. Separately, `main`'s history still holds four PDFs under
-    `legacy/Examples/` (added `063a6bd`, deleted `c7729f4`), named as carrier SLIs and
-    instructions; whether they are blank forms or filled ones wasn't checked, because that means
-    opening them.
+  - **8.1** `Blocker` `executed`. A repository-history matter that only the owner can resolve,
+    through GitHub Support. The detail is held by the owner and is not repeated in this record.
   - **8.2** `High` `executed (reviewer)`. The installer isn't code-signed: no `signCommand` or
     `certificateThumbprint` (`tauri.conf.json`); the unsigned NSIS installer and bare
     `FormWaypoint.exe` are uploaded (`desktop.yml:55-57`). Windows shows the unknown-publisher
@@ -504,7 +494,7 @@ plus a Rust binary built on `dtolnay/rust-toolchain@stable` (unpinned; `Cargo.to
   - core.license (skipped by the scorecard for want of a declared visibility): the repository
     has an MIT LICENSE, so it passes once visibility is declared. Not a finding.
 - **Pattern that closes the gap:**
-  - A GitHub Support request to purge the pull-request refs and any cached views, then a re-scan.
+  - The owner's GitHub Support request for 8.1, then a re-check.
   - Signing in the release workflow (SignPath Foundation for open source at $0, or Azure
     Artifact Signing at about $9.99 a month, or a certificate). The owner chooses.
   - An audit that blocks on high and critical, runs weekly, and keeps an expiring waiver
@@ -689,9 +679,7 @@ plus a Rust binary built on `dtolnay/rust-toolchain@stable` (unpinned; `Cargo.to
 - Notes: "Antigravity workflows stop on 2026-10-19, not 2026-11-01". Confirmed by the delivered
   standard `core.no-agent-workflows`; not independently re-checked against Antigravity's own
   announcement in this pass.
-- Reviewer's 8.1 lead ("the real CIPLs remain in the history") corrected: they are not in
-  `main`'s history (squash merges), but they are in public pull-request refs 26 to 32 (auditor,
-  executed).
+- Reviewer's 8.1 lead corrected by the auditor (executed).
 - Reviewer graded the keying-sheet gross substitution (5.1) high; regraded blocker, because it
   is a wrong figure filed today.
 - Reviewer graded `vite-spa.client-env` by the standard's high; regraded low on present risk
@@ -719,8 +707,7 @@ plus a Rust binary built on `dtolnay/rust-toolchain@stable` (unpinned; `Cargo.to
   against 15 CFR 30.6 or the carriers' instructions.
 - Contrast was computed from tokens, not measured in a rendered browser.
 - Startup time, parse time and memory were not measured.
-- The four `legacy/Examples/` PDFs in `main`'s history and the five pull-request-ref documents
-  weren't opened.
+- No document covered by 8.1 was opened.
 - Areas were read by five parallel reviewers and re-verified by the auditor where a finding set a
   blocker or high grade (5.1, 6.1, 8.1, 1.1, 7.x via the scorecard and API results); medium and
   low findings rest on the reviewer's citation, spot-checked.
