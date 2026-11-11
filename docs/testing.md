@@ -1,7 +1,6 @@
 # Testing record
 
-Two things here that no CI run can check: the real-shipment suite, and the public pull-request
-refs that once carried shipment documents.
+What no CI run can check: the real-shipment suite.
 
 ## Real-shipment suite runs
 
@@ -18,22 +17,3 @@ newest last. Any failure is a defect until shown otherwise.
 | Date | Commit | Result (passed / failed / skipped) | Run by | Notes |
 | --- | --- | --- | --- | --- |
 | 2026-07-28 | `1e181f5` | 209 passed | owner | Last recorded full run, from the commit message. 44 non-merge commits since have touched the parsers, reconciliation, the adapters or the draft without it (as of 2026-10-21: `git rev-list --count --no-merges 1e181f5..main -- src/domain/cipl src/domain/reconcile src/carriers src/domain/draft.ts`). |
-
-## Shipment documents in public pull-request refs
-
-Five CIPLs committed under `src/test/fixtures/` in July 2026 left `main` through squash merges,
-but GitHub keeps every pull request's head ref, and refs 26 to 32 still carried them on
-2026-10-08 (audit finding 8.1). Only GitHub Support can remove pull-request refs. To check
-whether they are gone, from an empty directory (file names only; nothing is opened):
-
-```bash
-git clone --bare --filter=blob:none https://github.com/JoelA510/FormWaypoint scan && cd scan
-git fetch --filter=blob:none origin '+refs/pull/*/head:refs/pr/*'
-git log --all --diff-filter=A --name-only --format= -- 'src/test/fixtures/*.pdf' | sort -u
-```
-
-Nothing printed means no ref still holds them.
-
-| Date | Result |
-| --- | --- |
-| 2026-10-08 | Five files listed, reachable through refs 26 to 32. |
