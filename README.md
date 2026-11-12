@@ -114,6 +114,17 @@ fails silently or transposes values.
 Adding a carrier means writing one adapter under `src/carriers/`. The parser and the
 reconciliation engine contain no carrier-specific logic.
 
+## Booking summary
+
+Below the Generate card, the shipment's booking facts are laid out as plain text with a button
+to copy them: invoice and order numbers, consignee, destination, carrier, mode, Incoterm, the
+ship date where the document states one, piece count, gross weight, and whatever was typed under Pieces and dimensions. It is for
+pasting into a pickup request. Nothing is sent from here.
+
+Each line is what the document states or what was entered, and says so when it is neither: a
+layout that prints no piece count or no gross weight reads "not stated on the document", and no
+figure is worked out from another to fill the gap.
+
 ## Dangerous goods — lithium batteries by air
 
 A separate tab. It reads the CIPL only when asked (**Filling from the CIPL**, below), and
