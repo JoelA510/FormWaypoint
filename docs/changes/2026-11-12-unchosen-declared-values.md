@@ -91,8 +91,15 @@ Native elements; the button is reachable in tab order ahead of the fields it spe
   case-sensitively; a typed destination treated as carried.
 - [x] The note and the confirm button — proved by `src/features/manual-fields.test.tsx`. Planted:
   note hidden; button inert.
-- [x] `App.tsx` marks on load and adds the checks — no test; statically reviewed. The app shell
-  has no test harness.
+- [x] `App.tsx` marks on load, on a saved consignee, clears on edit and on confirm, and adds the
+  checks — proved by `src/App.test.tsx`, the first test to mount the application itself: it
+  uploads a synthetic workbook through the real upload, parser, reconciliation and screens, with
+  only the store replaced by one in memory. Added after review pointed out the panel test could
+  not see the wiring. Planted, in `App.tsx`: sources not reset on load; carried values not
+  marked; checks left out; confirm inert; an edit not clearing its mark (1 or 2 fail each).
+  Not covered: that a generated shipment's history record carries the warnings. It is built from
+  the same list the test reads off the screen (statically reviewed); generating a form through
+  the application needs a complete profile, weights and a PDF fill, which this test does not do.
 - [x] ADR 0007; README and `roadmap.md` brought into line.
 
 ## Done when

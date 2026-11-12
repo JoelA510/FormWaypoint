@@ -74,6 +74,8 @@ revisiting if the warning ever fires in practice.
 `src/domain/draft-sources.test.ts` fails if a starting or carried value is not marked, if a blank
 carried value is, if an edit clears the wrong marks, if either check blocks or stops failing, or
 if the carried date is dropped. `src/features/manual-fields.test.tsx` fails if the list is hidden
-or the confirm button does nothing. Thirteen planted defects were run on 2026-11-12; each failed
-at least one test. `App.tsx` marking the values on load and adding the checks is statically
-reviewed only.
+or the confirm button does nothing. `src/App.test.tsx` mounts the application, uploads a
+synthetic workbook and fails if the marks are not set on load or from a saved consignee, are not
+cleared by an edit or the button, or the checks are left out. Eighteen planted defects were run on
+2026-11-12; each failed at least one test. That the history record of a generated shipment
+carries the warnings is statically reviewed only.
