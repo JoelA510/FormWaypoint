@@ -219,6 +219,8 @@ export interface PartyAddress {
 }
 
 /** Everything extracted from one CIPL PDF, both document sets. */
+export type NoChargeBox = 'ticked' | 'unticked' | 'unreadable'
+
 export interface ParsedCipl {
   fileName: string
   format: CiplFormat
@@ -260,6 +262,15 @@ export interface ParsedCipl {
    * complete shipment. `reconcile` turns this into a blocking check.
    */
   incompleteReason?: string
+  /**
+   * The in-house form's "NO CHARGE - VALUE FOR CUSTOMS PURPOSES ONLY" box, as printed.
+   *
+   * Absent for layouts that have no such box, and for a form whose box was not found.
+   * `unreadable` when the box was found but its mark could not be told apart, or the pages
+   * disagree: a tick that cannot be read is not an unticked box. Reported, never acted on:
+   * no value changes because of it.
+   */
+  noChargeBox?: NoChargeBox
   /** Non-fatal parse observations surfaced in the UI. */
   warnings: string[]
 }

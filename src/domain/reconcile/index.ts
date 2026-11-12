@@ -404,6 +404,7 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
     ...sourceControlChecks(sliLines, mergedLines, options),
     ...capacityCheck(sliLines, options.maxRows),
     ...eeiThresholdCheck(sliLines, header.documentCurrency),
+    ...noChargeCheck(parsed.noChargeBox),
     ...enteredFigureChecks(entered),
     ...exportControlOverrideChecks(mergedLines, options),
   ]
@@ -1477,6 +1478,38 @@ function originStatusChecks(merged: MergedLine[], originStatusByPart?: Record<st
     })
   }
   return checks
+}
+
+/**
+ * What the in-house form's "NO CHARGE - VALUE FOR CUSTOMS PURPOSES ONLY" box says.
+ *
+ * Information only, and nothing changes because of it: the values are filed as printed
+ * whatever the box says, because a value for customs purposes is still the value the form
+ * states. It is reported so a ticked box is seen before the form is signed, and a box whose
+ * mark could not be read is never taken for an empty one. Absent for layouts with no such box.
+ */
+function noChargeCheck(box: ParsedCipl['noChargeBox']): CheckResult[] {
+  if (!box) return []
+  const wording = '"NO CHARGE - VALUE FOR CUSTOMS PURPOSES ONLY"'
+  const detail: Record<NonNullable<typeof box>, { title: string; detail: string }> = {
+    ticked: {
+      title: 'The no-charge box is ticked',
+      detail:
+        `The form's ${wording} box is ticked: the goods are not sold, and the values are stated for customs. ` +
+        'They are filed exactly as printed; nothing here changes because of the box.',
+    },
+    unticked: {
+      title: 'The no-charge box is not ticked',
+      detail: `The form's ${wording} box is empty.`,
+    },
+    unreadable: {
+      title: 'The no-charge box could not be read',
+      detail:
+        `The form has a ${wording} box, but its mark could not be told apart, or its pages disagree. Look at the ` +
+        'box on the document. Nothing here depends on it; the values are filed as printed either way.',
+    },
+  }
+  return [{ id: 'no-charge-box', severity: 'info', ...detail[box], passed: box === 'unticked' }]
 }
 
 function classificationChecks(

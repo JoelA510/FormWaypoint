@@ -27,7 +27,7 @@
  * but anchoring on the printed labels ("INVOICE #:", "PART #", …) means an extra inserted
  * row or a column nudged in a future revision moves nothing.
  */
-import type { ParsedCipl, PartyAddress, ShipmentHeader, SourceLine } from '../types'
+import type { NoChargeBox, ParsedCipl, PartyAddress, ShipmentHeader, SourceLine } from '../types'
 import type { SheetRows } from '../item-library/read-workbook'
 import { countryFromAddressLines } from '../countries'
 import { roundTo } from '../reconcile/lines'
@@ -204,7 +204,49 @@ interface InHouseCiPage {
   freight: number | null
   /** The document-wide `TOTAL (USD)`, which every page repeats. */
   grandTotal: number | null
+  /** This page's no-charge box, or null where it was not found. See `readNoChargeBox`. */
+  noChargeBox: NoChargeBox | null
   warnings: string[]
+}
+
+/** The box's printed wording, however the dash was set. */
+const NO_CHARGE_WORDING = /NO\s+CHARGE\s*[-\u2013\u2014]?\s*VALUE\s+FOR\s+CUSTOMS\s+PURPOSES\s+ONLY/i
+/** Marks that mean the box is empty: the template's glyph, or the ASCII a print may reduce it to. */
+const EMPTY_BOX = /^(?:\u2610|\u25A1|\[\s*\])$/
+/** Marks a person types or picks to tick it. */
+const TICKED_BOX = /^(?:\u2611|\u2612|\u2713|\u2714|\u2717|\u2718|\u25A0|\u25A3|\[\s*[xX\u2713\u2714]\s*\]|[xX])$/
+
+/**
+ * The no-charge box on one page, read from the mark beside its wording.
+ *
+ * The workbook holds the box as a glyph at the start of the cell's text, and a person ticks it
+ * by replacing the glyph; there is no form control. So the mark is whatever precedes the
+ * words, in the same cell or the cell before. An empty mark, or one that is neither the empty
+ * box nor a recognised tick, is `unreadable`, never `unticked`: a print can drop the glyph from
+ * its text layer, and reading a box that lost its mark as "not ticked" would state something
+ * the document did not.
+ */
+function readNoChargeBox(rows: SheetRows): NoChargeBox | null {
+  for (const row of rows) {
+    for (let i = 0; i < row.length; i++) {
+      const cell = row[i] ?? ''
+      const match = NO_CHARGE_WORDING.exec(cell)
+      if (!match) continue
+      let mark = cell.slice(0, match.index).trim()
+      if (!mark) {
+        for (let j = i - 1; j >= 0; j--) {
+          if ((row[j] ?? '').trim()) {
+            mark = (row[j] ?? '').trim()
+            break
+          }
+        }
+      }
+      if (EMPTY_BOX.test(mark)) return 'unticked'
+      if (TICKED_BOX.test(mark)) return 'ticked'
+      return 'unreadable'
+    }
+  }
+  return null
 }
 
 type Parties = { shipper: PartyAddress; consignee: PartyAddress; billTo: PartyAddress }
@@ -317,7 +359,18 @@ export function parseInHouseCiPages(fileName: string, pages: SheetRows[], fromWo
     // holds generation.
     ...(incomplete.length ? { incompleteReason: incomplete.join(' ') } : {}),
     warnings,
+    ...noChargeOf(read),
   }
+}
+
+/**
+ * The no-charge box for the document: the pages' own reading where they agree. Pages that
+ * read it differently make it `unreadable`, because which page is right is not knowable here.
+ */
+function noChargeOf(read: InHouseCiPage[]): { noChargeBox?: NoChargeBox } {
+  const found = [...new Set(read.map((page) => page.noChargeBox).filter((box): box is NoChargeBox => box !== null))]
+  if (!found.length) return {}
+  return { noChargeBox: found.length === 1 ? found[0] : 'unreadable' }
 }
 
 const emptyParty = (): PartyAddress => ({ name: '', lines: [], country: null })
@@ -402,6 +455,7 @@ function readPage(rows: SheetRows, index: number, fromWorkbook: boolean): InHous
     tax: amountOnRow(rows, 'TAX', amountColumn),
     freight: amountOnRow(rows, 'FREIGHT', amountColumn),
     grandTotal: amountOnRow(rows, 'TOTAL (USD)', amountColumn),
+    noChargeBox: readNoChargeBox(rows),
     warnings,
   }
 }

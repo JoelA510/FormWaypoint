@@ -44,6 +44,12 @@ arithmetic cannot catch that on its own: a page that never arrived takes its sub
 it, so the rows left behind balance perfectly. The grand `TOTAL (USD)` is the second proof —
 it counts the goods on the missing page, and the rows are reconciled against it.
 
+The form's **NO CHARGE - VALUE FOR CUSTOMS PURPOSES ONLY** box is read off the mark in front of
+its wording and reported in the checks: ticked, not ticked, or could not be read. A mark it does
+not recognise, a print that dropped the mark, or pages that disagree all read as "could not be
+read", never as unticked. Nothing else changes because of the box; the values are filed as
+printed.
+
 Its `SHIP DATE` is the date of exportation on the generated form. Its invoice date box is
 routinely struck through — these are loaned tools and no-charge replacements, not sales —
 and a box holding `-` is read as empty rather than filed as a dash. The country of ultimate

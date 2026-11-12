@@ -75,6 +75,11 @@ export interface InHouseCiSpec {
    * an independent check on the pages this reader was handed.
    */
   grandTotal?: number
+  /**
+   * What sits in front of the NO CHARGE wording. Defaults to the template's empty box; a
+   * person ticks it by replacing the glyph, so a test passes the mark they would type.
+   */
+  noChargeMark?: string
   /** Omit the SUBTOTAL figure, to model a workbook saved without cached formula results. */
   omitSubtotal?: boolean
   /**
@@ -243,7 +248,7 @@ export function inHouseCiGrid(spec: InHouseCiSpec): SheetRows {
   const subtotal = spec.omitSubtotal ? '' : money(subtotalOf(spec))
   const total = spec.omitSubtotal && spec.grandTotal == null ? '' : money(grandTotalOf(spec))
   grid.push(
-    ['', '☐  NO CHARGE — VALUE FOR CUSTOMS PURPOSES ONLY', '', '', '', '', '', 'SUBTOTAL', '', '', subtotal],
+    ['', `${spec.noChargeMark ?? '☐'}  NO CHARGE — VALUE FOR CUSTOMS PURPOSES ONLY`, '', '', '', '', '', 'SUBTOTAL', '', '', subtotal],
     ['', '# OF PIECES:', '', spec.pieces != null ? String(spec.pieces) : '', 'NET WT (KG):',
       spec.netWeightKg != null ? String(spec.netWeightKg) : '', '', 'TAX', '', '', spec.tax != null ? money(spec.tax) : ''],
     ['', 'GROSS WT (KG):', '', spec.grossWeightKg != null ? String(spec.grossWeightKg) : '', 'DIMS / VOLUME:', '', '', 'FREIGHT', '', '',
@@ -408,7 +413,7 @@ function drawInHouseCiPage(page: PDFPage, font: PDFFont, spec: InHouseCiSpec): v
   const totalsTop = 240
   // The real print carries a checkbox glyph here; Helvetica cannot encode it, and the
   // parser keys on the words, so the fixture spells the box as ASCII.
-  at(COLUMNS.ln.left, totalsTop, '[ ]  NO CHARGE - VALUE FOR CUSTOMS PURPOSES ONLY')
+  at(COLUMNS.ln.left, totalsTop, `${spec.noChargeMark ?? '[ ]'}  NO CHARGE - VALUE FOR CUSTOMS PURPOSES ONLY`)
   at(COLUMNS.j.left, totalsTop, 'SUBTOTAL')
   centred(center(COLUMNS.k), totalsTop, subtotal)
   // TAX and FREIGHT share their rows with the weights, exactly as the printed form does —
