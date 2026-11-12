@@ -613,6 +613,39 @@ describe('the retention record of a prepared consignment', () => {
     expect(rows.filter((r) => r.includes('rules superseded 2027-01-01'))).toHaveLength(1)
   })
 
+  it('stamps the record with the date on the artifact when delivery runs past midnight', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 11, 31, 23, 59, 50))
+    const written: string[] = []
+    const kept: DgConsignmentRecord[] = []
+    const bridge = {
+      saveOutput: async (name: string, bytes: Uint8Array) => {
+        written.push(new TextDecoder().decode(bytes))
+        return `C:\\out\\${name}`
+      },
+      // The file is written on the 31st; opening it returns on the 1st.
+      openOutput: async () => {
+        vi.setSystemTime(new Date(2027, 0, 1, 0, 0, 5))
+      },
+    } as unknown as DesktopBridge
+    container = document.createElement('div')
+    document.body.append(container)
+    const r = createRoot(container)
+    root = r
+    await act(async () =>
+      r.render(<Harness cipl={null} initial={ready} bridge={bridge} onPrepared={(record) => kept.push(record)} />),
+    )
+    await act(async () => view().querySelector<HTMLInputElement>('[role="note"] input')!.click())
+    await click(button('Download the package checklist'))
+
+    expect(written[0]).toContain('Prepared 2026-12-31')
+    expect(written[0]).not.toContain(DG_RULES_LAPSED_NOTICE)
+    expect(kept).toHaveLength(1)
+    expect(kept[0].preparedAt.startsWith(new Date(2026, 11, 31, 23, 59, 50).toISOString().slice(0, 19))).toBe(true)
+    expect(kept[0].rulesSource?.lapsedWhenPrepared).toBe(false)
+    expect(kept[0].checks.find((c) => c.id === 'dg.rules-current')?.passed).toBe(true)
+  })
+
   it('still treats two downloads minutes apart as one preparation when nothing changed between them', async () => {
     const { written, kept } = await prepareOn(new Date(2026, 11, 30, 10, 0))
     vi.setSystemTime(new Date(2026, 11, 30, 10, 5))

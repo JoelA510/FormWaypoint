@@ -155,8 +155,8 @@ export function DangerousGoodsPanel({
    * effect since the screen was drawn: nothing is generated, and the re-render this causes
    * shows the lapse and its acknowledgement, so the next click is an informed one.
    */
-  const dateStillHolds = (): boolean => {
-    const current = localDate()
+  const dateStillHolds = (startedAt: Date): boolean => {
+    const current = localDate(startedAt)
     if (current === today) return true
     setToday(current)
     return dgRulesLapsed(current) === dgRulesLapsed(today)
@@ -229,8 +229,11 @@ export function DangerousGoodsPanel({
    * shorten the period both are kept for. Only a record from the last little while is the
    * same preparation as this one.
    */
-  const record = useCallback((): DgConsignmentRecord => {
-    const now = Date.now()
+  const record = useCallback((startedAt: Date): DgConsignmentRecord => {
+    // The moment the download was asked for, not the moment it finished: writing and opening
+    // the file is awaited, and a clock read after it can fall on the far side of midnight from
+    // the date printed on the artifact this record is evidence of.
+    const now = startedAt.getTime()
     const lapsedNow = dgRulesLapsed(localDate(new Date(now)))
     const fingerprint = JSON.stringify(consignment)
     const filed = records.find((r) => {
@@ -284,9 +287,9 @@ export function DangerousGoodsPanel({
    * was produced, which is the two-year obligation and has to be said plainly — beside the
    * "Saved to …" line, not instead of it.
    */
-  async function retain(artifact: string) {
+  async function retain(artifact: string, startedAt: Date) {
     try {
-      await onPrepared(record())
+      await onPrepared(record(startedAt))
     } catch (e) {
       const because = e instanceof Error ? e.message : 'the record could not be written'
       setError(
@@ -302,7 +305,10 @@ export function DangerousGoodsPanel({
     // double-click that writes two files is noise while one that writes two audit rows is
     // misinformation.
     if (busy) return
-    if (!dateStillHolds()) return
+    // One reading of the clock for the whole preparation: the guard, the date printed on the
+    // artifact and the retention record all take it from here.
+    const startedAt = new Date()
+    if (!dateStillHolds(startedAt)) return
     setBusy(true)
     setError(null)
     setWarnings([])
@@ -318,7 +324,7 @@ export function DangerousGoodsPanel({
       // Opened straight away, like the SLI: the next thing anyone does with a declaration is
       // read it, print it in colour and sign it by hand.
       await openDelivery(bridge, delivery)
-      await retain('declaration')
+      await retain('declaration', startedAt)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'The declaration could not be generated.')
     } finally {
@@ -330,14 +336,17 @@ export function DangerousGoodsPanel({
     // Guarded like the declaration: each run appends a retention record, and a double-click
     // that writes two files is noise while one that writes two audit rows is misinformation.
     if (busy) return
-    if (!dateStillHolds()) return
+    // One reading of the clock for the whole preparation: the guard, the date printed on the
+    // artifact and the retention record all take it from here.
+    const startedAt = new Date()
+    if (!dateStillHolds(startedAt)) return
     setBusy(true)
     setError(null)
     // And cleared like it. The warnings come from drawing the declaration; left standing
     // beside a checklist download they describe a form this button does not produce.
     setWarnings([])
     try {
-      const markdown = buildChecklist(consignment, assessment, localDate())
+      const markdown = buildChecklist(consignment, assessment, localDate(startedAt))
       const delivery = await deliver(
         bridge,
         `${consignment.airWaybillNumber || consignment.shippersReference || 'consignment'}_dg-checklist.md`,
@@ -348,7 +357,7 @@ export function DangerousGoodsPanel({
       await openDelivery(bridge, delivery)
       // Recorded too: for a Section II consignment this checklist is the only artifact, and a
       // consignment that left the tool with no record has no audit trail at all.
-      await retain('checklist')
+      await retain('checklist', startedAt)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'The checklist could not be saved.')
     } finally {

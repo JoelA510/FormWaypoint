@@ -134,6 +134,10 @@ until both acknowledgements are ticked. Neither is saved. The history table adds
   and the earlier record is left as written; two downloads five minutes apart on one day are
   still one preparation. Planted: the standing not compared (1 fails). Review caught this one
   too; the first test of the midnight case did not feed records back and could not see it.
+- [x] One reading of the clock per preparation — proved by the same file: a checklist written at
+  23:59:50 whose opening returns after midnight is recorded with the date printed on it and the
+  standing it was prepared under. Planted: the record reading the clock afresh (1 fails). The
+  third thing review found in the same seam.
 - [x] History marker — proved by the same file. Planted: marker removed (1 fails).
 - [x] Decode path — proved by `src/store/decode.test.ts`: a record saved before the field, a
   stamped one, and five unreadable stamps. Planted: unreadable stamp trusted (1 fails).
