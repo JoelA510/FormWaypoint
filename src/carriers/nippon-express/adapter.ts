@@ -53,6 +53,7 @@ export function createNipponExpressAdapter(options: NipponOptions = {}): Carrier
     maxCommodityRows: NIPPON_ROWS.length,
     maxInlineReferences: 3,
     supportedModes: ['AIR', 'OCEAN', 'TRUCK', 'RAIL'],
+    shippingWeightBox: 'box 26, "Gross Shipping Weight"',
 
     defaults: {
       forwardingAgent: 'Nippon Express USA, Inc.',

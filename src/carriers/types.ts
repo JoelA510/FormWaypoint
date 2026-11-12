@@ -114,6 +114,12 @@ export interface CarrierAdapter {
    */
   maxInlineReferences: number
   supportedModes: TransportMode[]
+  /**
+   * The box each commodity row's weight is written into, named as the blank form captions it,
+   * e.g. `box 26, "Gross Shipping Weight"`. Read by the note that the weight filed there is net
+   * (docs/adr/0001), so the domain can say which box without knowing the form.
+   */
+  shippingWeightBox: string
   /** Controlled values applied when the reviewer does not choose otherwise. */
   defaults: Partial<SliDraft>
   /** Confirms the loaded PDF is the revision this adapter maps. */

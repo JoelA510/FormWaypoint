@@ -121,6 +121,13 @@ describe('the note that row weights are net', () => {
     expect(ceva.detail).toContain('CEVA')
   })
 
+  it('takes the box from the adapter, so the domain holds no form of its own', () => {
+    const other = { ...getAdapter('ceva'), id: 'another-forwarder', name: 'Another Forwarder', shippingWeightBox: 'box 9, "Weight"' }
+    const check = shippingWeightBasisCheck(other)
+    expect(check.detail).toContain('On the Another Forwarder form, box 9, "Weight" receives')
+    expect(check.detail).not.toContain('Shipping Weight" column')
+  })
+
   it('never fails, warns or blocks: it records a standing decision, not a fault', () => {
     for (const id of ['nippon-express', 'ceva'] as const) {
       const check = shippingWeightBasisCheck(getAdapter(id))

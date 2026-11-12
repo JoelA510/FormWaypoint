@@ -411,12 +411,6 @@ export function unconfirmedSettingChecks(
   return checks
 }
 
-/** The box each SLI captions for shipping weight, in the words printed on the form. */
-const SHIPPING_WEIGHT_BOX: Record<string, string> = {
-  'nippon-express': 'box 26, "Gross Shipping Weight"',
-  ceva: 'the "Shipping Weight" column',
-}
-
 /**
  * States, on every SLI, that the weight filed per row is net (docs/adr/0001).
  *
@@ -430,7 +424,8 @@ const SHIPPING_WEIGHT_BOX: Record<string, string> = {
  * keying sheet keys the gross package weight or leaves it to be weighed.
  */
 export function shippingWeightBasisCheck(adapter: CarrierAdapter): CheckResult {
-  const box = SHIPPING_WEIGHT_BOX[adapter.id] ?? 'the shipping-weight box'
+  // The adapter names its own box: the domain knows no form (AGENTS.md, where code goes).
+  const box = adapter.shippingWeightBox.trim() || 'the shipping-weight box'
   return {
     id: 'shipping-weight-is-net',
     severity: 'info',
