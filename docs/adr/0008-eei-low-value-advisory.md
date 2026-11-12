@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-11-12
 - **Deciders:** the owner (Joel Abraham), who delegated the open choices to the implementing
-  session's recommendation on 2026-11-12. **The figure and its citation are his to confirm.**
+  session's recommendation on 2026-11-12. He confirmed the $2,500 figure on 2026-11-12.
 - **Applies to:** `src/domain/reconcile/eei.ts`, and the check list `reconcile()` returns
 
 ## Context

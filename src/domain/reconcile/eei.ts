@@ -24,6 +24,8 @@ export const EEI_LOW_VALUE_EXEMPTION = {
   /** The date the eCFR said title 15 was current to when this was read. */
   currentTo: '2026-11-09',
   retrieved: '2026-11-12',
+  /** The day the owner confirmed the figure against the regulation. */
+  confirmed: '2026-11-12',
   /** The last amendment the section cited when read. */
   lastAmended: '90 FR 39122, Aug. 14, 2025',
 } as const

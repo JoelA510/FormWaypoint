@@ -4,8 +4,8 @@ Kind: FEATURE · Drawn up: 2026-11-12 · Owner: Joel Abraham · Status: DONE
 
 Agreement: as for the three plans before it. The owner asked for the verification report's items
 one pull request at a time, gave the implementing session discretion over open decisions, and
-prefers warnings to blocks. The figure in this change is the one thing still owed his own
-confirmation; see Risks.
+prefers warnings to blocks. He confirmed the $2,500 figure on 2026-11-12, in review of the pull
+request.
 
 ## Why
 
@@ -66,9 +66,8 @@ covers "$2,500 or less".
 
 ## Risks and rollback
 
-- **Risk:** the figure or its reading is wrong, or the regulation is amended — **watch:** the
-  owner confirms `EEI_LOW_VALUE_EXEMPTION` against the current text; its dates say when it was
-  read — **if it happens:** one edit to the record; the tests that name 2500 change with it.
+- **Risk:** the regulation is amended — **watch:** the owner confirmed the figure on 2026-11-12;
+  the dates in `EEI_LOW_VALUE_EXEMPTION` say when it was read — **if it happens:** one edit to the record; the tests that name 2500 change with it.
 - **Risk:** the passing wording is read as "no EEI needed" — **watch:** the caveat is in the
   same sentence and a test fails if it is dropped — **if it happens:** drop the passing state and
   show the check only when a total is over.
