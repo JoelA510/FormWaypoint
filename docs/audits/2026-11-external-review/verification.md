@@ -277,9 +277,13 @@ recorded here as retrieved, for the owner to confirm.
 
 What the review missed:
 
-- The exemption is tested **per Schedule B number and per D/F**. That is the tool's row grouping,
-  so the check is a comparison per commodity row. It also means item 2 comes first: a wrong D/F
-  splits or merges value across the threshold.
+- The exemption is tested **per Schedule B number and per D/F**. That is coarser than the tool's
+  commodity rows, which are also split by ECCN, licence, SME and unit
+  (`src/domain/reconcile/lines.ts:281-288`). Two rows of $1,500 under one Schedule B number and one
+  D/F, differing only in ECCN, are $3,000 for the exemption. The check therefore has to sum the
+  rows by normalised Schedule B number and D/F before comparing; a comparison per row would miss
+  filings that are required. It also means item 2 comes first: a wrong D/F splits or merges value
+  across the threshold.
 - 30.37 opens "Except as noted in § 30.2(a)(1)(iv)". Licensed shipments, certain destinations and
   other cases require EEI whatever the value. A check may say "these rows exceed the threshold, so
   EEI is required". It must never say "no EEI is required", which would be an inferred compliance
@@ -288,7 +292,8 @@ What the review missed:
   the tool a record of filings, which `docs/product.md` does not describe: its mission is
   preparing paperwork. They need a line in product.md first.
 
-Smallest change: (a) alone, as a warning-severity check naming the rows over the threshold, with
+Smallest change: (a) alone, as a warning-severity check naming the Schedule B and D/F totals over
+the threshold and the rows that make them up, with
 the threshold, its citation, the retrieval date and the eCFR currency date held as one dated
 record. (b) to (d) wait on a product decision.
 
