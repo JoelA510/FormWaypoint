@@ -110,6 +110,22 @@ describe('the in-house form', () => {
     expect(keyed).not.toContain(draft.forwardingAgent)
   })
 
+  it('keeps a place the person entered apart from a different one the document names', async () => {
+    // The form says DAP Singapore.
+    const differs = summarise(await workbook(), { namedPlace: 'Rotterdam' }).line('Incoterm')
+    expect(differs).toBe('Incoterm: DAP Singapore (named place entered: Rotterdam)')
+    expect(differs).not.toContain('Singapore Rotterdam')
+    // Entering the same place again adds nothing.
+    expect(summarise(await workbook(), { namedPlace: 'singapore' }).line('Incoterm')).toBe('Incoterm: DAP Singapore')
+    // And with nothing entered the document's term stands as written.
+    expect(summarise(await workbook()).line('Incoterm')).toBe('Incoterm: DAP Singapore')
+  })
+
+  it('labels an entered place beside a term whose own wording is not a place', async () => {
+    const { line } = summarise(await workbook(), { incoterm: 'FOB Origin - Collect', namedPlace: 'SFO' })
+    expect(line('Incoterm')).toBe('Incoterm: FOB Origin - Collect (named place entered: SFO)')
+  })
+
   it('uses the reference and the named place the person entered', async () => {
     const { line } = summarise(await workbook(), { shipmentReference: 'SO-0000042', incoterm: 'FOB', namedPlace: 'SFO' })
     expect(line('Shipment reference')).toBe('Shipment reference: SO-0000042')

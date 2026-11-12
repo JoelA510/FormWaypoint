@@ -12,6 +12,7 @@
  * face to show it (project rule 1).
  */
 import type { SliDraft } from '../carriers/types'
+import { isNamedPlace, parseIncoterm } from './incoterms'
 import type { ShipmentHeader } from './types'
 import { kgToLb } from './units'
 
@@ -22,6 +23,27 @@ const NOT_ENTERED = 'not entered'
 function weight(kg: number | null): string | null {
   if (kg == null || !Number.isFinite(kg) || kg <= 0) return null
   return `${kg.toFixed(3)} kg (${kgToLb(kg).toFixed(1)} lb)`
+}
+
+/**
+ * The Incoterm with the place a person entered, kept apart from any place the document names.
+ *
+ * The term is the document's own words, never rebuilt. A place typed on the review screen
+ * completes a bare rule (`FOB` and `SFO` read `FOB SFO`), is left out where it only repeats the
+ * document's, and is labelled as entered where the document's term already says something else
+ * after the rule: `DAP Singapore` and `Rotterdam` joined into `DAP Singapore Rotterdam` would
+ * give a forwarder two delivery places and no way to tell which was meant. The same precedence
+ * the carrier adapters use.
+ */
+function incotermLine(draft: SliDraft): string | null {
+  const stated = draft.incoterm.trim()
+  const entered = draft.namedPlace.trim()
+  if (!stated) return entered ? `named place entered: ${entered}` : null
+  if (!entered) return stated
+  const rest = parseIncoterm(stated)?.namedPlace.trim() ?? ''
+  if (!rest) return `${stated} ${entered}`
+  if (isNamedPlace(rest) && rest.toLowerCase() === entered.toLowerCase()) return stated
+  return `${stated} (named place entered: ${entered})`
 }
 
 const joined = (values: string[]): string | null => {
@@ -55,7 +77,7 @@ export function buildBookingSummary(header: ShipmentHeader, draft: SliDraft, car
     `Destination: ${draft.destinationCountry.trim() || NOT_STATED}`,
     `Carrier: ${carrier?.trim() || draft.forwardingAgent.trim() || header.vesselAgent?.trim() || NOT_STATED}`,
     `Mode: ${draft.mode}`,
-    `Incoterm: ${[draft.incoterm.trim(), draft.namedPlace.trim()].filter(Boolean).join(' ') || NOT_STATED}`,
+    `Incoterm: ${incotermLine(draft) ?? NOT_STATED}`,
     `Invoice date: ${header.invoiceDate.trim() || NOT_STATED}`,
     // The document's own ship date, or nothing. The draft's date of exportation falls back to
     // the invoice date where a layout states no ship date, which is right for the form's box
