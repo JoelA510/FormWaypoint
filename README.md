@@ -300,8 +300,11 @@ manufacture the parts a document cannot support:
   do not fit the goods, and a tool that learned from them would repeat the error forever.
   Changing a code requires an explicit, recorded override, and the override is still
   challenged if it does not fit the goods.
-- It never infers **country of origin**, **hazardous-material status**, **routed-export
-  status**, **consignee type** or **related-party status**.
+- It never infers **country of origin** from anything but the document. **Consignee type**,
+  **related-party status**, **hazardous-material status** and **routed-export status** start at
+  a fixed value, or at the value last used for the same consignee, and each is named in a warning
+  until it is changed or confirmed for the shipment in hand
+  (`docs/adr/0007-unchosen-declared-values-are-warned.md`). None is read off a description.
 - It never decides that goods are **domestic** where their origin is foreign, and never files
   **foreign** for a line whose origin is blank without saying so. The first is entered by the
   filer; the second raises a warning that names the line.

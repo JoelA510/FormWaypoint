@@ -27,7 +27,12 @@ import { ScheduleBRefreshPanel } from './features/schedule-b-refresh'
 import {
   applyCarrierDefaults,
   buildDraft,
+  carriedSettingSources,
   checkDraft,
+  defaultSettingSources,
+  sourcesAfterEdit,
+  unconfirmedSettingChecks,
+  type SettingSources,
   defaultShipmentSettings,
   EMPTY_PROFILE,
   type CompanyProfile,
@@ -86,6 +91,13 @@ export function App() {
   const [carrierId, setCarrierId] = useState<ShipmentCarrierId>('nippon-express')
   const [profile, setProfile] = useState<CompanyProfile>(EMPTY_PROFILE)
   const [settings, setSettings] = useState<ShipmentSettings>(() => defaultShipmentSettings(getAdapter('nippon-express')))
+  /**
+   * Which declared values nobody has chosen for this shipment: the form's starting values, and
+   * whatever was carried from the consignee's last one (docs/adr/0007). Per shipment and never
+   * saved, like the acknowledgement on the dangerous goods tab: a confirmation remembered is a
+   * confirmation nobody gave this time.
+   */
+  const [settingSources, setSettingSources] = useState<SettingSources>(defaultSettingSources)
   /**
    * The unit of quantity to file each commodity number in, keyed by normalised code.
    *
@@ -318,6 +330,7 @@ export function App() {
         // passing on it. Setting the defaults only on the success path left exactly that
         // behind whenever the saved-consignee read failed.
         setSettings(base)
+        setSettingSources(defaultSettingSources())
 
         // Then reuse what was learned about this consignee last time.
         const known = header ? await localStore.getConsignee(header.consignedTo.name) : null
@@ -329,6 +342,13 @@ export function App() {
             partiesRelated: known.partiesRelated,
             destinationCountry: known.destinationCountry ?? '',
           })
+          // Marked, so the screen and the checks say these were chosen for another shipment.
+          setSettingSources(
+            carriedSettingSources(
+              { consigneeId: known.consigneeId ?? '', destinationCountry: known.destinationCountry ?? '' },
+              known.lastUsed ?? '',
+            ),
+          )
         }
       } catch (e) {
         // The parse already succeeded; only the saved-consignee lookup can land here. The
@@ -458,8 +478,15 @@ export function App() {
   // person supplies. Generation is gated on both — reconciled totals alone are not enough
   // to make a form fit to sign.
   const checks = useMemo(
-    () => (reconciliation && draft ? [...reconciliation.checks, ...checkDraft(draft, adapter)] : []),
-    [reconciliation, draft, adapter],
+    () =>
+      reconciliation && draft
+        ? [
+            ...reconciliation.checks,
+            ...checkDraft(draft, adapter),
+            ...unconfirmedSettingChecks(settings, settingSources, resolveDestinationCountry(reconciliation.header)),
+          ]
+        : [],
+    [reconciliation, draft, adapter, settings, settingSources],
   )
   const canGenerate = useMemo(
     () => checks.length > 0 && checks.every((c) => c.severity !== 'blocking' || c.passed),
@@ -1017,7 +1044,14 @@ export function App() {
                 settings={settings}
                 adapter={adapter}
                 onProfileChange={setProfile}
-                onSettingsChange={setSettings}
+                onSettingsChange={(next) => {
+                  // A value a person changes is theirs for this shipment, and stops being
+                  // reported as a default or a carry-over.
+                  setSettingSources((sources) => sourcesAfterEdit(sources, settings, next))
+                  setSettings(next)
+                }}
+                settingSources={settingSources}
+                onConfirmSettings={() => setSettingSources({})}
                 parts={shipmentParts}
                 exportControlByPart={exportControlByPart}
                 onExportControlChange={(part, next) =>
