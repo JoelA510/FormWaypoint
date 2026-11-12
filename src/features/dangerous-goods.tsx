@@ -43,7 +43,10 @@ import {
   type SeedPart,
 } from '../domain/dangerous-goods/cipl-seed'
 import {
+  DG_RULES_LAPSED_NOTICE,
+  DG_RULES_SOURCE,
   DG_SOURCE_NOTICE,
+  dgRulesLapsed,
   CHEMISTRY_LABELS,
   CONFIGURATION_LABELS,
   FORM_LABELS,
@@ -239,6 +242,11 @@ export function DangerousGoodsPanel({
       netWeightKg: assessment.totals.netWeightKg,
       consignment,
       checks: assessment.checks,
+      rulesSource: {
+        materials: DG_RULES_SOURCE.materials,
+        supersededOn: DG_RULES_SOURCE.supersededOn,
+        lapsedWhenPrepared: dgRulesLapsed(localDate(new Date(preparedAt))),
+      },
     }
   }, [consignment, assessment, records])
 
@@ -1644,6 +1652,7 @@ export function DeclarationPanel({
   bridge,
   onGenerate,
   onChecklist,
+  onDate = localDate(),
 }: {
   declaration: ReturnType<typeof buildDeclaration>
   assessment: ReturnType<typeof assess>
@@ -1654,11 +1663,19 @@ export function DeclarationPanel({
   bridge: DesktopBridge | null
   onGenerate: () => void
   onChecklist: () => void
+  /** The local date, `YYYY-MM-DD`. A prop so a test can stand on either side of a DGR revision. */
+  onDate?: string
 }) {
   // Not saved: asked again each time the screen is opened, because the gap it acknowledges
   // stays open until a qualified person has checked these rules against the current DGR.
   const [acknowledged, setAcknowledged] = useState(false)
-  const blocked = !assessment.canGenerate || busy || !acknowledged
+  // A second acknowledgement, not a rewording of the first (docs/adr/0005). The first is
+  // ticked on every consignment and reads the same every time; the day a later DGR takes
+  // effect has to be something the preparer is stopped by once more, not something that
+  // changed inside a sentence they no longer read.
+  const lapsed = dgRulesLapsed(onDate)
+  const [lapseAcknowledged, setLapseAcknowledged] = useState(false)
+  const blocked = !assessment.canGenerate || busy || !acknowledged || (lapsed && !lapseAcknowledged)
   return (
     <Card>
       <CardHeader
@@ -1692,6 +1709,24 @@ export function DeclarationPanel({
             <span>I will check this consignment against the current DGR before the declaration is signed.</span>
           </label>
         </div>
+
+        {lapsed ? (
+          <div role="alert" className="space-y-2 rounded-md border border-[var(--color-block)] bg-[var(--color-block-soft)] px-3 py-2 text-sm">
+            <p>{DG_RULES_LAPSED_NOTICE}</p>
+            <label className="flex items-start gap-2">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={lapseAcknowledged}
+                onChange={(e) => setLapseAcknowledged(e.target.checked)}
+              />
+              <span>
+                I understand these figures were superseded on {DG_RULES_SOURCE.supersededOn}, and I will check every
+                entry, limit and statement against the DGR now in force.
+              </span>
+            </label>
+          </div>
+        ) : null}
 
         {assessment.declarationRequired && declaration.lines.length ? (
           <div className="overflow-x-auto">
@@ -1836,7 +1871,14 @@ export function DgHistoryPanel({ records }: { records: DgConsignmentRecord[] }) 
                     </td>
                     <td className="tabular py-2 pr-4 text-right">{record.packages}</td>
                     <td className="tabular py-2 pr-4 text-right">{formatKg(record.netWeightKg)}</td>
-                    <td className="py-2 pr-4 text-[var(--color-ink-faint)]">{localDate(new Date(record.preparedAt))}</td>
+                    <td className="py-2 pr-4 text-[var(--color-ink-faint)]">
+                      {localDate(new Date(record.preparedAt))}
+                      {record.rulesSource?.lapsedWhenPrepared ? (
+                        <span className="ml-2 text-[var(--color-block)]">
+                          rules superseded {record.rulesSource.supersededOn}
+                        </span>
+                      ) : null}
+                    </td>
                     <td className="tabular py-2">{record.retainUntil}</td>
                   </tr>
                 ))}

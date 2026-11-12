@@ -46,4 +46,32 @@ describe('records read back from storage', () => {
     expect(decodeDgConsignments([dg, { id: 'D2' }])).toEqual([dg])
     expect(readErrorLog().map((e) => e.message)).toEqual([expect.stringMatching(/dangerous goods .* 1 left out/)])
   })
+
+  it('reads a DG record saved before the rules source was dated, and one saved with it', () => {
+    const old = { id: 'D1', preparedAt: '2026-10-01', retainUntil: '2028-10-01', consignment: {}, checks: [] }
+    const stamped = {
+      ...old,
+      id: 'D2',
+      rulesSource: { materials: 'Course materials rev. A', supersededOn: '2027-01-01', lapsedWhenPrepared: false },
+    }
+    const [first, second] = decodeDgConsignments([old, stamped])
+    expect(first).toEqual(old)
+    expect('rulesSource' in first).toBe(false)
+    expect(second).toEqual(stamped)
+    expect(readErrorLog()).toEqual([])
+  })
+
+  it('keeps a DG record whose rules stamp is unreadable, without the stamp, and says so', () => {
+    const base = { id: 'D3', preparedAt: '2026-10-01', retainUntil: '2028-10-01', consignment: {} }
+    for (const rulesSource of [
+      'Course materials',
+      null,
+      { materials: 'Course materials', supersededOn: '2027-01-01' },
+      { materials: '', supersededOn: '2027-01-01', lapsedWhenPrepared: false },
+      { materials: 'Course materials', supersededOn: '2027-01-01', lapsedWhenPrepared: 'no' },
+    ]) {
+      expect(decodeDgConsignments([{ ...base, rulesSource }])).toEqual([base])
+    }
+    expect(readErrorLog().at(-1)?.message).toMatch(/dangerous goods .* 0 left out, 1 repaired/)
+  })
 })

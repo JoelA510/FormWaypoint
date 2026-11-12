@@ -1,6 +1,6 @@
 # FormWaypoint Roadmap
 
-**Last Updated**: 2026-10-21
+**Last Updated**: 2026-11-12
 
 ## Current focus
 
@@ -55,7 +55,8 @@ B refresh, which cannot work in a browser.
 | **In-house Commercial Invoice format** | ✅ Done | Form 00004-00202, read from the .xlsx workbook or a PDF printed from it, any number of pages; weights supplied per part. |
 | **DG fill from the CIPL** | ✅ Done | Consignee, reference and one entry per part from the CIPL loaded in Standard Shipping; count, net weight and package count offered a click at a time, only where the CIPL's own totals prove them (ADR 0004). |
 | **Nothing pre-answered (DG)** | ✅ Done | Battery classification inputs, condition, packaging, counts and co-packing start unanswered and block until chosen. |
-| **Regression suite** | ✅ Done | 1,070 TypeScript tests on synthetic documents and the lithium battery course's own worked scenarios, 104 more against six real shipments where those (gitignored) documents are present, and Rust unit tests for the shell's path handling. |
+| **Dated rules source (DG)** | ✅ Done | The course materials and the first day a later DGR is in force held as one dated record; printed on every checklist and kept on every retention record. From that day a warning check fails, the checklist says so, and generating asks for a second acknowledgement (ADR 0005). Warns, never blocks. |
+| **Regression suite** | ✅ Done | 1,126 TypeScript tests on synthetic documents and the lithium battery course's own worked scenarios, 104 more against six real shipments where those (gitignored) documents are present, and Rust unit tests for the shell's path handling. |
 | **Desktop packaging seam** | ✅ Done | `localStore` is the single named implementation, IndexedDB in the browser and in the desktop webview alike. Windows-only target; WebView2 covers every platform API the app uses. |
 | **Desktop build (.exe)** | ✅ Done | Tauri v2 shell; the Windows installer is built by the `Desktop build` workflow. Seven Rust commands, no plugins and no decisions. TLS goes through the OS certificate store, so a corporate inspection CA is trusted, and an environment proxy is honoured. |
 | **Schedule B revision diff** | ✅ Done | `src/domain/schedule-b/revision.ts` — diffs two datasets, intersects the result with the item library by part, and renders the change log and CSV worklist. Pure logic, no filesystem or network. |
@@ -108,7 +109,9 @@ knowingly absent:
 - **A ruleset maintained as versioned data.** Thresholds and limits are in source with
   citations, which means a January revision is a code change. The specification is right that
   this should be data a compliance user publishes; it is a larger piece of work than the
-  workflow it would serve.
+  workflow it would serve. What exists is one dated record of where the figures came from and
+  when a later DGR takes effect, so the tool says when that code change is due (ADR 0005); the
+  figures themselves are still source.
 - **A governed battery master.** Keyed on manufacturer, model and revision, with article level
   and composition, so the engine resolves which revision is physically in the box rather than
   which is on the drawing. Today battery facts are answered fresh for each consignment; only the
@@ -166,6 +169,7 @@ Two boundaries are deliberate and should stay:
 
 | Date | Milestone | Details |
 | :--- | :--- | :--- |
+| 2026-11-12 | **DG rules carry a dated source** | The dangerous goods figures name their source and the day a later DGR takes effect as data. Checklists and retention records carry it, and from 1 January 2027 a warning check, the checklist and a second acknowledgement say the figures are superseded (ADR 0005). |
 | 2026-10-19 | **DG packages start unanswered** | Packaging description, package and overpack counts and the prohibited co-packing question start blank; a blank packaging blocks where a declaration is required and warns otherwise, and co-packing reads Not answered / No / Yes. |
 | 2026-10-19 | **DG entries start unanswered** | Chemistry, cell or battery, configuration, article level and condition start unanswered and block classification until chosen; a fresh entry no longer classifies as lithium ion (UN3480) before anyone has described it. |
 | 2026-10-19 | **DG fill from the CIPL** | The dangerous goods tab fills its blank consignee, reference and per-part entries from the CIPL loaded in Standard Shipping, and offers each part's count and net weight a click at a time where the CIPL's totals prove them (ADR 0004). |
