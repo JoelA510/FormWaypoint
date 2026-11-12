@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { consignment, entry, overpack, pkg } from './test-support'
 import { assess, overpackOrder } from './assess'
 import { buildChecklist } from './checklist'
-import { DG_SOURCE_NOTICE } from './lithium'
+import { DG_RULES_LAPSED_NOTICE, DG_RULES_SOURCE, DG_SOURCE_NOTICE } from './lithium'
 import { buildDeclaration, retainUntil } from './dgd'
 import { emptyEntry } from './types'
 import { localDate } from '../../lib/report'
@@ -285,6 +285,24 @@ describe('the source of the rules', () => {
     const shipment = consignment([pkg('p1', [entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 7 })])])
     const markdown = buildChecklist(shipment, assess(shipment), '2026-08-06')
     expect(markdown.split('\n').slice(0, 4).join('\n')).toContain(DG_SOURCE_NOTICE)
+  })
+
+  it('prints the dated source under the notice, and no lapse warning while it holds', () => {
+    const shipment = consignment([pkg('p1', [entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 7 })])])
+    const markdown = buildChecklist(shipment, assess(shipment, '2026-12-31'), '2026-12-31')
+    const head = markdown.split('\n').slice(0, 8).join('\n')
+    expect(head).toContain(`Rules source: ${DG_RULES_SOURCE.materials}`)
+    expect(head).toContain('A later DGR takes effect on 2027-01-01')
+    expect(markdown).not.toContain(DG_RULES_LAPSED_NOTICE)
+    expect(markdown).not.toContain('Rules not superseded by a later DGR')
+  })
+
+  it('says in the heading and under Outstanding that a later DGR is in force, once one is', () => {
+    const shipment = consignment([pkg('p1', [entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 7 })])])
+    const markdown = buildChecklist(shipment, assess(shipment, '2027-01-01'), '2027-01-01')
+    expect(markdown.split('\n').slice(0, 8).join('\n')).toContain(`**${DG_RULES_LAPSED_NOTICE}**`)
+    const outstanding = markdown.slice(markdown.indexOf('## Outstanding'))
+    expect(outstanding).toContain('**warning** — Rules not superseded by a later DGR')
   })
 })
 

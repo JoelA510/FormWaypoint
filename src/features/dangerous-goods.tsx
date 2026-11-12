@@ -43,7 +43,10 @@ import {
   type SeedPart,
 } from '../domain/dangerous-goods/cipl-seed'
 import {
+  DG_RULES_LAPSED_NOTICE,
+  DG_RULES_SOURCE,
   DG_SOURCE_NOTICE,
+  dgRulesLapsed,
   CHEMISTRY_LABELS,
   CONFIGURATION_LABELS,
   FORM_LABELS,
@@ -140,7 +143,24 @@ export function DangerousGoodsPanel({
   const [saved, setSaved] = useState<Delivery | null>(null)
   const [ciplNotes, setCiplNotes] = useState<string[] | null>(null)
 
-  const assessment = useMemo(() => assess(consignment), [consignment])
+  // The local date the assessment and the Generate card were last drawn for. Held as state
+  // because the calendar moving on renders nothing by itself: a screen acknowledged on
+  // 31 December and left open would otherwise go on offering the downloads on 1 January
+  // without the second acknowledgement (docs/adr/0005).
+  const [today, setToday] = useState(() => localDate())
+  const assessment = useMemo(() => assess(consignment, today), [consignment, today])
+
+  /**
+   * Re-reads the date at the moment a download is asked for. False when a later DGR has taken
+   * effect since the screen was drawn: nothing is generated, and the re-render this causes
+   * shows the lapse and its acknowledgement, so the next click is an informed one.
+   */
+  const dateStillHolds = (startedAt: Date): boolean => {
+    const current = localDate(startedAt)
+    if (current === today) return true
+    setToday(current)
+    return dgRulesLapsed(current) === dgRulesLapsed(today)
+  }
   const declaration = useMemo(() => buildDeclaration(consignment, assessment), [consignment, assessment])
 
   const patch = useCallback(
@@ -209,8 +229,12 @@ export function DangerousGoodsPanel({
    * shorten the period both are kept for. Only a record from the last little while is the
    * same preparation as this one.
    */
-  const record = useCallback((): DgConsignmentRecord => {
-    const now = Date.now()
+  const record = useCallback((startedAt: Date): DgConsignmentRecord => {
+    // The moment the download was asked for, not the moment it finished: writing and opening
+    // the file is awaited, and a clock read after it can fall on the far side of midnight from
+    // the date printed on the artifact this record is evidence of.
+    const now = startedAt.getTime()
+    const lapsedNow = dgRulesLapsed(localDate(new Date(now)))
     const fingerprint = JSON.stringify(consignment)
     const filed = records.find((r) => {
       if (JSON.stringify(r.consignment) !== fingerprint) return false
@@ -219,7 +243,13 @@ export function DangerousGoodsPanel({
       // satisfied "less than half an hour ago", and a genuinely new preparation then reused
       // its id and overwrote the earlier row with a back-dated one.
       const age = now - new Date(r.preparedAt).getTime()
-      return age >= 0 && age < SAME_PREPARATION_MS
+      if (!(age >= 0 && age < SAME_PREPARATION_MS)) return false
+      // And not across the day a later DGR took effect. The two downloads either side of it
+      // are prepared under different standing: the second carries the lapse on its checklist
+      // and in its checks, and landing it on the first would overwrite a record that says
+      // "current" with one stamped by the earlier date. A record from before the stamp
+      // existed can only have been prepared while the rules held.
+      return (r.rulesSource?.lapsedWhenPrepared ?? false) === lapsedNow
     })
     const preparedAt = filed?.preparedAt ?? new Date(now).toISOString()
     return {
@@ -239,6 +269,12 @@ export function DangerousGoodsPanel({
       netWeightKg: assessment.totals.netWeightKg,
       consignment,
       checks: assessment.checks,
+      rulesSource: {
+        materials: DG_RULES_SOURCE.materials,
+        supersededOn: DG_RULES_SOURCE.supersededOn,
+        // The same value either way: a record is only reused when its standing matches.
+        lapsedWhenPrepared: lapsedNow,
+      },
     }
   }, [consignment, assessment, records])
 
@@ -251,9 +287,9 @@ export function DangerousGoodsPanel({
    * was produced, which is the two-year obligation and has to be said plainly — beside the
    * "Saved to …" line, not instead of it.
    */
-  async function retain(artifact: string) {
+  async function retain(artifact: string, startedAt: Date) {
     try {
-      await onPrepared(record())
+      await onPrepared(record(startedAt))
     } catch (e) {
       const because = e instanceof Error ? e.message : 'the record could not be written'
       setError(
@@ -269,6 +305,10 @@ export function DangerousGoodsPanel({
     // double-click that writes two files is noise while one that writes two audit rows is
     // misinformation.
     if (busy) return
+    // One reading of the clock for the whole preparation: the guard, the date printed on the
+    // artifact and the retention record all take it from here.
+    const startedAt = new Date()
+    if (!dateStillHolds(startedAt)) return
     setBusy(true)
     setError(null)
     setWarnings([])
@@ -284,7 +324,7 @@ export function DangerousGoodsPanel({
       // Opened straight away, like the SLI: the next thing anyone does with a declaration is
       // read it, print it in colour and sign it by hand.
       await openDelivery(bridge, delivery)
-      await retain('declaration')
+      await retain('declaration', startedAt)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'The declaration could not be generated.')
     } finally {
@@ -296,13 +336,17 @@ export function DangerousGoodsPanel({
     // Guarded like the declaration: each run appends a retention record, and a double-click
     // that writes two files is noise while one that writes two audit rows is misinformation.
     if (busy) return
+    // One reading of the clock for the whole preparation: the guard, the date printed on the
+    // artifact and the retention record all take it from here.
+    const startedAt = new Date()
+    if (!dateStillHolds(startedAt)) return
     setBusy(true)
     setError(null)
     // And cleared like it. The warnings come from drawing the declaration; left standing
     // beside a checklist download they describe a form this button does not produce.
     setWarnings([])
     try {
-      const markdown = buildChecklist(consignment, assessment, localDate())
+      const markdown = buildChecklist(consignment, assessment, localDate(startedAt))
       const delivery = await deliver(
         bridge,
         `${consignment.airWaybillNumber || consignment.shippersReference || 'consignment'}_dg-checklist.md`,
@@ -313,7 +357,7 @@ export function DangerousGoodsPanel({
       await openDelivery(bridge, delivery)
       // Recorded too: for a Section II consignment this checklist is the only artifact, and a
       // consignment that left the tool with no record has no audit trail at all.
-      await retain('checklist')
+      await retain('checklist', startedAt)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'The checklist could not be saved.')
     } finally {
@@ -639,6 +683,7 @@ export function DangerousGoodsPanel({
         bridge={bridge}
         onGenerate={() => void generateDeclaration()}
         onChecklist={() => void downloadChecklist()}
+        onDate={today}
       />
 
       <DgHistoryPanel records={records} />
@@ -1644,6 +1689,7 @@ export function DeclarationPanel({
   bridge,
   onGenerate,
   onChecklist,
+  onDate = localDate(),
 }: {
   declaration: ReturnType<typeof buildDeclaration>
   assessment: ReturnType<typeof assess>
@@ -1654,11 +1700,19 @@ export function DeclarationPanel({
   bridge: DesktopBridge | null
   onGenerate: () => void
   onChecklist: () => void
+  /** The local date, `YYYY-MM-DD`. A prop so a test can stand on either side of a DGR revision. */
+  onDate?: string
 }) {
   // Not saved: asked again each time the screen is opened, because the gap it acknowledges
   // stays open until a qualified person has checked these rules against the current DGR.
   const [acknowledged, setAcknowledged] = useState(false)
-  const blocked = !assessment.canGenerate || busy || !acknowledged
+  // A second acknowledgement, not a rewording of the first (docs/adr/0005). The first is
+  // ticked on every consignment and reads the same every time; the day a later DGR takes
+  // effect has to be something the preparer is stopped by once more, not something that
+  // changed inside a sentence they no longer read.
+  const lapsed = dgRulesLapsed(onDate)
+  const [lapseAcknowledged, setLapseAcknowledged] = useState(false)
+  const blocked = !assessment.canGenerate || busy || !acknowledged || (lapsed && !lapseAcknowledged)
   return (
     <Card>
       <CardHeader
@@ -1692,6 +1746,24 @@ export function DeclarationPanel({
             <span>I will check this consignment against the current DGR before the declaration is signed.</span>
           </label>
         </div>
+
+        {lapsed ? (
+          <div role="alert" className="space-y-2 rounded-md border border-[var(--color-block)] bg-[var(--color-block-soft)] px-3 py-2 text-sm">
+            <p>{DG_RULES_LAPSED_NOTICE}</p>
+            <label className="flex items-start gap-2">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={lapseAcknowledged}
+                onChange={(e) => setLapseAcknowledged(e.target.checked)}
+              />
+              <span>
+                I understand these figures were superseded on {DG_RULES_SOURCE.supersededOn}, and I will check every
+                entry, limit and statement against the DGR now in force.
+              </span>
+            </label>
+          </div>
+        ) : null}
 
         {assessment.declarationRequired && declaration.lines.length ? (
           <div className="overflow-x-auto">
@@ -1836,7 +1908,14 @@ export function DgHistoryPanel({ records }: { records: DgConsignmentRecord[] }) 
                     </td>
                     <td className="tabular py-2 pr-4 text-right">{record.packages}</td>
                     <td className="tabular py-2 pr-4 text-right">{formatKg(record.netWeightKg)}</td>
-                    <td className="py-2 pr-4 text-[var(--color-ink-faint)]">{localDate(new Date(record.preparedAt))}</td>
+                    <td className="py-2 pr-4 text-[var(--color-ink-faint)]">
+                      {localDate(new Date(record.preparedAt))}
+                      {record.rulesSource?.lapsedWhenPrepared ? (
+                        <span className="ml-2 text-[var(--color-block)]">
+                          rules superseded {record.rulesSource.supersededOn}
+                        </span>
+                      ) : null}
+                    </td>
                     <td className="tabular py-2">{record.retainUntil}</td>
                   </tr>
                 ))}

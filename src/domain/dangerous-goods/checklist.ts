@@ -16,7 +16,10 @@ import { cell } from '../../lib/report'
 import { applyA181, groupByClassification, overpackOrder, packageCountInConsignment, type DgAssessment } from './assess'
 import { formatKg } from './dgd'
 import {
+  DG_RULES_LAPSED_NOTICE,
+  DG_RULES_SOURCE,
   DG_SOURCE_NOTICE,
+  dgRulesLapsed,
   CHEMISTRY_LABELS,
   FORM_LABELS,
   combinedSectionIIStatement,
@@ -36,6 +39,13 @@ export function buildChecklist(
 
   out.push('# Lithium battery air consignment — package and air waybill checklist')
   out.push('', `> ${DG_SOURCE_NOTICE}`)
+  // The dated source, on every checklist, so the paper says what it was prepared under after
+  // the figures in the app have moved on (docs/adr/0005).
+  out.push(
+    '>',
+    `> Rules source: ${DG_RULES_SOURCE.materials}. A later DGR takes effect on ${DG_RULES_SOURCE.supersededOn}.`,
+  )
+  if (dgRulesLapsed(preparedOn)) out.push('>', `> **${DG_RULES_LAPSED_NOTICE}**`)
   out.push('')
   out.push(`Prepared ${preparedOn}${carrier ? ` for carriage on ${cell(carrier)}` : ''}.`)
   out.push('')

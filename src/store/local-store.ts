@@ -175,6 +175,21 @@ export interface DgConsignmentRecord {
   /** Everything that was entered, so the declaration can be reproduced exactly. */
   consignment: DgConsignment
   checks: CheckResult[]
+  /**
+   * What the figures rested on when this was prepared (`DG_RULES_SOURCE`), copied rather than
+   * referenced: the constant moves on with each DGR revision, and a record kept for two years
+   * has to go on saying which figures it was prepared under. Absent on records written before
+   * the source was dated (docs/adr/0005), which is not the same as "current".
+   */
+  rulesSource?: DgRulesSourceStamp
+}
+
+export interface DgRulesSourceStamp {
+  materials: string
+  /** `YYYY-MM-DD`, the first day a later DGR was in force. */
+  supersededOn: string
+  /** True when that day had already come on the local date of preparation. */
+  lapsedWhenPrepared: boolean
 }
 
 export interface LocalStore {

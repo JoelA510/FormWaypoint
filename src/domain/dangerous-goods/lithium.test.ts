@@ -7,6 +7,10 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  DG_RULES_LAPSED_NOTICE,
+  DG_RULES_SOURCE,
+  DG_SOURCE_NOTICE,
+  dgRulesLapsed,
   airWaybillStatement,
   classifyForAir,
   combinedSectionIIStatement,
@@ -471,5 +475,34 @@ describe('the Section I route for a heavy package of small batteries', () => {
     expect(sodium.packingInstructionLabel).toBe('978 II')
     expect(sodium.limits.source).toContain('5-30')
     expect(sodium.limits.source).not.toContain('5-26')
+  })
+})
+
+describe('the date the figures stop describing the regulations in force', () => {
+  it('holds on the last day of the year and lapses on the day a later DGR takes effect', () => {
+    expect(DG_RULES_SOURCE.supersededOn).toBe('2027-01-01')
+    expect(dgRulesLapsed('2026-11-12')).toBe(false)
+    expect(dgRulesLapsed('2026-12-31')).toBe(false)
+    expect(dgRulesLapsed('2027-01-01')).toBe(true)
+    expect(dgRulesLapsed('2028-06-30')).toBe(true)
+  })
+
+  it('counts a date it cannot read as lapsed, never as current', () => {
+    for (const unreadable of ['', '2026', '12/31/2026', '2026-12-31T23:00:00Z', 'not a date']) {
+      expect(dgRulesLapsed(unreadable)).toBe(true)
+    }
+  })
+
+  it('names the same course materials in the notice and in the dated record', () => {
+    // One source of truth is the point of the record; the notice is asserted verbatim
+    // elsewhere, so the two are held together here instead of one being built from the other.
+    expect(DG_SOURCE_NOTICE).toContain(DG_RULES_SOURCE.materials)
+    expect(DG_RULES_LAPSED_NOTICE).toContain(DG_RULES_SOURCE.supersededOn)
+  })
+
+  it('records where the date was read and when, as data', () => {
+    expect(DG_RULES_SOURCE.supersededBasis.source).toMatch(/^https:\/\/www\.iata\.org\//)
+    expect(DG_RULES_SOURCE.supersededBasis.retrieved).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(DG_RULES_SOURCE.supersededBasis.statement).not.toBe('')
   })
 })

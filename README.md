@@ -224,7 +224,12 @@ The regulatory figures come from the Labelmaster *Shipping Lithium Batteries —
 Fully Regulated* multimodal course (Student Guide rev. 02/01/2026, Supplemental Appendix rev.
 01/01/2025 for the reproduced PI 965 text), and each is cited in
 `src/domain/dangerous-goods/lithium.ts` against the figure it was taken from, so it can be
-re-checked when the DGR is revised. `docs/dangerous-goods-fact-check.md` records what was
+re-checked when the DGR is revised. The materials and the first day a later DGR is in force
+(1 January 2027) are held as one dated record beside them. Until that day every checklist prints
+the source and the date; from it, a warning check fails on every consignment, the checklist says
+the figures are superseded, and generating asks for a second acknowledgement
+(`docs/adr/0005-dangerous-goods-rules-source-is-dated.md`). The tool does not stop working on that
+day, and it does not update itself. `docs/dangerous-goods-fact-check.md` records what was
 checked against what, including the claims in the supplied ORT documents that could be
 confirmed, the two that could not, and the one — the co-packing prohibition list — that turned
 out to be wrong in both directions.

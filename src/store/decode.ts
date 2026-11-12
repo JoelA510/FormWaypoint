@@ -139,10 +139,23 @@ export const decodeShipments = (raws: unknown[]): ShipmentRecord[] =>
   }))
 
 export const decodeDgConsignments = (raws: unknown[]): DgConsignmentRecord[] =>
-  decodeAll('dangerous goods consignment', raws, (raw) => ({
-    record:
-      nonEmptyText(raw.id) && isText(raw.preparedAt) && isText(raw.retainUntil) && isObject(raw.consignment)
-        ? (raw as unknown as DgConsignmentRecord)
-        : null,
-    repaired: false,
-  }))
+  decodeAll('dangerous goods consignment', raws, (raw) => {
+    if (!(nonEmptyText(raw.id) && isText(raw.preparedAt) && isText(raw.retainUntil) && isObject(raw.consignment))) {
+      return { record: null, repaired: false }
+    }
+    // Absent on every record written before the rules source was dated: read as it is, and
+    // the history says nothing about it. One that is present and unreadable is dropped from
+    // the record rather than shown, because a stamp is only worth printing if it is the one
+    // that was written.
+    const stamp = raw.rulesSource
+    const stampOk =
+      stamp === undefined ||
+      (isObject(stamp) &&
+        nonEmptyText(stamp.materials) &&
+        nonEmptyText(stamp.supersededOn) &&
+        typeof stamp.lapsedWhenPrepared === 'boolean')
+    if (stampOk) return { record: raw as unknown as DgConsignmentRecord, repaired: false }
+    const rest = { ...raw }
+    delete rest.rulesSource
+    return { record: rest as unknown as DgConsignmentRecord, repaired: true }
+  })

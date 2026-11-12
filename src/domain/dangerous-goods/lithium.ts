@@ -50,6 +50,52 @@ export const DG_SOURCE_NOTICE =
   'Appendix rev. 01/01/2025), and state and operator variations are not held here. Check every entry against ' +
   'the current DGR before the declaration is signed.'
 
+/**
+ * What the figures in this module rest on, and the day they stop describing the regulations in
+ * force (docs/adr/0005).
+ *
+ * One dated record, so that a January revision is a change here and nowhere else. It names the
+ * course materials and not a DGR edition, because nobody has read these figures against an
+ * edition (docs/adr/0003): stamping an edition number on a checklist would claim a check that
+ * was never made.
+ *
+ * `supersededOn` is the first day a later DGR is in force. The materials are revised
+ * 02/01/2026, so they can reflect nothing later than the regulations of 2026, and
+ * `supersededBasis` is where the date of the next ones was read. Every field is dated data
+ * with its source; none is to be edited from memory.
+ */
+export const DG_RULES_SOURCE = {
+  materials:
+    'Labelmaster Shipping Lithium Batteries course materials (Student Guide rev. 02/01/2026, Supplemental ' +
+    'Appendix rev. 01/01/2025)',
+  /** `YYYY-MM-DD`, compared with the date where the preparer is. */
+  supersededOn: '2027-01-01',
+  supersededBasis: {
+    statement: 'The 2027 DGRs come into force on 1 January 2027',
+    source: 'https://www.iata.org/en/programs/cargo/dgr/download/',
+    retrieved: '2026-11-12',
+  },
+} as const
+
+/**
+ * Whether a later DGR than the one these figures were taken under is in force on `onDate`.
+ *
+ * `onDate` is a local `YYYY-MM-DD` (see `localDate`), not an instant: the regulations change
+ * with the calendar where the consignment is prepared, and a UTC comparison would call the
+ * afternoon of 31 December the new year across the United States. A date that cannot be read
+ * counts as lapsed, because "cannot tell" and "too old" call for the same response.
+ */
+export function dgRulesLapsed(onDate: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(onDate)) return true
+  return onDate >= DG_RULES_SOURCE.supersededOn
+}
+
+/** Said wherever the unverified notice is, once `dgRulesLapsed`. */
+export const DG_RULES_LAPSED_NOTICE =
+  `These figures predate the Dangerous Goods Regulations now in force. A later DGR took effect on ` +
+  `${DG_RULES_SOURCE.supersededOn}, and nothing here has been updated or checked against it: a limit, a ` +
+  'packing instruction or a required statement may have changed.'
+
 /** How the cells travel relative to the equipment they power (Student Guide fig. 2-8). */
 export type Configuration = 'standalone' | 'packed-with-equipment' | 'contained-in-equipment'
 

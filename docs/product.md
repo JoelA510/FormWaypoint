@@ -1,6 +1,6 @@
 # FormWaypoint: product
 
-Last changed: 2026-10-20 (accepted as drafted by the owner)
+Last changed: 2026-11-12 (the DG figures' lapse date added to Constraints)
 
 ## Mission
 
@@ -36,6 +36,8 @@ Not a user: the forwarder or carrier, who receive the forms but never run the to
   in `src/store/local-store.ts`).
 - DG figures come from the Labelmaster course materials, not the licensed IATA DGR (ADR 0003,
   `docs/dangerous-goods-fact-check.md`).
+- Those figures are superseded when a later DGR takes effect, on 1 January 2027. The tool says so
+  from that day and goes on working; it does not update them (ADR 0005).
 
 ## Glossary
 
@@ -52,3 +54,4 @@ Not a user: the forwarder or carrier, who receive the forms but never run the to
 | --- | --- | --- |
 | 2026-10-19 | First version | Drafted for the CIPL-to-DG prefill plan; `prompts/plan-change.md` plans against it |
 | 2026-10-20 | Accepted as drafted | The owner's confirmation; no line changed |
+| 2026-11-12 | Constraint added: the DG figures' lapse date | ADR 0005; item 3 of `docs/audits/2026-11-external-review/verification.md` |

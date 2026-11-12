@@ -25,8 +25,12 @@
  *    declaration certifies acts — packing, marking, labelling — that happened away from this
  *    screen.
  */
+import { localDate } from '../../lib/report'
 import type { CheckResult } from '../types'
 import {
+  DG_RULES_LAPSED_NOTICE,
+  DG_RULES_SOURCE,
+  dgRulesLapsed,
   airWaybillStatement,
   BATTERY_MARK_PREFIX,
   classifyForAir,
@@ -283,7 +287,34 @@ function packageLabel(pkg: DgPackage, consignment: DgConsignment): string {
   return count > 0 ? `${count} × ${pkg.packagingType || 'package'}` : `${pkg.packagingType || 'package'} (count not stated)`
 }
 
-export function assess(consignment: DgConsignment): DgAssessment {
+/**
+ * Whether the figures every other check rests on still describe the regulations in force.
+ *
+ * A warning, not a block (docs/adr/0005): nothing here was ever verified against a DGR, so the
+ * day a new one takes effect changes how much the preparer has to check, not whether the tool
+ * may be used. It is about the tool and not the consignment, which is why `assess` adds it
+ * after deciding `canGenerate`.
+ */
+export function rulesCurrencyCheck(onDate: string): CheckResult {
+  const lapsed = dgRulesLapsed(onDate)
+  return {
+    id: 'dg.rules-current',
+    severity: 'warning',
+    title: 'Rules not superseded by a later DGR',
+    detail: lapsed
+      ? `${DG_RULES_LAPSED_NOTICE} They come from the ${DG_RULES_SOURCE.materials}. Check every entry, limit ` +
+        'and statement against the DGR in force before the declaration is signed.'
+      : `The figures come from the ${DG_RULES_SOURCE.materials}. A later DGR takes effect on ` +
+        `${DG_RULES_SOURCE.supersededOn}; from that day this check fails until the figures are updated.`,
+    passed: !lapsed,
+  }
+}
+
+/**
+ * `onDate` is the local date the consignment is being prepared on, as `YYYY-MM-DD`. Only the
+ * rules-currency check reads it.
+ */
+export function assess(consignment: DgConsignment, onDate: string = localDate()): DgAssessment {
   const checks: CheckResult[] = []
   const packages: PackageAssessment[] = []
   const byKey = new Map<string, AirClassification>()
@@ -364,6 +395,12 @@ export function assess(consignment: DgConsignment): DgAssessment {
 
   const grossStated = packages.every((p) => p.pkg.grossWeightKg != null)
 
+  // Decided before the rules-currency check joins the list, so `checks.length > 0` goes on
+  // meaning what it meant: that something about the consignment itself was assessed. No test
+  // can tell the two orders apart today, because `dg.structure` is always present.
+  const canGenerate = checks.length > 0 && checks.every((c) => c.severity !== 'blocking' || c.passed)
+  checks.push(rulesCurrencyCheck(onDate))
+
   return {
     packages,
     complete,
@@ -372,7 +409,7 @@ export function assess(consignment: DgConsignment): DgAssessment {
     declarationRequired,
     airWaybillStatements,
     checks,
-    canGenerate: checks.length > 0 && checks.every((c) => c.severity !== 'blocking' || c.passed),
+    canGenerate,
     totals: {
       packages: totalPackages,
       netWeightKg: kg(

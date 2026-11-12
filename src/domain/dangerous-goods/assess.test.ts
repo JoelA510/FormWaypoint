@@ -1729,3 +1729,27 @@ describe('verdicts on a consignment that is not fully described', () => {
     expect(check(result, 'dg.co-pack.p1')!.title).toBe('Fibreboard box (count not stated): nothing packed with it that may not be')
   })
 })
+
+describe('whether the rules still describe the regulations in force', () => {
+  const shipment = consignment([pkg('p1', [entry('e1', { wattHours: 95 }, { netWeightKgPerPackage: 7 })])])
+  const rules = (onDate: string) => assess(shipment, onDate).checks.filter((c) => c.id === 'dg.rules-current')
+
+  it('passes, and says when it will stop, while no later DGR is in force', () => {
+    const [check, ...others] = rules('2026-12-31')
+    expect(others).toEqual([])
+    expect(check).toMatchObject({ severity: 'warning', passed: true })
+    expect(check.detail).toContain('2027-01-01')
+  })
+
+  it('fails as a warning from the day a later DGR takes effect, and does not block', () => {
+    const before = assess(shipment, '2026-12-31')
+    const after = assess(shipment, '2027-01-01')
+    const [check] = rules('2027-01-01')
+    expect(check).toMatchObject({ severity: 'warning', passed: false })
+    expect(check.detail).toContain('predate the Dangerous Goods Regulations now in force')
+    // The decision in ADR 0005: the lapse changes what the preparer must check, not whether a
+    // consignment that passed yesterday can be generated today.
+    expect(before.canGenerate).toBe(true)
+    expect(after.canGenerate).toBe(true)
+  })
+})
