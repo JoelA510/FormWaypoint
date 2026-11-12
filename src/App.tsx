@@ -24,6 +24,7 @@ import { loadInstalledDataset } from './domain/schedule-b/refresh'
 import { desktopBridge } from './desktop'
 import { localDate } from './lib/report'
 import { ScheduleBRefreshPanel } from './features/schedule-b-refresh'
+import { BookingSummaryPanel } from './features/booking-summary'
 import {
   applyCarrierDefaults,
   buildDraft,
@@ -1082,6 +1083,11 @@ export function App() {
                 sme={settings.sme || null}
                 exportControlByPart={exportControlByPart}
                 originStatusByPart={originStatusByPart}
+              />
+              <BookingSummaryPanel
+                header={reconciliation.header}
+                draft={draft}
+                carrier={keyedCarrier ? KEYED_CARRIERS[keyedCarrier].label : undefined}
               />
               <HistoryPanel shipments={shipments} onClear={() => void clearAll()} />
             </>

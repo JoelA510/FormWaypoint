@@ -161,4 +161,25 @@ describe('declared values nobody chose, through the application', () => {
     expect(text()).toContain('Carried destination agrees with the document')
     expect(text()).toContain('this document gives "Singapore"')
   })
+
+  it('offers the booking facts as text, and names the carrier the shipment is keyed into', async () => {
+    await mount()
+    await upload('first.xlsx', simpleInHouseCi())
+    const summary = () =>
+      [...container!.querySelectorAll('textarea')].find((t) => t.readOnly && t.value.startsWith('Invoice: '))?.value ?? ''
+    expect(summary()).toContain('Invoice: CI-2026-0001')
+    expect(summary()).toContain('Destination: Singapore')
+    expect(summary()).toContain('Pieces: 2')
+    expect(summary()).toContain('Gross weight: 4.100 kg (9.0 lb)')
+    expect(summary()).toContain('Carrier: Nippon Express')
+
+    const carrier = container!.querySelector<HTMLSelectElement>('select[aria-label="Carrier"]')!
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(carrier, 'fedex')
+      carrier.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    await settle()
+    expect(summary()).toContain('Carrier: FedEx')
+    expect(summary()).not.toContain('Nippon')
+  })
 })
