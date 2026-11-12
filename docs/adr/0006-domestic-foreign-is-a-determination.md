@@ -35,8 +35,11 @@ part, with a reason, and that entry is filed in place of the derived letter in b
 is kept against the part and reused, shown wherever it is in force with its date, name and reason,
 and named in a warning check whenever it changes the letter a document gives.
 
-A line that states no country of origin no longer files F. It blocks until the document is
-corrected or a D/F is entered for its part.
+A line that states no country of origin still files F, as it always has, and now raises a warning
+that names the line, says it is being filed as F on no document's say, and points to the per-part
+entry. It warns and does not block: the owner's standing preference, stated on 2026-11-12, is a
+warning wherever a manual correction exists, because a block can hold a whole shipment over one
+error that a person could fix in a moment.
 
 ## Alternatives considered
 
@@ -53,10 +56,14 @@ Classification overrides record one. Rejected here: the tool has one user, who i
 the entry already records their name from the exporter profile. A second name field would be the
 same name typed twice.
 
-### Alternative: keep filing F for a blank origin and warn
+### Alternative: block on a blank origin
 
-Keeps every past behaviour. Rejected: it files a figure the document does not state, which
-project rule 1 names as the worst outcome, and the fix for the person is one entry.
+The first version of this change did, on the reading that filing F for a blank origin puts a
+value on the form that no document states (project rules 1 and 2). Rejected by the owner in
+review: a line with neither an origin nor a part number could not be answered per part at all, so
+the block had no way out but editing the source document, and a parser that dropped an origin
+would have held every shipment in that layout. The warning says the same thing without stopping
+the work, and the generated form stays editable.
 
 ### Alternative: stop deriving the letter and ask for every part
 
@@ -68,10 +75,11 @@ asked of every part is one nobody reads.
 
 - A foreign-origin part that is domestic for the EEI can now be filed correctly, once, and stays
   correct.
-- Shipments with a blank country of origin that used to produce a form now block. No synthetic
-  document in the suite has one. **Whether any of the six real fixtures does is unknown** until
-  the owner runs `npm run test:real`; a failure there on `origin-stated` is this change working,
-  not a regression, but the owner should see it before relying on the build.
+- A blank country of origin is still filed as F. That is a value the documents do not state, and
+  it stands as a known, warned departure from the letter of project rules 1 and 2, on the owner's
+  decision. Nothing that generated before stops generating, so this change needs no
+  `npm run test:real` run to be safe; the run would only show whether any real fixture now
+  raises the warning.
 - An entry can split or merge commodity rows, because D/F is part of what makes a row.
 - `PartOverrideRecord` gains four optional fields. Records saved before them decode unchanged.
 - The tool still decides nothing: it has no view on whether a transformation is substantial.
@@ -79,8 +87,8 @@ asked of every part is one nobody reads.
 ## Verification
 
 `src/domain/reconcile/origin-status.test.ts` fails if an entry is ignored, applied to a line with
-no part number, or reported when it agrees with the document, and if a blank origin stops
-blocking. `keying-sheet.test.ts` fails if the sheet states a different letter from the SLI.
+no part number, or reported when it agrees with the document, and if a blank origin stops being
+warned about by name or starts blocking. `keying-sheet.test.ts` fails if the sheet states a different letter from the SLI.
 `src/store/local-store.test.ts` and `decode.test.ts` fail if an entry-only record is dropped or a
 stored value other than D or F is trusted. `src/features/review.test.tsx` fails if an entry can
 be applied without a reason or a signer, or is shown without its date. Fifteen planted defects

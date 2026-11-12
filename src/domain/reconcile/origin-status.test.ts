@@ -111,18 +111,27 @@ describe('what the reviewer is told about D/F', () => {
 
   it('passes the origin check, and says nothing about entries, on a document that states every origin', async () => {
     const result = await reconciled(() => {})
-    expect(check(result, 'origin-stated')).toMatchObject({ severity: 'blocking', passed: true })
+    expect(check(result, 'origin-stated')).toMatchObject({ severity: 'warning', passed: true })
     expect(check(result, 'origin-status-entered')).toBeUndefined()
   })
 
-  it('blocks on a line with no country of origin instead of filing it as foreign', async () => {
+  it('warns, by name, about a line with no country of origin, and says it is being filed as F', async () => {
+    const before = await reconciled(() => {})
     const result = await reconciled((lines) => {
       for (const l of lines) if (l.partNumber === lines[0].partNumber) l.countryOfOrigin = ''
     })
     const stated = check(result, 'origin-stated')
-    expect(stated).toMatchObject({ severity: 'blocking', passed: false })
+    // A warning, not a block: the owner's standing preference where a manual fix exists.
+    expect(stated).toMatchObject({ severity: 'warning', passed: false })
     expect(stated?.detail).toContain(parsed.lines[0].partNumber)
+    expect(stated?.detail).toContain('filed as F')
     expect(stated?.detail).toContain('a blank is not "foreign"')
+    // So it changes nothing about whether the shipment can be generated.
+    expect(result.canGenerate).toBe(before.canGenerate)
+    expect(result.checks.filter((c) => c.severity === 'blocking' && !c.passed).map((c) => c.id)).toEqual(
+      before.checks.filter((c) => c.severity === 'blocking' && !c.passed).map((c) => c.id),
+    )
+    expect(result.sliLines.some((r) => r.domesticForeign === 'F')).toBe(true)
   })
 
   it('lets a person answer for that part, and reports that they did', async () => {

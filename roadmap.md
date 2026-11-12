@@ -30,7 +30,7 @@ B refresh, which cannot work in a browser.
 | **CIPL parser** | ✅ Done | Position-aware text extraction; FC/TP1 sets, multi-page detail, repeated POs. No OCR — the documents have a text layer. |
 | **Second CIPL format** | ✅ Done | The SAP-style `SHIPMENT#` layout behind a format registry: single currency, stated ECCNs, no weights, two-digit dates. |
 | **Reconciliation** | ✅ Done | USD set selection, invoice↔packing-list join, grouping by Schedule B + D/F, blocking totals checks. |
-| **D/F per part** | ✅ Done | The letter starts from the country of origin and can be entered against a part with a reason, kept and reused, shown with its date wherever it is in force, and reported in a check whenever it changes what the document gives. A line with no origin blocks instead of filing F (ADR 0006). |
+| **D/F per part** | ✅ Done | The letter starts from the country of origin and can be entered against a part with a reason, kept and reused, shown with its date wherever it is in force, and reported in a check whenever it changes what the document gives. A line with no origin is named in a warning where it used to file F silently (ADR 0006). |
 | **Schedule B validation** | ✅ Done | Census AES dataset: 10 digits, currently active, required unit of quantity, description plausibility. Staleness warning once a January/July revision passes the dataset's date. |
 | **Continuation pages** | ✅ Done | A shipment longer than a sheet holds is produced as several, numbered bottom-right. Commodity rows are per sheet; every other box is one field with a widget on each, so a correction on any page shows on all of them. Replaces a blocking check that refused the shipment. |
 | **Unit of quantity** | ✅ Done | Each row filed in the unit its commodity number requires — the net weight where Schedule B reports a code by weight — with the unit changeable per code on the review screen, carried identically into both SLIs and both keying sheets. Kilogram quantities are filed as whole kilograms. Never invents a figure a shipment cannot state. |
@@ -170,7 +170,7 @@ Two boundaries are deliberate and should stay:
 
 | Date | Milestone | Details |
 | :--- | :--- | :--- |
-| 2026-11-12 | **D/F entered per part** | D or F can be entered against a part where the country of origin does not settle it, and a blank origin blocks instead of filing as foreign (ADR 0006). |
+| 2026-11-12 | **D/F entered per part** | D or F can be entered against a part where the country of origin does not settle it, and a blank origin is warned about by name where it used to file as foreign silently (ADR 0006). |
 | 2026-11-12 | **DG rules carry a dated source** | The dangerous goods figures name their source and the day a later DGR takes effect as data. Checklists and retention records carry it, and from 1 January 2027 a warning check, the checklist and a second acknowledgement say the figures are superseded (ADR 0005). |
 | 2026-10-19 | **DG packages start unanswered** | Packaging description, package and overpack counts and the prohibited co-packing question start blank; a blank packaging blocks where a declaration is required and warns otherwise, and co-packing reads Not answered / No / Yes. |
 | 2026-10-19 | **DG entries start unanswered** | Chemistry, cell or battery, configuration, article level and condition start unanswered and block classification until chosen; a fresh entry no longer classifies as lithium ion (UN3480) before anyone has described it. |

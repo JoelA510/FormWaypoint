@@ -1,4 +1,4 @@
-# D/F can be entered per part, and a blank origin no longer files as foreign
+# D/F can be entered per part, and a blank origin no longer files as foreign silently
 
 Kind: BUGFIX · Drawn up: 2026-11-12 · Owner: Joel Abraham · Status: DONE
 
@@ -30,8 +30,9 @@ verification.
   - An entry in force is always shown with its date, name and reason, and can be reverted.
   - A warning check, `origin-status-entered`, names each part whose entered letter differs from
     what the document gives, or supplies one the document does not.
-  - A blocking check, `origin-stated`, fails on any line with no country of origin and no entry
-    for its part.
+  - A warning check, `origin-stated`, fails on any line with no country of origin and no entry
+    for its part, and says the line is being filed as F. It was blocking in the first version
+    of this change; the owner asked for a warning (ADR 0006).
 - **Unchanged:**
   - A shipment whose every line states an origin, with nothing entered, produces exactly the
     rows, letters and checks it did. Proved by the existing reconcile, golden and keying-sheet
@@ -52,9 +53,10 @@ verification.
 
 - Operating rule 14 (how a filed value is chosen; a persisted record's shape) — follows it: this
   plan.
-- Project rule 1 — follows it, and closes a breach: a blank origin is no longer substituted.
-- Project rule 2 — follows it, and closes a breach: the letter can now come from a person, and
-  never comes from nothing.
+- Project rule 1 — departs in one case, on the owner's decision: a blank origin is still filed as
+  F. It is now warned about by name where it was silent. Recorded in ADR 0006.
+- Project rule 2 — follows it for the determination: the letter can now come from a person. The
+  blank-origin case is the departure noted under rule 1.
 - Project rule 4 — follows it: both new checks have tests that make them fail.
 - ADR 0006 (new, in this change) records the decision. No existing ADR is touched.
 
@@ -64,7 +66,7 @@ verification.
 
 1. *Per part or per shipment:* per part, kept and reused.
 2. *Approver as well as reason:* reason only; the signer's name is recorded from the profile.
-3. *Blank origin:* blocks.
+3. *Blank origin:* warns. The recommendation was to block; the owner chose a warning.
 
 **Regulatory text.** 15 CFR 30.6(a)(11) and the definitions it points to in § 30.1(c), from the
 eCFR, title 15 current to 2026-11-09, retrieved 2026-11-12. Quoted in ADR 0006. Nothing in the
@@ -83,14 +85,14 @@ empty" can be tested; an entry-only record is kept.
 
 **UI.** `OriginStatusInput` in `review.tsx`: a labelled native select, a reason input, and an
 Apply button disabled until there is a reason and a signer name. A line with no part number gets
-no control, and the blocking check says why.
+no control, and the warning says why.
 
 ## Risks and rollback
 
-- **Risk:** a real document has blank origins the parsers have always produced, and now blocks —
-  **watch:** `npm run test:real` on the owner's machine, which cannot run here — **if it
-  happens:** if the document really states none, enter the D/F; if the parser dropped it, that is
-  a parser defect this change has exposed.
+- **Risk:** the blank-origin warning is read past and F is filed for goods that are domestic —
+  **watch:** it names each line, and the D/F column shows "no origin stated" in the blocking
+  colour for that part — **if it happens:** enter the D/F for the part; the generated form is
+  also editable.
 - **Risk:** a carried entry is applied to a shipment where it no longer holds — **watch:** the
   warning check and the dated line on the review screen appear every time — **if it happens:**
   revert the entry on that screen.
@@ -102,7 +104,7 @@ no control, and the blocking check says why.
   `src/domain/reconcile/origin-status.test.ts`. Planted: entry ignored (5 fail); applied to a
   line with no part number (1 fails).
 - [x] `origin-stated` and `origin-status-entered` — proved by the same file through `reconcile`
-  on the synthetic CIPL. Planted: blank never blocks; entry does not answer a blank; agreeing
+  on the synthetic CIPL. Planted: blank never warned about; entry does not answer a blank; agreeing
   entry reported; warning never raised (1 or 2 fail each).
 - [x] Keying sheet states the same letter — proved by `keying-sheet.test.ts`. Planted: `df-code`
   key, the cell, and the blank-origin answer each ignoring the entry (1 fails each).

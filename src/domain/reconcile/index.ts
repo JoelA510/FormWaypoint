@@ -1412,10 +1412,12 @@ function partCodeOverrideChecks(merged: MergedLine[], codesByPart?: Record<strin
  *
  * Two checks, for the two ways the letter can be wrong without looking it (docs/adr/0006):
  *
- *  - **`origin-stated`**, blocking. A line with no country of origin used to file `F`, a
- *    foreign origin no document stated. It now holds the shipment until the document is
- *    corrected or a person enters the D/F for that part. A line with neither an origin nor a
- *    part number cannot be answered here at all, and the check says so.
+ *  - **`origin-stated`**, a warning. A line with no country of origin files `F`, a foreign
+ *    origin no document stated, and used to do so without a word. It still files `F`, because
+ *    the owner prefers a warning with a quick manual fix to a block that can hold a shipment
+ *    over one parse error; what changed is that every such line is now named, with the letter
+ *    it will be filed under and the way to change it. A line with neither an origin nor a
+ *    part number cannot be answered per part, and the check says so.
  *  - **`origin-status-entered`**, a warning, in the same spirit as the entered commodity
  *    numbers: a letter a person entered replaces the one the origin gives, and the form shows
  *    it as though the document said so. Reported where it actually changes the letter, and
@@ -1432,13 +1434,14 @@ function originStatusChecks(merged: MergedLine[], originStatusByPart?: Record<st
   const checks: CheckResult[] = [
     {
       id: 'origin-stated',
-      severity: 'blocking',
+      severity: 'warning',
       title: 'Every line has a country of origin, or a D/F entered for its part',
       detail: unstated.length
         ? `No country of origin on ${unstated.length} line(s): ` +
           unstated.map((l) => (l.partNumber.trim() ? `${l.partNumber} (${ref(l)})` : `${ref(l)}, which has no part number either`)).join(', ') +
-          '. Whether goods are domestic or foreign is declared on the form, and a blank is not "foreign". Correct ' +
-          'the document, or enter D or F for the part under Per-part values.'
+          '. These are being filed as F (foreign), which no document states: a blank is not "foreign". Correct ' +
+          'the document, or enter D or F for the part under Per-part values; a line with no part number can ' +
+          'only be corrected on the generated form.'
         : 'Each line states one, or its part has a D/F entered by a person.',
       passed: unstated.length === 0,
       refs: unstated.map((l) => l.id),

@@ -72,7 +72,8 @@ of defaulting to zero.
    country of origin. Where that does not settle it (goods made abroad and substantially
    transformed in the United States are domestic, 15 CFR 30.1(c)), D or F is entered against
    the part on the review screen with a reason, kept, and reported in a check each time it
-   changes the letter. A line that states no origin blocks until one of the two is supplied
+   changes the letter. A line that states no origin is still filed as F, with a warning that
+   names it until an origin or an entry is supplied
    (`docs/adr/0006-domestic-foreign-is-a-determination.md`).
 5. **Honours an ECCN the document states.** Where a CIPL prints one it wins over the blanket
    value, and the reviewer is told, including when it disagrees with what was filed
@@ -302,8 +303,8 @@ manufacture the parts a document cannot support:
 - It never infers **country of origin**, **hazardous-material status**, **routed-export
   status**, **consignee type** or **related-party status**.
 - It never decides that goods are **domestic** where their origin is foreign, and never files
-  **foreign** for a line whose origin is blank. The first is entered by the filer; the second
-  blocks.
+  **foreign** for a line whose origin is blank without saying so. The first is entered by the
+  filer; the second raises a warning that names the line.
 - It never treats a blank field as zero, and never applies a signature.
 - It never quietly substitutes a figure of its own for one the documents give. A **quantity,
   weight or value entered by hand** replaces the document's — that is what it is for — and
