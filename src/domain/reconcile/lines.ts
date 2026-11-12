@@ -18,6 +18,27 @@ export function domesticForeign(countryOfOrigin: string): 'D' | 'F' {
   return US_ORIGINS.has((countryOfOrigin ?? '').trim().toUpperCase()) ? 'D' : 'F'
 }
 
+export type OriginStatus = 'D' | 'F'
+
+/**
+ * The D/F a line is filed under: what a person entered against its part, or else what its
+ * country of origin gives (docs/adr/0006).
+ *
+ * The country of origin is a starting answer and not the determination. 15 CFR 30.1(c) counts
+ * as domestic goods that were imported and then substantially transformed, or substantially
+ * enhanced in value or improved in condition, in the United States, and nothing on a CIPL says
+ * whether that happened. Only a person can, so their entry wins in both directions.
+ *
+ * A line with no part number can carry no entry, because an entry is a statement about a part.
+ */
+export function domesticForeignFor(
+  line: Pick<MergedLine, 'partNumber' | 'countryOfOrigin'>,
+  originStatusByPart?: Record<string, OriginStatus>,
+): OriginStatus {
+  const part = partKey(line.partNumber)
+  return (part && originStatusByPart?.[part]) || domesticForeign(line.countryOfOrigin)
+}
+
 /**
  * The CIPL prints commodity headings inconsistently (`Electrical Conductors` next to
  * `measure equipment`). Only the first letter is touched — rewording is a human decision,
@@ -224,6 +245,13 @@ export interface AggregationOptions {
    */
   codesByPart?: Record<string, string>
   /**
+   * The D/F a reviewer entered against a part, keyed by uppercased part number.
+   *
+   * Beats the letter the line's country of origin gives; see `domesticForeignFor`. Part of the
+   * grouping key like the letter it replaces, so entering one can split or merge rows.
+   */
+  originStatusByPart?: Record<string, OriginStatus>
+  /**
    * Net weight per unit, keyed by part number, used when the document states no weights.
    *
    * The `vendor-b` format prints none at all, so its SLIs have always been filled
@@ -267,7 +295,7 @@ export function aggregateLines(lines: MergedLine[], options: AggregationOptions)
       options.codesByPart?.[partKey(line.partNumber)] ||
       options.overrides?.[sourceCode] ||
       line.classification
-    const df = domesticForeign(line.countryOfOrigin)
+    const df = domesticForeignFor(line, options.originStatusByPart)
     // An export-control value printed on the document is authoritative and beats the
     // blanket value. Filing EAR99 over a stated 5A992.C would be a misdeclaration, and the
     // same holds for a stated license or SME (the `inhouse-ci` form prints all three per

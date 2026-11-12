@@ -9,7 +9,7 @@ import { basisNote } from './quantity-basis'
 import { partKey } from '../domain/part-key'
 import type { OverrideRecord } from '../store/local-store'
 import type { CheckResult, MergedLine, ParsedCipl, Reconciliation, SLILine } from '../domain/types'
-import { FIGURE_ON_LINE, type RowFigures } from '../domain/reconcile'
+import { FIGURE_ON_LINE, domesticForeign, type OriginStatus, type RowFigures } from '../domain/reconcile'
 
 const SEVERITY_TONE: Record<CheckResult['severity'], Tone> = {
   blocking: 'block',
@@ -569,11 +569,19 @@ export function PartOverridesPanel({
   onSaveCode,
   onSaveDescription,
   onClearCode,
+  originEntries = {},
+  onSaveOriginStatus,
+  onClearOriginStatus,
 }: {
   reconciliation: Reconciliation
   weights: Record<string, number>
   codes: Record<string, string>
   descriptions: Record<string, string>
+  /** The D/F entered against a part, with who entered it, why and when, keyed like `codes`. */
+  originEntries?: Record<string, OriginEntry>
+  /** Absent where the screen is read-only; the column then shows the letter and its source. */
+  onSaveOriginStatus?: (partNumber: string, description: string, status: OriginStatus, reason: string) => void
+  onClearOriginStatus?: (partNumber: string) => void
   /** True when the document states no weights, so the weight column is in play. */
   weightsNeeded: boolean
   /** Who is entering these — the signer, so nobody types their own name twice. */
@@ -585,6 +593,15 @@ export function PartOverridesPanel({
 }) {
   const parts = [...new Map(reconciliation.mergedLines.map((l) => [l.partNumber, l])).values()]
   const weightOf = (part: MergedLine) => weights[partKey(part.partNumber)]
+  // Every origin the document states for a part, across all of its lines: the row shows one
+  // line per part, and a part shipped from two countries has two answers until one is entered.
+  const originsOf = (part: MergedLine) => [
+    ...new Set(
+      reconciliation.mergedLines
+        .filter((l) => partKey(l.partNumber) === partKey(part.partNumber))
+        .map((l) => l.countryOfOrigin.trim()),
+    ),
+  ]
   const missing = weightsNeeded ? parts.filter((p) => weightOf(p) == null) : []
   const ordered = weightsNeeded ? [...missing, ...parts.filter((p) => weightOf(p) != null)] : parts
   // Counted the same way `partCodeOverrideChecks` counts them: a saved code that matches what
@@ -601,8 +618,8 @@ export function PartOverridesPanel({
         title="Per-part values"
         description={
           weightsNeeded
-            ? 'This document states no weights. Enter the net weight of one unit, and a commodity number where the printed one is wrong. Both are saved and reused.'
-            : 'Enter a commodity number where the one printed on this document is wrong. Saved against the part and reused.'
+            ? 'This document states no weights. Enter the net weight of one unit, a commodity number where the printed one is wrong, and D or F where the country of origin does not settle it. All are saved and reused.'
+            : 'Enter a commodity number where the one printed on this document is wrong, and D or F where the country of origin does not settle it. Saved against the part and reused.'
         }
         actions={
           <div className="flex items-center gap-2">
@@ -619,7 +636,7 @@ export function PartOverridesPanel({
       />
       <CardBody className="px-0 py-0">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[860px] border-collapse text-sm">
+          <table className="w-full min-w-[1040px] border-collapse text-sm">
             <thead>
               <tr className="border-b bg-[var(--color-sunken)] text-left text-xs tracking-wide text-[var(--color-ink-faint)] uppercase">
                 <th className="px-4 py-2.5 font-semibold">Part</th>
@@ -628,6 +645,7 @@ export function PartOverridesPanel({
                 {weightsNeeded ? <th className="px-4 py-2.5 font-semibold">Net kg each</th> : null}
                 {weightsNeeded ? <th className="px-4 py-2.5 text-right font-semibold">Line kg</th> : null}
                 <th className="px-4 py-2.5 font-semibold">Schedule B</th>
+                <th className="px-4 py-2.5 font-semibold">D/F</th>
                 <th className="px-4 py-2.5 font-semibold">Commodity wording</th>
               </tr>
             </thead>
@@ -663,6 +681,20 @@ export function PartOverridesPanel({
                         enteredBy={enteredBy}
                         onCommit={(code, reason) => onSaveCode(part.partNumber, part.description, code, reason)}
                         onClear={() => onClearCode(part.partNumber)}
+                      />
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <OriginStatusInput
+                        partNumber={part.partNumber}
+                        origins={originsOf(part)}
+                        entry={originEntries[partKey(part.partNumber)]}
+                        enteredBy={enteredBy}
+                        onCommit={
+                          onSaveOriginStatus
+                            ? (status, reason) => onSaveOriginStatus(part.partNumber, part.description, status, reason)
+                            : undefined
+                        }
+                        onClear={onClearOriginStatus ? () => onClearOriginStatus(part.partNumber) : undefined}
                       />
                     </td>
                     <td className="px-4 py-2.5">
@@ -870,6 +902,126 @@ function PartCodeInput({
               disabled={!reason.trim() || !enteredBy.trim()}
               onClick={() => {
                 onCommit(normalised, reason.trim())
+                setReason('')
+              }}
+            >
+              Apply to this part
+            </Button>
+            <span className="text-xs text-[var(--color-ink-faint)]">
+              {enteredBy.trim() ? `as ${enteredBy}` : 'set the signer name first'}
+            </span>
+          </div>
+        </>
+      ) : null}
+    </div>
+  )
+}
+
+/** A D/F a person entered against a part, as the store holds it. */
+export interface OriginEntry {
+  status: OriginStatus
+  reason: string
+  enteredBy: string
+  /** ISO timestamp of the part record's last change, shown as a date. */
+  updatedAt: string
+}
+
+/**
+ * Whether one part is filed as domestic or foreign, and on whose say.
+ *
+ * The letter starts from the country of origin, which this shows, because that is where the
+ * form's D/F has always come from. It is not the whole question: goods made abroad and then
+ * substantially transformed or enhanced in value in the United States are domestic for the
+ * export filing (15 CFR 30.1(c)), and no CIPL says whether that happened. So a person can
+ * enter the letter, with a reason, the way they enter a commodity number (docs/adr/0006).
+ *
+ * An entry is kept against the part and comes back on its next shipment, so the date and the
+ * reason stay on screen wherever one is in force: a value carried over from an earlier
+ * shipment has to look like one.
+ */
+function OriginStatusInput({
+  partNumber,
+  origins,
+  entry,
+  enteredBy,
+  onCommit,
+  onClear,
+}: {
+  partNumber: string
+  origins: string[]
+  entry: OriginEntry | undefined
+  enteredBy: string
+  onCommit?: (status: OriginStatus, reason: string) => void
+  onClear?: () => void
+}) {
+  const [choice, setChoice] = useState<OriginStatus | ''>('')
+  const [reason, setReason] = useState('')
+
+  const stated = origins.filter(Boolean)
+  const fromDocument = origins.length
+    ? origins.map((o) => (o ? `${domesticForeign(o)} from ${o}` : 'no origin stated')).join('; ')
+    : 'no origin stated'
+  const unanswered = !entry && stated.length < origins.length
+  // A part with no number cannot hold an entry: there is nothing to keep it against.
+  const editable = Boolean(onCommit && partNumber.trim())
+
+  return (
+    <div className="space-y-1.5">
+      <p className={unanswered ? 'text-xs text-[var(--color-block)]' : 'text-xs text-[var(--color-ink-faint)]'}>
+        {entry ? `document: ${fromDocument}` : fromDocument}
+      </p>
+
+      {entry ? (
+        <div className="space-y-1">
+          <p className="text-xs text-[var(--color-warn)]">
+            filing {entry.status}, entered {entry.updatedAt.slice(0, 10)}
+            {entry.enteredBy ? ` by ${entry.enteredBy}` : ''}
+            {entry.reason ? `: ${entry.reason}` : ''}
+          </p>
+          {onClear ? (
+            <button
+              type="button"
+              className="text-xs text-[var(--color-ink-faint)] underline"
+              onClick={() => {
+                setChoice('')
+                setReason('')
+                onClear()
+              }}
+            >
+              revert to the document
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {editable ? (
+        <Select
+          value={choice}
+          aria-label={`D/F to file for part ${partNumber}`}
+          onChange={(e) => setChoice(e.target.value as OriginStatus | '')}
+        >
+          <option value="">{entry ? 'change the entry…' : 'enter D or F…'}</option>
+          <option value="D">D, domestic</option>
+          <option value="F">F, foreign</option>
+        </Select>
+      ) : null}
+
+      {editable && choice && choice !== entry?.status ? (
+        <>
+          <Input
+            value={reason}
+            aria-label={`Reason for the D/F of part ${partNumber}`}
+            placeholder="Why this part is domestic or foreign"
+            onChange={(e) => setReason(e.target.value)}
+          />
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={!reason.trim() || !enteredBy.trim()}
+              onClick={() => {
+                onCommit?.(choice, reason.trim())
+                setChoice('')
                 setReason('')
               }}
             >

@@ -12,7 +12,7 @@ import {
   type RowFigures,
 } from './domain/reconcile'
 import { indexByPart, libraryChanges, libraryWeights, type ItemLibraryEntry } from './domain/item-library'
-import { distinctParts } from './domain/part-key'
+import { distinctParts, partKey } from './domain/part-key'
 import {
   createScheduleBIndex,
   loadBundledPayload,
@@ -44,6 +44,7 @@ import {
 import {
   localStore,
   overrideCodes,
+  overrideOriginStatus,
   overrideDescriptions,
   overrideWeights,
   overridesToMap,
@@ -368,6 +369,30 @@ export function App() {
    */
   const codesByPart = useMemo(() => overrideCodes(partOverrides), [partOverrides])
 
+  /**
+   * The D/F entered against a part (docs/adr/0006). Like the codes, only what a person typed:
+   * nothing derives one, and the letter the country of origin gives is used wherever this
+   * holds nothing for the part.
+   */
+  const originStatusByPart = useMemo(() => overrideOriginStatus(partOverrides), [partOverrides])
+  const originEntries = useMemo(
+    () =>
+      Object.fromEntries(
+        partOverrides
+          .filter((r) => r.originStatus === 'D' || r.originStatus === 'F')
+          .map((r) => [
+            partKey(r.partNumber),
+            {
+              status: r.originStatus as 'D' | 'F',
+              reason: r.originStatusReason ?? '',
+              enteredBy: r.originStatusBy ?? '',
+              updatedAt: r.originStatusAt ?? r.updatedAt,
+            },
+          ]),
+      ),
+    [partOverrides],
+  )
+
   /** Commodity wording the operator saved, for the keying sheets. Never generated. */
   const descriptionsByPart = useMemo(() => overrideDescriptions(partOverrides), [partOverrides])
 
@@ -379,6 +404,7 @@ export function App() {
       license: settings.license || null,
       overrides: overridesToMap(overrides),
       codesByPart,
+      originStatusByPart,
       // Only consulted for formats that state no weights; a printed weight always wins.
       unitWeightsByPart,
       itemsByPart,
@@ -390,7 +416,7 @@ export function App() {
       // describes a document this run does not generate.
       maxRows: keyedCarrier ? undefined : adapter.maxCommodityRows,
     })
-  }, [parsed, scheduleB, settings.eccn, settings.sme, settings.license, overrides, codesByPart, unitWeightsByPart, itemsByPart, reportingUnits, rowFigures, exportControlByPart, adapter, keyedCarrier])
+  }, [parsed, scheduleB, settings.eccn, settings.sme, settings.license, overrides, codesByPart, originStatusByPart, unitWeightsByPart, itemsByPart, reportingUnits, rowFigures, exportControlByPart, adapter, keyedCarrier])
 
   // In the order the invoice lists them, deduped the way every other per-part map keys them,
   // so the override table reads down the document rather than in whatever order a Set produced.
@@ -507,6 +533,30 @@ export function App() {
    */
   const clearPartCode = useCallback(
     (partNumber: string) => savePartOverride(partNumber, '', { exportCode: '', reason: '', enteredBy: '' }),
+    [savePartOverride],
+  )
+
+  /** Its own date, because the record's `updatedAt` moves whenever a weight or a code does. */
+  const savePartOriginStatus = useCallback(
+    (partNumber: string, description: string, originStatus: 'D' | 'F', reason: string) =>
+      savePartOverride(partNumber, description, {
+        originStatus,
+        originStatusReason: reason,
+        originStatusBy: profile.signerName.trim(),
+        originStatusAt: new Date().toISOString(),
+      }),
+    [savePartOverride, profile.signerName],
+  )
+
+  /** Drops the D/F entry, keeping any weight, code or wording, like `clearPartCode`. */
+  const clearPartOriginStatus = useCallback(
+    (partNumber: string) =>
+      savePartOverride(partNumber, '', {
+        originStatus: undefined,
+        originStatusReason: '',
+        originStatusBy: '',
+        originStatusAt: '',
+      }),
     [savePartOverride],
   )
 
@@ -919,6 +969,11 @@ export function App() {
                 onSaveCode={(part, description, code, reason) => void savePartCode(part, description, code, reason)}
                 onSaveDescription={(part, description, text) => void savePartDescription(part, description, text)}
                 onClearCode={(part) => void clearPartCode(part)}
+                originEntries={originEntries}
+                onSaveOriginStatus={(part, description, status, reason) =>
+                  void savePartOriginStatus(part, description, status, reason)
+                }
+                onClearOriginStatus={(part) => void clearPartOriginStatus(part)}
               />
               <CommodityTable
                 reconciliation={reconciliation}
@@ -992,6 +1047,7 @@ export function App() {
                 license={settings.license || null}
                 sme={settings.sme || null}
                 exportControlByPart={exportControlByPart}
+                originStatusByPart={originStatusByPart}
               />
               <HistoryPanel shipments={shipments} onClear={() => void clearAll()} />
             </>

@@ -31,11 +31,13 @@ import { partKey } from '../part-key'
 import {
   aggregateLines,
   applyUnitWeights,
+  domesticForeign,
   exportControlFor,
   joinInvoiceToPacking,
   roundTo,
   unmatchedPackingLines,
   type AggregationOptions,
+  type OriginStatus,
 } from './lines'
 
 export * from './lines'
@@ -395,6 +397,7 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
     ...partCodeChecks(mergedLines, index, options.itemsByPart),
     ...libraryWeightChecks(mergedLines, packingLines, parsed.providesWeights, options.itemsByPart),
     ...partCodeOverrideChecks(mergedLines, options.codesByPart),
+    ...originStatusChecks(mergedLines, options.originStatusByPart),
     ...classificationChecks(sliLines, mergedLines, index),
     ...exportControlChecks(options, mergedLines),
     ...sourceControlChecks(sliLines, mergedLines, options),
@@ -1402,6 +1405,73 @@ function partCodeOverrideChecks(merged: MergedLine[], codesByPart?: Record<strin
       actual: `${substituted.size} part(s)`,
     },
   ]
+}
+
+/**
+ * Where each row's D/F came from, and whether every line has one that rests on something.
+ *
+ * Two checks, for the two ways the letter can be wrong without looking it (docs/adr/0006):
+ *
+ *  - **`origin-stated`**, blocking. A line with no country of origin used to file `F`, a
+ *    foreign origin no document stated. It now holds the shipment until the document is
+ *    corrected or a person enters the D/F for that part. A line with neither an origin nor a
+ *    part number cannot be answered here at all, and the check says so.
+ *  - **`origin-status-entered`**, a warning, in the same spirit as the entered commodity
+ *    numbers: a letter a person entered replaces the one the origin gives, and the form shows
+ *    it as though the document said so. Reported where it actually changes the letter, and
+ *    where it supplies one for a line that states no origin.
+ */
+function originStatusChecks(merged: MergedLine[], originStatusByPart?: Record<string, OriginStatus>): CheckResult[] {
+  const enteredFor = (line: MergedLine): OriginStatus | undefined => {
+    const part = partKey(line.partNumber)
+    return part ? originStatusByPart?.[part] : undefined
+  }
+  const ref = (line: MergedLine) => `${line.orderNumber}/${line.sequence}`
+
+  const unstated = merged.filter((line) => !line.countryOfOrigin.trim() && !enteredFor(line))
+  const checks: CheckResult[] = [
+    {
+      id: 'origin-stated',
+      severity: 'blocking',
+      title: 'Every line has a country of origin, or a D/F entered for its part',
+      detail: unstated.length
+        ? `No country of origin on ${unstated.length} line(s): ` +
+          unstated.map((l) => (l.partNumber.trim() ? `${l.partNumber} (${ref(l)})` : `${ref(l)}, which has no part number either`)).join(', ') +
+          '. Whether goods are domestic or foreign is declared on the form, and a blank is not "foreign". Correct ' +
+          'the document, or enter D or F for the part under Per-part values.'
+        : 'Each line states one, or its part has a D/F entered by a person.',
+      passed: unstated.length === 0,
+      refs: unstated.map((l) => l.id),
+    },
+  ]
+
+  const changed = new Map<string, string>()
+  for (const line of merged) {
+    const entered = enteredFor(line)
+    if (!entered) continue
+    const origin = line.countryOfOrigin.trim()
+    if (origin && domesticForeign(origin) === entered) continue
+    changed.set(
+      `${partKey(line.partNumber)}|${origin.toUpperCase()}`,
+      origin
+        ? `${line.partNumber}: filing ${entered} where the origin on the document (${origin}) gives ${domesticForeign(origin)}`
+        : `${line.partNumber}: filing ${entered} where the document states no origin`,
+    )
+  }
+  if (changed.size) {
+    checks.push({
+      id: 'origin-status-entered',
+      severity: 'warning',
+      title: 'Some parts are filed under a D/F entered by hand',
+      detail:
+        [...changed.values()].join(' · ') +
+        '. Confirm each before signing — whether goods count as domestic is a determination you are making ' +
+        '(15 CFR 30.1(c)), and it is kept against the part for later shipments.',
+      passed: false,
+      actual: `${new Set([...changed.keys()].map((k) => k.split('|')[0])).size} part(s)`,
+    })
+  }
+  return checks
 }
 
 function classificationChecks(

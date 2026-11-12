@@ -35,10 +35,11 @@ import type { SliDraft } from '../types'
 import { canonicalUnit, formatScheduleB, normalizeScheduleB, type ScheduleBIndex } from '../../domain/schedule-b'
 import { distinctParts, partKey } from '../../domain/part-key'
 import {
-  domesticForeign,
+  domesticForeignFor,
   exportControlFor,
   roundTo,
   type ExportControlOverride,
+  type OriginStatus,
 } from '../../domain/reconcile'
 import { toCountryPickerLabel, toIsoAlpha2 } from '../../domain/countries'
 import { exportDate } from '../../domain/draft'
@@ -260,6 +261,8 @@ export interface CodeCorrections {
   sme?: string | null
   /** Export control entered against a part, which beats both. Only `df-code` reads it. */
   exportControlByPart?: Record<string, ExportControlOverride>
+  /** The D/F a reviewer entered against a part. Beats the letter the origin gives. */
+  originStatusByPart?: Record<string, OriginStatus>
 }
 
 /**
@@ -282,6 +285,12 @@ export interface CodeCorrections {
  * No mode merges two commodity numbers, because a row asserts one. `line` groups on the
  * line's own identity, which is how "never group" is spelled without a special case.
  */
+/** True when a line's D/F rests on something: an origin the document states, or a person's entry. */
+function statedOrEntered(line: MergedLine, originStatusByPart?: Record<string, OriginStatus>): boolean {
+  const part = partKey(line.partNumber)
+  return Boolean(line.countryOfOrigin.trim() || (part && originStatusByPart?.[part]))
+}
+
 function groupKeyFor(line: MergedLine, mode: GroupingMode, index: number, corrections: CodeCorrections): string {
   const code = normalizeScheduleB(codeFor(line, corrections))
   // In every mode, because a commodity record holds one unit and `aggregateLines` keys on it
@@ -312,7 +321,7 @@ function groupKeyFor(line: MergedLine, mode: GroupingMode, index: number, correc
         exportControlByPart: corrections.exportControlByPart,
       })
       return [
-        domesticForeign(line.countryOfOrigin),
+        domesticForeignFor(line, corrections.originStatusByPart),
         code,
         unit,
         (control.eccn ?? '').toUpperCase(),
@@ -742,12 +751,15 @@ function groupForKeying(
       // row whose other three pieces have no stated origin asserts they are domestic, which
       // is both unsupported and the opposite of the `F` the SLI files for them. A field that
       // cannot be stated is left for the operator, who is told to state it.
+      //
+      // A D/F a person entered against the part is the letter for that line whatever its
+      // origin says, or fails to say (docs/adr/0006): it is the same letter the SLI files.
       domesticForeign:
         options.grouping === 'df-code'
-          ? domesticForeign(first.countryOfOrigin)
-          : originMissing
+          ? domesticForeignFor(first, corrections.originStatusByPart)
+          : group.some((l) => !statedOrEntered(l, corrections.originStatusByPart))
             ? ''
-            : joinDistinct(origins.map(domesticForeign).sort()),
+            : joinDistinct(group.map((l) => domesticForeignFor(l, corrections.originStatusByPart)).sort()),
       // A row with no origin at all, or only some of one, needs one as much as a row with an
       // unrecognised name.
       needsCountryCode: originMissing || !origins.length || origins.some((o) => !toIsoAlpha2(o).known),
@@ -933,6 +945,8 @@ export interface KeyingInputs {
   sme?: string | null
   /** Export control entered against a part. Beats both the printed and the shipment-wide value. */
   exportControlByPart?: Record<string, ExportControlOverride>
+  /** The D/F entered against a part, the same entries `reconcile` was given. */
+  originStatusByPart?: Record<string, OriginStatus>
 }
 
 export function buildKeyingSheet(
@@ -957,6 +971,7 @@ export function buildKeyingSheet(
       license: inputs.license,
       sme: inputs.sme,
       exportControlByPart: inputs.exportControlByPart,
+      originStatusByPart: inputs.originStatusByPart,
     },
     reportingUnits(reconciliation.sliLines),
     reconciliation.sliLines,

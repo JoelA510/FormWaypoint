@@ -99,6 +99,17 @@ export interface PartOverrideRecord {
   /** Why this code, required with one. Empty for a weight-only record. */
   reason?: string
   enteredBy?: string
+  /**
+   * D or F to file for this part instead of the letter its country of origin gives
+   * (docs/adr/0006). A determination like the code, so it carries its own reason and name,
+   * kept apart from the code's: the two are decided separately and cleared separately.
+   * Absent on every record written before it existed, which reads as "not entered".
+   */
+  originStatus?: 'D' | 'F'
+  originStatusReason?: string
+  originStatusBy?: string
+  /** When the D/F was entered. Its own date: `updatedAt` moves with every other field. */
+  originStatusAt?: string
   /** Description as last seen, purely to make the saved list readable. */
   description: string
   updatedAt: string
@@ -106,7 +117,18 @@ export interface PartOverrideRecord {
 
 /** The fields of a part's record that a caller may set. */
 export type PartOverridePatch = Partial<
-  Pick<PartOverrideRecord, 'netWeightKg' | 'exportCode' | 'sliDescription' | 'reason' | 'enteredBy'>
+  Pick<
+    PartOverrideRecord,
+    | 'netWeightKg'
+    | 'exportCode'
+    | 'sliDescription'
+    | 'reason'
+    | 'enteredBy'
+    | 'originStatus'
+    | 'originStatusReason'
+    | 'originStatusBy'
+    | 'originStatusAt'
+  >
 >
 
 /** One processed shipment, kept for autofill and as an audit trail. */
@@ -439,21 +461,9 @@ export const indexedDbStore: LocalStore = {
     // Matched on the normalised part number, not the stored key: a part whose casing differs
     // between two documents is one part and must not become two rows.
     const existing = held.find((r) => partKey(r.partNumber) === partKey(partNumber))
-    const merged: PartOverrideRecord = {
-      ...existing,
-      partNumber: existing?.partNumber ?? partNumber,
-      description: description || existing?.description || '',
-      netWeightKg: existing?.netWeightKg ?? null,
-      ...patch,
-      updatedAt: new Date().toISOString(),
-    }
-    // A record with neither field left says nothing, and would put an empty row in the
-    // item-master worklist.
-    if (merged.netWeightKg == null && !merged.exportCode?.trim() && !merged.sliDescription?.trim()) {
-      if (existing) await tx.store.delete(existing.partNumber)
-    } else {
-      await tx.store.put(merged)
-    }
+    const merged = mergePartOverride(existing, partNumber, description, patch, new Date().toISOString())
+    if (merged) await tx.store.put(merged)
+    else if (existing) await tx.store.delete(existing.partNumber)
     await tx.done
   },
   async deletePartOverride(partNumber) {
@@ -609,6 +619,50 @@ export function overrideCodes(records: PartOverrideRecord[]): Record<string, str
     records
       .filter((r) => r.exportCode?.trim())
       .map((r) => [partKey(r.partNumber), (r.exportCode as string).trim()]),
+  )
+}
+
+/**
+ * One part's record after a patch, or null when nothing is left worth keeping.
+ *
+ * Apart from the transaction that calls it so the decision can be tested: nothing in the test
+ * environment provides IndexedDB, and "is this record now empty" is what decides whether a
+ * D/F entered against a part with no weight and no code is kept or silently dropped.
+ *
+ * A record with no field left says nothing, and would put an empty row in the item-master
+ * worklist.
+ */
+export function mergePartOverride(
+  existing: PartOverrideRecord | undefined,
+  partNumber: string,
+  description: string,
+  patch: PartOverridePatch,
+  updatedAt: string,
+): PartOverrideRecord | null {
+  const merged: PartOverrideRecord = {
+    ...existing,
+    partNumber: existing?.partNumber ?? partNumber,
+    description: description || existing?.description || '',
+    netWeightKg: existing?.netWeightKg ?? null,
+    ...patch,
+    updatedAt,
+  }
+  const empty =
+    merged.netWeightKg == null && !merged.exportCode?.trim() && !merged.sliDescription?.trim() && !merged.originStatus
+  return empty ? null : merged
+}
+
+/**
+ * The D/F entered against each part, keyed the way the reconciliation looks parts up.
+ *
+ * Only `D` and `F` pass: anything else held under the field is not an entry, and letting it
+ * through would group a row under a letter no form has a box for.
+ */
+export function overrideOriginStatus(records: PartOverrideRecord[]): Record<string, 'D' | 'F'> {
+  return Object.fromEntries(
+    records
+      .filter((r) => r.originStatus === 'D' || r.originStatus === 'F')
+      .map((r) => [partKey(r.partNumber), r.originStatus as 'D' | 'F']),
   )
 }
 

@@ -20,6 +20,29 @@ describe('records read back from storage', () => {
     expect(readErrorLog()[0].message).toMatch(/part weight records .* 0 left out, 1 repaired/)
   })
 
+  it('reads a part record saved before a D/F could be entered, and one saved with it', () => {
+    const before = { partNumber: 'P-4', netWeightKg: 1.5, description: 'Widget', updatedAt: '2026-10-01' }
+    const withEntry = {
+      partNumber: 'P-5', netWeightKg: null, description: 'Gadget', updatedAt: '2026-11-12',
+      originStatus: 'D', originStatusReason: 'Assembled in the United States', originStatusBy: 'Pat Example',
+      originStatusAt: '2026-11-12',
+    }
+    const [first, second] = decodePartOverrides([before, withEntry])
+    expect(first).toEqual({ ...before, exportCode: undefined })
+    expect('originStatus' in first).toBe(false)
+    expect(second).toEqual({ ...withEntry, exportCode: undefined })
+    expect(readErrorLog()).toEqual([])
+  })
+
+  it('drops a stored D/F that is neither D nor F, keeps the part, and says so', () => {
+    for (const originStatus of ['X', 'd', '', 1, true]) {
+      const [part] = decodePartOverrides([{ partNumber: 'P-6', netWeightKg: 2, description: '', originStatus }])
+      expect(part.netWeightKg).toBe(2)
+      expect('originStatus' in part).toBe(false)
+    }
+    expect(readErrorLog().at(-1)?.message).toMatch(/part weight records .* 0 left out, 1 repaired/)
+  })
+
   it('leaves out records without their key, and anything that is not a record', () => {
     expect(decodePartOverrides([{ netWeightKg: 1 }, 'junk', null, { partNumber: 'P-2', netWeightKg: 2 }])).toEqual([
       { partNumber: 'P-2', netWeightKg: 2, description: '', exportCode: undefined },
