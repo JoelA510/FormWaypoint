@@ -60,7 +60,7 @@ B refresh, which cannot work in a browser.
 | **DG fill from the CIPL** | ✅ Done | Consignee, reference and one entry per part from the CIPL loaded in Standard Shipping; count, net weight and package count offered a click at a time, only where the CIPL's own totals prove them (ADR 0004). |
 | **Nothing pre-answered (DG)** | ✅ Done | Battery classification inputs, condition, packaging, counts and co-packing start unanswered and block until chosen. |
 | **Dated rules source (DG)** | ✅ Done | The course materials and the first day a later DGR is in force held as one dated record; printed on every checklist and kept on every retention record. From that day a warning check fails, the checklist says so, and generating asks for a second acknowledgement (ADR 0005). Warns, never blocks. |
-| **Regression suite** | ✅ Done | 1,210 TypeScript tests on synthetic documents and the lithium battery course's own worked scenarios, 104 more against six real shipments where those (gitignored) documents are present, and Rust unit tests for the shell's path handling. |
+| **Regression suite** | ✅ Done | 1,213 TypeScript tests on synthetic documents and the lithium battery course's own worked scenarios, 104 more against six real shipments where those (gitignored) documents are present, and Rust unit tests for the shell's path handling. |
 | **Desktop packaging seam** | ✅ Done | `localStore` is the single named implementation, IndexedDB in the browser and in the desktop webview alike. Windows-only target; WebView2 covers every platform API the app uses. |
 | **Desktop build (.exe)** | ✅ Done | Tauri v2 shell; the Windows installer is built by the `Desktop build` workflow. Seven Rust commands, no plugins and no decisions. TLS goes through the OS certificate store, so a corporate inspection CA is trusted, and an environment proxy is honoured. |
 | **Schedule B revision diff** | ✅ Done | `src/domain/schedule-b/revision.ts` — diffs two datasets, intersects the result with the item library by part, and renders the change log and CSV worklist. Pure logic, no filesystem or network. |
@@ -161,8 +161,10 @@ Two boundaries are deliberate and should stay:
 ## Open questions
 
 - **Box 26 net vs gross.** All historical shipments enter net weight into a box captioned
-  "Gross Shipping Weight". Exposed as an adapter option, defaulting to net (observed
-  practice) rather than hard-coded either way.
+  "Gross Shipping Weight", and ADR 0001 keeps it that way. Shipping weight for the export
+  filing includes packaging (15 CFR 30.6(a)(16)); what each forwarder transmits from the box is
+  the open question, and only they can answer it. Until then every filled SLI carries an
+  information note, `shipping-weight-is-net`, saying so in its checks and history record.
 - **K78455CW** was cited in an early field-mapping analysis but its documents have not been
   provided, so its totals are unverified and it is not a fixture.
 - **Item-master cleanup.** One imported library flags 1,456 of 2,856 rows — import-HTS

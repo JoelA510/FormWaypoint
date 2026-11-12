@@ -8,6 +8,7 @@ import {
   carriedSettingSources,
   defaultSettingSources,
   defaultShipmentSettings,
+  shippingWeightBasisCheck,
   sourcesAfterEdit,
   unconfirmedSettingChecks,
   type ShipmentSettings,
@@ -103,5 +104,28 @@ describe('what a person’s own change does', () => {
     const before = fresh()
     const marks = sourcesAfterEdit(defaultSettingSources(), before, { ...before, shipmentReference: 'SO-1' })
     expect(marks).toEqual(defaultSettingSources())
+  })
+})
+
+describe('the note that row weights are net', () => {
+  it('names the box on each form as its caption prints it, and cites the decision and the definition', () => {
+    const nippon = shippingWeightBasisCheck(getAdapter('nippon-express'))
+    expect(nippon).toMatchObject({ id: 'shipping-weight-is-net', severity: 'info', passed: true })
+    expect(nippon.detail).toContain('box 26, "Gross Shipping Weight"')
+    expect(nippon.detail).toContain('ADR 0001')
+    expect(nippon.detail).toContain('15 CFR 30.6(a)(16)')
+    expect(nippon.detail).toContain('Nippon Express')
+
+    const ceva = shippingWeightBasisCheck(getAdapter('ceva'))
+    expect(ceva.detail).toContain('the "Shipping Weight" column')
+    expect(ceva.detail).toContain('CEVA')
+  })
+
+  it('never fails, warns or blocks: it records a standing decision, not a fault', () => {
+    for (const id of ['nippon-express', 'ceva'] as const) {
+      const check = shippingWeightBasisCheck(getAdapter(id))
+      expect(check.passed).toBe(true)
+      expect(check.severity).toBe('info')
+    }
   })
 })

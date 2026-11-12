@@ -182,4 +182,25 @@ describe('declared values nobody chose, through the application', () => {
     expect(summary()).toContain('Carrier: FedEx')
     expect(summary()).not.toContain('Nippon')
   })
+
+  it('records that row weights are net wherever an SLI is filled, and not for a keyed carrier', async () => {
+    await mount()
+    await upload('first.xlsx', simpleInHouseCi())
+    const note = 'Row weights are net, filed in the shipping-weight box'
+    expect(text()).toContain(note)
+    expect(text()).toContain('box 26, "Gross Shipping Weight"')
+
+    const carrier = container!.querySelector<HTMLSelectElement>('select[aria-label="Carrier"]')!
+    const choose = async (value: string) => {
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(carrier, value)
+        carrier.dispatchEvent(new Event('change', { bubbles: true }))
+      })
+      await settle()
+    }
+    await choose('ceva')
+    expect(text()).toContain('the "Shipping Weight" column')
+    await choose('fedex')
+    expect(text()).not.toContain(note)
+  })
 })

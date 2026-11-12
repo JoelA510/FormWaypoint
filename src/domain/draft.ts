@@ -411,6 +411,39 @@ export function unconfirmedSettingChecks(
   return checks
 }
 
+/** The box each SLI captions for shipping weight, in the words printed on the form. */
+const SHIPPING_WEIGHT_BOX: Record<string, string> = {
+  'nippon-express': 'box 26, "Gross Shipping Weight"',
+  ceva: 'the "Shipping Weight" column',
+}
+
+/**
+ * States, on every SLI, that the weight filed per row is net (docs/adr/0001).
+ *
+ * Information that always passes. It is not a finding about the shipment: filing net weight in
+ * these boxes is the owner's standing decision, and this exists so the decision is on the face
+ * of each shipment's checks and in its history record, beside the definition it departs from,
+ * instead of only in an ADR. Shipping weight for the export filing includes packaging
+ * (15 CFR 30.6(a)(16)); what a forwarder transmits from this box is theirs to say.
+ *
+ * Only for a form this tool fills. A shipment keyed into FedEx or UPS has no such box: the
+ * keying sheet keys the gross package weight or leaves it to be weighed.
+ */
+export function shippingWeightBasisCheck(adapter: CarrierAdapter): CheckResult {
+  const box = SHIPPING_WEIGHT_BOX[adapter.id] ?? 'the shipping-weight box'
+  return {
+    id: 'shipping-weight-is-net',
+    severity: 'info',
+    title: 'Row weights are net, filed in the shipping-weight box',
+    detail:
+      `On the ${adapter.name} form, ${box} receives each row's net weight, as the forms filed by hand always ` +
+      'have (ADR 0001). Shipping weight for an export filing includes packaging (15 CFR 30.6(a)(16)), so this is ' +
+      "not the gross figure the caption suggests. The shipment's gross weight, where the document states one, " +
+      'is in the booking summary.',
+    passed: true,
+  }
+}
+
 /**
  * Checks over the assembled draft rather than the source document.
  *
