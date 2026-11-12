@@ -40,6 +40,7 @@ export function OutputPanel({
   license = null,
   sme = null,
   exportControlByPart = {},
+  originStatusByPart = {},
 }: {
   adapter: CarrierAdapter
   reconciliation: Reconciliation
@@ -64,6 +65,8 @@ export function OutputPanel({
   sme?: string | null
   /** Export control entered against a part, so the sheet groups as the form files. */
   exportControlByPart?: Record<string, ExportControlOverride>
+  /** The D/F entered against a part, so the sheet states the letter the SLI files. */
+  originStatusByPart?: Record<string, 'D' | 'F'>
   /** Gated on the document checks *and* the draft checks — see App. */
   canGenerate: boolean
   onGenerated: () => void
@@ -214,6 +217,7 @@ export function OutputPanel({
         license,
         sme,
         exportControlByPart,
+        originStatusByPart,
       })
       const delivery = await deliver(
         bridge,

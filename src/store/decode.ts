@@ -88,15 +88,19 @@ export const decodePartOverrides = (raws: unknown[]): PartOverrideRecord[] =>
     if (!nonEmptyText(raw.partNumber)) return { record: null, repaired: false }
     const netWeightKg = decodeWeight(raw.netWeightKg)
     const repaired = raw.netWeightKg != null && netWeightKg == null
-    return {
-      record: {
-        ...(raw as unknown as PartOverrideRecord),
-        netWeightKg,
-        description: isText(raw.description) ? raw.description : '',
-        exportCode: isText(raw.exportCode) ? raw.exportCode : undefined,
-      },
-      repaired: repaired || !isText(raw.description),
+    // Absent on every record saved before a D/F could be entered. One that is present and is
+    // not D or F is dropped: it would otherwise be filed, or group a row under it.
+    const originOk = raw.originStatus === 'D' || raw.originStatus === 'F'
+    const originRepaired = raw.originStatus != null && !originOk
+    const record: PartOverrideRecord = {
+      ...(raw as unknown as PartOverrideRecord),
+      netWeightKg,
+      description: isText(raw.description) ? raw.description : '',
+      exportCode: isText(raw.exportCode) ? raw.exportCode : undefined,
     }
+    if (originOk) record.originStatus = raw.originStatus as 'D' | 'F'
+    else delete record.originStatus
+    return { record, repaired: repaired || !isText(raw.description) || originRepaired }
   })
 
 export const decodeItems = (raws: unknown[]): ItemLibraryEntry[] =>

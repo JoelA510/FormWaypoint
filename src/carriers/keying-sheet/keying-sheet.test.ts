@@ -1732,6 +1732,38 @@ describe('a row whose lines do not all state an origin', () => {
   })
 })
 
+describe('a D/F a person entered against a part', () => {
+  const sheet = (lines: MergedLine[], grouping: 'part-code' | 'df-code', originStatusByPart: Record<string, 'D' | 'F'>) =>
+    buildKeyingSheet('fedex-ship-manager', fixture(lines, []), draft(), { options: { grouping }, originStatusByPart })
+      .commodities
+
+  it('is the letter the row states, in place of the one its origin gives', () => {
+    const lines = [line({ id: 'a', partNumber: 'P-1', countryOfOrigin: 'Japan' })]
+    expect(sheet(lines, 'part-code', {})[0].domesticForeign).toBe('F')
+    expect(sheet(lines, 'part-code', { 'P-1': 'D' })[0].domesticForeign).toBe('D')
+    // The country of manufacture is a different box and keeps what the document says.
+    expect(sheet(lines, 'part-code', { 'P-1': 'D' })[0].countryOfManufacture).toBe('JP')
+  })
+
+  it('supplies the letter for a line that states no origin, which otherwise stays blank', () => {
+    const lines = [line({ id: 'a', partNumber: 'P-1', countryOfOrigin: '' })]
+    expect(sheet(lines, 'part-code', {})[0].domesticForeign).toBe('')
+    expect(sheet(lines, 'part-code', { 'P-1': 'F' })[0].domesticForeign).toBe('F')
+    // Still asked for a country: the entry answers D/F and nothing else.
+    expect(sheet(lines, 'part-code', { 'P-1': 'F' })[0].needsCountryCode).toBe(true)
+  })
+
+  it('partitions the SLI-style grouping the way the SLI rows are partitioned', () => {
+    const lines = [
+      line({ id: 'a', partNumber: 'P-1', countryOfOrigin: 'Japan' }),
+      line({ id: 'b', partNumber: 'P-2', countryOfOrigin: 'Japan' }),
+    ]
+    expect(sheet(lines, 'df-code', {})).toHaveLength(1)
+    const rows = sheet(lines, 'df-code', { 'P-1': 'D' })
+    expect(rows.map((r) => r.domesticForeign).sort()).toEqual(['D', 'F'])
+  })
+})
+
 describe('rows that must not go out unremarked', () => {
   it('prompts for a country the document never stated', () => {
     // A blank cell beside a blank D/F prompts nobody — while the SLI files F for the same

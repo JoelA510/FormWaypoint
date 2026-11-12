@@ -68,7 +68,13 @@ of defaulting to zero.
 3. **Joins invoice lines to packing-list lines** by lot id, then order + sequence, then
    order + line + part. Never by description.
 4. **Groups lines into commodity rows** keyed on Schedule B, D/F and the export-control
-   triplet — matching how these shipments are actually filed.
+   triplet — matching how these shipments are actually filed. D/F starts from the line's
+   country of origin. Where that does not settle it (goods made abroad and substantially
+   transformed in the United States are domestic, 15 CFR 30.1(c)), D or F is entered against
+   the part on the review screen with a reason, kept, and reported in a check each time it
+   changes the letter. A line that states no origin is still filed as F, with a warning that
+   names it until an origin or an entry is supplied
+   (`docs/adr/0006-domestic-foreign-is-a-determination.md`).
 5. **Honours an ECCN the document states.** Where a CIPL prints one it wins over the blanket
    value, and the reviewer is told, including when it disagrees with what was filed
    previously.
@@ -296,6 +302,9 @@ manufacture the parts a document cannot support:
   challenged if it does not fit the goods.
 - It never infers **country of origin**, **hazardous-material status**, **routed-export
   status**, **consignee type** or **related-party status**.
+- It never decides that goods are **domestic** where their origin is foreign, and never files
+  **foreign** for a line whose origin is blank without saying so. The first is entered by the
+  filer; the second raises a warning that names the line.
 - It never treats a blank field as zero, and never applies a signature.
 - It never quietly substitutes a figure of its own for one the documents give. A **quantity,
   weight or value entered by hand** replaces the document's — that is what it is for — and
