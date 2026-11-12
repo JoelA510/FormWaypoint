@@ -1,5 +1,12 @@
-import { Badge, Card, CardBody, CardHeader, Field, Input, Select, Textarea, Toggle } from '../components/ui'
-import type { CompanyProfile, ShipmentSettings } from '../domain/draft'
+import { Badge, Button, Card, CardBody, CardHeader, Field, Input, Select, Textarea, Toggle } from '../components/ui'
+import {
+  describeSetting,
+  describeSource,
+  type CompanyProfile,
+  type SettingSources,
+  type ShipmentSettings,
+  type UnconfirmedSetting,
+} from '../domain/draft'
 import type { CarrierAdapter } from '../carriers/types'
 import type { ExportControlOverride } from '../domain/reconcile'
 import { partKey } from '../domain/part-key'
@@ -21,12 +28,18 @@ export function ManualFieldsPanel({
   parts = [],
   exportControlByPart = {},
   onExportControlChange,
+  settingSources = {},
+  onConfirmSettings,
 }: {
   profile: CompanyProfile
   settings: ShipmentSettings
   adapter: CarrierAdapter
   onProfileChange: (next: CompanyProfile) => void
   onSettingsChange: (next: ShipmentSettings) => void
+  /** Declared values nobody has chosen for this shipment, and where each came from. */
+  settingSources?: SettingSources
+  /** Confirms every one of them as right for this shipment. */
+  onConfirmSettings?: () => void
   /** Part numbers on this shipment, in the order the invoice lists them. */
   parts?: string[]
   /** Export control entered against a part, keyed by uppercased part number. */
@@ -40,6 +53,7 @@ export function ManualFieldsPanel({
     onSettingsChange({ ...settings, [key]: value })
 
   const isNippon = adapter.id === 'nippon-express'
+  const unconfirmed = (Object.keys(settingSources) as UnconfirmedSetting[]).filter((key) => settingSources[key])
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
@@ -50,6 +64,26 @@ export function ManualFieldsPanel({
           actions={<Badge tone="warn">manual</Badge>}
         />
         <CardBody className="space-y-3">
+          {unconfirmed.length ? (
+            <div
+              role="note"
+              className="space-y-2 rounded-md border border-[var(--color-warn)] bg-[var(--color-warn-soft)] px-3 py-2 text-sm"
+            >
+              <p>These will be filed as shown, and nobody has chosen them for this shipment:</p>
+              <ul className="list-disc space-y-0.5 pl-5">
+                {unconfirmed.map((key) => (
+                  <li key={key}>
+                    {describeSetting(key, settings)}: {describeSource(settingSources[key]!)}
+                  </li>
+                ))}
+              </ul>
+              {onConfirmSettings ? (
+                <Button size="sm" onClick={onConfirmSettings}>
+                  These are right for this shipment
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
           <Field
             label="Shipment reference"
             hint="Internal sales-order number. On past shipments this was an SO number that appears nowhere on the CIPL."

@@ -273,6 +273,145 @@ export function applyCarrierDefaults(previous: ShipmentSettings, adapter: Carrie
 }
 
 /**
+ * The settings this tool fills in before anyone has chosen them for the shipment in hand.
+ *
+ * Two ways that happens, and neither is the person's answer for *this* shipment
+ * (docs/adr/0007): the form's starting value, which nobody chose at all, and a value carried
+ * from the last shipment to the same consignee, which somebody chose for a different one.
+ */
+export type UnconfirmedSetting =
+  | 'consigneeId'
+  | 'consigneeType'
+  | 'partiesRelated'
+  | 'destinationCountry'
+  | 'hazardous'
+  | 'routedExport'
+
+export type SettingSource = { kind: 'default' } | { kind: 'carried'; lastUsed: string }
+export type SettingSources = Partial<Record<UnconfirmedSetting, SettingSource>>
+
+/** Every setting a fresh shipment starts with a value for that nobody has chosen. */
+export function defaultSettingSources(): SettingSources {
+  return {
+    consigneeType: { kind: 'default' },
+    partiesRelated: { kind: 'default' },
+    hazardous: { kind: 'default' },
+    routedExport: { kind: 'default' },
+  }
+}
+
+/**
+ * The sources after a saved consignee's values have been laid over the defaults.
+ *
+ * A blank carried value carries nothing, so it is not marked: a blank consignee id is a blank
+ * box, and a blank destination means "use the document".
+ */
+export function carriedSettingSources(
+  carried: Pick<ShipmentSettings, 'consigneeId' | 'destinationCountry'>,
+  lastUsed: string,
+): SettingSources {
+  const from: SettingSource = { kind: 'carried', lastUsed }
+  return {
+    ...defaultSettingSources(),
+    consigneeType: from,
+    partiesRelated: from,
+    ...(carried.consigneeId.trim() ? { consigneeId: from } : {}),
+    ...(carried.destinationCountry.trim() ? { destinationCountry: from } : {}),
+  }
+}
+
+/** Drops the mark from every setting whose value differs between two versions: a person changed it. */
+export function sourcesAfterEdit(sources: SettingSources, before: ShipmentSettings, after: ShipmentSettings): SettingSources {
+  const kept: SettingSources = {}
+  for (const key of Object.keys(sources) as UnconfirmedSetting[]) {
+    if (before[key] === after[key]) kept[key] = sources[key]
+  }
+  return kept
+}
+
+const CONSIGNEE_TYPE_LABELS: Record<ConsigneeType, string> = {
+  DIRECT_CONSUMER: 'Direct consumer',
+  RESELLER: 'Reseller',
+  GOVERNMENT_ENTITY: 'Government entity',
+  OTHER: 'Other / unknown',
+}
+
+/** A setting's value as the form will state it, for the check and the note beside the field. */
+export function describeSetting(key: UnconfirmedSetting, settings: ShipmentSettings): string {
+  switch (key) {
+    case 'consigneeId':
+      return `Consignee ID "${settings.consigneeId}"`
+    case 'consigneeType':
+      return `Consignee type "${CONSIGNEE_TYPE_LABELS[settings.consigneeType] ?? settings.consigneeType}"`
+    case 'partiesRelated':
+      return `Related parties "${settings.partiesRelated ? 'Yes' : 'No'}"`
+    case 'destinationCountry':
+      return `Country of destination "${settings.destinationCountry}"`
+    case 'hazardous':
+      return `Hazardous materials "${settings.hazardous ? 'Yes' : 'No'}"`
+    case 'routedExport':
+      return `Routed export "${settings.routedExport ? 'Yes' : 'No'}"`
+  }
+}
+
+/** Where an unconfirmed value came from, in the words used beside the field and in the check. */
+export function describeSource(source: SettingSource): string {
+  return source.kind === 'default'
+    ? 'the starting value, not chosen for this shipment'
+    : `carried from this consignee's shipment of ${source.lastUsed.slice(0, 10) || 'an earlier date'}`
+}
+
+/**
+ * Says which filed values nobody has chosen for this shipment.
+ *
+ * Warnings, not blocks (docs/adr/0007): the owner's standing preference where a manual
+ * correction exists. Both stay on the list until the person changes the value or confirms it,
+ * and both are saved with the shipment's record, so a form generated past them says so.
+ *
+ * `documentCountry` is the destination the document itself gives, or null. A carried
+ * destination is filed in place of it, which is the one carried value that can contradict the
+ * document rather than merely predate the shipment, so that disagreement gets its own line.
+ */
+export function unconfirmedSettingChecks(
+  settings: ShipmentSettings,
+  sources: SettingSources,
+  documentCountry: string | null,
+): CheckResult[] {
+  const open = (Object.keys(sources) as UnconfirmedSetting[]).filter((key) => sources[key])
+  const checks: CheckResult[] = [
+    {
+      id: 'settings-confirmed',
+      severity: 'warning',
+      title: 'Declared values chosen for this shipment',
+      detail: open.length
+        ? open.map((key) => `${describeSetting(key, settings)}: ${describeSource(sources[key] as SettingSource)}`).join(' · ') +
+          '. Each is filed as shown. Change any that is wrong, or confirm them under This shipment.'
+        : 'Consignee type, related parties, hazardous materials, routed export and any consignee ID or ' +
+          'destination were each set or confirmed for this shipment.',
+      passed: open.length === 0,
+      actual: open.length ? `${open.length} not confirmed` : undefined,
+    },
+  ]
+
+  const carriedCountry = sources.destinationCountry ? settings.destinationCountry.trim() : ''
+  const stated = documentCountry?.trim() ?? ''
+  if (carriedCountry && stated && carriedCountry.toUpperCase() !== stated.toUpperCase()) {
+    checks.push({
+      id: 'destination-carried-differs',
+      severity: 'warning',
+      title: 'Carried destination agrees with the document',
+      detail:
+        `Filing "${carriedCountry}", ${describeSource(sources.destinationCountry as SettingSource)}, but this ` +
+        `document gives "${stated}". Clear the field to use the document, or confirm the carried country.`,
+      passed: false,
+      expected: stated,
+      actual: carriedCountry,
+    })
+  }
+  return checks
+}
+
+/**
  * Checks over the assembled draft rather than the source document.
  *
  * `reconcile` can only prove what the CIPL says. These cover the other half — the fields a
