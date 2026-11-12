@@ -70,10 +70,34 @@ export function eeiBuckets(sliLines: SLILine[]): EeiBucket[] {
 const usd = (value: number) =>
   `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
-/** One advisory, of `info` severity: it reports a fact about the shipment and stops nothing. */
-export function eeiThresholdCheck(sliLines: SLILine[]): CheckResult[] {
+/**
+ * One advisory, of `info` severity: it reports a fact about the shipment and stops nothing.
+ *
+ * `currency` is the currency the rows are priced in. The figure is in US dollars and nothing
+ * here converts, so rows in any other currency, or in one that could not be read, are not
+ * compared at all: 20,000 yen is not $20,000, and advice built on it would be unsupported.
+ *
+ * The heading states the finding in each case and is not the passing condition restated,
+ * because the row is shown with an `info` badge and no "failed" beside it: "No commodity
+ * number totals over $2,500" above a list of the ones that do would read as its opposite.
+ */
+export function eeiThresholdCheck(sliLines: SLILine[], currency: string): CheckResult[] {
   if (!sliLines.length) return []
   const { thresholdUsd, citation, currentTo } = EEI_LOW_VALUE_EXEMPTION
+  if (currency.trim().toUpperCase() !== 'USD') {
+    return [
+      {
+        id: 'eei-low-value-exemption',
+        severity: 'info',
+        title: `Commodity totals not compared with the ${usd(thresholdUsd)} EEI figure`,
+        detail:
+          `The rows are priced in ${currency.trim() || 'a currency that could not be read'}, and the low-value ` +
+          `exemption (${citation}) is stated in US dollars. Nothing is converted here, so whether any commodity ` +
+          'number is over the figure has to be worked out from the US dollar values.',
+        passed: false,
+      },
+    ]
+  }
   const over = eeiBuckets(sliLines)
     .filter((b) => b.valueUsd > thresholdUsd)
     .sort((a, b) => b.valueUsd - a.valueUsd)
@@ -82,7 +106,10 @@ export function eeiThresholdCheck(sliLines: SLILine[]): CheckResult[] {
     {
       id: 'eei-low-value-exemption',
       severity: 'info',
-      title: `No commodity number totals over ${usd(thresholdUsd)}`,
+      title: over.length
+        ? `${over.length === 1 ? 'A commodity number totals' : `${over.length} commodity numbers total`} over ` +
+          `${usd(thresholdUsd)}: EEI filing required`
+        : `No commodity number totals over ${usd(thresholdUsd)}`,
       detail: over.length
         ? over
             .map((b) => `${b.scheduleB} ${b.domesticForeign}: ${usd(b.valueUsd)}${b.rows > 1 ? ` across ${b.rows} rows` : ''}`)

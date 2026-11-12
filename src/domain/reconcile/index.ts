@@ -403,7 +403,7 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
     ...exportControlChecks(options, mergedLines),
     ...sourceControlChecks(sliLines, mergedLines, options),
     ...capacityCheck(sliLines, options.maxRows),
-    ...eeiThresholdCheck(sliLines),
+    ...eeiThresholdCheck(sliLines, header.documentCurrency),
     ...enteredFigureChecks(entered),
     ...exportControlOverrideChecks(mergedLines, options),
   ]

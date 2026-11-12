@@ -35,8 +35,8 @@ const row = (scheduleB: string, domesticForeign: 'D' | 'F', valueUsd: number, ov
     ...over,
   }) as SLILine
 
-const only = (rows: SLILine[]) => {
-  const checks = eeiThresholdCheck(rows)
+const only = (rows: SLILine[], currency = 'USD') => {
+  const checks = eeiThresholdCheck(rows, currency)
   expect(checks).toHaveLength(1)
   return checks[0]
 }
@@ -123,7 +123,54 @@ describe('what the advisory will not conclude', () => {
   })
 
   it('says nothing about a shipment with no rows', () => {
-    expect(eeiThresholdCheck([])).toEqual([])
+    expect(eeiThresholdCheck([], 'USD')).toEqual([])
+  })
+
+  it('heads the row with what it found, never with a statement the detail contradicts', () => {
+    // The row carries an `info` badge and no "failed", so the heading is read as the result.
+    expect(only([row('8544.42.0000', 'F', 100)]).title).toBe('No commodity number totals over $2,500.00')
+    expect(only([row('8544.42.0000', 'F', 9000)]).title).toBe('A commodity number totals over $2,500.00: EEI filing required')
+    const two = only([row('8544.42.0000', 'F', 9000), row('9031.49.8000', 'D', 2600)])
+    expect(two.title).toBe('2 commodity numbers total over $2,500.00: EEI filing required')
+    expect(two.title).not.toMatch(/^No /)
+  })
+})
+
+describe('rows that are not priced in US dollars', () => {
+  it('compares nothing, names the currency, and gives no filing advice', () => {
+    // 20,000 yen is not $20,000.
+    const check = only([row('8544.42.0000', 'F', 20000), row('9031.49.8000', 'F', 10000)], 'JPY')
+    expect(check).toMatchObject({ severity: 'info', passed: false })
+    expect(check.title).toBe('Commodity totals not compared with the $2,500.00 EEI figure')
+    expect(check.detail).toContain('priced in JPY')
+    expect(check.detail).not.toContain('$20,000')
+    expect(check.detail).not.toContain('has to be filed')
+  })
+
+  it('treats a currency that could not be read the same way, and never as dollars', () => {
+    for (const unreadable of ['', '  ']) {
+      const check = only([row('8544.42.0000', 'F', 20000)], unreadable)
+      expect(check.passed).toBe(false)
+      expect(check.detail).toContain('a currency that could not be read')
+    }
+  })
+
+  it('reads USD however it is cased or padded', () => {
+    expect(only([row('8544.42.0000', 'F', 100)], ' usd ').passed).toBe(true)
+  })
+
+  it('is given the controlling currency by the reconciliation', async () => {
+    const parsed = await parseCipl('synthetic.pdf', await buildSyntheticCipl(simpleShipment()))
+    const yen = {
+      ...parsed,
+      headers: Object.fromEntries(
+        Object.entries(parsed.headers).map(([set, header]) => [set, { ...header, documentCurrency: 'JPY' }]),
+      ),
+    } as typeof parsed
+    const result = reconcile(yen, null, { eccn: 'EAR99', sme: 'N', license: 'NLR' })
+    const check = result.checks.find((c) => c.id === 'eei-low-value-exemption')
+    expect(check?.title).toBe('Commodity totals not compared with the $2,500.00 EEI figure')
+    expect(check?.detail).toContain('priced in JPY')
   })
 })
 

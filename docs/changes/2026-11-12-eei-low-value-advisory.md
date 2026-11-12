@@ -24,6 +24,9 @@ every figure that test needs and said nothing. Item 5(a) of the 2026-11 verifica
     the text was current to.
   - Where none is, it says so, and says this does not mean no filing is required, citing
     15 CFR 30.2(a)(1)(iv).
+  - Where the rows are not priced in US dollars, or the currency could not be read, it compares
+    nothing and says which currency they are in.
+  - The heading says what was found: none over, how many over, or not compared.
 - **Unchanged:**
   - Whether a shipment can be generated. Proved by the reconcile suites passing untouched and by
     the test that asserts the severity in both directions.
@@ -37,7 +40,7 @@ every figure that test needs and said nothing. Item 5(a) of the 2026-11 verifica
   on the keying sheet. They make the tool a record of filings and need a line in
   `docs/product.md` first.
 - Any other exemption in § 30.37, and every case in § 30.2(a)(1)(iv).
-- Currency conversion. The rows are already in US dollars.
+- Currency conversion. A document with no US dollar set is not compared.
 
 ## Against the rules
 
@@ -61,8 +64,8 @@ number and D/F. Rows are finer than that (they also split on ECCN, licence, SME 
 comparison per row would miss totals over the figure. "Over" is strictly greater: the exemption
 covers "$2,500 or less".
 
-**Check.** `eeiThresholdCheck(sliLines)` returns one `info` check, or none for no rows. Added to
-`reconcile()` after the capacity check.
+**Check.** `eeiThresholdCheck(sliLines, currency)` returns one `info` check, or none for no rows.
+Added to `reconcile()` after the capacity check, with the selected header's currency.
 
 ## Risks and rollback
 
@@ -85,6 +88,11 @@ covers "$2,500 or less".
   (2 fail); severity `warning` (2); caveat dropped; totals not sorted; always passing (1 or 2).
 - [x] Wired into `reconcile()` — proved by the same file through a real parse. Planted: the line
   removed (1 fails).
+- [x] Currency guard and headings — proved by the same file, including through `reconcile()` on a
+  parse whose headers say JPY. Found in review: the first version treated a document with no US
+  dollar set as dollars, and headed an over-the-figure result "No commodity number totals over
+  $2,500". Planted: currency never checked (3 fail); compared case-sensitively; `reconcile()`
+  always passing USD; the heading fixed to the passing statement (1 fails each).
 - [x] ADR 0008; README and `roadmap.md` brought into line.
 
 One planted defect survived at first: removing the per-row rounding alone changes nothing for

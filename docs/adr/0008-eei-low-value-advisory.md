@@ -34,7 +34,13 @@ normalised Schedule B number and D/F and:
 - where any total is over the figure, names each with its value and says the exemption does not
   cover it, so EEI has to be filed for it;
 - where none is, says so, and says in the same breath that this is the low-value exemption only
-  and does not mean no filing is required.
+  and does not mean no filing is required;
+- where the rows are not priced in US dollars, or the currency could not be read, compares
+  nothing and says so. Nothing is converted.
+
+The heading states what was found in each case. It is shown beside an `info` badge with no
+"failed" label, so a heading that restated the passing condition would read as the opposite of
+the detail under it.
 
 The figure, its citation, the source, the date the text was current to, the retrieval date and
 the last amendment are held together as one dated record, `EEI_LOW_VALUE_EXEMPTION`.
@@ -70,13 +76,14 @@ shipment under $2,500.
   Regulations are amended; the record's dates say when it last was.
 - The check depends on D/F being right (ADR 0006): an entry that moves a part between letters
   moves its value between totals.
-- The value is the one on the commodity rows, in US dollars from the USD document set, including
-  any figure entered by hand over a row.
+- The value is the one on the commodity rows, including any figure entered by hand over a row.
+  The comparison is made only when the controlling document set is priced in US dollars.
 
 ## Verification
 
 `src/domain/reconcile/eei.test.ts` fails if exactly $2,500 is counted as over, if rows are not
 summed, if D and F are summed together, if one number written two ways is counted twice, if the
-sum is taken in floating point, if the check warns or blocks, if the caveat is dropped, or if the
-check is missing from `reconcile()`. Eleven planted defects were run on 2026-11-12; each failed at
-least one test.
+sum is taken in floating point, if the check warns or blocks, if the caveat is dropped, if rows in
+another currency are compared as dollars, if the heading contradicts the detail, or if the check
+is missing from `reconcile()` or not given the controlling currency. Fifteen planted defects were
+run on 2026-11-12; each failed at least one test.
