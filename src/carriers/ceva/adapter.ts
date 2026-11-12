@@ -46,6 +46,7 @@ export function createCevaAdapter(): CarrierAdapter {
     maxCommodityRows: CEVA_MAX_ROWS,
     maxInlineReferences: 1,
     supportedModes: ['AIR', 'OCEAN'],
+    shippingWeightBox: 'the "Shipping Weight" column',
 
     defaults: {
       forwardingAgent: 'CEVA Logistics',

@@ -31,6 +31,7 @@ import {
   carriedSettingSources,
   checkDraft,
   defaultSettingSources,
+  shippingWeightBasisCheck,
   sourcesAfterEdit,
   unconfirmedSettingChecks,
   type SettingSources,
@@ -485,9 +486,11 @@ export function App() {
             ...reconciliation.checks,
             ...checkDraft(draft, adapter),
             ...unconfirmedSettingChecks(settings, settingSources, resolveDestinationCountry(reconciliation.header)),
+            // Only where an SLI is filled: a keyed carrier borrows an adapter and has no such box.
+            ...(keyedCarrier ? [] : [shippingWeightBasisCheck(adapter)]),
           ]
         : [],
-    [reconciliation, draft, adapter, settings, settingSources],
+    [reconciliation, draft, adapter, settings, settingSources, keyedCarrier],
   )
   const canGenerate = useMemo(
     () => checks.length > 0 && checks.every((c) => c.severity !== 'blocking' || c.passed),
