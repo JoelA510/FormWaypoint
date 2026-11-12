@@ -56,7 +56,11 @@ export function buildBookingSummary(header: ShipmentHeader, draft: SliDraft, car
     `Carrier: ${carrier?.trim() || draft.forwardingAgent.trim() || header.vesselAgent?.trim() || NOT_STATED}`,
     `Mode: ${draft.mode}`,
     `Incoterm: ${[draft.incoterm.trim(), draft.namedPlace.trim()].filter(Boolean).join(' ') || NOT_STATED}`,
-    `Ship date: ${draft.dateOfExportation.trim() || NOT_STATED}`,
+    `Invoice date: ${header.invoiceDate.trim() || NOT_STATED}`,
+    // The document's own ship date, or nothing. The draft's date of exportation falls back to
+    // the invoice date where a layout states no ship date, which is right for the form's box
+    // and wrong here: a forwarder would plan a collection against a date nobody gave.
+    `Ship date: ${header.shipDate?.trim() || NOT_STATED}`,
     `Pieces: ${pieces ?? NOT_STATED}`,
     `Gross weight: ${weight(header.totalGrossWeightKg) ?? NOT_STATED}`,
     // What the person typed for the forwarder, dimensions included: the one place those exist.

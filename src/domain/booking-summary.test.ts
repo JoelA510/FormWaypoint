@@ -37,6 +37,19 @@ describe('a layout that prints the package count and gross weight', () => {
     expect(line('Gross weight')).toBe(`Gross weight: ${kg.toFixed(3)} kg (${(kg * 2.2046226218).toFixed(1)} lb)`)
     for (const order of header.orderNumbers) expect(line('Order numbers')).toContain(order)
   })
+
+  it('does not pass the invoice date off as a ship date the document never states', async () => {
+    const parsed = await parseCipl('synthetic.pdf', await buildSyntheticCipl(simpleShipment()))
+    const reconciliation = reconcile(parsed, null, CONTROLLED)
+    const draft = buildDraft(reconciliation, EMPTY_PROFILE, defaultShipmentSettings(adapter), adapter)
+    // This layout prints no ship date, and the form's date of exportation falls back to the
+    // invoice date. That fallback must not reach a pickup request under the name "Ship date".
+    expect(reconciliation.header.shipDate).toBeNull()
+    expect(draft.dateOfExportation).toBe(reconciliation.header.invoiceDate)
+    const { line } = summarise(parsed)
+    expect(line('Ship date')).toBe('Ship date: not stated on the document')
+    expect(line('Invoice date')).toBe(`Invoice date: ${reconciliation.header.invoiceDate}`)
+  })
 })
 
 describe('a layout that prints no weights and no package count', () => {
@@ -64,6 +77,14 @@ describe('the in-house form', () => {
     expect(line('Destination')).toBe('Destination: Singapore')
     expect(line('Pieces')).toBe('Pieces: 2')
     expect(line('Gross weight')).toBe('Gross weight: 4.100 kg (9.0 lb)')
+  })
+
+  it('gives the ship date where the form has a box for exactly that', async () => {
+    const spec = { ...simpleInHouseCi(), shipDate: '08/12/2026' }
+    const parsed = await parseCiplFile('ci.xlsx', buildXlsx([{ name: 'INV', rows: inHouseCiGrid(spec) }]))
+    const { line } = summarise(parsed)
+    expect(line('Ship date')).toBe('Ship date: 08/12/2026')
+    expect(line('Invoice date')).toBe('Invoice date: 08/10/2026')
   })
 
   it('carries what was typed for the forwarder, dimensions included, a line at a time', async () => {

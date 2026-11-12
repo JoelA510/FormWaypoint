@@ -11,6 +11,8 @@ import { BookingSummaryPanel } from './booking-summary'
 
 const header = {
   invoiceNumber: 'CI-2026-0001',
+  invoiceDate: '08/10/2026',
+  shipDate: null,
   orderNumbers: ['4501234567'],
   purchaseOrders: [],
   vesselAgent: 'Nippon Express',
