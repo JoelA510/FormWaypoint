@@ -231,6 +231,7 @@ export function DangerousGoodsPanel({
    */
   const record = useCallback((): DgConsignmentRecord => {
     const now = Date.now()
+    const lapsedNow = dgRulesLapsed(localDate(new Date(now)))
     const fingerprint = JSON.stringify(consignment)
     const filed = records.find((r) => {
       if (JSON.stringify(r.consignment) !== fingerprint) return false
@@ -239,7 +240,13 @@ export function DangerousGoodsPanel({
       // satisfied "less than half an hour ago", and a genuinely new preparation then reused
       // its id and overwrote the earlier row with a back-dated one.
       const age = now - new Date(r.preparedAt).getTime()
-      return age >= 0 && age < SAME_PREPARATION_MS
+      if (!(age >= 0 && age < SAME_PREPARATION_MS)) return false
+      // And not across the day a later DGR took effect. The two downloads either side of it
+      // are prepared under different standing: the second carries the lapse on its checklist
+      // and in its checks, and landing it on the first would overwrite a record that says
+      // "current" with one stamped by the earlier date. A record from before the stamp
+      // existed can only have been prepared while the rules held.
+      return (r.rulesSource?.lapsedWhenPrepared ?? false) === lapsedNow
     })
     const preparedAt = filed?.preparedAt ?? new Date(now).toISOString()
     return {
@@ -262,7 +269,8 @@ export function DangerousGoodsPanel({
       rulesSource: {
         materials: DG_RULES_SOURCE.materials,
         supersededOn: DG_RULES_SOURCE.supersededOn,
-        lapsedWhenPrepared: dgRulesLapsed(localDate(new Date(preparedAt))),
+        // The same value either way: a record is only reused when its standing matches.
+        lapsedWhenPrepared: lapsedNow,
       },
     }
   }, [consignment, assessment, records])

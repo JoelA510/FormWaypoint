@@ -127,14 +127,20 @@ function Harness({
 }) {
   const [consignment, setConsignment] = useState<DgConsignment>(initial)
   const [links, setLinks] = useState<Record<string, string>>({})
+  // Fed back like `App.handleDgPrepared` does, the later write winning on a shared id, so the
+  // panel sees its own earlier record when deciding whether a download is the same preparation.
+  const [kept, setKept] = useState<DgConsignmentRecord[]>(records)
   return (
     <DangerousGoodsPanel
       profile={EMPTY_PROFILE}
       bridge={bridge}
-      records={records}
+      records={kept}
       consignment={consignment}
       onConsignmentChange={setConsignment}
-      onPrepared={onPrepared}
+      onPrepared={(record) => {
+        setKept((prev) => [...prev.filter((r) => r.id !== record.id), record])
+        onPrepared(record)
+      }}
       cipl={cipl}
       ciplLinks={links}
       onCiplLinks={(next) => setLinks((prev) => ({ ...prev, ...next }))}
@@ -599,6 +605,20 @@ describe('the retention record of a prepared consignment', () => {
     expect(written[1]).toContain('**warning** — Rules not superseded by a later DGR')
     expect(kept.at(-1)?.rulesSource?.lapsedWhenPrepared).toBe(true)
     expect(kept.at(-1)?.checks.find((c) => c.id === 'dg.rules-current')?.passed).toBe(false)
+    // Twenty minutes apart, the same consignment, and still two preparations: the later one
+    // must not land on the earlier record and restamp it.
+    expect(kept.at(-1)?.id).not.toBe(kept[0].id)
+    expect(kept[0].rulesSource?.lapsedWhenPrepared).toBe(false)
+    const rows = [...view().querySelectorAll('tr')].map((r) => r.textContent ?? '')
+    expect(rows.filter((r) => r.includes('rules superseded 2027-01-01'))).toHaveLength(1)
+  })
+
+  it('still treats two downloads minutes apart as one preparation when nothing changed between them', async () => {
+    const { written, kept } = await prepareOn(new Date(2026, 11, 30, 10, 0))
+    vi.setSystemTime(new Date(2026, 11, 30, 10, 5))
+    await click(button('Download the package checklist'))
+    expect(written).toHaveLength(2)
+    expect(kept.map((r) => r.id)).toEqual([kept[0].id, kept[0].id])
   })
 
   it('records the lapse on a consignment prepared the day a later DGR takes effect', async () => {

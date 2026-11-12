@@ -129,6 +129,11 @@ until both acknowledgements are ticked. Neither is saved. The history table adds
   31 December generates nothing at 00:10 until the second box is ticked. Planted: the re-read
   removed from the checklist download (1 fails). The declaration download carries the same guard
   and is statically reviewed only; no test draws the PDF through the panel.
+- [x] Two downloads either side of the day stay two records — proved by the same file, with the
+  harness feeding saved records back as `App` does: the later download gets its own id and stamp
+  and the earlier record is left as written; two downloads five minutes apart on one day are
+  still one preparation. Planted: the standing not compared (1 fails). Review caught this one
+  too; the first test of the midnight case did not feed records back and could not see it.
 - [x] History marker — proved by the same file. Planted: marker removed (1 fails).
 - [x] Decode path — proved by `src/store/decode.test.ts`: a record saved before the field, a
   stamped one, and five unreadable stamps. Planted: unreadable stamp trusted (1 fails).
