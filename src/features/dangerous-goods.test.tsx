@@ -580,6 +580,27 @@ describe('the retention record of a prepared consignment', () => {
     expect(kept[0].checks.find((c) => c.id === 'dg.rules-current')?.passed).toBe(true)
   })
 
+  it('generates nothing on a screen acknowledged before the day and left open across it', async () => {
+    const { written, kept } = await prepareOn(new Date(2026, 11, 31, 23, 50))
+    expect(written).toHaveLength(1)
+
+    // Midnight passes with the screen open and its one acknowledgement still ticked.
+    vi.setSystemTime(new Date(2027, 0, 1, 0, 10))
+    await click(button('Download the package checklist'))
+    expect(written).toHaveLength(1)
+    expect(kept).toHaveLength(1)
+    expect(view().querySelector('[role="alert"]')?.textContent).toContain(DG_RULES_LAPSED_NOTICE)
+    expect(button('Download the package checklist')?.disabled).toBe(true)
+
+    await act(async () => view().querySelector<HTMLInputElement>('[role="alert"] input')!.click())
+    await click(button('Download the package checklist'))
+    expect(written).toHaveLength(2)
+    expect(written[1]).toContain(DG_RULES_LAPSED_NOTICE)
+    expect(written[1]).toContain('**warning** — Rules not superseded by a later DGR')
+    expect(kept.at(-1)?.rulesSource?.lapsedWhenPrepared).toBe(true)
+    expect(kept.at(-1)?.checks.find((c) => c.id === 'dg.rules-current')?.passed).toBe(false)
+  })
+
   it('records the lapse on a consignment prepared the day a later DGR takes effect', async () => {
     const { written, kept } = await prepareOn(new Date(2027, 0, 1, 9, 0))
     expect(written[0]).toContain(DG_RULES_LAPSED_NOTICE)

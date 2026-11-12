@@ -143,7 +143,24 @@ export function DangerousGoodsPanel({
   const [saved, setSaved] = useState<Delivery | null>(null)
   const [ciplNotes, setCiplNotes] = useState<string[] | null>(null)
 
-  const assessment = useMemo(() => assess(consignment), [consignment])
+  // The local date the assessment and the Generate card were last drawn for. Held as state
+  // because the calendar moving on renders nothing by itself: a screen acknowledged on
+  // 31 December and left open would otherwise go on offering the downloads on 1 January
+  // without the second acknowledgement (docs/adr/0005).
+  const [today, setToday] = useState(() => localDate())
+  const assessment = useMemo(() => assess(consignment, today), [consignment, today])
+
+  /**
+   * Re-reads the date at the moment a download is asked for. False when a later DGR has taken
+   * effect since the screen was drawn: nothing is generated, and the re-render this causes
+   * shows the lapse and its acknowledgement, so the next click is an informed one.
+   */
+  const dateStillHolds = (): boolean => {
+    const current = localDate()
+    if (current === today) return true
+    setToday(current)
+    return dgRulesLapsed(current) === dgRulesLapsed(today)
+  }
   const declaration = useMemo(() => buildDeclaration(consignment, assessment), [consignment, assessment])
 
   const patch = useCallback(
@@ -277,6 +294,7 @@ export function DangerousGoodsPanel({
     // double-click that writes two files is noise while one that writes two audit rows is
     // misinformation.
     if (busy) return
+    if (!dateStillHolds()) return
     setBusy(true)
     setError(null)
     setWarnings([])
@@ -304,6 +322,7 @@ export function DangerousGoodsPanel({
     // Guarded like the declaration: each run appends a retention record, and a double-click
     // that writes two files is noise while one that writes two audit rows is misinformation.
     if (busy) return
+    if (!dateStillHolds()) return
     setBusy(true)
     setError(null)
     // And cleared like it. The warnings come from drawing the declaration; left standing
@@ -647,6 +666,7 @@ export function DangerousGoodsPanel({
         bridge={bridge}
         onGenerate={() => void generateDeclaration()}
         onChecklist={() => void downloadChecklist()}
+        onDate={today}
       />
 
       <DgHistoryPanel records={records} />

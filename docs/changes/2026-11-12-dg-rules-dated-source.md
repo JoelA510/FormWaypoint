@@ -82,7 +82,7 @@ with the same notice, as on 12 November 2026. Item 3 of the 2026-11 verification
 UTC date calls the afternoon of 31 December the new year across the United States.
 
 **Assessment.** `assess(consignment, onDate = localDate())` appends `rulesCurrencyCheck(onDate)`
-after `canGenerate` is decided.
+after `canGenerate` is decided. The panel passes the date it holds in state.
 
 **Persisted record.** `DgConsignmentRecord.rulesSource?: { materials, supersededOn,
 lapsedWhenPrepared }`, copied from the constant at preparation so a record goes on saying what it
@@ -103,9 +103,10 @@ until both acknowledgements are ticked. Neither is saved. The history table adds
 - **Risk:** the lapse warning becomes one more box ticked without reading — **watch:** it stays
   failing on every consignment and printed on every checklist until the figures are updated —
   **if it happens:** ADR 0005 is revisited and the check made blocking, a one-word change.
-- **Risk:** the app is left open across midnight on 31 December; the assessment is memoised on the
-  consignment and keeps the old date until something is edited — **watch:** the Generate card and
-  the checklist read the date when they render or print, so both show the lapse regardless.
+- **Risk:** the app is left open across midnight on 31 December — **watch:** the panel holds the
+  date it was drawn for and re-reads it when a download is asked for; if a later DGR has taken
+  effect in between, nothing is generated and the lapse and its acknowledgement are shown. The
+  first version of this change did not do this and review caught it.
 - **Rollback:** revert the commit. Records already written keep an extra `rulesSource` field,
   which the older decoder passes through untouched.
 
@@ -124,6 +125,10 @@ until both acknowledgements are ticked. Neither is saved. The history table adds
   required (1 fails).
 - [x] `rulesSource` on the retention record — proved by the same file, downloading a checklist
   through the panel with the clock on either side of the day. Planted: stamp hard-coded (1 fails).
+- [x] The date re-read at the click — proved by the same file: a screen acknowledged at 23:50 on
+  31 December generates nothing at 00:10 until the second box is ticked. Planted: the re-read
+  removed from the checklist download (1 fails). The declaration download carries the same guard
+  and is statically reviewed only; no test draws the PDF through the panel.
 - [x] History marker — proved by the same file. Planted: marker removed (1 fails).
 - [x] Decode path — proved by `src/store/decode.test.ts`: a record saved before the field, a
   stamped one, and five unreadable stamps. Planted: unreadable stamp trusted (1 fails).
