@@ -48,7 +48,7 @@ describe('a layout that prints the package count and gross weight', () => {
     expect(draft.dateOfExportation).toBe(reconciliation.header.invoiceDate)
     const { line } = summarise(parsed)
     expect(line('Ship date')).toBe('Ship date: not stated on the document')
-    expect(line('Invoice date')).toBe(`Invoice date: ${reconciliation.header.invoiceDate}`)
+    expect(line('Invoice date')).toBeUndefined()
   })
 })
 
@@ -63,6 +63,18 @@ describe('a layout that prints no weights and no package count', () => {
     // The net weight and the quantity exist, and are not offered in their place.
     expect(text).not.toMatch(/Gross weight: \d/)
     expect(text).not.toMatch(/Pieces: \d/)
+  })
+
+  it('gives its one date once, as the ship date it is, and not again as an invoice date', async () => {
+    // This layout prints a ship date and no invoice date. Its parser copies the ship date into
+    // `invoiceDate` so the forms have something for their box; that copy is not a document fact.
+    const parsed = await parseCipl('synthetic-b.pdf', await buildVendorBPdf(wholeShipment()))
+    const { text, line, header } = summarise(parsed)
+    expect(header.shipDate).toBeTruthy()
+    expect(header.invoiceDate).toBe(header.shipDate)
+    expect(line('Ship date')).toBe(`Ship date: ${header.shipDate}`)
+    expect(line('Invoice date')).toBeUndefined()
+    expect(text.split(header.shipDate as string)).toHaveLength(2)
   })
 })
 
@@ -84,7 +96,7 @@ describe('the in-house form', () => {
     const parsed = await parseCiplFile('ci.xlsx', buildXlsx([{ name: 'INV', rows: inHouseCiGrid(spec) }]))
     const { line } = summarise(parsed)
     expect(line('Ship date')).toBe('Ship date: 08/12/2026')
-    expect(line('Invoice date')).toBe('Invoice date: 08/10/2026')
+    expect(line('Invoice date')).toBeUndefined()
   })
 
   it('carries what was typed for the forwarder, dimensions included, a line at a time', async () => {

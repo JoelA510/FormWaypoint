@@ -78,8 +78,11 @@ export function buildBookingSummary(header: ShipmentHeader, draft: SliDraft, car
     `Carrier: ${carrier?.trim() || draft.forwardingAgent.trim() || header.vesselAgent?.trim() || NOT_STATED}`,
     `Mode: ${draft.mode}`,
     `Incoterm: ${incotermLine(draft) ?? NOT_STATED}`,
-    `Invoice date: ${header.invoiceDate.trim() || NOT_STATED}`,
-    // The document's own ship date, or nothing. The draft's date of exportation falls back to
+    // The document's own ship date, or nothing. No invoice date is given beside it: a pickup
+    // request does not need one, and `header.invoiceDate` is not always a date the document
+    // prints (the `vendor-b` layout states only a ship date, which its parser copies there
+    // for the forms' sake), so printing it would state as a document fact a date it lacks.
+    // The draft's date of exportation falls back to
     // the invoice date where a layout states no ship date, which is right for the form's box
     // and wrong here: a forwarder would plan a collection against a date nobody gave.
     `Ship date: ${header.shipDate?.trim() || NOT_STATED}`,
