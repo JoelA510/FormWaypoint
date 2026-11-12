@@ -28,6 +28,7 @@ import { MAX_SHEETS, pagesNeeded } from '../../lib/pagination'
 import { largestRemainder, placesFor } from '../../lib/apportion'
 import type { ItemLibraryEntry } from '../item-library'
 import { partKey } from '../part-key'
+import { eeiThresholdCheck } from './eei'
 import {
   aggregateLines,
   applyUnitWeights,
@@ -402,6 +403,7 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
     ...exportControlChecks(options, mergedLines),
     ...sourceControlChecks(sliLines, mergedLines, options),
     ...capacityCheck(sliLines, options.maxRows),
+    ...eeiThresholdCheck(sliLines, header.documentCurrency),
     ...enteredFigureChecks(entered),
     ...exportControlOverrideChecks(mergedLines, options),
   ]

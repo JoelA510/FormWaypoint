@@ -38,6 +38,7 @@ B refresh, which cannot work in a browser.
 | **Item library** | ✅ Done | Item-master import (.xlsx/.csv/.tsv, columns matched by heading, explicit weight unit) supplying per-part weights, with the `####.##.####` + concordance filter flagging codes to fix by part number. |
 | **Nippon Express adapter** | ✅ Done | Blank form 01/04/2022, 8 commodity rows, per-cell fields. |
 | **CEVA adapter** | ✅ Done | Blank form 11201-C3 rev. 8/2023, multiline column fields, whole-dollar values. |
+| **EEI low-value advisory** | ✅ Done | An information-only check naming each Schedule B number whose total, with D and F counted apart, is over $2,500, so the low-value exemption (15 CFR 30.37(a)) does not cover it. The figure is held as dated data with its source. Never concludes that no filing is required (ADR 0008). |
 | **Unchosen declared values** | ✅ Done | Consignee type, related parties, hazardous and routed export start at fixed values, and a saved consignee's ID, type, related-party status and destination are carried; each is named in a warning, with the date it was last used, until changed or confirmed for the shipment. A carried destination that disagrees with the document is reported (ADR 0007). |
 | **Review screen** | ✅ Done | Per-field provenance, blocking/advisory checks, classification overrides with reason and approver. |
 | **FedEx / UPS** | ✅ Done | Keying sheets ordered the way Ship Manager and WorldShip prompt, for manual entry. |
@@ -58,7 +59,7 @@ B refresh, which cannot work in a browser.
 | **DG fill from the CIPL** | ✅ Done | Consignee, reference and one entry per part from the CIPL loaded in Standard Shipping; count, net weight and package count offered a click at a time, only where the CIPL's own totals prove them (ADR 0004). |
 | **Nothing pre-answered (DG)** | ✅ Done | Battery classification inputs, condition, packaging, counts and co-packing start unanswered and block until chosen. |
 | **Dated rules source (DG)** | ✅ Done | The course materials and the first day a later DGR is in force held as one dated record; printed on every checklist and kept on every retention record. From that day a warning check fails, the checklist says so, and generating asks for a second acknowledgement (ADR 0005). Warns, never blocks. |
-| **Regression suite** | ✅ Done | 1,174 TypeScript tests on synthetic documents and the lithium battery course's own worked scenarios, 104 more against six real shipments where those (gitignored) documents are present, and Rust unit tests for the shell's path handling. |
+| **Regression suite** | ✅ Done | 1,192 TypeScript tests on synthetic documents and the lithium battery course's own worked scenarios, 104 more against six real shipments where those (gitignored) documents are present, and Rust unit tests for the shell's path handling. |
 | **Desktop packaging seam** | ✅ Done | `localStore` is the single named implementation, IndexedDB in the browser and in the desktop webview alike. Windows-only target; WebView2 covers every platform API the app uses. |
 | **Desktop build (.exe)** | ✅ Done | Tauri v2 shell; the Windows installer is built by the `Desktop build` workflow. Seven Rust commands, no plugins and no decisions. TLS goes through the OS certificate store, so a corporate inspection CA is trusted, and an environment proxy is honoured. |
 | **Schedule B revision diff** | ✅ Done | `src/domain/schedule-b/revision.ts` — diffs two datasets, intersects the result with the item library by part, and renders the change log and CSV worklist. Pure logic, no filesystem or network. |
@@ -171,6 +172,7 @@ Two boundaries are deliberate and should stay:
 
 | Date | Milestone | Details |
 | :--- | :--- | :--- |
+| 2026-11-12 | **EEI low-value advisory** | The checks name the commodity totals over $2,500 that the low-value exemption does not cover, as information (ADR 0008). |
 | 2026-11-12 | **Unchosen declared values named** | Starting values and values carried from a consignee's last shipment are listed in a warning and on the manual fields until confirmed (ADR 0007). |
 | 2026-11-12 | **D/F entered per part** | D or F can be entered against a part where the country of origin does not settle it, and a blank origin is warned about by name where it used to file as foreign silently (ADR 0006). |
 | 2026-11-12 | **DG rules carry a dated source** | The dangerous goods figures name their source and the day a later DGR takes effect as data. Checklists and retention records carry it, and from 1 January 2027 a warning check, the checklist and a second acknowledgement say the figures are superseded (ADR 0005). |

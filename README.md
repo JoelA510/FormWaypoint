@@ -86,6 +86,11 @@ of defaulting to zero.
    instead — and the review screen lets you change the unit before anything is generated.
 8. **Proves the arithmetic** before generating anything. Quantities, weights and values must
    sum back to the totals printed on the source document.
+   It also says, as information and never as a block, which Schedule B numbers total over
+   $2,500 with domestic and foreign goods counted apart, because the low-value exemption from
+   filing Electronic Export Information (15 CFR 30.37(a)) does not cover those. It never says
+   that no filing is required: licensed shipments and the other cases in 15 CFR 30.2(a)(1)(iv)
+   need one whatever the value (`docs/adr/0008-eei-low-value-advisory.md`).
 9. **Fills the carrier's real blank form** and downloads it, still editable and unsigned.
 
 ## Supported carriers
