@@ -173,12 +173,15 @@ export function eeiThresholdCheck(sliLines: SLILine[], currency: string): CheckR
   if (diamonds.length) {
     pointers.push(`${diamonds.join(', ')} ${diamonds.length === 1 ? 'is' : 'are'} rough diamonds, which need EEI whatever the value`)
   }
-  // § 758.1(b)(3): 600-series and 9x515 items need EEI whatever the value or destination.
+  // § 758.1(b)(3): 600-series and 9x515 items need EEI whatever the value or destination, but
+  // only those in paragraphs .a through .x. A `.y` item is outside it, and is left to the value,
+  // licence and destination checks like any other.
   const series = [
     ...new Set(
       sliLines
         .map((l) => (l.eccn ?? '').trim().toUpperCase())
-        .filter((eccn) => /^\d[A-E]6\d\d/.test(eccn) || /^9[A-E]515/.test(eccn)),
+        .filter((eccn) => /^\d[A-E]6\d\d/.test(eccn) || /^9[A-E]515/.test(eccn))
+        .filter((eccn) => !/^\w{5}\.Y\b/.test(eccn)),
     ),
   ]
   if (series.length) {
@@ -277,9 +280,25 @@ export function eeiDestinationCheck(
   lines: Pick<SLILine, 'scheduleB' | 'eccn'>[],
 ): CheckResult[] {
   const { code, known } = toIsoAlpha2(destinationCountry)
-  if (!known) return []
   const record = EEI_BY_DESTINATION
   const basis = `${record.citation}, as the eCFR read on ${record.currentTo}`
+  if (!destinationCountry.trim()) return []
+  // A destination typed in a form the country table does not read cannot be ruled in or out.
+  // Said, rather than treated as a destination where neither rule applies.
+  if (!known) {
+    return [
+      {
+        id: 'eei-destination',
+        severity: 'warning',
+        title: 'EEI destination rules could not be checked',
+        detail:
+          `"${destinationCountry.trim()}" is not a country name this tool recognises, so whether it is in Country ` +
+          `Group E:1 or E:2, or is China, Hong Kong, Russia or Venezuela, could not be checked (${basis}(1), (10)). ` +
+          'Enter the country by its name to have it checked.',
+        passed: false,
+      },
+    ]
+  }
 
   const group = Object.entries(record.countryGroupE).find(([, codes]) => codes.includes(code))?.[0]
   if (group) {

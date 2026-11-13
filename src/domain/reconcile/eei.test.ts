@@ -280,7 +280,14 @@ describe('the cases the destination decides (15 CFR 758.1(b))', () => {
     expect(eeiDestinationCheck('China', lines('EAR99', ' ear99 '))).toEqual([])
     expect(eeiDestinationCheck('Singapore', lines('5A992.c'))).toEqual([])
     expect(eeiDestinationCheck('', lines('5A992.c'))).toEqual([])
-    expect(eeiDestinationCheck('Ruritania', lines('5A992.c'))).toEqual([])
+  })
+
+  it('says the destination rules could not be checked for a destination it cannot read', () => {
+    for (const destination of ['China (CN)', 'Ruritania']) {
+      const [check] = eeiDestinationCheck(destination, lines('5A992.c'))
+      expect(check, destination).toMatchObject({ severity: 'warning', title: 'EEI destination rules could not be checked' })
+      expect(check.detail).toContain(`"${destination}"`)
+    }
   })
 
   it('says it cannot tell when rows going to those destinations have no ECCN', () => {
@@ -306,6 +313,14 @@ describe('600-series and 9x515 items', () => {
       expect(check.severity, eccn).toBe('warning')
       expect(check.detail).toContain('600 series or 9x515')
     }
+  })
+
+  it('leaves out .y items, which the rule does not cover', () => {
+    for (const eccn of ['9A610.y', '9A610.y.1', '0A606.Y', '9A515.y.2']) {
+      expect(only([row('8544.42.0000', 'F', 100, { eccn })]).severity, eccn).toBe('info')
+    }
+    // A .y item over the figure still needs filing on value.
+    expect(only([row('8544.42.0000', 'F', 9000, { eccn: '9A610.y' })]).severity).toBe('warning')
   })
 
   it('does not take an ordinary ECCN for one', () => {

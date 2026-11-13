@@ -31,7 +31,10 @@ this exporter's shipments:
   required whatever the value for a Country Group E destination, and for any ECCN other than EAR99
   going to China, Hong Kong, Russia or Venezuela, naming the ECCNs and the GOV exemption. Where
   rows going to those four have no ECCN, it says whether they are controlled cannot be told.
-- The value check adds a 600-series or 9x515 ECCN to its pointers.
+- The value check adds a 600-series or 9x515 ECCN to its pointers, except a `.y` item, which
+  § 758.1(b)(3) leaves out ("paragraphs .a through .x").
+- A destination the country table cannot read raises a warning that the destination rules could
+  not be checked, rather than passing as a destination where neither applies.
 - Both lists are held as dated data with their source, `EEI_BY_DESTINATION`.
 - Warnings only, never a block (AGENTS.md project rule 6).
 
