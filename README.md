@@ -95,7 +95,10 @@ of defaulting to zero.
    It also says whether Electronic Export Information has to be filed, never as a block. Any
    Schedule B number totalling over $2,500, with domestic and foreign goods counted apart, raises
    a warning that a filing is required (15 CFR 30.37(a)). A licence other than NLR, or a
-   rough-diamond heading, raises a warning that one may be required whatever the value. Otherwise
+   rough-diamond heading, raises a warning that one may be required whatever the value, as does a
+   600-series or 9x515 ECCN, an ECCN other than EAR99 going to China, Hong Kong, Russia or
+   Venezuela, or any shipment to a Country Group E:1 or E:2 destination
+   (`docs/adr/0010-eei-by-destination.md`). Otherwise
    it says no filing is needed on value and lists the cases in 15 CFR 30.2(a)(1)(iv) that would
    change that, most of which only you can confirm. Nothing about EEI goes on the forms
    (`docs/adr/0009-eei-filing-warning.md`).

@@ -5,7 +5,17 @@
  * document shape influences that.
  */
 import { describe, expect, it } from 'vitest'
-import { EEI_LOW_VALUE_EXEMPTION, EEI_REGARDLESS_OF_VALUE, eeiBuckets, eeiThresholdCheck } from './eei'
+import {
+  EEI_BY_DESTINATION,
+  EEI_LOW_VALUE_EXEMPTION,
+  EEI_REGARDLESS_OF_VALUE,
+  eeiBuckets,
+  eeiDestinationCheck,
+  eeiThresholdCheck,
+} from './eei'
+import { checkDraft } from '../draft'
+import { getAdapter } from '../../carriers/registry'
+import type { SliDraft } from '../../carriers/types'
 import { reconcile } from '.'
 import { createScheduleBIndex } from '../schedule-b'
 import { buildSyntheticCipl, simpleShipment } from '../../test/synthetic/cipl'
@@ -235,5 +245,72 @@ describe('through the reconciliation', () => {
     const over = eeiBuckets(result.sliLines).filter((b) => b.valueUsd > 2500)
     expect(check?.passed).toBe(over.length === 0)
     for (const b of over) expect(check?.detail).toContain(`${b.scheduleB} ${b.domesticForeign}`)
+  })
+})
+
+describe('the cases the destination decides (15 CFR 758.1(b))', () => {
+  const lines = (...eccns: (string | null)[]) => eccns.map((eccn, i) => ({ scheduleB: `8544.42.000${i}`, eccn }))
+
+  it('holds both lists as dated data with their source', () => {
+    expect(EEI_BY_DESTINATION.countryGroupE).toEqual({ 'E:1': ['IR', 'KP', 'SY'], 'E:2': ['CU'] })
+    expect(EEI_BY_DESTINATION.cclDestinations).toEqual(['CN', 'HK', 'RU', 'VE'])
+    expect(EEI_BY_DESTINATION.currentTo).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+  })
+
+  it('warns that EEI is required for a Country Group E destination, whatever the items', () => {
+    for (const destination of ['Cuba', 'Iran', 'North Korea', 'Syrian Arab Republic', 'IR']) {
+      const [check] = eeiDestinationCheck(destination, lines('EAR99'))
+      expect(check, destination).toMatchObject({ id: 'eei-destination', severity: 'warning', passed: false })
+      expect(check.detail).toContain('Country Group E:')
+    }
+  })
+
+  it('warns that EEI is required for controlled items to China, Hong Kong, Russia or Venezuela, naming them', () => {
+    for (const destination of ['China', "China, People's Republic of", 'Hong Kong', 'Russia', 'Venezuela']) {
+      const [check] = eeiDestinationCheck(destination, lines('EAR99', '5A992.c'))
+      expect(check, destination).toMatchObject({ severity: 'warning', passed: false })
+      expect(check.title).toBe('EEI filing required whatever the value: controlled items to this destination')
+      expect(check.detail).toContain('Items classified 5A992.c')
+      expect(check.detail).toContain('License Exception GOV')
+    }
+    expect(eeiDestinationCheck('Hong Kong', lines('5A992.c'))[0].detail).toContain('Hong Kong counts as China')
+  })
+
+  it('says nothing for EAR99 items to those destinations, and nothing for an ordinary destination', () => {
+    expect(eeiDestinationCheck('China', lines('EAR99', ' ear99 '))).toEqual([])
+    expect(eeiDestinationCheck('Singapore', lines('5A992.c'))).toEqual([])
+    expect(eeiDestinationCheck('', lines('5A992.c'))).toEqual([])
+    expect(eeiDestinationCheck('Ruritania', lines('5A992.c'))).toEqual([])
+  })
+
+  it('says it cannot tell when rows going to those destinations have no ECCN', () => {
+    const [check] = eeiDestinationCheck('Russia', lines('EAR99', null, ''))
+    expect(check.title).toBe('EEI filing may be required whatever the value: ECCN not entered')
+    expect(check.detail).toContain('2 row(s) have no ECCN entered')
+  })
+
+  it('is part of the draft checks, read from the destination the draft will file', () => {
+    const draft = { destinationCountry: 'China', lines: [row('8544.42.0000', 'F', 100, { eccn: '5A992.c' })] }
+    const checks = checkDraft(
+      { ...draft, usppiName: '', usppiEin: '', usppiZip: '', pointOfOrigin: '', signerName: '', signerTitle: '', dateOfExportation: '', mode: 'AIR', shipmentReference: '' } as unknown as SliDraft,
+      getAdapter('nippon-express'),
+    )
+    expect(checks.find((c) => c.id === 'eei-destination')?.severity).toBe('warning')
+  })
+})
+
+describe('600-series and 9x515 items', () => {
+  it('warns that EEI is required whatever the value, under the figure', () => {
+    for (const eccn of ['9A610.x', '0A606.a', '9A515.e']) {
+      const check = only([row('8544.42.0000', 'F', 100, { eccn })])
+      expect(check.severity, eccn).toBe('warning')
+      expect(check.detail).toContain('600 series or 9x515')
+    }
+  })
+
+  it('does not take an ordinary ECCN for one', () => {
+    for (const eccn of ['5A992.c', '3A001.a', '9A991.d', 'EAR99']) {
+      expect(only([row('8544.42.0000', 'F', 100, { eccn })]).severity, eccn).toBe('info')
+    }
   })
 })
