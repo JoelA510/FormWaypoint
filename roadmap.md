@@ -162,11 +162,9 @@ Two boundaries are deliberate and should stay:
 
 ## Open questions
 
-- **Box 26 net vs gross.** All historical shipments enter net weight into a box captioned
-  "Gross Shipping Weight", and ADR 0001 keeps it that way. Shipping weight for the export
-  filing includes packaging (15 CFR 30.6(a)(16)); what each forwarder transmits from the box is
-  the open question, and only they can answer it. Until then every filled SLI carries an
-  information note, `shipping-weight-is-net`, saying so in its checks and history record.
+- **Box 26 net vs gross.** Settled by the owner, 2026-11-13: the forwarders need the net weight
+  per row there, and take the gross weight from the commercial invoice rather than adding up the
+  rows. ADR 0001 stands. Every filled SLI keeps its information note, `shipping-weight-is-net`.
 - **K78455CW** was cited in an early field-mapping analysis but its documents have not been
   provided, so its totals are unverified and it is not a fixture.
 - **Item-master cleanup.** One imported library flags 1,456 of 2,856 rows — import-HTS
