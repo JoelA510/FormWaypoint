@@ -92,11 +92,13 @@ of defaulting to zero.
    instead — and the review screen lets you change the unit before anything is generated.
 8. **Proves the arithmetic** before generating anything. Quantities, weights and values must
    sum back to the totals printed on the source document.
-   It also says, as information and never as a block, which Schedule B numbers total over
-   $2,500 with domestic and foreign goods counted apart, because the low-value exemption from
-   filing Electronic Export Information (15 CFR 30.37(a)) does not cover those. It never says
-   that no filing is required: licensed shipments and the other cases in 15 CFR 30.2(a)(1)(iv)
-   need one whatever the value (`docs/adr/0008-eei-low-value-advisory.md`).
+   It also says whether Electronic Export Information has to be filed, never as a block. Any
+   Schedule B number totalling over $2,500, with domestic and foreign goods counted apart, raises
+   a warning that a filing is required (15 CFR 30.37(a)). A licence other than NLR, or a
+   rough-diamond heading, raises a warning that one may be required whatever the value. Otherwise
+   it says no filing is needed on value and lists the cases in 15 CFR 30.2(a)(1)(iv) that would
+   change that, most of which only you can confirm. Nothing about EEI goes on the forms
+   (`docs/adr/0009-eei-filing-warning.md`).
 9. **Fills the carrier's real blank form** and downloads it, still editable and unsigned.
 
 ## Supported carriers
