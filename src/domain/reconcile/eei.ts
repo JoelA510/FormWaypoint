@@ -16,6 +16,7 @@
  */
 import type { CheckResult, SLILine } from '../types'
 import { formatScheduleB, normalizeScheduleB } from '../schedule-b'
+import { toIsoAlpha2 } from '../countries'
 
 /**
  * The figure, held as dated data with its source. Read from the regulation, never from memory:
@@ -46,10 +47,14 @@ export const EEI_REGARDLESS_OF_VALUE = {
   currentTo: '2026-11-10',
   retrieved: '2026-11-13',
   lastAmended: '91 FR 35384, June 11, 2026',
+  /** Read again from the eCFR, at the owner's direction, and found unchanged. */
+  rechecked: '2026-11-13',
   roughDiamondHeadings: ['710210', '710221', '710231'],
   /** The cases in the order the paragraph lists them, in the words the warning uses. */
   cases: [
-    'a licence from the Bureau of Industry and Security, or reporting the EAR requires (15 CFR 758.1(b))',
+    'a licence from the Bureau of Industry and Security, or reporting the EAR requires (15 CFR 758.1(b)), ' +
+      'which includes any item with an ECCN other than EAR99 going to China, Hong Kong, Russia or Venezuela, ' +
+      'and 600-series or 9x515 items going anywhere',
     'a State Department (ITAR) licence, or an item subject to the ITAR though exempt from licensing',
     'a DEA export permit or declaration',
     'a Nuclear Regulatory Commission export licence',
@@ -58,6 +63,25 @@ export const EEI_REGARDLESS_OF_VALUE = {
     'used self-propelled vehicles',
     'a destination in Country Group E:1 or E:2 (15 CFR 758.1(b)(1))',
   ],
+} as const
+
+/**
+ * The cases in 15 CFR 758.1(b) that the destination decides, held as dated data like the
+ * records above. Both lists were read from the eCFR (title 15 current to 2026-11-10, retrieved
+ * 2026-11-13): Country Group E from supplement no. 1 to part 740, the four destinations from
+ * § 758.1(b)(10), whose note puts Hong Kong under China.
+ */
+export const EEI_BY_DESTINATION = {
+  citation: '15 CFR 758.1(b)',
+  source: 'https://www.ecfr.gov/current/title-15/subtitle-B/chapter-VII/subchapter-C/part-758/section-758.1',
+  currentTo: '2026-11-10',
+  retrieved: '2026-11-13',
+  lastAmended: '91 FR 46260, July 23, 2026',
+  /** § 758.1(b)(1): E:1 terrorist-supporting countries, E:2 unilateral embargo. */
+  countryGroupE: { 'E:1': ['IR', 'KP', 'SY'], 'E:2': ['CU'] } as Record<string, readonly string[]>,
+  countryGroupSource: '15 CFR part 740, supplement no. 1, Country Group E',
+  /** § 758.1(b)(10): any item on the Commerce Control List, unless under License Exception GOV. */
+  cclDestinations: ['CN', 'HK', 'RU', 'VE'],
 } as const
 
 /** A licence column that says no licence is needed: `NLR`, however it is punctuated. */
@@ -149,6 +173,23 @@ export function eeiThresholdCheck(sliLines: SLILine[], currency: string): CheckR
   if (diamonds.length) {
     pointers.push(`${diamonds.join(', ')} ${diamonds.length === 1 ? 'is' : 'are'} rough diamonds, which need EEI whatever the value`)
   }
+  // § 758.1(b)(3): 600-series and 9x515 items need EEI whatever the value or destination, but
+  // only those in paragraphs .a through .x. A `.y` item is outside it, and is left to the value,
+  // licence and destination checks like any other.
+  const series = [
+    ...new Set(
+      sliLines
+        .map((l) => (l.eccn ?? '').trim().toUpperCase())
+        .filter((eccn) => /^\d[A-E]6\d\d/.test(eccn) || /^9[A-E]515/.test(eccn))
+        .filter((eccn) => !/^\w{5}\.Y\b/.test(eccn)),
+    ),
+  ]
+  if (series.length) {
+    pointers.push(
+      `${series.join(', ')} ${series.length === 1 ? 'is' : 'are'} in the 600 series or 9x515, which need EEI ` +
+        'whatever the value or destination (15 CFR 758.1(b)(3))',
+    )
+  }
   const pointerText = pointers.length ? ` Also: ${pointers.join('; ')} (${regardless}).` : ''
   const caseList = `${exceptions.cases.slice(0, -1).join('; ')}; or ${exceptions.cases.at(-1)}`
 
@@ -221,3 +262,90 @@ export function eeiThresholdCheck(sliLines: SLILine[], currency: string): CheckR
     },
   ]
 }
+
+/**
+ * The cases the destination decides (15 CFR 758.1(b)(1) and (10)): EEI whatever the value.
+ *
+ * Separate from the value check because the destination a form is filed with is settled on the
+ * person's side (it can be typed over, or carried from the consignee), and this reads the one
+ * that will be filed. A warning, never a block (AGENTS.md project rule 6). Nothing when neither
+ * case applies.
+ *
+ * Case (10) is read off the ECCNs the rows carry: an item on the Commerce Control List is one
+ * with an ECCN other than EAR99. A row with no ECCN cannot be judged and is named as such; the
+ * export-control check already asks for one.
+ */
+export function eeiDestinationCheck(
+  destinationCountry: string,
+  lines: Pick<SLILine, 'scheduleB' | 'eccn'>[],
+): CheckResult[] {
+  const { code, known } = toIsoAlpha2(destinationCountry)
+  const record = EEI_BY_DESTINATION
+  const basis = `${record.citation}, as the eCFR read on ${record.currentTo}`
+  if (!destinationCountry.trim()) return []
+  // A destination typed in a form the country table does not read cannot be ruled in or out.
+  // Said, rather than treated as a destination where neither rule applies.
+  if (!known) {
+    return [
+      {
+        id: 'eei-destination',
+        severity: 'warning',
+        title: 'EEI destination rules could not be checked',
+        detail:
+          `"${destinationCountry.trim()}" is not a country name this tool recognises, so whether it is in Country ` +
+          `Group E:1 or E:2, or is China, Hong Kong, Russia or Venezuela, could not be checked (${basis}(1), (10)). ` +
+          'Enter the country by its name to have it checked.',
+        passed: false,
+      },
+    ]
+  }
+
+  const group = Object.entries(record.countryGroupE).find(([, codes]) => codes.includes(code))?.[0]
+  if (group) {
+    return [
+      {
+        id: 'eei-destination',
+        severity: 'warning',
+        title: 'EEI filing required whatever the value: the destination',
+        detail:
+          `${destinationCountry.trim()} is in Country Group ${group} (${record.countryGroupSource}), so EEI must be ` +
+          `filed for every item subject to the EAR whatever its value (${basis}(1)). Exports there are also ` +
+          'subject to licensing and Treasury embargo rules this tool does not check.',
+        passed: false,
+      },
+    ]
+  }
+
+  if (!(record.cclDestinations as readonly string[]).includes(code)) return []
+  const ccl = [
+    ...new Set(
+      lines.map((l) => (l.eccn ?? '').trim()).filter((eccn) => eccn && eccn.toUpperCase() !== 'EAR99'),
+    ),
+  ]
+  const unknown = lines.filter((l) => !(l.eccn ?? '').trim()).map((l) => l.scheduleB)
+  if (!ccl.length && !unknown.length) return []
+  const hongKong = code === 'HK' ? ' Hong Kong counts as China for this rule.' : ''
+  return [
+    {
+      id: 'eei-destination',
+      severity: 'warning',
+      title: ccl.length
+        ? 'EEI filing required whatever the value: controlled items to this destination'
+        : 'EEI filing may be required whatever the value: ECCN not entered',
+      detail:
+        (ccl.length
+          ? `Items classified ${ccl.join(', ')} are on the Commerce Control List and are going to ` +
+            `${destinationCountry.trim()}, so EEI must be filed whatever their value (${basis}(10)), unless the ` +
+            'export is made under License Exception GOV (15 CFR 758.1(c)(4)).'
+          : `The shipment is going to ${destinationCountry.trim()}, where any item with an ECCN other than EAR99 needs ` +
+            `EEI whatever its value (${basis}(10)).`) +
+        (unknown.length
+          ? ` ${unknown.length} row(s) have no ECCN entered (${[...new Set(unknown)].join(', ')}), so whether they ` +
+            'are on the list cannot be told here.'
+          : '') +
+        hongKong,
+      passed: false,
+    },
+  ]
+}
+

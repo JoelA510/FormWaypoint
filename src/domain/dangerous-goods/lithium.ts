@@ -74,6 +74,8 @@ export const DG_RULES_SOURCE = {
     statement: 'The 2027 DGRs come into force on 1 January 2027',
     source: 'https://www.iata.org/en/programs/cargo/dgr/download/',
     retrieved: '2026-11-12',
+    /** Read again from the same page, at the owner's direction, and found unchanged. */
+    rechecked: '2026-11-13',
   },
 } as const
 

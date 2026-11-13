@@ -10,7 +10,7 @@
 import type { CarrierAdapter, ConsigneeType, SliDraft, TransportMode } from '../carriers/types'
 import { parseLooseDate } from '../carriers/form-utils'
 import type { CheckResult, Reconciliation, ShipmentHeader } from './types'
-import { resolveDestinationCountry } from './reconcile'
+import { eeiDestinationCheck, resolveDestinationCountry } from './reconcile'
 import { kgToLb } from './units'
 
 /** Stable facts about the exporter. Saved locally and reused across shipments. */
@@ -447,7 +447,8 @@ export function shippingWeightBasisCheck(adapter: CarrierAdapter): CheckResult {
  * EIN and signer block are blank is not a form anyone should be able to download.
  */
 export function checkDraft(draft: SliDraft, adapter: CarrierAdapter): CheckResult[] {
-  const checks: CheckResult[] = []
+  // The destination this draft will file, which can differ from the document's.
+  const checks: CheckResult[] = [...eeiDestinationCheck(draft.destinationCountry, draft.lines)]
 
   const required: [string, string][] = [
     ['USPPI name', draft.usppiName],

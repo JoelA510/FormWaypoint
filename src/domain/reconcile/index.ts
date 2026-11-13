@@ -42,6 +42,7 @@ import {
 } from './lines'
 
 export * from './lines'
+export { eeiDestinationCheck, EEI_BY_DESTINATION } from './eei'
 
 /** Tolerance for comparing a sum of rounded lines against a printed document total. */
 const MONEY_TOLERANCE = 0.01
