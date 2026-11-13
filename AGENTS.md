@@ -130,6 +130,12 @@ What the tool must never do, in order of cost:
    which is gitignored, with their identifiers in its `manifest.json`. Test profiles use
    fictitious names, numbers and addresses. A real document committed once stays public in
    pull-request refs even after `main` drops it.
+6. **Never block what a person can fix.** A new check warns rather than blocks wherever the
+   person can see the value and correct it by hand: a block can hold a whole shipment over one
+   error a manual correction would fix in a moment. Block only where the form would carry a
+   figure the documents disprove and nothing on the screen can repair it (totals that do not
+   reconcile, a page missing from the document). A note that changes nothing is `info`. The
+   owner's standing preference, stated 2026-11-12; ADRs 0006 to 0008 apply it.
 
 Where code goes:
 

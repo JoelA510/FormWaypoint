@@ -525,3 +525,24 @@ By what a wrong form costs and what has a date on it:
 6. **Item 4**: the advisory check now; the rest waits on the forwarders.
 7. **Item 1**: the loader change whenever the owner has the in-house documents to hand.
 8. **Item 7**: drop as written.
+
+## 6. What became of each item
+
+Recorded after the fact, 2026-11-13. The owner decided the open questions, or delegated them to
+the implementing session, as each item was built; this section is a pointer, not a new finding.
+
+| # | Outcome |
+| --- | --- |
+| 1 | Open. Needs real in-house documents and a machine that can run `npm run test:real`; the owner rarely has a command line where the documents are. `docs/testing.md` says so. |
+| 2 | Built, [#88](https://github.com/JoelA510/FormWaypoint/pull/88), ADR 0006. A blank origin warns rather than blocks, on the owner's decision. |
+| 3 | Built, [#87](https://github.com/JoelA510/FormWaypoint/pull/87), ADR 0005. The 2027-01-01 date, read from IATA, has not been explicitly confirmed by the owner; it stands as recorded in `DG_RULES_SOURCE`. |
+| 4 | An information note on every filled SLI, [#93](https://github.com/JoelA510/FormWaypoint/pull/93). ADR 0001 stands until the owner has asked the forwarders what they transmit from the box. |
+| 5(a) | Built, [#90](https://github.com/JoelA510/FormWaypoint/pull/90), ADR 0008. The owner confirmed the $2,500 figure on 2026-11-12. |
+| 5(b)-(d) | Not built as an ITN record. The owner, 2026-11-13: the tool should say whether EEI has to be filed, with the exceptions, as a warning and never a block; it should not record an ITN, add an input field, or print anything about EEI on the exported documents. The owner files through the carrier (FedEx) because the organisation has no direct AES access. Tracked as its own change. |
+| 6 + A | Built, [#89](https://github.com/JoelA510/FormWaypoint/pull/89), ADR 0007, as warnings. |
+| 7 | Dropped, as recommended. |
+| 8 | Dropped. The owner, 2026-11-13: weights in the item master are measured on a scale at the workstation and taken as accurate, so there is no basis to record; packaging changes can still cause variance, and the existing weight warnings already report it where the document states a weight to compare against (the library-weight check, and the supplied-weights check against the form's net total). |
+| 9(a) | Built, [#92](https://github.com/JoelA510/FormWaypoint/pull/92). |
+| 9(b) | Built, [#94](https://github.com/JoelA510/FormWaypoint/pull/94). |
+| 10 | Built, [#91](https://github.com/JoelA510/FormWaypoint/pull/91). |
+
