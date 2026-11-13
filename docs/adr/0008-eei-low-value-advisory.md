@@ -1,6 +1,6 @@
 # 0008. The EEI low-value exemption is reported as information, in one direction only
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR 0009 (2026-11-13), on the owner's instruction
 - **Date:** 2026-11-12
 - **Deciders:** the owner (Joel Abraham), who delegated the open choices to the implementing
   session's recommendation on 2026-11-12. He confirmed the $2,500 figure on 2026-11-12.

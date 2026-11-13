@@ -5,7 +5,7 @@
  * document shape influences that.
  */
 import { describe, expect, it } from 'vitest'
-import { EEI_LOW_VALUE_EXEMPTION, eeiBuckets, eeiThresholdCheck } from './eei'
+import { EEI_LOW_VALUE_EXEMPTION, EEI_REGARDLESS_OF_VALUE, eeiBuckets, eeiThresholdCheck } from './eei'
 import { reconcile } from '.'
 import { createScheduleBIndex } from '../schedule-b'
 import { buildSyntheticCipl, simpleShipment } from '../../test/synthetic/cipl'
@@ -103,17 +103,21 @@ describe('which totals are over the figure', () => {
   })
 })
 
-describe('what the advisory will not conclude', () => {
-  it('is information, never a block or a warning, in either direction', () => {
-    expect(only([row('8544.42.0000', 'F', 100)]).severity).toBe('info')
-    expect(only([row('8544.42.0000', 'F', 100000)]).severity).toBe('info')
+describe('what the check says, and how loudly', () => {
+  it('warns that a filing is required when a total is over the figure, and never blocks', () => {
+    const check = only([row('8544.42.0000', 'F', 100000)])
+    expect(check).toMatchObject({ severity: 'warning', passed: false })
+    expect(check.detail).toContain('has to be filed before the goods are exported')
+    expect(check.detail).toContain("through AES or a carrier's or agent's filing service")
   })
 
-  it('never says no filing is required, and says why not', () => {
+  it('says no filing is needed on value, as information, and lists every case that would change that', () => {
     const check = only([row('8544.42.0000', 'F', 100)])
-    expect(check.passed).toBe(true)
-    expect(check.detail).toContain('It does not mean no filing is required')
-    expect(check.detail).toContain('15 CFR 30.2(a)(1)(iv)')
+    expect(check).toMatchObject({ severity: 'info', passed: true })
+    expect(check.title).toBe('No EEI filing needed on value: no commodity number totals over $2,500.00')
+    expect(check.detail).toContain('the low-value exemption covers this shipment')
+    for (const exception of EEI_REGARDLESS_OF_VALUE.cases) expect(check.detail).toContain(exception)
+    expect(check.detail).toContain('15 CFR 30.2(a)(1)(iv), as the eCFR read on 2026-11-10')
   })
 
   it('cites the section and the date the text was current to', () => {
@@ -127,16 +131,57 @@ describe('what the advisory will not conclude', () => {
   })
 
   it('heads the row with what it found, never with a statement the detail contradicts', () => {
-    // The row carries an `info` badge and no "failed", so the heading is read as the result.
-    expect(only([row('8544.42.0000', 'F', 100)]).title).toBe('No commodity number totals over $2,500.00')
-    expect(only([row('8544.42.0000', 'F', 9000)]).title).toBe('A commodity number totals over $2,500.00: EEI filing required')
+    expect(only([row('8544.42.0000', 'F', 9000)]).title).toBe('EEI filing required: a commodity number totals over $2,500.00')
     const two = only([row('8544.42.0000', 'F', 9000), row('9031.49.8000', 'D', 2600)])
-    expect(two.title).toBe('2 commodity numbers total over $2,500.00: EEI filing required')
+    expect(two.title).toBe('EEI filing required: 2 commodity numbers total over $2,500.00')
     expect(two.title).not.toMatch(/^No /)
   })
 })
 
+describe('the cases that need EEI whatever the value', () => {
+  it('holds them as dated data with their citation and source', () => {
+    expect(EEI_REGARDLESS_OF_VALUE.citation).toBe('15 CFR 30.2(a)(1)(iv)')
+    expect(EEI_REGARDLESS_OF_VALUE.source).toMatch(/^https:\/\/www\.ecfr\.gov\//)
+    expect(EEI_REGARDLESS_OF_VALUE.currentTo).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(EEI_REGARDLESS_OF_VALUE.cases).toHaveLength(8)
+  })
+
+  it('warns, under the figure, when a row is filed under a licence that is not NLR', () => {
+    const check = only([row('8544.42.0000', 'F', 100, { license: 'D123456' })])
+    expect(check).toMatchObject({ severity: 'warning', passed: false, title: 'EEI filing may be required whatever the value' })
+    expect(check.detail).toContain('"D123456", not NLR')
+  })
+
+  it('reads NLR however it is punctuated, and a blank licence as neither', () => {
+    for (const license of ['NLR', 'nlr', ' N.L.R. ', 'N L R', '', null]) {
+      const check = only([row('8544.42.0000', 'F', 100, { license } as Partial<SLILine>)])
+      expect(check.severity, String(license)).toBe('info')
+    }
+  })
+
+  it('warns, under the figure, about rough diamonds', () => {
+    const check = only([row('7102.31.0000', 'F', 100)])
+    expect(check).toMatchObject({ severity: 'warning', passed: false })
+    expect(check.detail).toContain('7102.31.0000 is rough diamonds')
+    // A heading outside the three is not caught.
+    expect(only([row('7102.39.0010', 'F', 100)]).severity).toBe('info')
+  })
+
+  it('adds what it found to the filing-required warning when a total is also over the figure', () => {
+    const check = only([row('8544.42.0000', 'F', 9000, { license: 'D123456' })])
+    expect(check.title).toMatch(/^EEI filing required/)
+    expect(check.detail).toContain('Also: rows are filed under "D123456"')
+  })
+})
+
 describe('rows that are not priced in US dollars', () => {
+  it('still looks for the cases that do not depend on value', () => {
+    const check = only([row('7102.10.0000', 'F', 20000)], 'JPY')
+    expect(check).toMatchObject({ severity: 'warning', title: 'EEI filing may be required whatever the value' })
+    expect(check.detail).toContain('priced in JPY')
+    expect(check.detail).not.toContain('$20,000')
+  })
+
   it('compares nothing, names the currency, and gives no filing advice', () => {
     // 20,000 yen is not $20,000.
     const check = only([row('8544.42.0000', 'F', 20000), row('9031.49.8000', 'F', 10000)], 'JPY')
