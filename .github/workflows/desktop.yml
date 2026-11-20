@@ -11,6 +11,10 @@ on:
     paths:
       - 'src-tauri/**'
       - 'src/**'
+      - 'public/**'
+      - 'scripts/stamp-desktop-version.mjs'
+      - 'index.html'
+      - 'vite.config.ts'
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/desktop.yml'
@@ -36,6 +40,9 @@ jobs:
         with:
           workspaces: src-tauri
 
+      - name: Set the Windows build version
+        run: node scripts/stamp-desktop-version.mjs "$env:GITHUB_RUN_NUMBER"
+
       - name: Install dependencies
         run: npm ci
 
@@ -50,6 +57,21 @@ jobs:
 
       - name: Build the installer
         run: npm run desktop:build
+
+      - name: Verify the packaged Windows version
+        shell: pwsh
+        run: |
+          $expected = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $app = Get-Item src-tauri/target/release/FormWaypoint.exe
+          $installer = @(Get-ChildItem src-tauri/target/release/bundle/nsis/*.exe)
+          if ($installer.Count -ne 1 -or $installer[0].Name -notlike "*_${expected}_*-setup.exe") {
+            throw "Expected one NSIS installer for $expected"
+          }
+          foreach ($binary in @($app, $installer[0])) {
+            $actual = $binary.VersionInfo.ProductVersion
+            if ($actual -ne $expected) { throw "$($binary.Name) reports $actual, expected $expected" }
+          }
+          "FormWaypoint $expected - $($installer[0].Name)" >> $env:GITHUB_STEP_SUMMARY
 
       - name: Upload the installer
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
