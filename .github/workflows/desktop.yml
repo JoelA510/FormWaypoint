@@ -89,4 +89,4 @@ jobs:
     permissions:
       actions: read
       contents: write
-    uses: ./.github/workflows/publish-windows.yml
+    uses: $/.github/workflows/publish-windows.yml
