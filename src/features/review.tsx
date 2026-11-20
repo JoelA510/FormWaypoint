@@ -197,6 +197,7 @@ export function CommodityTable({
   onRowFigureChange?: (rowKey: string, field: keyof RowFigures, value: number | undefined) => void
 }) {
   const { sliLines, mergedLines, enteredFigures } = reconciliation
+  const weightMismatch = reconciliation.checks.some((check) => check.id === 'total-weight' && !check.passed)
   const byId = new Map(mergedLines.map((l) => [l.id, l]))
   // What the documents said, for the boxes that are showing something else. The row itself
   // now carries the entered figure, so comparing a typed value against the row would call an
@@ -315,7 +316,12 @@ export function CommodityTable({
                 {/* No total under the filed quantity: those figures can be in different units,
                     and a column of pieces added to a column of kilograms is not a number. */}
                 <td className="px-4 py-2.5" />
-                <td className="tabular px-4 py-2.5 text-right">{sum(sliLines.map((l) => l.weightKg)).toFixed(3)}</td>
+                <td className="tabular px-4 py-2.5 text-right">
+                  {sum(sliLines.map((l) => l.weightKg)).toFixed(3)}
+                  {weightMismatch && reconciliation.header.totalNetWeightKg != null ? (
+                    <div className="text-xs">Document net: {reconciliation.header.totalNetWeightKg.toFixed(3)} kg</div>
+                  ) : null}
+                </td>
                 <td className="tabular px-4 py-2.5 text-right">{sum(sliLines.map((l) => l.valueUsd)).toFixed(2)}</td>
               </tr>
             </tfoot>
@@ -340,6 +346,18 @@ function atLeast(value: number, decimals: number): string {
   if (!Number.isFinite(value)) return ''
   const own = (String(value).split('.')[1] ?? '').length
   return value.toFixed(Math.max(decimals, Math.min(own, 6)))
+}
+
+/** Combine equivalent invoice units, keeping different measures visible on the same part. */
+function partQuantities(lines: MergedLine[]): string {
+  const quantities = new Map<string, { unit: string; quantity: number }>()
+  for (const line of lines) {
+    const key = canonicalUnit(line.uom) ?? ''
+    const total = quantities.get(key)
+    if (total) total.quantity += line.quantity
+    else quantities.set(key, { unit: line.uom.trim(), quantity: line.quantity })
+  }
+  return [...quantities.values()].map(({ quantity, unit }) => `${formatQuantity(quantity)} ${unit}`.trim()).join(' + ')
 }
 
 /**
@@ -591,23 +609,24 @@ export function PartOverridesPanel({
   onSaveDescription: (partNumber: string, description: string, sliDescription: string) => void
   onClearCode: (partNumber: string) => void
 }) {
-  const parts = [...new Map(reconciliation.mergedLines.map((l) => [l.partNumber, l])).values()]
+  const byPart = new Map<string, MergedLine[]>()
+  for (const line of reconciliation.mergedLines) {
+    // Without a part number there is no evidence that two lines name the same goods.
+    const number = partKey(line.partNumber)
+    const key = number ? `part:${number}` : `line:${line.id}`
+    const group = byPart.get(key)
+    if (group) group.push(line)
+    else byPart.set(key, [line])
+  }
+  // Keep the last line's descriptive fields, as the override controls did before grouping.
+  const parts = [...byPart].map(([key, lines]) => ({ key, part: lines[lines.length - 1], lines }))
   const weightOf = (part: MergedLine) => weights[partKey(part.partNumber)]
-  // Every origin the document states for a part, across all of its lines: the row shows one
-  // line per part, and a part shipped from two countries has two answers until one is entered.
-  const originsOf = (part: MergedLine) => [
-    ...new Set(
-      reconciliation.mergedLines
-        .filter((l) => partKey(l.partNumber) === partKey(part.partNumber))
-        .map((l) => l.countryOfOrigin.trim()),
-    ),
-  ]
-  const missing = weightsNeeded ? parts.filter((p) => weightOf(p) == null) : []
-  const ordered = weightsNeeded ? [...missing, ...parts.filter((p) => weightOf(p) != null)] : parts
+  const missing = weightsNeeded ? parts.filter(({ part }) => weightOf(part) == null) : []
+  const ordered = weightsNeeded ? [...missing, ...parts.filter(({ part }) => weightOf(part) != null)] : parts
   // Counted the same way `partCodeOverrideChecks` counts them: a saved code that matches what
   // this document prints substituted nothing, and badging it would contradict a checks panel
   // that deliberately says nothing about it.
-  const overridden = parts.filter((p) => {
+  const overridden = parts.filter(({ part: p }) => {
     const entered = codes[partKey(p.partNumber)]
     return entered && normalizeScheduleB(entered) !== normalizeScheduleB(p.classification)
   }).length
@@ -643,20 +662,22 @@ export function PartOverridesPanel({
                 <th className="px-4 py-2.5 font-semibold">Description</th>
                 <th className="px-4 py-2.5 text-right font-semibold">Qty</th>
                 {weightsNeeded ? <th className="px-4 py-2.5 font-semibold">Net kg each</th> : null}
-                {weightsNeeded ? <th className="px-4 py-2.5 text-right font-semibold">Line kg</th> : null}
+                {weightsNeeded ? <th className="px-4 py-2.5 text-right font-semibold">Part kg</th> : null}
                 <th className="px-4 py-2.5 font-semibold">Schedule B</th>
                 <th className="px-4 py-2.5 font-semibold">D/F</th>
                 <th className="px-4 py-2.5 font-semibold">Commodity wording</th>
               </tr>
             </thead>
             <tbody>
-              {ordered.map((part) => {
+              {ordered.map(({ key, part, lines }) => {
                 const unit = weightOf(part)
+                const netWeights = lines.map((line) => line.netWeightKg)
+                const partKg = netWeights.every((kg) => kg != null) ? sum(netWeights) : null
                 return (
-                  <tr key={part.partNumber} className="border-b align-top last:border-b-0">
+                  <tr key={key} className="border-b align-top last:border-b-0">
                     <td className="tabular px-4 py-2.5 whitespace-nowrap">{part.partNumber}</td>
                     <td className="px-4 py-2.5 text-[var(--color-ink-soft)]">{part.description}</td>
-                    <td className="tabular px-4 py-2.5 text-right">{part.quantity}</td>
+                    <td className="tabular px-4 py-2.5 text-right">{partQuantities(lines)}</td>
                     {weightsNeeded ? (
                       <td className="px-4 py-2.5">
                         <UnitWeightInput
@@ -667,10 +688,10 @@ export function PartOverridesPanel({
                     ) : null}
                     {weightsNeeded ? (
                       <td className="tabular px-4 py-2.5 text-right">
-                        {unit == null ? (
+                        {partKg == null ? (
                           <span className="text-[var(--color-block)]">needed</span>
                         ) : (
-                          (unit * part.quantity).toFixed(3)
+                          partKg.toFixed(3)
                         )}
                       </td>
                     ) : null}
@@ -686,7 +707,7 @@ export function PartOverridesPanel({
                     <td className="px-4 py-2.5">
                       <OriginStatusInput
                         partNumber={part.partNumber}
-                        origins={originsOf(part)}
+                        origins={[...new Set(lines.map((line) => line.countryOfOrigin.trim()))]}
                         entry={originEntries[partKey(part.partNumber)]}
                         enteredBy={enteredBy}
                         onCommit={

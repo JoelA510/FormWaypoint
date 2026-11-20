@@ -45,7 +45,7 @@ afterEach(() => {
   cleared.mockClear()
 })
 
-const mount = async (lines: MergedLine[], originEntries: Record<string, OriginEntry> = {}, enteredBy = 'Pat Example') => {
+const mount = async (lines: MergedLine[], originEntries: Record<string, OriginEntry> = {}, enteredBy = 'Pat Example', weights?: Record<string, number>) => {
   container = document.createElement('div')
   document.body.append(container)
   const r = createRoot(container)
@@ -54,10 +54,10 @@ const mount = async (lines: MergedLine[], originEntries: Record<string, OriginEn
     r.render(
       <PartOverridesPanel
         reconciliation={{ mergedLines: lines } as unknown as Reconciliation}
-        weights={{}}
+        weights={weights ?? {}}
         codes={{}}
         descriptions={{}}
-        weightsNeeded={false}
+        weightsNeeded={weights !== undefined}
         enteredBy={enteredBy}
         onSaveWeight={() => {}}
         onSaveCode={() => {}}
@@ -132,5 +132,24 @@ describe('the D/F of a part on the review screen', () => {
   it('offers no entry on a line with no part number, because there is nothing to keep it against', async () => {
     await mount([line('', 'Japan')])
     expect(container!.querySelector('select[aria-label^="D/F to file"]')).toBeNull()
+  })
+})
+
+describe('per-part shipment totals', () => {
+  it('counts every occurrence once and shows the combined kilograms for a saved unit weight', async () => {
+    await mount([
+      { ...line('p-1', 'Japan'), quantity: 3, netWeightKg: 0.75 },
+      { ...line('P-2', 'Japan'), quantity: 8, netWeightKg: 4 },
+      { ...line('P-1', 'United States'), quantity: 2, uom: 'EA', netWeightKg: 0.5 },
+    ], {}, 'Pat Example', { 'P-1': 0.25, 'P-2': 0.5 })
+    expect(container!.querySelectorAll('tbody tr')).toHaveLength(2)
+    expect(row('P-1').children[2].textContent).toBe('5 PCS')
+    expect(row('P-1').children[4].textContent).toBe('1.250')
+    expect(row('P-2').children[2].textContent).toBe('8 PCS')
+  })
+
+  it('keeps unlike quantities separate within the same part', async () => {
+    await mount([line('P-1', 'Japan'), { ...line('P-1', 'Japan', 'second'), quantity: 2.5, uom: 'KG' }])
+    expect(row('P-1').children[2].textContent).toBe('1 PCS + 2.500 KG')
   })
 })
