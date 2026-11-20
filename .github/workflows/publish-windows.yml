@@ -1,0 +1,68 @@
+name: Publish Windows release
+on:
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      build_run:
+        description: Successful main-branch Desktop build run ID
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    concurrency: publish-windows-${{ inputs.build_run || github.run_id }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_RUN: ${{ inputs.build_run || github.run_id }}
+      BACKFILL: ${{ inputs.build_run != '' }}
+    steps:
+      - name: Publish the verified desktop binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$BUILD_RUN" =~ ^[0-9]+$ ]]
+          run=$(gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN")
+          jq -e --arg repo "$GH_REPO" '
+            .path == ".github/workflows/desktop.yml" and .head_branch == "main"
+            and .head_repository.full_name == $repo
+            and (.event == "push" or .event == "workflow_dispatch")
+          ' <<< "$run" > /dev/null
+          # The caller waits for the Windows job. A manual backfill must verify the completed run.
+          if [[ "$BACKFILL" == true ]]; then
+            jq -e '.conclusion == "success"' <<< "$run" > /dev/null
+          fi
+          source_sha=$(jq -r .head_sha <<< "$run")
+          gh run download "$BUILD_RUN" --name FormWaypoint-windows-installer --dir artifact
+          shopt -s nullglob
+          installers=(artifact/bundle/nsis/*-setup.exe)
+          [[ ${#installers[@]} == 1 ]]
+          [[ $(basename "${installers[0]}") =~ ^FormWaypoint_([0-9]+\.[0-9]+\.[0-9]+)_x64-setup\.exe$ ]]
+          tag="v${BASH_REMATCH[1]}"
+          mv "${installers[0]}" FormWaypoint-setup.exe
+          mv artifact/FormWaypoint.exe FormWaypoint.exe
+          # On retry, accept a published release only if its commit and both assets match.
+          if release=$(gh release view "$tag" --json isDraft,targetCommitish,assets); then
+            [[ $(jq -r '.targetCommitish' <<< "$release") == "$source_sha" ]]
+            [[ $(jq -r '.isDraft' <<< "$release") == false ]]
+            for file in FormWaypoint.exe FormWaypoint-setup.exe; do
+              digest="sha256:$(sha256sum "$file" | cut -d' ' -f1)"
+              jq -e --arg file "$file" --arg digest "$digest" '.assets[] | select(.name == $file and .digest == $digest)' <<< "$release" >/dev/null
+            done
+            exit 0
+          fi
+          args=()
+          if latest=$(gh release view --json tagName --jq .tagName); then
+            if [[ $(printf '%s\n' "$tag" "$latest" | sort -V | tail -1) != "$tag" ]]; then
+              args+=(--latest=false)
+            fi
+          fi
+          gh release create "$tag" FormWaypoint.exe FormWaypoint-setup.exe --target "$source_sha" \
+            --title "FormWaypoint ${tag#v}" --notes "Verified Windows x64 desktop build $BUILD_RUN. Download FormWaypoint.exe to run directly with WebView2, or FormWaypoint-setup.exe for a per-user installation." "${args[@]}"

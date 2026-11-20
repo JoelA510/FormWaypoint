@@ -1,0 +1,6 @@
+{
+  "redirects": [
+    { "source": "/download", "destination": "https://github.com/JoelA510/FormWaypoint/releases/latest/download/FormWaypoint.exe", "permanent": false },
+    { "source": "/installer", "destination": "https://github.com/JoelA510/FormWaypoint/releases/latest/download/FormWaypoint-setup.exe", "permanent": false }
+  ]
+}
