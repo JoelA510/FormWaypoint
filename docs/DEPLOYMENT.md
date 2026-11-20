@@ -62,3 +62,9 @@ which is why it runs in CI (`.github/workflows/desktop.yml`, on demand) rather t
 `npm run desktop:dev` runs it in a window where a Rust toolchain is installed. Data stays in
 IndexedDB inside the webview, kept under the bundle identifier `com.formwaypoint.app`, which
 must not change or installed copies lose their saved data.
+
+The Windows workflow assigns a patch version to each new run. Run 51 starts the 1.0
+series at `1.0.0`, run 52 builds `1.0.1`, and so on. A manual dispatch gets the next
+number. Retrying a run keeps its number, and a failed build can leave a gap. The app
+footer, diagnostic exports, Windows executable and installer all use the version from
+the build checkout. Local development uses the checked-in base version.
