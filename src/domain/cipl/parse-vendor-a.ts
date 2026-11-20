@@ -259,7 +259,7 @@ function parseHeaderPage(page: TextPage, kind: DocumentKind, existing?: Shipment
   const notifyTo = labelValue(rows, 'NOTIFY TO:') ?? null
 
   const tradeTerms = tradeTermsValue(rows)
-  const { totalQuantity, cartons } = totalsBlock(rows)
+  const { totalQuantity, printedQuantity, cartons } = totalsBlock(rows, existing)
   // Only an invoice page may supply the money total. `invoiceTotal` matches any two-item
   // row shaped `<number> <AAA>`, and a packing-list header row like `1113.140 KGS` fits
   // that shape — read from the wrong kind of page it would coalesce over the invoice's
@@ -298,6 +298,7 @@ function parseHeaderPage(page: TextPage, kind: DocumentKind, existing?: Shipment
     cartons: coalesce(cartons, existing?.cartons),
     documentCurrency: coalesce(documentCurrency, existing?.documentCurrency) ?? '',
     totalQuantity: coalesce(totalQuantity, existing?.totalQuantity) ?? 0,
+    printedQuantity,
     totalValue: coalesce(totalValue, existing?.totalValue) ?? 0,
     totalNetWeightKg: coalesce(weights.net, existing?.totalNetWeightKg),
     totalGrossWeightKg: coalesce(weights.gross, existing?.totalGrossWeightKg),
@@ -375,7 +376,8 @@ export function freightFromTradeTerms(tradeTerms: string): 'PREPAID' | 'COLLECT'
   return null
 }
 
-function totalsBlock(rows: TextRow[]): { totalQuantity: number | null; cartons: number | null } {
+function totalsBlock(rows: TextRow[], existing?: ShipmentHeader) {
+  let printedQuantity = existing?.printedQuantity
   let totalQuantity: number | null = null
   let cartons: number | null = null
 
@@ -383,8 +385,17 @@ function totalsBlock(rows: TextRow[]): { totalQuantity: number | null; cartons: 
   if (totalIdx !== -1) {
     // Printed as either `3 PCS` in one cell or `3` and `PCS` in two.
     const after = valueRightOf(rows[totalIdx], 'TOTAL:')
-    const n = parseNumber(after?.split(/\s+/)[0])
-    if (n !== null) totalQuantity = n
+    const [quantity, unit] = after?.split(/\s+/) ?? []
+    const n = parseNumber(quantity)
+    if (n !== null) {
+      totalQuantity = n
+      if (unit && /^[\p{L}][\p{L}\p{N}./-]*$/u.test(unit)) {
+        printedQuantity = `${quantity} ${unit}`
+      } else if (!printedQuantity || existing?.totalQuantity !== n) {
+        // A repeated total can omit its unit. Keep the other header's unit only for the same quantity.
+        printedQuantity = quantity
+      }
+    }
   }
 
   const cartonIdx = findLabelRow(rows, 'CARTONS:')
@@ -394,7 +405,7 @@ function totalsBlock(rows: TextRow[]): { totalQuantity: number | null; cartons: 
     const n = after?.split(/\s+/).map(parseNumber).find((v) => v !== null)
     if (n != null) cartons = n
   }
-  return { totalQuantity, cartons }
+  return { totalQuantity, printedQuantity, cartons }
 }
 
 /** The grand total sits alone on its own row as `<amount> <CUR>`. */

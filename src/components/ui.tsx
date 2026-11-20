@@ -7,7 +7,7 @@
  * dark are handled in one place.
  */
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react'
-import { useId } from 'react'
+import { createContext, useContext, useId } from 'react'
 import { cn } from '../lib/utils'
 
 export function Button({
@@ -26,11 +26,11 @@ export function Button({
         'disabled:cursor-not-allowed disabled:opacity-50',
         size === 'sm' ? 'px-2.5 py-1 text-xs' : 'px-3.5 py-2 text-sm',
         variant === 'primary' &&
-          'border-transparent bg-[var(--color-accent)] text-white hover:brightness-110 disabled:hover:brightness-100',
+          'border-transparent bg-[var(--color-accent)] text-[var(--color-on-accent)] enabled:hover:bg-[var(--color-accent-hover)]',
         variant === 'default' &&
           'border-[var(--color-line-strong)] bg-[var(--color-surface)] text-[var(--color-ink)] hover:bg-[var(--color-sunken)]',
         variant === 'ghost' && 'border-transparent bg-transparent text-[var(--color-ink-soft)] hover:bg-[var(--color-sunken)]',
-        variant === 'danger' && 'border-transparent bg-[var(--color-block)] text-white hover:brightness-110',
+        variant === 'danger' && 'border-transparent bg-[var(--color-block)] text-[var(--color-on-block)] hover:underline',
         className,
       )}
       {...props}
@@ -83,6 +83,14 @@ export function Badge({ tone = 'neutral', children }: { tone?: Tone; children: R
   )
 }
 
+const FieldHint = createContext<string | undefined>(undefined)
+
+function useDescription(props: { id?: string; 'aria-describedby'?: string }) {
+  const field = useContext(FieldHint)
+  const hint = field && field === props.id ? `${field}-hint` : undefined
+  return [props['aria-describedby'], hint].filter(Boolean).join(' ') || undefined
+}
+
 export function Field({
   label,
   hint,
@@ -100,26 +108,26 @@ export function Field({
       <label htmlFor={id} className="text-xs font-medium tracking-wide text-[var(--color-ink-soft)] uppercase">
         {label}
       </label>
-      {children(id)}
-      {hint ? <p className="text-xs text-[var(--color-ink-faint)]">{hint}</p> : null}
+      <FieldHint.Provider value={hint ? id : undefined}>{children(id)}</FieldHint.Provider>
+      {hint ? <p id={`${id}-hint`} className="text-xs text-[var(--color-ink-faint)]">{hint}</p> : null}
     </div>
   )
 }
 
 const CONTROL =
-  'w-full rounded-md border bg-[var(--color-surface)] px-2.5 py-1.5 text-sm text-[var(--color-ink)] placeholder:text-[var(--color-ink-faint)]'
+  'w-full rounded-md border border-[var(--color-border-control)] bg-[var(--color-surface)] px-2.5 py-1.5 text-sm text-[var(--color-ink)] placeholder:text-[var(--color-ink-faint)]'
 
 export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
-  return <input className={cn(CONTROL, className)} {...props} />
+  return <input className={cn(CONTROL, className)} {...props} aria-describedby={useDescription(props)} />
 }
 
 export function Textarea({ className, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return <textarea className={cn(CONTROL, 'min-h-20 resize-y', className)} {...props} />
+  return <textarea className={cn(CONTROL, 'min-h-20 resize-y', className)} {...props} aria-describedby={useDescription(props)} />
 }
 
 export function Select({ className, children, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
-    <select className={cn(CONTROL, className)} {...props}>
+    <select className={cn(CONTROL, className)} {...props} aria-describedby={useDescription(props)}>
       {children}
     </select>
   )
@@ -142,6 +150,7 @@ export function Toggle({
       <input
         id={id}
         type="checkbox"
+        aria-describedby={hint ? `${id}-hint` : undefined}
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
         className="mt-0.5 size-4 accent-[var(--color-accent)]"
@@ -150,7 +159,7 @@ export function Toggle({
         <label htmlFor={id} className="text-sm text-[var(--color-ink)]">
           {label}
         </label>
-        {hint ? <p className="text-xs text-[var(--color-ink-faint)]">{hint}</p> : null}
+        {hint ? <p id={`${id}-hint`} className="text-xs text-[var(--color-ink-faint)]">{hint}</p> : null}
       </div>
     </div>
   )

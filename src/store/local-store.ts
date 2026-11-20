@@ -214,7 +214,12 @@ export interface DgRulesSourceStamp {
   lapsedWhenPrepared: boolean
 }
 
+export type AppearancePreference = 'system' | 'light' | 'dark'
+
 export interface LocalStore {
+  getAppearance(): Promise<AppearancePreference>
+  saveAppearance(value: AppearancePreference): Promise<void>
+
   getProfile(): Promise<CompanyProfile | null>
   saveProfile(profile: CompanyProfile): Promise<void>
 
@@ -417,6 +422,13 @@ function db(): Promise<Schema> {
 }
 
 export const indexedDbStore: LocalStore = {
+  async getAppearance() {
+    const saved: unknown = await (await db()).get('profile', 'appearance')
+    return saved === 'light' || saved === 'dark' ? saved : 'system'
+  },
+  async saveAppearance(value) {
+    await (await db()).put('profile', value, 'appearance')
+  },
   async getProfile() {
     return decodeProfile(await (await db()).get('profile', 'current'))
   },

@@ -14,10 +14,11 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildXlsx } from './lib/xlsx'
 import { inHouseCiGrid, simpleInHouseCi, type InHouseCiSpec } from './test/synthetic/inhouse-ci'
-import type { ConsigneeRecord, LocalStore } from './store/local-store'
+import type { AppearancePreference, ConsigneeRecord, LocalStore } from './store/local-store'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
+let savedAppearance: AppearancePreference = 'system'
 const consignees = new Map<string, ConsigneeRecord>()
 
 vi.mock('./store/local-store', async (importOriginal) => {
@@ -25,6 +26,8 @@ vi.mock('./store/local-store', async (importOriginal) => {
   const none = async () => []
   const nothing = async () => {}
   const store: Partial<LocalStore> = {
+    getAppearance: async () => savedAppearance,
+    saveAppearance: async (value) => { savedAppearance = value },
     getProfile: async () => null,
     saveProfile: nothing,
     getKeyingOptions: async () => null,
@@ -49,6 +52,7 @@ let container: HTMLDivElement | null = null
 let root: Root | null = null
 
 beforeEach(() => {
+  savedAppearance = 'system'
   consignees.clear()
   vi.stubGlobal(
     'fetch',
@@ -214,4 +218,42 @@ it('shows the summed part quantity and the printed net total beside unreconciled
   expect.soft(part?.children[2].textContent).toBe('9 EA')
   const footer = [...container!.querySelectorAll('tfoot')].find((foot) => foot.textContent?.includes('Total'))
   expect(footer?.textContent).toContain('Document net: 3.200 kg')
+})
+
+it('labels derived quantities and invoice weights with their sources and keeps incompatible units separate', async () => {
+  const spec = simpleInHouseCi()
+  spec.lines[0] = { ...spec.lines[0], quantity: 2.5, uom: 'KG' }
+  await mount()
+  await upload('mixed-units.xlsx', spec)
+  const row = (label: string) => [...container!.querySelectorAll('span')].find(el => el.textContent === label)?.parentElement
+  expect(row('Total quantity')?.textContent).toContain('2.500 KG + 3 EA')
+  expect(row('Total quantity')?.textContent).toContain('sum of invoice lines')
+  expect(row('Net / gross weight')?.textContent).toContain('commercial invoice')
+  const footerQuantity = container!.querySelector('tfoot tr td:nth-child(2)')?.textContent
+  expect(footerQuantity?.split(' + ').sort()).toEqual(['2.500 KG', '3 EA'])
+})
+
+it('associates a shipment input with its explanatory text', async () => {
+  await mount()
+  await upload('hint.xlsx', simpleInHouseCi())
+  const label = [...container!.querySelectorAll('label')].find(el => el.textContent === 'Consignee ID')!
+  const hint = document.getElementById(label.htmlFor)?.getAttribute('aria-describedby')
+  expect(document.getElementById(hint ?? '')?.textContent).toContain('EORI')
+})
+
+it('restores the saved appearance and allows returning to the system setting', async () => {
+  savedAppearance = 'dark'
+  await mount()
+  const label = [...container!.querySelectorAll('label')].find(el => el.textContent?.startsWith('Appearance'))!
+  const select = document.getElementById(label.htmlFor) as HTMLSelectElement
+  expect(select.value).toBe('dark')
+  expect(document.documentElement.dataset.appearance).toBe('dark')
+  for (const value of ['light', 'system']) {
+    await act(async () => {
+      select.value = value
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(document.documentElement.dataset.appearance).toBe(value)
+    expect(savedAppearance).toBe(value)
+  }
 })

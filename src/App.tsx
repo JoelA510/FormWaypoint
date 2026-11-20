@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Badge, Button, Card, CardBody, CardHeader, Select } from './components/ui'
 import { UploadPanel } from './features/upload-panel'
+import { Appearance } from './components/appearance'
 import { ChecksPanel, CommodityTable, OverridesPanel, PartOverridesPanel, ShipmentSummary } from './features/review'
 import { ManualFieldsPanel } from './features/manual-fields'
 import { ItemLibraryPanel, ItemMasterUpdatesPanel, type ImportMode } from './features/item-library'
@@ -56,6 +57,7 @@ import {
   overrideWeights,
   overridesToMap,
   type DgConsignmentRecord,
+  type AppearancePreference,
   type OverrideRecord,
   type PartOverrideRecord,
   type PartOverridePatch,
@@ -89,6 +91,7 @@ const CARRIER_LABELS: Record<ShipmentCarrierId, string> = {
 
 export function App() {
   const [workflow, setWorkflow] = useState<Workflow>('standard')
+  const [appearance, setAppearance] = useState<AppearancePreference | null>(null)
   const [parsed, setParsed] = useState<ParsedCipl | null>(null)
   const [carrierId, setCarrierId] = useState<ShipmentCarrierId>('nippon-express')
   const [profile, setProfile] = useState<CompanyProfile>(EMPTY_PROFILE)
@@ -252,7 +255,7 @@ export function App() {
     // profile blank and the retention panel reading "Nothing prepared yet" for consignments
     // still inside their two-year window — with no indication that anything had failed.
     void (async () => {
-      const [saved, savedOverrides, savedPartOverrides, savedItems, history, dgHistory] =
+      const [saved, savedOverrides, savedPartOverrides, savedItems, history, dgHistory, savedAppearance] =
         await Promise.allSettled([
           localStore.getProfile(),
           localStore.listOverrides(),
@@ -260,6 +263,7 @@ export function App() {
           localStore.listItems(),
           localStore.listShipments(),
           localStore.listDgConsignments(),
+          localStore.getAppearance(),
         ])
       if (saved.status === 'fulfilled') {
         if (saved.value) setProfile(saved.value)
@@ -273,8 +277,12 @@ export function App() {
       if (history.status === 'fulfilled') setShipments(history.value)
       if (dgHistory.status === 'fulfilled') setDgConsignments(dgHistory.value)
 
+      // A choice made while storage was opening takes precedence over the saved one.
+      if (savedAppearance.status === 'fulfilled') setAppearance(current => current ?? savedAppearance.value)
+
       const failed = [
         [saved, 'the exporter profile'],
+        [savedAppearance, 'the appearance preference'],
         [savedOverrides, 'the classification overrides'],
         [savedPartOverrides, 'the per-part weights'],
         [savedItems, 'the item library'],
@@ -757,6 +765,7 @@ export function App() {
     // store is one of the ones that actually cleared: a write just succeeded against it,
     // so this screen is now the truth about what is stored.
     if (cleared('the exporter profile')) {
+      setAppearance('system')
       setProfileUnavailable(false)
       setProfileLoaded(true)
     }
@@ -794,7 +803,14 @@ export function App() {
                 : 'Lithium and sodium batteries by air → Shipper’s Declaration for Dangerous Goods'}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Appearance
+              value={appearance ?? 'system'}
+              onChange={next => {
+                setAppearance(next)
+                void write('The appearance preference', () => localStore.saveAppearance(next))
+              }}
+            />
             <Badge tone="pass">runs entirely on this machine</Badge>
             {workflow === 'standard' ? (
               scheduleB ? (

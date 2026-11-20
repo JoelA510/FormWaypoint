@@ -52,6 +52,8 @@ export interface SyntheticCipl {
   dischargePort: string
   tradeTerms: string
   cartons: number
+  /** Unit beside the header quantity. An empty string leaves the unit off the document. */
+  headerQuantityUnit?: { invoice: string; packing: string }
   lines: SyntheticLine[]
   /** Lines per detail page. Lower it to force a block over a page break. */
   linesPerPage?: number
@@ -169,7 +171,8 @@ function drawHeaderPage(doc: PDFDocument, spec: SyntheticCipl, set: string, kind
   text(page, 'DESCRIPTION OF GOODS', 150, 487, font)
   text(page, 'TOTAL:', 30, 445, font)
   text(page, String(totalQty), 108, 445, font)
-  text(page, 'PCS', 120, 445, font)
+  const headerUnit = kind === 'INVOICE' ? spec.headerQuantityUnit?.invoice : spec.headerQuantityUnit?.packing
+  text(page, headerUnit ?? 'PCS', 120, 445, font)
   text(page, 'CARTONS:', 30, 433, font)
   text(page, String(spec.cartons), 72, 433, font)
   text(page, 'TRADE TERMS:', 372, 409, font)
