@@ -205,6 +205,8 @@ export interface ShipmentHeader {
   cartons: number | null
   documentCurrency: string
   totalQuantity: number
+  /** Quantity and unit as printed on a document with a separate quantity total. */
+  printedQuantity?: string
   totalValue: number
   totalNetWeightKg: number | null
   totalGrossWeightKg: number | null

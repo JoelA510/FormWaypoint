@@ -6,54 +6,30 @@
  * a status never reads as branding.
  */
 @theme {
-  --color-canvas: oklch(0.98 0.004 240);
-  --color-surface: oklch(1 0 0);
-  --color-sunken: oklch(0.955 0.006 240);
-  --color-line: oklch(0.9 0.008 240);
-  --color-line-strong: oklch(0.82 0.012 240);
-
-  --color-ink: oklch(0.24 0.02 250);
-  --color-ink-soft: oklch(0.48 0.018 250);
-  --color-ink-faint: oklch(0.62 0.015 250);
-
-  --color-accent: oklch(0.52 0.09 195);
-  --color-accent-ink: oklch(0.36 0.08 195);
-  --color-accent-soft: oklch(0.95 0.025 195);
-
-  --color-pass: oklch(0.53 0.11 155);
-  --color-pass-soft: oklch(0.95 0.035 155);
-  --color-warn: oklch(0.58 0.12 70);
-  --color-warn-soft: oklch(0.96 0.04 80);
-  --color-block: oklch(0.53 0.16 25);
-  --color-block-soft: oklch(0.95 0.03 25);
+  --color-canvas: light-dark(#f6f9fb, #101419);
+  --color-surface: light-dark(#ffffff, #191f25);
+  --color-sunken: light-dark(#edf1f4, #0a0f13);
+  --color-line: light-dark(#d9dfe3, #2d343b);
+  --color-line-strong: light-dark(#bdc5cb, #454e58);
+  --color-border-control: light-dark(#848b93, #6c747b);
+  --color-ink: light-dark(#182029, #e8ebef);
+  --color-ink-soft: light-dark(#565f68, #a8afb5);
+  --color-ink-faint: light-dark(#646b73, #9299a1);
+  --color-accent: light-dark(#2a6a6e, #7bc0c2);
+  --color-accent-hover: light-dark(#1f5559, #9fd3d5);
+  --color-accent-ink: light-dark(#156165, #80c5ca);
+  --color-accent-soft: light-dark(#e0f3f4, #113436);
+  --color-on-accent: light-dark(#ffffff, #101419);
+  --color-pass: light-dark(#057743, #6cd092);
+  --color-pass-soft: light-dark(#ddf6e4, #12301e);
+  --color-warn: light-dark(#855904, #e8aa4e);
+  --color-warn-soft: light-dark(#fff0d4, #3c2a0e);
+  --color-block: light-dark(#a03f3c, #ff958e);
+  --color-block-soft: light-dark(#ffe7e4, #47211e);
+  --color-on-block: light-dark(#ffffff, #101419);
 
   --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-}
-
-@media (prefers-color-scheme: dark) {
-  @theme {
-    --color-canvas: oklch(0.19 0.012 250);
-    --color-surface: oklch(0.235 0.014 250);
-    --color-sunken: oklch(0.165 0.012 250);
-    --color-line: oklch(0.32 0.016 250);
-    --color-line-strong: oklch(0.42 0.02 250);
-
-    --color-ink: oklch(0.94 0.006 250);
-    --color-ink-soft: oklch(0.75 0.012 250);
-    --color-ink-faint: oklch(0.6 0.014 250);
-
-    --color-accent: oklch(0.72 0.1 195);
-    --color-accent-ink: oklch(0.85 0.08 195);
-    --color-accent-soft: oklch(0.3 0.05 195);
-
-    --color-pass: oklch(0.72 0.12 155);
-    --color-pass-soft: oklch(0.28 0.05 155);
-    --color-warn: oklch(0.78 0.12 80);
-    --color-warn-soft: oklch(0.3 0.05 75);
-    --color-block: oklch(0.7 0.14 25);
-    --color-block-soft: oklch(0.3 0.06 25);
-  }
 }
 
 @layer base {
@@ -63,6 +39,14 @@
 
   html {
     color-scheme: light dark;
+  }
+
+  html[data-appearance="light"] {
+    color-scheme: light;
+  }
+
+  html[data-appearance="dark"] {
+    color-scheme: dark;
   }
 
   body {

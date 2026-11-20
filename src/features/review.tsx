@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Field, Input, ProvenanceRow, Select, type Tone } from '../components/ui'
-import { resolveDestination } from '../domain/reconcile'
+import { printsQuantityTotal, resolveDestination } from '../domain/reconcile'
 import { exportDate } from '../domain/draft'
 import { canonicalUnit, formatScheduleB, normalizeScheduleB } from '../domain/schedule-b'
 import { canRestate, resolveReportingQuantity, type QuantitySource } from '../domain/units'
@@ -21,8 +21,12 @@ const SEVERITY_TONE: Record<CheckResult['severity'], Tone> = {
 export function ShipmentSummary({ parsed, reconciliation }: { parsed: ParsedCipl; reconciliation: Reconciliation }) {
   const { header, selectedSet } = reconciliation
   const excluded = parsed.availableSets.filter((s) => s !== selectedSet)
-  // The same two resolutions the generated form is built from, so this screen cannot name a
-  // value or a source the SLI does not carry.
+  const printed = printsQuantityTotal(parsed.format)
+  const quantity = printed ? header.printedQuantity : quantitiesByUnit(
+    parsed.lines.filter(line => line.documentSet === selectedSet && line.documentKind === 'INVOICE'),
+  )
+  const hasWeights = header.totalNetWeightKg != null || header.totalGrossWeightKg != null
+  // The date and destination use the same resolutions as the generated SLI.
   const exported = exportDate(header)
   const destination = resolveDestination(header)
 
@@ -71,7 +75,7 @@ export function ShipmentSummary({ parsed, reconciliation }: { parsed: ParsedCipl
           <ProvenanceRow label="Forwarder named on the CIPL" value={header.vesselAgent ?? '—'} source="VESSEL AGENT" />
           <ProvenanceRow label="Incoterm" value={header.incoterm ?? '—'} source="TRADE TERMS" />
           <ProvenanceRow label="Freight" value={header.freightTerms ?? '—'} source="TRADE TERMS" />
-          <ProvenanceRow label="Total quantity" value={`${header.totalQuantity} pcs`} source="CIPL total" />
+          <ProvenanceRow label="Total quantity" value={quantity || 'Not stated'} source={quantity ? (printed ? 'CIPL total' : 'sum of invoice lines') : ''} />
           <ProvenanceRow
             label="Total value"
             value={`${header.totalValue.toFixed(2)} ${header.documentCurrency}`}
@@ -80,7 +84,7 @@ export function ShipmentSummary({ parsed, reconciliation }: { parsed: ParsedCipl
           <ProvenanceRow
             label="Net / gross weight"
             value={`${header.totalNetWeightKg?.toFixed(3) ?? '—'} / ${header.totalGrossWeightKg?.toFixed(3) ?? '—'} kg`}
-            source="packing list"
+            source={hasWeights ? (parsed.format === 'inhouse-ci' ? 'commercial invoice' : 'packing list') : 'not stated'}
           />
         </div>
 
@@ -312,7 +316,7 @@ export function CommodityTable({
                 <td className="px-4 py-2.5" colSpan={3}>
                   Total
                 </td>
-                <td className="tabular px-4 py-2.5 text-right">{sum(sliLines.map((l) => l.quantity))}</td>
+                <td className="tabular px-4 py-2.5 text-right">{quantitiesByUnit(sliLines.map(l => ({ quantity: l.quantity, uom: l.sourceUom })))}</td>
                 {/* No total under the filed quantity: those figures can be in different units,
                     and a column of pieces added to a column of kilograms is not a number. */}
                 <td className="px-4 py-2.5" />
@@ -348,8 +352,8 @@ function atLeast(value: number, decimals: number): string {
   return value.toFixed(Math.max(decimals, Math.min(own, 6)))
 }
 
-/** Combine equivalent invoice units, keeping different measures visible on the same part. */
-function partQuantities(lines: MergedLine[]): string {
+/** Combine equivalent invoice units, keeping different measures separate. */
+function quantitiesByUnit(lines: Pick<MergedLine, 'quantity' | 'uom'>[]): string {
   const quantities = new Map<string, { unit: string; quantity: number }>()
   for (const line of lines) {
     const key = canonicalUnit(line.uom) ?? ''
@@ -677,7 +681,7 @@ export function PartOverridesPanel({
                   <tr key={key} className="border-b align-top last:border-b-0">
                     <td className="tabular px-4 py-2.5 whitespace-nowrap">{part.partNumber}</td>
                     <td className="px-4 py-2.5 text-[var(--color-ink-soft)]">{part.description}</td>
-                    <td className="tabular px-4 py-2.5 text-right">{partQuantities(lines)}</td>
+                    <td className="tabular px-4 py-2.5 text-right">{quantitiesByUnit(lines)}</td>
                     {weightsNeeded ? (
                       <td className="px-4 py-2.5">
                         <UnitWeightInput

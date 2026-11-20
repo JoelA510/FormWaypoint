@@ -34,10 +34,18 @@ describe('an ordinary shipment', () => {
     expect(header.consignedTo.name).toBe('Example Consignee Pte. Ltd.')
     expect(header.vesselAgent).toBe('Nippon Express')
     expect(header.totalQuantity).toBe(7)
+    expect(header.printedQuantity).toBe('7 PCS')
     expect(header.totalValue).toBeCloseTo(190, 2)
     expect(header.totalNetWeightKg).toBeCloseTo(3.4, 3)
     expect(header.cartons).toBe(2)
   })
+
+  it.each([['M2', 'M2', '7 M2'], ['PCS', '', '7 PCS'], ['', '', '7']])(
+    'preserves the header quantity across invoice unit "%s" and packing unit "%s"', async (invoice, packing, expected) => {
+      const parsed = await parse({ ...simpleShipment(), headerQuantityUnit: { invoice, packing } })
+      expect(parsed.headers.FC.printedQuantity).toBe(expected)
+    },
+  )
 
   it('reads every line from both document kinds', async () => {
     const parsed = await parse()
