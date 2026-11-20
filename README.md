@@ -19,9 +19,9 @@ npm run dev            # browser, http://localhost:5173
 npm run desktop:dev    # desktop window (needs a Rust toolchain)
 ```
 
-A Windows installer is built by the **Desktop build** workflow — run it from the Actions
-tab and download the `FormWaypoint-windows-installer` artifact. It cannot be built anywhere
-but a Windows runner.
+Download the [portable Windows executable](https://github.com/JoelA510/FormWaypoint/releases/latest/download/FormWaypoint.exe)
+or the [per-user installer](https://github.com/JoelA510/FormWaypoint/releases/latest/download/FormWaypoint-setup.exe).
+Successful main-branch desktop builds publish both Windows x64 binaries to [GitHub Releases](https://github.com/JoelA510/FormWaypoint/releases).
 
 ## Supported CIPL formats
 
