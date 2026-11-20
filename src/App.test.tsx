@@ -204,3 +204,14 @@ describe('declared values nobody chose, through the application', () => {
     expect(text()).not.toContain(note)
   })
 })
+
+it('shows the summed part quantity and the printed net total beside unreconciled commodity weights', async () => {
+  const spec = simpleInHouseCi()
+  spec.lines = [spec.lines[0], { ...spec.lines[0], quantity: 5 }]
+  await mount()
+  await upload('repeated-part.xlsx', spec)
+  const part = [...container!.querySelectorAll('tbody tr')].find((tr) => tr.firstElementChild?.textContent === spec.lines[0].partNumber)
+  expect.soft(part?.children[2].textContent).toBe('9 EA')
+  const footer = [...container!.querySelectorAll('tfoot')].find((foot) => foot.textContent?.includes('Total'))
+  expect(footer?.textContent).toContain('Document net: 3.200 kg')
+})
