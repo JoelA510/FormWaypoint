@@ -1,25 +1,70 @@
 <!doctype html>
 <html lang="en">
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>FormWaypoint for Windows</title>
-<style>
-  :root { color-scheme: light dark; font: 100%/1.6 "Segoe UI", system-ui, sans-serif; color: light-dark(#182029,#e8ebef); background: light-dark(#f6f9fb,#101419); }
-  main { max-width: 40rem; margin: clamp(3rem,14vh,10rem) auto; padding: 0 1.5rem; }
-  h1 { font-size: clamp(2.7rem,8vw,4.75rem); letter-spacing: -.055em; line-height: 1; margin: 0 0 1rem; }
-  .lead { font-size: 1.2rem; margin: 0 0 2.5rem; }
-  section { border-top: 1px solid light-dark(#bdc5cb,#454e58); padding: 1.1rem 0; }
-  h2 { margin: 0; font-size: 1.25rem; }
-  p { margin: .25rem 0 1rem; }
-  a { color: light-dark(#156165,#80c5ca); }
-  .button { display: inline-block; background: light-dark(#2a6a6e,#7bc0c2); color: light-dark(white,#101419); border-radius: .4rem; padding: .55rem 1rem; text-decoration: none; font-weight: 600; }
-  a:hover { text-decoration: underline; }
-</style>
-<main>
-  <h1>FormWaypoint</h1>
-  <p class="lead">Prepare export paperwork on your Windows PC. Your shipment documents stay on your machine.</p>
-  <section><h2>Portable executable</h2><p>Run directly on Windows x64 with Microsoft Edge WebView2.</p><a class="button" href="/download">Download portable EXE</a></section>
-  <section><h2>Windows installer</h2><p>Install for your Windows account or update an existing installation.</p><a href="/installer">Download installer</a></section>
-  <a href="https://github.com/JoelA510/FormWaypoint/releases">Release history</a>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Review commercial invoices, prepare carrier instructions and check battery shipments for air transport. Download FormWaypoint for Windows.">
+  <title>FormWaypoint | Export paperwork for Windows</title>
+  <link rel="icon" href="/images/formwaypoint.png">
+  <link rel="stylesheet" href="/showcase.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top">
+  <div class="wrap bar">
+    <div class="identity"><img src="/images/formwaypoint.png" alt="" width="33" height="33"><b>FormWaypoint</b><span class="divider"></span><a href="https://secureyour.tech/">SecureYour.Tech</a></div>
+    <nav class="actions" aria-label="Header downloads"><a class="button primary" href="/download"><span aria-hidden="true">↓</span> Portable EXE</a><a class="button" href="/installer">Windows installer</a></nav>
+  </div>
+</header>
+<main id="main">
+  <section class="wrap hero" aria-labelledby="headline">
+    <div class="intro">
+      <p class="eyebrow"><span class="dot"></span>Windows desktop / x64</p>
+      <h1 id="headline">Export paperwork,<br><em>ready for review.</em></h1>
+      <p class="lead">Turn commercial invoices and packing lists into carrier instructions. Prepare battery shipments for air transport. Your shipment documents stay on your PC.</p>
+      <a class="jump" href="#workflows">Explore the workflows <span aria-hidden="true">↓</span></a>
+    </div>
+    <figure class="shipment">
+      <div class="stage">
+        <div class="paper"><img src="/images/sample-invoice.webp" alt=""></div>
+        <div class="receipt">
+          <div class="receipt-head"><span>Shipment summary</span><span class="code">USD</span></div>
+          <dl><div><dt>Invoice quantity</dt><dd>7 PCS</dd></div><div><dt>Net weight</dt><dd>3.400 kg</dd></div><div><dt>Gross weight</dt><dd>3.740 kg</dd></div></dl>
+        </div>
+      </div>
+      <figcaption>Sample shipment <span>Commercial invoice &amp; packing list</span></figcaption>
+    </figure>
+  </section>
+
+  <section id="workflows" class="workspace" aria-labelledby="workspace-title">
+    <div class="wrap">
+      <p class="eyebrow">Inside FormWaypoint</p>
+      <h2 id="workspace-title">Two shipping workflows</h2>
+      <article>
+        <div class="feature">
+          <h3>Standard shipping</h3>
+          <p>Trace quantities, net weights and values back to the invoice and packing list. Review the Schedule B commodity rows before generating a Shipper’s Letter of Instruction for Nippon Express or CEVA, or a keying sheet for FedEx or UPS.</p>
+        </div>
+        <figure class="screen"><a href="/images/commodity-review.webp" aria-label="View the full-size commodity review screenshot"><img src="/images/commodity-review.webp" width="1665" height="477" alt="Commodity review groups the sample invoice lines and shows their quantities, net weights and values."></a><figcaption>Commodity review <span>Sample invoice · <a href="/images/commodity-review.webp">View full size</a></span></figcaption></figure>
+      </article>
+      <article>
+        <div class="feature">
+          <h3>Dangerous goods by air</h3>
+          <p>Describe each battery type and how it is packed. FormWaypoint checks the package details, identifies missing answers, and prepares the package checklist and Shipper’s Declaration where required.</p>
+        </div>
+        <figure class="screen"><a href="/images/dangerous-goods.webp" aria-label="View the full-size package entry screenshot"><img src="/images/dangerous-goods.webp" width="1665" height="615" loading="lazy" alt="Package entry fields for packaging, identical packages, overpack, gross weight and equipment weight."></a><figcaption>Dangerous goods <span>Package details · <a href="/images/dangerous-goods.webp">View full size</a></span></figcaption></figure>
+      </article>
+    </div>
+  </section>
 </main>
+<footer>
+  <div class="wrap">
+    <div class="footer-main">
+      <div><p class="eyebrow">Windows x64</p><h2>Download FormWaypoint</h2><p>Run the portable EXE with Microsoft Edge WebView2, or use the installer to install or update FormWaypoint for your Windows account.</p></div>
+      <nav class="actions" aria-label="Footer downloads"><a class="button primary" href="/download"><span aria-hidden="true">↓</span> Portable EXE</a><a class="button" href="/installer">Windows installer</a></nav>
+    </div>
+    <div class="colophon"><a href="https://secureyour.tech/">Joel Abraham / SecureYour.Tech</a><a href="https://github.com/JoelA510/FormWaypoint/releases">Release history ↗</a></div>
+  </div>
+</footer>
+</body>
 </html>
