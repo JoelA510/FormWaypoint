@@ -26,7 +26,8 @@ remembering would be skipped by exactly the changes made in a hurry.
 We will keep `CHANGELOG.md` at the repository root, one dated line per change, newest first, and
 make it a condition of merging. On a pull request, the required `check` job runs
 `scripts/check-changelog.mjs`, which reads the push paths from `desktop.yml` itself and fails
-when the pull request changes a shipped file and adds no entry line to `CHANGELOG.md`. The
+when the pull request changes a shipped file and leaves no more dated entries under "Changes" in
+`CHANGELOG.md` than it found, so rewording a line does not pass for adding one. The
 publish step also asks GitHub to generate each release's notes (the pull requests since the last
 release) and links the changelog at the released commit.
 
@@ -78,9 +79,10 @@ repository setting.
 ## Verification
 
 - `src/test/changelog-gate.test.ts` runs the script in a scratch repository against this
-  repository's real `desktop.yml`: a shipped change without an entry fails, one that only edits
-  the changelog's prose fails, one with an entry passes, a docs-only change and a dependency
-  bump pass, and a workflow with no path list fails.
+  repository's real `desktop.yml`: a shipped change without an entry fails; so does one that
+  only edits the changelog's prose, rewords an instruction bullet, rewords an existing entry, or
+  adds an undated bullet; one with a dated entry passes; a docs-only change and a dependency
+  bump pass; and a workflow with no path list fails.
 - `node scripts/check-changelog.mjs origin/main` on any branch says what the check would decide.
 - The publish step's change cannot be run without publishing a release: it is read against the
   GitHub CLI manual for `gh release create`, where `--notes` text is prepended to generated

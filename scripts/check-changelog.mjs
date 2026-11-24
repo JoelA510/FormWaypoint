@@ -26,9 +26,19 @@ if (needing.length === 0) {
   process.exit(0)
 }
 
-// Touching the file is not enough: the pull request has to add an entry.
-const added = git('diff', '--unified=0', base, 'HEAD', '--', 'CHANGELOG.md').split('\n').filter((line) => /^\+- \S/.test(line))
-if (added.length === 0) {
+// Touching the file is not enough, and neither is rewording a line: the pull request has to
+// leave more dated entries under "Changes" than it found. An entry is "- YYYY-MM-DD: text".
+const entries = (revision) => {
+  // ls-tree prints nothing for a file the revision does not have, and fails on a bad revision.
+  if (git('ls-tree', '--name-only', revision, '--', 'CHANGELOG.md').trim() === '') return []
+  const section = git('show', `${revision}:CHANGELOG.md`).split(/^## Changes[ \t]*\r?$/m)[1] ?? ''
+  return section.split(/^## /m)[0].split(/\r?\n/).filter((line) => /^- \d{4}-\d{2}-\d{2}: \S/.test(line))
+}
+const before = entries(base)
+const after = entries('HEAD')
+const added = after.filter((line) => !before.includes(line))
+const removed = before.filter((line) => !after.includes(line))
+if (added.length <= removed.length) {
   console.error(`This change ships in the desktop build (${needing.length} file(s), first: ${needing[0]}) and adds no entry to CHANGELOG.md.`)
   console.error('Add a line under "Changes", newest first: "- YYYY-MM-DD: what changed for the person using the app."')
   process.exit(1)

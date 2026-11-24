@@ -55,6 +55,33 @@ it('refuses a shipped change that edits the changelog without adding an entry', 
   expect(check).toThrow(/adds no entry to CHANGELOG\.md/)
 })
 
+// Found in review: any added bullet used to count, so rewording a line passed for an entry.
+it('refuses a shipped change that only rewords a bullet in the instructions', () => {
+  write('src/app.ts', 'export const a = 2\n')
+  const changelog = readFileSync(path.join(dir, 'CHANGELOG.md'), 'utf8')
+  expect(changelog).toContain('- Never a real shipment')
+  write('CHANGELOG.md', changelog.replace('- Never a real shipment', '- Never, ever, a real shipment'))
+  commit('reword an instruction')
+  expect(check).toThrow(/adds no entry to CHANGELOG\.md/)
+})
+
+it('refuses a shipped change that only rewords an existing entry', () => {
+  write('src/app.ts', 'export const a = 2\n')
+  const changelog = readFileSync(path.join(dir, 'CHANGELOG.md'), 'utf8')
+  expect(changelog).toContain(': This changelog starts.')
+  write('CHANGELOG.md', changelog.replace(': This changelog starts.', ': This changelog begins.'))
+  commit('reword an entry')
+  expect(check).toThrow(/adds no entry to CHANGELOG\.md/)
+})
+
+it('refuses an entry with no date', () => {
+  write('src/app.ts', 'export const a = 2\n')
+  const changelog = readFileSync(path.join(dir, 'CHANGELOG.md'), 'utf8')
+  write('CHANGELOG.md', changelog.replace(/## Changes\r?\n/, '## Changes\n\n- Fixed a thing.\n'))
+  commit('undated entry')
+  expect(check).toThrow(/adds no entry to CHANGELOG\.md/)
+})
+
 it('accepts a shipped change that adds an entry', () => {
   write('public/data/notes.txt', 'changed\n')
   addEntry()
