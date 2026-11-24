@@ -17,5 +17,7 @@ it contains. A dependency update is named there and needs no line here.
 
 ## Changes
 
+- 2026-11-24: Security updates to two libraries inside the desktop shell (`cookie` and `url`). No
+  change to what the app does.
 - 2026-11-24: This changelog starts. Releases 1.0.1 and 1.0.2 (2026-11-20) came before it; what
   they contain is in the pull requests merged up to that date.
