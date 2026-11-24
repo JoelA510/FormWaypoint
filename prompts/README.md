@@ -8,7 +8,7 @@ Two take a project to a production-grade state, from opposite starting points:
 | Prompt | Use when | What it produces |
 | --- | --- | --- |
 | [`new-project.md`](./new-project.md) | The repo is empty or nearly so. | A verified reference table, one justified stack proposal, the guardrail files (agent rules, contributing, first ADR, tooling/CI, typed env), and a phased plan whose milestone 1 ends in a deployable walking skeleton. |
-| [`existing-project.md`](./existing-project.md) | Code exists and needs to reach production-grade. | A dated audit (`docs/audits/YYYY-MM-<slug>/audit.md`): a baseline run of every gate, then twelve areas scored with file-path evidence and severity, re-verified with refuted findings recorded; a remediation plan beside it that accounts for every finding; and executed milestone 1. Gap analysis, not a rewrite. |
+| [`existing-project.md`](./existing-project.md) | Code exists and needs to reach production-grade. | A dated audit (`docs/audits/YYYY-MM-<slug>/audit.md`): a baseline run of every gate, then thirteen areas scored, the last whether each promised flow works end to end, with file-path evidence and severity, re-verified with refuted findings recorded; a remediation plan beside it that accounts for every finding; and executed milestone 1. Gap analysis, not a rewrite. |
 
 Seven more cover the work that comes after, the day-to-day changes where most defects actually
 enter:
@@ -61,6 +61,12 @@ Codex, Antigravity, Gemini CLI, Cursor, and Copilot read skills from `.agents/sk
 Code reads the copies in `.claude/skills/`. Invoke one as `/complete` in Claude Code or
 Antigravity, `$complete` in Codex, or ask for it by name in any other agent.
 
+Which of those agents a project uses is its own choice, recorded in `.agents/platforms.json`:
+the two project prompts ask for it, and it decides which instruction files are wired up and how
+large AGENTS.md may grow, since each agent stops reading at a different size.
+[`agent-platforms.md`](./agent-platforms.md) lists the agents the template knows, with each
+one's documented limits and sources, and the procedure for researching one it doesn't.
+
 ## Artifact skeletons
 
 Every file the prompts require — AGENTS.md and the CLAUDE.md that imports it, CONTRIBUTING.md,
@@ -87,14 +93,18 @@ This delivers the prompts (with this README and a fresh run log) into `<target>/
 skeletons into `<target>/prompts/skeletons/`, the standards the target is held to into
 `<target>/prompts/standards/`, and the skills into `<target>/.agents/skills/` and
 `<target>/.claude/skills/`, plus `prompts/.apply-manifest.json` recording what was delivered
-and from which template commit. Nothing but the skills lands at a live path, so nothing in the
-target is overwritten or shadowed. `--list` previews without writing.
+and from which template commit. When the target's `.agents/platforms.json` selects its agents
+(`agent-platforms.md`), the skills go only to the home(s) those agents read: `.claude/skills/`
+for Claude Code, `.agents/skills/` for the rest. What an earlier apply put in a home the
+selection no longer reads is reported and left as it is, never removed. Nothing but the skills
+lands at a live path, so nothing in the target is overwritten or shadowed. `--list` previews
+without writing.
 
 The `core` standards always come along. `--pack <name>` (`node`, `supabase`, and the rest of the
 catalog's packs) adds a stack's standards, and the manifest remembers it for later runs;
 `--drop-pack <name>` stops delivering one. `--check` writes nothing and exits 1 when the target
-has drifted: a re-apply would change a file, or a parked `.template` or a conflict marker is
-still there. A CI job in the target, or a fleet report, can ask it.
+has drifted: a re-apply would change a file, a parked `.template` or a conflict marker is still
+there, or a delivered file is ignored by the target's git and not committed. A CI job in the target, or a fleet report, can ask it.
 
 `process:apply` and `scripts/check-placeholders.mjs` need no install. `check:instructions` and
 `check:env` need the template's dependencies (`yaml` and `typescript`); for process-only use,
@@ -104,10 +114,16 @@ scripts, which would otherwise set up the template's own git hooks in that check
 Then, in the target:
 
 - **Keep formatters off the delivered files** (`prompts/`, `.agents/skills/`,
-  `.claude/skills/`), for example in `.prettierignore`, before the first commit: a pre-commit
-  formatter would otherwise rewrite them as they're committed. A reformat makes every one of
-  them look edited, and a re-apply then parks the template's updates beside them instead of
-  applying them.
+  `.claude/skills/`), for example in `.prettierignore`. A formatter that runs on commit (a
+  pre-commit hook, lint-staged) needs this before the first commit, or it rewrites them as
+  they're committed. One run only by hand can wait for the project's first change, where a config
+  edit is in scope (an audit run that may not touch config, say), as long as it's run only on the
+  project's own paths until then. A reformat makes every delivered file look edited, and a
+  re-apply then parks the template's updates beside them instead of applying them.
+- **Commit the delivered files even where `.gitignore` covers them** (an ignored `.claude/`, for
+  instance): add exceptions (`.claude/*`, then `!.claude/skills/`), or, where `.gitignore` isn't to
+  be edited, force-add them (`git add -f`); git keeps tracking a force-added file. Otherwise no
+  clone has them. `process:apply` names them, and `--check` fails until they're committed.
 - **Then commit the delivery, unmodified, manifest included**, before any prompt run: the
   run's own diff stays reviewable, and the manifest travels with the repo so a later re-apply
   can tell your edits from old deliveries.
