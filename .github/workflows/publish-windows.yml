@@ -65,4 +65,4 @@ jobs:
             fi
           fi
           gh release create "$tag" FormWaypoint.exe FormWaypoint-setup.exe --target "$source_sha" \
-            --title "FormWaypoint ${tag#v}" --notes "Verified Windows x64 desktop build $BUILD_RUN. Download FormWaypoint.exe to run directly with WebView2, or FormWaypoint-setup.exe for a per-user installation." "${args[@]}"
+            --title "FormWaypoint ${tag#v}" --generate-notes --notes "Verified Windows x64 desktop build $BUILD_RUN. Download FormWaypoint.exe to run directly with WebView2, or FormWaypoint-setup.exe for a per-user installation. What changed, in plain words: https://github.com/$GH_REPO/blob/$source_sha/CHANGELOG.md" "${args[@]}"
