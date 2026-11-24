@@ -32,7 +32,8 @@ beforeEach(() => {
   write('src/app.ts', 'export const a = 1\n')
   commit('base')
 })
-afterEach(() => rmSync(dir, { recursive: true, force: true }))
+// Retries cover Windows briefly holding a file inside the scratch repository's .git.
+afterEach(() => rmSync(dir, { recursive: true, force: true, maxRetries: 3 }))
 
 const addEntry = () => {
   const changelog = readFileSync(path.join(dir, 'CHANGELOG.md'), 'utf8')

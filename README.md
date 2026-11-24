@@ -22,6 +22,7 @@ npm run desktop:dev    # desktop window (needs a Rust toolchain)
 Download the [portable Windows executable](https://github.com/JoelA510/FormWaypoint/releases/latest/download/FormWaypoint.exe)
 or the [per-user installer](https://github.com/JoelA510/FormWaypoint/releases/latest/download/FormWaypoint-setup.exe).
 Successful main-branch desktop builds publish both Windows x64 binaries to [GitHub Releases](https://github.com/JoelA510/FormWaypoint/releases).
+What each build changed is in [CHANGELOG.md](CHANGELOG.md).
 
 ## Supported CIPL formats
 

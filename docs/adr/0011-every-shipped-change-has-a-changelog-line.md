@@ -11,8 +11,9 @@
 
 Since #100 and #102 (2026-11-20) every successful desktop build from `main` is versioned
 automatically and published to GitHub Releases, and a public download page points at the latest
-one. Releases 1.0.1 and 1.0.2 went out that day. Each carries the same fixed sentence as its
-notes, and the repository had no changelog, so nothing told a shipper what a new build changed.
+one. Releases 1.0.1 and 1.0.2 went out that day. The publish step writes the same fixed sentence
+as every release's notes, and the repository had no changelog, so nothing told a shipper what a
+new build changed.
 On a tool whose first rule is "never file a wrong figure", a changed rounding rule or a new
 blocking check is something the person using it has to be able to find.
 
