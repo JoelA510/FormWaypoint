@@ -1,0 +1,59 @@
+# Commands that need the owner's approval under AGENTS.md, and the forced installs it forbids.
+# Codex checks these leading words in a trusted project when a command runs outside the sandbox.
+# The examples are checked on load. Other option orders can produce the same effect.
+
+prefix_rule(
+    pattern = ["git", "push", ["--force", "-f", "--force-with-lease"]],
+    decision = "prompt",
+    justification = "A force push rewrites history other people may have. Ask first (AGENTS.md).",
+    match = [["git", "push", "--force"], ["git", "push", "-f", "origin", "topic"]],
+    not_match = [["git", "push"], ["git", "push", "origin", "topic"]],
+)
+
+prefix_rule(
+    pattern = ["git", "reset", "--hard"],
+    decision = "prompt",
+    justification = "A hard reset discards uncommitted work. Ask first (AGENTS.md).",
+    match = [["git", "reset", "--hard"], ["git", "reset", "--hard", "HEAD~1"]],
+    not_match = [["git", "reset"], ["git", "reset", "--soft", "HEAD~1"]],
+)
+
+prefix_rule(
+    pattern = ["git", "clean"],
+    decision = "prompt",
+    justification = "git clean deletes untracked files, which nothing can restore. Ask first (AGENTS.md).",
+    match = [["git", "clean", "-fd"]],
+    not_match = [["git", "status"]],
+)
+
+prefix_rule(
+    pattern = ["rm", ["-rf", "-fr", "-r", "-R"]],
+    decision = "prompt",
+    justification = "A recursive delete is not undone. Ask first (AGENTS.md).",
+    match = [["rm", "-rf", "build"], ["rm", "-r", "tmp"]],
+    not_match = [["rm", "notes.txt"]],
+)
+
+prefix_rule(
+    pattern = ["npm", "publish"],
+    decision = "prompt",
+    justification = "Publishing sends this package outside the repository. Ask first (AGENTS.md).",
+    match = [["npm", "publish"], ["npm", "publish", "--access", "public"]],
+    not_match = [["npm", "pack"]],
+)
+
+prefix_rule(
+    pattern = ["gh", "release", ["create", "delete", "upload", "edit"]],
+    decision = "prompt",
+    justification = "A release is public and tagged. Ask first (AGENTS.md).",
+    match = [["gh", "release", "create", "v1.2.3"]],
+    not_match = [["gh", "release", "list"], ["gh", "release", "view", "v1.2.3"]],
+)
+
+prefix_rule(
+    pattern = ["npm", ["install", "i", "ci"], ["--force", "--legacy-peer-deps"]],
+    decision = "forbidden",
+    justification = "Installs aren't forced here: report the failed install instead (AGENTS.md, docs/dependency-policy.md).",
+    match = [["npm", "install", "--force"], ["npm", "ci", "--legacy-peer-deps"]],
+    not_match = [["npm", "install"], ["npm", "ci"]],
+)
