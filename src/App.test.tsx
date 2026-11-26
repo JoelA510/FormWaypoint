@@ -12,6 +12,9 @@ import path from 'node:path'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { localStore } from './store/local-store'
+import { EMPTY_PROFILE } from './domain/draft'
+import * as delivery from './lib/deliver'
 import { buildXlsx } from './lib/xlsx'
 import { inHouseCiGrid, simpleInHouseCi, type InHouseCiSpec } from './test/synthetic/inhouse-ci'
 import type { AppearancePreference, ConsigneeRecord, LocalStore } from './store/local-store'
@@ -34,6 +37,7 @@ vi.mock('./store/local-store', async (importOriginal) => {
     saveKeyingOptions: nothing,
     getConsignee: async (name) => consignees.get(name) ?? null,
     saveConsignee: nothing,
+    saveShipment: nothing,
     listConsignees: none,
     listOverrides: none,
     listPartOverrides: none,
@@ -65,6 +69,7 @@ afterEach(async () => {
   container?.remove()
   root = null
   container = null
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
 
@@ -256,4 +261,87 @@ it('restores the saved appearance and allows returning to the system setting', a
     expect(document.documentElement.dataset.appearance).toBe(value)
     expect(savedAppearance).toBe(value)
   }
+})
+
+const carrierSelect = () => container!.querySelector<HTMLSelectElement>('select[aria-label="Carrier"]')!
+const button = (label: string) =>
+  [...container!.querySelectorAll('button')].find((item) => item.textContent === label)
+const selectValue = async (select: HTMLSelectElement, value: string) => {
+  await act(async () => {
+    select.value = value
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+}
+
+it.each(['Independent Forwarder', ''])('requires a new choice for an unmatched or missing forwarder (%s)', async (carrier) => {
+  await mount()
+  await upload('first.xlsx', { ...simpleInHouseCi(), carrier: 'UPS' })
+  expect(carrierSelect().value).toBe('ups')
+  await act(async () => button('Start over')!.click())
+  await upload('next.xlsx', { ...simpleInHouseCi(), carrier })
+  expect(carrierSelect().value).toBe('')
+  expect(text()).toContain('Choose a carrier')
+  expect(button('Download keying sheet')).toBeUndefined()
+  await selectValue(carrierSelect(), 'ceva')
+  expect(button('Download completed CEVA Logistics SLI')).toBeDefined()
+})
+
+it('rejects a multi-file drop before reading either file and accepts the next single upload', async () => {
+  await mount()
+  const files = [new File([], 'invoice.pdf'), new File([], 'packing.pdf')]
+  const outside = new Event('drop', { bubbles: true, cancelable: true })
+  Object.defineProperty(outside, 'dataTransfer', { value: { files, types: ['Files'] } })
+  container!.querySelector('footer')!.dispatchEvent(outside)
+  expect(outside.defaultPrevented).toBe(true)
+
+  const read = vi.fn(async () => new ArrayBuffer(0))
+  for (const file of files) Object.defineProperty(file, 'arrayBuffer', { value: read })
+  const drop = new Event('drop', { bubbles: true, cancelable: true })
+  Object.defineProperty(drop, 'dataTransfer', { value: { files, types: ['Files'] } })
+  await act(async () => button('Choose a file')!.parentElement!.dispatchEvent(drop))
+  expect(read).not.toHaveBeenCalled()
+  expect(container!.querySelector('[role=alert]')?.textContent).toMatch(/combine/i)
+  await upload('combined.xlsx', simpleInHouseCi())
+  expect(carrierSelect().value).toBe('nippon-express')
+})
+
+it('keeps the workbook target with the keyed carrier and retires the old Open action', async () => {
+  const spec = simpleInHouseCi()
+  spec.lines[1].hts = spec.lines[0].hts
+  vi.spyOn(localStore, 'getProfile').mockResolvedValueOnce({
+    ...EMPTY_PROFILE, usppiName: 'Example Exporter', usppiEin: '00-0000000', usppiZip: '00000',
+    pointOfOrigin: 'CA', signerName: 'Test Signer', signerTitle: 'Test',
+  })
+  vi.spyOn(localStore, 'listPartOverrides').mockResolvedValueOnce(spec.lines.map((line) => ({
+    partNumber: line.partNumber, netWeightKg: 0.5, description: line.description, updatedAt: '',
+  })))
+  const deliver = vi.spyOn(delivery, 'deliver').mockResolvedValue({ path: '/test/output.xlsx', fileName: 'output.xlsx' })
+  await mount()
+  await upload('sample.xlsx', { ...spec, netWeightKg: 3.5 })
+  const target = () => container!.querySelector<HTMLSelectElement>('select[aria-label="Target application"]')!
+  await selectValue(carrierSelect(), 'ups')
+  expect(target().value).toBe('ups-worldship')
+  expect(target().disabled).toBe(true)
+  expect(button('Download keying sheet')!.disabled).toBe(false)
+  await act(async () => button('Download keying sheet')!.click())
+  expect(deliver.mock.calls.at(-1)?.[1]).toMatch(/ups-worldship\.xlsx$/)
+  expect(button('Open')).toBeDefined()
+  await selectValue(carrierSelect(), 'fedex')
+  expect(target().value).toBe('fedex-ship-manager')
+  expect(button('Open')).toBeUndefined()
+  await selectValue(carrierSelect(), 'ceva')
+  expect(target().disabled).toBe(false)
+  await act(async () => button('Download keying sheet')!.click())
+  expect(button('Open')).toBeDefined()
+  await selectValue(target(), 'ups-worldship')
+  expect(button('Open')).toBeUndefined()
+
+  let finishSave!: (file: delivery.Delivery) => void
+  deliver.mockReturnValueOnce(new Promise((resolve) => { finishSave = resolve }))
+  const open = vi.spyOn(delivery, 'open')
+  await act(async () => button('Download keying sheet')!.click())
+  await selectValue(target(), 'fedex-ship-manager')
+  await act(async () => finishSave({ path: '/test/late.xlsx', fileName: 'late.xlsx' }))
+  expect(open).not.toHaveBeenCalled()
+  expect(button('Open')).toBeUndefined()
 })

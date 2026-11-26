@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Select } from '../components/ui'
 import { deliver, open as openDelivery, type Delivery } from '../lib/deliver'
 import {
@@ -22,6 +22,8 @@ import type { Reconciliation } from '../domain/types'
 import type { ExportControlOverride } from '../domain/reconcile'
 import { localStore, type ShipmentRecord } from '../store/local-store'
 
+const EMPTY_DESCRIPTIONS: Record<string, string> = {}
+
 export function OutputPanel({
   adapter,
   reconciliation,
@@ -30,7 +32,7 @@ export function OutputPanel({
   onGenerated,
   keyedCarrier = null,
   bridge,
-  descriptionsByPart = {},
+  descriptionsByPart = EMPTY_DESCRIPTIONS,
   sourceFile,
   excludedSets = [],
   scheduleB = null,
@@ -79,13 +81,31 @@ export function OutputPanel({
   keyedCarrier?: 'fedex' | 'ups' | null
 }) {
   const [busy, setBusy] = useState(false)
-  const [warnings, setWarnings] = useState<string[]>([])
-  const [error, setError] = useState<string | null>(null)
-  const [saved, setSaved] = useState<Delivery | null>(null)
-  const [target, setTarget] = useState<KeyingTarget>(
-    keyedCarrier === 'ups' ? 'ups-worldship' : 'fedex-ship-manager',
-  )
+  const [chosenTarget, setChosenTarget] = useState<KeyingTarget>('fedex-ship-manager')
+  const target = keyedCarrier === 'ups' ? 'ups-worldship' : keyedCarrier === 'fedex' ? 'fedex-ship-manager' : chosenTarget
   const [options, setOptions] = useState<KeyingOptions>(DEFAULT_KEYING_OPTIONS)
+
+  // A save may finish after the operator edits the shipment. Only show its files and
+  // messages beside the inputs that produced them, including keying-only layout changes.
+  const inputs = useMemo(
+    () => ({ draft, target, options, keyedCarrier, descriptionsByPart }),
+    [draft, target, options, keyedCarrier, descriptionsByPart],
+  )
+  const liveInputs = useRef<typeof inputs | null>(null)
+  useLayoutEffect(() => {
+    liveInputs.current = inputs
+    return () => { liveInputs.current = null }
+  }, [inputs])
+  const [result, setResult] = useState<{
+    inputs: typeof inputs
+    saved?: Delivery
+    warnings?: string[]
+    error?: string
+  } | null>(null)
+  const current = result?.inputs === inputs ? result : null
+  const saved = current?.saved
+  const warnings = current?.warnings ?? []
+  const error = current?.error
 
   // Restored once, then written back on every change. A layout is a way of working, and
   // making somebody re-pick it on each shipment is the friction this panel exists to remove.
@@ -155,8 +175,7 @@ export function OutputPanel({
 
   async function generate() {
     setBusy(true)
-    setError(null)
-    setWarnings([])
+    setResult(null)
     try {
       const response = await fetch(`${import.meta.env.BASE_URL}${adapter.templateUrl}`)
       if (!response.ok) throw new Error(`Could not load the ${adapter.name} template (${response.status}).`)
@@ -172,15 +191,14 @@ export function OutputPanel({
       }
 
       const filled = await adapter.fill(templateBytes, draft)
-      setWarnings(filled.warnings)
       const delivery = await deliver(bridge, `${header.invoiceNumber || 'shipment'}_SLI_${adapter.id}.pdf`, filled.bytes)
-      setSaved(delivery)
+      setResult({ inputs, saved: delivery, warnings: filled.warnings })
       // Opened straight away: the next thing anyone does with a filled SLI is read it and
       // sign it, and the boxes this tool deliberately leaves blank are only fillable there.
-      await openDelivery(bridge, delivery)
+      if (liveInputs.current === inputs) await openDelivery(bridge, delivery)
       onGenerated()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'The form could not be generated.')
+      setResult({ inputs, error: e instanceof Error ? e.message : 'The form could not be generated.' })
     } finally {
       setBusy(false)
     }
@@ -199,11 +217,7 @@ export function OutputPanel({
     // two audit rows against one shipment.
     if (busy) return
     setBusy(true)
-    setError(null)
-    // Cleared like the SLI's. The warnings belong to the artifact that raised them, and a
-    // form-fill warning left standing beside a keying sheet describes a box on a form this
-    // download does not produce.
-    setWarnings([])
+    setResult(null)
     try {
       const sheet = buildKeyingSheet(target, reconciliation, draft, {
         descriptionsByPart,
@@ -225,13 +239,13 @@ export function OutputPanel({
         keyingSheetToXlsx(sheet),
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       )
-      setSaved(delivery)
-      await openDelivery(bridge, delivery)
+      setResult({ inputs, saved: delivery })
+      if (liveInputs.current === inputs) await openDelivery(bridge, delivery)
       // Recorded like a generated form: for FedEx and UPS this is the only artifact, and a
       // shipment that left the tool with no history entry has no audit trail at all.
       onGenerated()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'The keying sheet could not be saved.')
+      setResult({ inputs, error: e instanceof Error ? e.message : 'The keying sheet could not be saved.' })
     } finally {
       setBusy(false)
     }
@@ -319,7 +333,8 @@ export function OutputPanel({
           <div className="flex flex-wrap items-center gap-2">
             <Select
               value={target}
-              onChange={(e) => setTarget(e.target.value as KeyingTarget)}
+              disabled={Boolean(keyedCarrier)}
+              onChange={(e) => setChosenTarget(e.target.value as KeyingTarget)}
               className="w-auto"
               aria-label="Target application"
             >

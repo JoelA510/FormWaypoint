@@ -86,14 +86,13 @@ export function ManualFieldsPanel({
           ) : null}
           <Field
             label="Shipment reference"
-            hint="Internal sales-order number. On past shipments this was an SO number that appears nowhere on the CIPL."
+            hint="Enter your internal sales-order reference."
           >
             {(id) => (
               <Input
                 id={id}
                 value={settings.shipmentReference}
                 onChange={(e) => setSetting('shipmentReference', e.target.value)}
-                placeholder="e.g. 13370794"
               />
             )}
           </Field>
@@ -105,7 +104,6 @@ export function ManualFieldsPanel({
                   id={id}
                   value={settings.transportationReference}
                   onChange={(e) => setSetting('transportationReference', e.target.value)}
-                  placeholder="e.g. NEU-5112 9514"
                 />
               )}
             </Field>
@@ -145,7 +143,6 @@ export function ManualFieldsPanel({
                 id={id}
                 value={settings.consigneeId}
                 onChange={(e) => setSetting('consigneeId', e.target.value)}
-                placeholder="e.g. NL008305535"
               />
             )}
           </Field>
@@ -203,8 +200,8 @@ export function ManualFieldsPanel({
             label="Named place / port"
             hint={
               isNippon
-                ? 'Qualifies the incoterm, e.g. the port in FOB SFO.'
-                : 'Qualifies the incoterm, e.g. the port in FOB SFO. This form has no box for it, so it goes ' +
+                ? 'The place or port named in the trade terms.'
+                : 'The place or port named in the trade terms. This form has no box for it, so it goes ' +
                   'into the special instructions. Leave blank where the document already names one.'
             }
           >
@@ -213,7 +210,7 @@ export function ManualFieldsPanel({
                 id={id}
                 value={settings.namedPlace}
                 onChange={(e) => setSetting('namedPlace', e.target.value)}
-                placeholder="e.g. SFO"
+                placeholder="Named place or port"
               />
             )}
           </Field>
@@ -224,7 +221,7 @@ export function ManualFieldsPanel({
                 id={id}
                 value={settings.piecesAndDimensions}
                 onChange={(e) => setSetting('piecesAndDimensions', e.target.value)}
-                placeholder="1 Pallet&#10;52 x 48 x 50"
+                placeholder="Package count, dimensions and units"
               />
             )}
           </Field>

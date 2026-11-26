@@ -474,7 +474,7 @@ export function DangerousGoodsPanel({
                     id={id}
                     value={consignment.airportOfDeparture}
                     onChange={(e) => patch({ airportOfDeparture: e.target.value })}
-                    placeholder="Los Angeles"
+                    placeholder="Departure airport"
                   />
                 )}
               </Field>
@@ -487,7 +487,7 @@ export function DangerousGoodsPanel({
                     id={id}
                     value={consignment.airportOfDestination}
                     onChange={(e) => patch({ airportOfDestination: e.target.value })}
-                    placeholder="Amsterdam"
+                    placeholder="Destination airport"
                   />
                 )}
               </Field>
@@ -548,7 +548,7 @@ export function DangerousGoodsPanel({
                     id={id}
                     value={consignment.operatingCarrier}
                     onChange={(e) => patch({ operatingCarrier: e.target.value })}
-                    placeholder="e.g. UPS Airlines"
+                    placeholder="Operating airline"
                   />
                 )}
               </Field>
@@ -580,7 +580,7 @@ export function DangerousGoodsPanel({
                     id={id}
                     value={consignment.emergencyContactPhone}
                     onChange={(e) => patch({ emergencyContactPhone: e.target.value })}
-                    placeholder="1-800-424-9300"
+                    placeholder="Emergency telephone number"
                   />
                 )}
               </Field>
@@ -966,7 +966,7 @@ function PackagesEditor({
                       id={id}
                       value={pkg.unSpecificationMark}
                       onChange={(e) => onUpdatePackage(pkg.id, { unSpecificationMark: e.target.value })}
-                      placeholder="4G/Y25/S/26/USA/+D02390"
+                      placeholder="Mark printed on the packaging"
                     />
                   )}
                 </Field>

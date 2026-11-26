@@ -33,7 +33,7 @@ export interface FormatDescriptor {
 export const CIPL_FORMATS: FormatDescriptor[] = [
   {
     id: 'inhouse-ci',
-    label: 'In-house Commercial Invoice (form 00004-00202)',
+    label: 'In-house Commercial Invoice',
     matches: isInHouseCiPdf,
     parse: parseInHouseCiPdf,
   },
@@ -104,7 +104,7 @@ export async function parseCiplFile(fileName: string, data: ArrayBuffer | Uint8A
   if (!found.sheets.length) {
     throw new Error(
       `${fileName} is a workbook, but none of its ${found.sheetCount} sheet(s) is the Commercial Invoice ` +
-        'form (00004-00202) this tool reads. Workbook import supports that form only; CIPLs from other ' +
+        'form this tool reads. Workbook import supports that form only; CIPLs from other ' +
         'systems are read from their PDFs.',
     )
   }

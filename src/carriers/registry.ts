@@ -20,7 +20,7 @@ export const KEYED_CARRIERS: Record<KeyedCarrierId, { label: string; application
   ups: { label: 'UPS', application: 'UPS WorldShip' },
 }
 
-export function isKeyedCarrier(id: ShipmentCarrierId): id is KeyedCarrierId {
+export function isKeyedCarrier(id: ShipmentCarrierId | null): id is KeyedCarrierId {
   return id === 'fedex' || id === 'ups'
 }
 
