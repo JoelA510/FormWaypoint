@@ -16,7 +16,7 @@
 import { EMPTY_PROFILE, type CompanyProfile } from '../domain/draft'
 import type { ItemLibraryEntry } from '../domain/item-library'
 import { logError } from '../lib/error-log'
-import type { ConsigneeRecord, DgConsignmentRecord, OverrideRecord, PartOverrideRecord, ShipmentRecord } from './local-store'
+import type { ConsigneeRecord, DgConsignmentRecord, OverrideRecord, PartOverrideRecord, ShipmentOutput, ShipmentRecord } from './local-store'
 
 type Raw = Record<string, unknown>
 
@@ -136,11 +136,26 @@ export const decodeConsignees = (raws: unknown[]): ConsigneeRecord[] =>
     repaired: false,
   }))
 
+function isShipmentOutput(value: unknown): value is ShipmentOutput {
+  if (!isObject(value)) return false
+  const { kind, fileName, path } = value
+  if (kind !== 'sli' && kind !== 'fedex-ship-manager' && kind !== 'ups-worldship') return false
+  if (!nonEmptyText(fileName) || /[\\/:*?"<>|]/.test(fileName)) return false
+  if (!fileName.endsWith(kind === 'sli' ? '.pdf' : '.xlsx')) return false
+  // A browser download has no known path. Native saves return an absolute path and the
+  // final basename, including any duplicate suffix. Rust checks the output directory on open.
+  return path === null || (isText(path) && /^(?:[a-z]:[\\/]|\\\\|\/)/i.test(path) && path.split(/[\\/]/).at(-1) === fileName)
+}
+
 export const decodeShipments = (raws: unknown[]): ShipmentRecord[] =>
-  decodeAll('shipment history', raws, (raw) => ({
-    record: nonEmptyText(raw.id) && isText(raw.processedAt) ? (raw as unknown as ShipmentRecord) : null,
-    repaired: false,
-  }))
+  decodeAll('shipment history', raws, (raw) => {
+    if (!nonEmptyText(raw.id) || !isText(raw.processedAt)) return { record: null, repaired: false }
+    const record = raw as unknown as ShipmentRecord
+    if (raw.output === undefined || isShipmentOutput(raw.output)) return { record, repaired: false }
+    const repaired = { ...record }
+    delete repaired.output
+    return { record: repaired, repaired: true }
+  })
 
 export const decodeDgConsignments = (raws: unknown[]): DgConsignmentRecord[] =>
   decodeAll('dangerous goods consignment', raws, (raw) => {

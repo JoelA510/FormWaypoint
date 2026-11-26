@@ -45,6 +45,7 @@ import {
   type ShipmentSettings,
 } from './domain/draft'
 import {
+  CARRIER_LABELS,
   KEYED_CARRIERS,
   detectCarrier,
   getAdapter,
@@ -65,6 +66,7 @@ import {
   type PartOverrideRecord,
   type PartOverridePatch,
   type ShipmentRecord,
+  type ShipmentOutput,
 } from './store/local-store'
 import { DangerousGoodsPanel } from './features/dangerous-goods'
 import { newConsignment, type DgConsignment } from './domain/dangerous-goods/types'
@@ -84,13 +86,6 @@ import { APP_VERSION, exportDiagnostics, setErrorContext } from './lib/error-log
  * the CIPL loaded here, when asked (ADR 0004). Nothing about dangerous goods comes back.
  */
 type Workflow = 'standard' | 'dangerous-goods'
-
-const CARRIER_LABELS: Record<ShipmentCarrierId, string> = {
-  'nippon-express': 'Nippon Express USA',
-  ceva: 'CEVA Logistics',
-  fedex: 'FedEx — keyed into Ship Manager',
-  ups: 'UPS — keyed into WorldShip',
-}
 
 export function App() {
   // Let the upload panel read file drops. Elsewhere, keep WebView2 on the shipment screen.
@@ -635,7 +630,7 @@ export function App() {
     return sources.length ? sources.join(' + ') : null
   }, [items])
 
-  const handleGenerated = useCallback(async () => {
+  const handleGenerated = useCallback(async (output: ShipmentOutput) => {
     if (!reconciliation || !parsed || !carrierId) return
     const { header, sliLines } = reconciliation
     const processedAt = new Date().toISOString()
@@ -645,6 +640,7 @@ export function App() {
       processedAt,
       carrierId,
       fileName: parsed.fileName,
+      output,
       consigneeName: header.consignedTo.name,
       destinationCountry: resolveDestinationCountry(header) ?? '',
       totalQuantity: header.totalQuantity,
@@ -658,7 +654,7 @@ export function App() {
       settings,
     }
     // Reported, not swallowed. This is the audit record for a form that has already been
-    // written and opened, and `db()` rejects rather than hanging now — so a tab superseded
+    // written, and `db()` rejects rather than hanging now — so a tab superseded
     // by a newer version in another window would lose the record while the panel went on
     // saying "Saved to …". The consignee is convenience data and the list on screen is a
     // view; the record is the only one of the three that has to be said out loud.
@@ -980,7 +976,7 @@ export function App() {
                 today={localDate()}
                 bridge={bridge}
               />
-              <HistoryPanel shipments={shipments} onClear={() => void clearAll()} />
+              <HistoryPanel shipments={shipments} bridge={bridge} onClear={() => void clearAll()} />
             </>
           ) : reconciliation && draft ? (
             <>
@@ -1159,7 +1155,7 @@ export function App() {
                         <li key={check.id}>{check.id === 'profile-complete' ? 'Required exporter details are missing' : check.title}{corrections(check)}</li>)}</ul>
                       <a className="underline" href="#shipment-checks">Read check details</a>
                     </>}
-                    onGenerated={() => void handleGenerated()}
+                    onGenerated={handleGenerated}
                     keyedCarrier={keyedCarrier}
                     bridge={bridge}
                     descriptionsByPart={descriptionsByPart}
@@ -1181,7 +1177,7 @@ export function App() {
                   />
                 </>
               )}
-              <HistoryPanel shipments={shipments} onClear={() => void clearAll()} />
+              <HistoryPanel shipments={shipments} bridge={bridge} onClear={() => void clearAll()} />
             </>
           ) : null}
           </>

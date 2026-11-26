@@ -94,7 +94,7 @@ export function UploadPanel({
             ref={inputRef}
             type="file"
             accept="application/pdf,.pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.xlsx"
-            className="sr-only"
+            hidden
             onChange={(e) => {
               void handleFiles(e.target.files)
               e.target.value = ''

@@ -213,7 +213,7 @@ export interface KeyingSheet {
   manualFields: string[]
 }
 
-const APPLICATION_NAMES: Record<KeyingTarget, string> = {
+export const APPLICATION_NAMES: Record<KeyingTarget, string> = {
   'fedex-ship-manager': 'FedEx Ship Manager',
   'ups-worldship': 'UPS WorldShip',
 }
