@@ -15,6 +15,13 @@ export type CarrierId = 'nippon-express' | 'ceva'
 export type KeyedCarrierId = 'fedex' | 'ups'
 export type ShipmentCarrierId = CarrierId | KeyedCarrierId
 
+export const CARRIER_LABELS: Record<ShipmentCarrierId, string> = {
+  'nippon-express': 'Nippon Express USA',
+  ceva: 'CEVA Logistics',
+  fedex: 'FedEx — keyed into Ship Manager',
+  ups: 'UPS — keyed into WorldShip',
+}
+
 export const KEYED_CARRIERS: Record<KeyedCarrierId, { label: string; application: string }> = {
   fedex: { label: 'FedEx', application: 'FedEx Ship Manager' },
   ups: { label: 'UPS', application: 'UPS WorldShip' },

@@ -13,11 +13,12 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { localStore } from './store/local-store'
-import { EMPTY_PROFILE } from './domain/draft'
+import { defaultShipmentSettings, EMPTY_PROFILE } from './domain/draft'
+import { getAdapter } from './carriers/registry'
 import * as delivery from './lib/deliver'
 import { buildXlsx } from './lib/xlsx'
 import { inHouseCiGrid, simpleInHouseCi, type InHouseCiSpec } from './test/synthetic/inhouse-ci'
-import type { AppearancePreference, ConsigneeRecord, LocalStore } from './store/local-store'
+import type { AppearancePreference, ConsigneeRecord, LocalStore, ShipmentRecord } from './store/local-store'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -291,6 +292,17 @@ it.each(['Independent Forwarder', ''])('requires a new choice for an unmatched o
   expect(button('Download completed CEVA Logistics SLI')).toBeDefined()
 })
 
+it('exposes a single CIPL chooser and opens its native picker from the named button', async () => {
+  await mount()
+  const choose = button('Choose a file')!
+  const input = choose.closest('section')!.querySelector<HTMLInputElement>('input[type=file]')!
+  const pick = vi.spyOn(input, 'click')
+  expect(input.hidden).toBe(true)
+  expect(choose.tabIndex).toBe(0)
+  await act(async () => choose.click())
+  expect(pick).toHaveBeenCalledOnce()
+})
+
 it('rejects a multi-file drop before reading either file and accepts the next single upload', async () => {
   await mount()
   const files = [new File([], 'invoice.pdf'), new File([], 'packing.pdf')]
@@ -308,6 +320,21 @@ it('rejects a multi-file drop before reading either file and accepts the next si
   expect(container!.querySelector('[role=alert]')?.textContent).toMatch(/combine/i)
   await upload('combined.xlsx', simpleInHouseCi())
   expect(carrierSelect().value).toBe('nippon-express')
+})
+
+it('shows the recorded carrier on a history entry created by an earlier build', async () => {
+  vi.spyOn(localStore, 'listShipments').mockResolvedValueOnce([{
+    id: 'example-run', invoiceNumber: 'EXAMPLE', processedAt: '2026-10-01T12:00:00Z', carrierId: 'ceva',
+    fileName: 'source.pdf', consigneeName: 'Test consignee', destinationCountry: 'Canada',
+    totalQuantity: 1, totalValueUsd: 5, totalNetWeightKg: 0.25, lines: [], checks: [],
+    settings: defaultShipmentSettings(getAdapter('ceva')),
+  }])
+  await mount()
+  const row = [...container!.querySelectorAll('tr')].find(tr => tr.textContent?.includes('Test consignee'))
+  expect(row?.textContent).toContain('CEVA Logistics')
+  expect(row?.textContent).toContain('Output location unavailable')
+  expect(row?.textContent).not.toContain('source.pdf')
+  expect(row?.querySelector('button')).toBeNull()
 })
 
 it('keeps the workbook target with the keyed carrier and retires the old Open action', async () => {
@@ -349,6 +376,51 @@ it('keeps the workbook target with the keyed carrier and retires the old Open ac
   await act(async () => finishSave({ path: '/test/late.xlsx', fileName: 'late.xlsx' }))
   expect(open).not.toHaveBeenCalled()
   expect(button('Open')).toBeUndefined()
+})
+
+it.each(['desktop', 'browser'])('keeps the delivered workbook in History after Start over on %s', async (platform) => {
+  const desktop = platform === 'desktop'
+  const fileName = desktop ? 'shipment_ups-worldship (2).xlsx' : 'shipment_ups-worldship.xlsx'
+  const savedPath = '/exports/' + fileName
+  const invoke = vi.fn().mockResolvedValue(null)
+  if (desktop) vi.stubGlobal('__TAURI_INTERNALS__', { invoke })
+  const shipments: ShipmentRecord[] = []
+  vi.spyOn(localStore, 'saveShipment').mockImplementation(async row => { shipments.push(row) })
+  vi.spyOn(localStore, 'listShipments').mockImplementation(async () => [...shipments])
+  vi.spyOn(localStore, 'getProfile').mockResolvedValueOnce({
+    ...EMPTY_PROFILE, usppiName: 'Example Exporter', usppiEin: '00-0000000', usppiZip: '00000',
+    pointOfOrigin: 'CA', signerName: 'Test Signer', signerTitle: 'Test',
+  })
+  const spec = simpleInHouseCi()
+  spec.lines[1].hts = spec.lines[0].hts
+  vi.spyOn(localStore, 'listPartOverrides').mockResolvedValueOnce(spec.lines.map(line => ({
+    partNumber: line.partNumber, netWeightKg: 0.5, description: line.description, updatedAt: '',
+  })))
+  vi.spyOn(delivery, 'deliver').mockResolvedValue({ fileName, path: desktop ? savedPath : null })
+  await mount()
+  await upload('source.xlsx', { ...spec, netWeightKg: 3.5 })
+  await selectValue(carrierSelect(), 'ceva')
+  await selectValue(container!.querySelector<HTMLSelectElement>('select[aria-label="Target application"]')!, 'ups-worldship')
+  await act(async () => button('Download keying sheet')!.click())
+  expect(shipments).toHaveLength(1)
+  await act(async () => button('Start over')!.click())
+  await act(async () => button('Discard shipment edits')!.click())
+  const row = [...container!.querySelectorAll('tr')].find(tr => tr.textContent?.includes(fileName))
+  expect(row?.textContent).toContain('CEVA Logistics')
+  expect(row?.textContent).toContain('UPS WorldShip keying sheet')
+  const open = row!.querySelector('button')
+  if (desktop) {
+    expect(open?.getAttribute('aria-label')).toBe('Open ' + fileName)
+    invoke.mockRejectedValueOnce('The saved file is no longer there.')
+    await act(async () => open!.click())
+    expect(invoke).toHaveBeenLastCalledWith('open_output', { path: savedPath })
+    expect(row!.querySelector('[role=alert]')?.textContent).toMatch(/moved or renamed/i)
+    await act(async () => open!.click())
+    expect(row!.querySelector('[role=alert]')).toBeNull()
+  } else {
+    expect(open).toBeNull()
+    expect(row!.textContent).toMatch(/browser.*downloads/i)
+  }
 })
 
 it('offers exporter setup before upload and links a blocked draft to its missing field and part', async () => {

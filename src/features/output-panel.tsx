@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Select } from '../components/ui'
 import { deliver, open as openDelivery, type Delivery } from '../lib/deliver'
 import {
+  APPLICATION_NAMES,
   buildKeyingSheet,
   keyingSheetToXlsx,
   COMMODITY_COLUMNS,
@@ -17,11 +18,14 @@ import {
   type KeyingTarget,
 } from '../carriers/keying-sheet'
 import type { DesktopBridge } from '../desktop'
+import { CARRIER_LABELS, type ShipmentCarrierId } from '../carriers/registry'
 import type { CarrierAdapter, SliDraft } from '../carriers/types'
 import type { ScheduleBIndex } from '../domain/schedule-b'
 import type { Reconciliation } from '../domain/types'
 import type { ExportControlOverride } from '../domain/reconcile'
 import { localStore, type ShipmentRecord } from '../store/local-store'
+
+export type ShipmentOutput = Delivery & { kind: 'sli' | KeyingTarget }
 
 const EMPTY_DESCRIPTIONS: Record<string, string> = {}
 
@@ -74,7 +78,7 @@ export function OutputPanel({
   /** Gated on the document checks *and* the draft checks — see App. */
   blockers: ReactNode
   canGenerate: boolean
-  onGenerated: () => void
+  onGenerated: (output: ShipmentOutput) => void
   /**
    * Set when the shipment goes to a carrier that is keyed into its own software rather
    * than sent a form. The SLI download is withheld entirely in that case: the adapter in
@@ -199,7 +203,7 @@ export function OutputPanel({
       // Opened straight away: the next thing anyone does with a filled SLI is read it and
       // sign it, and the boxes this tool deliberately leaves blank are only fillable there.
       if (liveInputs.current === inputs) await openDelivery(bridge, delivery)
-      onGenerated()
+      onGenerated({ ...delivery, kind: 'sli' })
     } catch (e) {
       setResult({ inputs, error: e instanceof Error ? e.message : 'The form could not be generated.' })
     } finally {
@@ -246,7 +250,7 @@ export function OutputPanel({
       if (liveInputs.current === inputs) await openDelivery(bridge, delivery)
       // Recorded like a generated form: for FedEx and UPS this is the only artifact, and a
       // shipment that left the tool with no history entry has no audit trail at all.
-      onGenerated()
+      onGenerated({ ...delivery, kind: target })
     } catch (e) {
       setResult({ inputs, error: e instanceof Error ? e.message : 'The keying sheet could not be saved.' })
     } finally {
@@ -432,18 +436,51 @@ function KeyingSheetOptions({
   )
 }
 
+function HistoryOutput({ output, bridge }: { output?: ShipmentOutput; bridge: DesktopBridge | null }) {
+  const [error, setError] = useState('')
+  if (!output) return <span className="text-[var(--color-ink-faint)]">Output location unavailable</span>
+
+  async function openFile(desktop: DesktopBridge, path: string) {
+    setError('')
+    try {
+      await desktop.openOutput(path)
+    } catch (cause) {
+      const reason = cause instanceof Error ? cause.message : 'The file could not be opened.'
+      setError(`${reason} If it was moved or renamed, open it from its new location.`)
+    }
+  }
+
+  const { kind, fileName, path } = output
+  return (
+    <div className="min-w-40 max-w-72 space-y-1">
+      <p>{kind === 'sli' ? 'SLI (PDF)' : `${APPLICATION_NAMES[kind]} keying sheet (XLSX)`}</p>
+      <p className="break-all text-xs text-[var(--color-ink-soft)]">{fileName}</p>
+      {path && bridge ? (
+        <Button size="sm" aria-label={`Open ${fileName}`} onClick={() => void openFile(bridge, path)}>Open</Button>
+      ) : (
+        <p className="text-xs text-[var(--color-ink-faint)]">Check your browser’s downloads.</p>
+      )}
+      {error && <p role="alert" className="break-words text-xs text-[var(--color-block)]">{error}</p>}
+    </div>
+  )
+}
+
 export function HistoryPanel({
   shipments,
+  outputs,
+  bridge,
   onClear,
 }: {
   shipments: ShipmentRecord[]
+  outputs: ReadonlyMap<string, ShipmentOutput>
+  bridge: DesktopBridge | null
   onClear: () => void
 }) {
   return (
     <Card>
       <CardHeader
         title="History"
-        description="Processed shipments, kept on this machine for autofill and audit."
+        description="Processed shipments, kept on this machine for autofill and audit. Files saved during this session can be reopened here in the desktop app."
         actions={
           shipments.length ? (
             <Button size="sm" variant="danger" onClick={onClear}>
@@ -463,6 +500,8 @@ export function HistoryPanel({
               <thead>
                 <tr className="border-b text-left text-xs tracking-wide text-[var(--color-ink-faint)] uppercase">
                   <th className="py-2 pr-4 font-semibold">Invoice</th>
+                  <th className="py-2 pr-4 font-semibold">Recorded carrier</th>
+                  <th className="py-2 pr-4 font-semibold">Output</th>
                   <th className="py-2 pr-4 font-semibold">Consignee</th>
                   <th className="py-2 pr-4 font-semibold">Destination</th>
                   <th className="py-2 pr-4 text-right font-semibold">Qty</th>
@@ -474,6 +513,10 @@ export function HistoryPanel({
                 {shipments.map((record) => (
                   <tr key={record.id} className="border-b last:border-b-0">
                     <td className="tabular py-2 pr-4">{record.invoiceNumber || '—'}</td>
+                    <td className="py-2 pr-4">
+                      {Object.hasOwn(CARRIER_LABELS, record.carrierId) ? CARRIER_LABELS[record.carrierId as ShipmentCarrierId] : 'Unknown'}
+                    </td>
+                    <td className="py-2 pr-4"><HistoryOutput output={outputs.get(record.id)} bridge={bridge} /></td>
                     <td className="py-2 pr-4">{record.consigneeName}</td>
                     <td className="py-2 pr-4">{record.destinationCountry}</td>
                     <td className="tabular py-2 pr-4 text-right">{record.totalQuantity}</td>
