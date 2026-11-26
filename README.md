@@ -122,6 +122,10 @@ field, for manual entry. Import files are not generated because WorldShip import
 Ship Manager flat-file layouts are configured per installation, and a mismatched layout
 fails silently or transposes values.
 
+Upload one shipment at a time. Combine separate invoice and packing list PDFs before dropping
+them into the app. If the document does not identify a supported carrier, choose one in the
+Carrier panel to continue. Choosing UPS or FedEx also selects its workbook layout.
+
 Adding a carrier means writing one adapter under `src/carriers/`. The parser and the
 reconciliation engine contain no carrier-specific logic.
 

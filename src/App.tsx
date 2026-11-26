@@ -8,6 +8,7 @@ import { ItemLibraryPanel, ItemMasterUpdatesPanel, type ImportMode } from './fea
 import { HistoryPanel, OutputPanel } from './features/output-panel'
 import {
   reconcile,
+  selectDocumentSet,
   resolveDestinationCountry,
   type ExportControlOverride,
   type RowFigures,
@@ -90,10 +91,23 @@ const CARRIER_LABELS: Record<ShipmentCarrierId, string> = {
 }
 
 export function App() {
+  // Let the upload panel read file drops. Elsewhere, keep WebView2 on the shipment screen.
+  useEffect(() => {
+    const preventFileNavigation = (event: DragEvent) => {
+      if (event.dataTransfer?.types.includes('Files')) event.preventDefault()
+    }
+    window.addEventListener('dragover', preventFileNavigation)
+    window.addEventListener('drop', preventFileNavigation)
+    return () => {
+      window.removeEventListener('dragover', preventFileNavigation)
+      window.removeEventListener('drop', preventFileNavigation)
+    }
+  }, [])
+
   const [workflow, setWorkflow] = useState<Workflow>('standard')
   const [appearance, setAppearance] = useState<AppearancePreference | null>(null)
   const [parsed, setParsed] = useState<ParsedCipl | null>(null)
-  const [carrierId, setCarrierId] = useState<ShipmentCarrierId>('nippon-express')
+  const [carrierId, setCarrierId] = useState<ShipmentCarrierId | null>(null)
   const [profile, setProfile] = useState<CompanyProfile>(EMPTY_PROFILE)
   const [settings, setSettings] = useState<ShipmentSettings>(() => defaultShipmentSettings(getAdapter('nippon-express')))
   /**
@@ -194,7 +208,7 @@ export function App() {
   // A keyed carrier has no form of its own. The draft still needs an adapter to assemble
   // and check values, so one is used purely as scaffolding and never offered as output.
   const adapter = useMemo(
-    () => getAdapter(isKeyedCarrier(carrierId) ? 'nippon-express' : (carrierId as CarrierId)),
+    () => getAdapter(carrierId && !isKeyedCarrier(carrierId) ? carrierId : 'nippon-express'),
     [carrierId],
   )
   // Null in the browser build; the whole desktop surface keys off this.
@@ -324,13 +338,12 @@ export function App() {
       setExportControlByPart({})
 
       try {
-        const header = next.headers[next.availableSets[0]]
-        const detected = detectCarrier(header?.vesselAgent)
-        const nextCarrier = detected ?? carrierId
+        const header = next.headers[selectDocumentSet(next).set]
+        const nextCarrier = detectCarrier(header?.vesselAgent)
         setCarrierId(nextCarrier)
 
         const base = defaultShipmentSettings(
-          getAdapter(isKeyedCarrier(nextCarrier) ? 'nippon-express' : (nextCarrier as CarrierId)),
+          getAdapter(nextCarrier && !isKeyedCarrier(nextCarrier) ? nextCarrier : 'nippon-express'),
         )
         // Reset before the lookup, not after it.
         //
@@ -372,7 +385,7 @@ export function App() {
         setBusy(false)
       }
     },
-    [carrierId],
+    [],
   )
 
   const itemsByPart = useMemo(() => indexByPart(items), [items])
@@ -608,14 +621,14 @@ export function App() {
   }, [items])
 
   const handleGenerated = useCallback(async () => {
-    if (!reconciliation || !parsed) return
+    if (!reconciliation || !parsed || !carrierId) return
     const { header, sliLines } = reconciliation
     const processedAt = new Date().toISOString()
     const record: ShipmentRecord = {
       id: `${header.invoiceNumber}@${processedAt}`,
       invoiceNumber: header.invoiceNumber,
       processedAt,
-      carrierId: adapter.id,
+      carrierId,
       fileName: parsed.fileName,
       consigneeName: header.consignedTo.name,
       destinationCountry: resolveDestinationCountry(header) ?? '',
@@ -665,7 +678,7 @@ export function App() {
     } catch {
       // The history list re-reads on the next load.
     }
-  }, [reconciliation, parsed, adapter, settings, draft, checks])
+  }, [reconciliation, parsed, carrierId, settings, draft, checks])
 
   const handleDgPrepared = useCallback(async (record: DgConsignmentRecord) => {
     await localStore.saveDgConsignment(record)
@@ -907,7 +920,7 @@ export function App() {
           ) : null}
 
           {error ? (
-            <p className="rounded-md border border-[var(--color-block)] bg-[var(--color-block-soft)] px-3 py-2 text-sm">
+            <p role="alert" className="rounded-md border border-[var(--color-block)] bg-[var(--color-block-soft)] px-3 py-2 text-sm">
               {error}
             </p>
           ) : null}
@@ -947,17 +960,21 @@ export function App() {
                 <CardHeader
                   title="Carrier"
                   description={
-                    keyedCarrier
-                      ? `The CIPL names ${parsed.headers[reconciliation.selectedSet]?.vesselAgent ?? KEYED_CARRIERS[keyedCarrier].label}. ` +
-                        `This shipment is keyed into ${KEYED_CARRIERS[keyedCarrier].application}; no SLI is generated.`
-                      : parsed.headers[reconciliation.selectedSet]?.vesselAgent
-                        ? `The CIPL names ${parsed.headers[reconciliation.selectedSet].vesselAgent}.`
-                        : 'Choose the forwarder this shipment is going to.'
+                    carrierId === null
+                      ? reconciliation.header.vesselAgent
+                        ? `The CIPL names ${reconciliation.header.vesselAgent}. Choose the carrier for this shipment.`
+                        : 'The CIPL does not name a carrier. Choose the carrier for this shipment.'
+                      : keyedCarrier
+                        ? `Key this shipment into ${KEYED_CARRIERS[keyedCarrier].application}.`
+                        : reconciliation.header.vesselAgent
+                          ? `The CIPL names ${reconciliation.header.vesselAgent}.`
+                          : 'Choose the forwarder this shipment is going to.'
                   }
                   actions={
                     <Button
                       variant="ghost"
                       size="sm"
+                      disabled={busy}
                       onClick={() => {
                         setParsed(null)
                         setError(null)
@@ -976,7 +993,8 @@ export function App() {
                 />
                 <CardBody>
                   <Select
-                    value={carrierId}
+                    value={carrierId ?? ''}
+                    disabled={busy}
                     aria-label="Carrier"
                     className="w-auto"
                     onChange={(e) => {
@@ -990,6 +1008,7 @@ export function App() {
                       )
                     }}
                   >
+                    <option value="" disabled>Choose a carrier</option>
                     {(Object.keys(CARRIER_LABELS) as ShipmentCarrierId[]).map((id) => (
                       <option key={id} value={id}>
                         {CARRIER_LABELS[id]}
@@ -1000,114 +1019,118 @@ export function App() {
               </Card>
 
               <ShipmentSummary parsed={parsed} reconciliation={reconciliation} />
-              {/*
-                Always shown, unlike the weights-only panel it replaces. A code can need
-                correcting on any document, and the format that prints weights is the one whose
-                codes there is no library figure to check against.
-              */}
-              <PartOverridesPanel
-                reconciliation={reconciliation}
-                weights={unitWeightsByPart}
-                codes={codesByPart}
-                descriptions={descriptionsByPart}
-                weightsNeeded={!parsed.providesWeights}
-                enteredBy={profile.signerName}
-                onSaveWeight={(part, description, weight) => void savePartWeight(part, description, weight)}
-                onSaveCode={(part, description, code, reason) => void savePartCode(part, description, code, reason)}
-                onSaveDescription={(part, description, text) => void savePartDescription(part, description, text)}
-                onClearCode={(part) => void clearPartCode(part)}
-                originEntries={originEntries}
-                onSaveOriginStatus={(part, description, status, reason) =>
-                  void savePartOriginStatus(part, description, status, reason)
-                }
-                onClearOriginStatus={(part) => void clearPartOriginStatus(part)}
-              />
-              <CommodityTable
-                reconciliation={reconciliation}
-                reportingUnits={reportingUnits}
-                onReportingUnitChange={(code, unit) =>
-                  setReportingUnits((current) => {
-                    // An empty choice is "use the Schedule B default", which is the absence of
-                    // an entry rather than an entry saying nothing — otherwise the blank sits
-                    // in the record and reads later as a unit somebody picked.
-                    const next = { ...current }
-                    if (unit) next[code] = unit
-                    else delete next[code]
-                    return next
-                  })
-                }
-                rowFigures={rowFigures}
-                onRowFigureChange={(rowKey, field, value) =>
-                  setRowFigures((current) => {
-                    // An emptied box is the override taken back, which is the absence of an
-                    // entry rather than an entry holding nothing — a row left holding `{}`
-                    // reads later as a figure somebody entered.
-                    const own = { ...(current[rowKey] ?? {}) }
-                    if (value === undefined) delete own[field]
-                    else own[field] = value
-                    const next = { ...current }
-                    if (Object.keys(own).length) next[rowKey] = own
-                    else delete next[rowKey]
-                    return next
-                  })
-                }
-              />
-              <ChecksPanel checks={checks} canGenerate={canGenerate} />
-              <OverridesPanel
-                reconciliation={reconciliation}
-                overrides={overrides}
-                onSave={(record) => void saveOverride(record)}
-                onDelete={(sourceCode) => void removeOverride(sourceCode)}
-              />
-              <ManualFieldsPanel
-                profile={profile}
-                settings={settings}
-                adapter={adapter}
-                onProfileChange={setProfile}
-                onSettingsChange={(next) => {
-                  // A value a person changes is theirs for this shipment, and stops being
-                  // reported as a default or a carry-over.
-                  setSettingSources((sources) => sourcesAfterEdit(sources, settings, next))
-                  setSettings(next)
-                }}
-                settingSources={settingSources}
-                onConfirmSettings={() => setSettingSources({})}
-                parts={shipmentParts}
-                exportControlByPart={exportControlByPart}
-                onExportControlChange={(part, next) =>
-                  setExportControlByPart((current) => {
-                    const kept = { ...current }
-                    if (next.eccn || next.license || next.sme) kept[part] = next
-                    else delete kept[part]
-                    return kept
-                  })
-                }
-              />
-              <OutputPanel
-                adapter={adapter}
-                reconciliation={reconciliation}
-                draft={draft}
-                canGenerate={canGenerate}
-                onGenerated={() => void handleGenerated()}
-                keyedCarrier={keyedCarrier}
-                bridge={bridge}
-                descriptionsByPart={descriptionsByPart}
-                sourceFile={parsed.fileName}
-                excludedSets={parsed.availableSets.filter((set) => set !== reconciliation.selectedSet)}
-                scheduleB={scheduleB}
-                codesByPart={codesByPart}
-                classificationOverrides={overridesToMap(overrides)}
-                eccn={settings.eccn || null}
-                license={settings.license || null}
-                sme={settings.sme || null}
-                exportControlByPart={exportControlByPart}
-                originStatusByPart={originStatusByPart}
-              />
-              <BookingSummaryPanel
-                header={reconciliation.header}
-                draft={draft}
-                carrier={keyedCarrier ? KEYED_CARRIERS[keyedCarrier].label : undefined}
-              />
+              {carrierId && (
+                <>
+                  {/*
+                    Always shown, unlike the weights-only panel it replaces. A code can need
+                    correcting on any document, and the format that prints weights is the one whose
+                    codes there is no library figure to check against.
+                  */}
+                  <PartOverridesPanel
+                    reconciliation={reconciliation}
+                    weights={unitWeightsByPart}
+                    codes={codesByPart}
+                    descriptions={descriptionsByPart}
+                    weightsNeeded={!parsed.providesWeights}
+                    enteredBy={profile.signerName}
+                    onSaveWeight={(part, description, weight) => void savePartWeight(part, description, weight)}
+                    onSaveCode={(part, description, code, reason) => void savePartCode(part, description, code, reason)}
+                    onSaveDescription={(part, description, text) => void savePartDescription(part, description, text)}
+                    onClearCode={(part) => void clearPartCode(part)}
+                    originEntries={originEntries}
+                    onSaveOriginStatus={(part, description, status, reason) =>
+                      void savePartOriginStatus(part, description, status, reason)
+                    }
+                    onClearOriginStatus={(part) => void clearPartOriginStatus(part)}
+                  />
+                  <CommodityTable
+                    reconciliation={reconciliation}
+                    reportingUnits={reportingUnits}
+                    onReportingUnitChange={(code, unit) =>
+                      setReportingUnits((current) => {
+                        // An empty choice is "use the Schedule B default", which is the absence of
+                        // an entry rather than an entry saying nothing — otherwise the blank sits
+                        // in the record and reads later as a unit somebody picked.
+                        const next = { ...current }
+                        if (unit) next[code] = unit
+                        else delete next[code]
+                        return next
+                      })
+                    }
+                    rowFigures={rowFigures}
+                    onRowFigureChange={(rowKey, field, value) =>
+                      setRowFigures((current) => {
+                        // An emptied box is the override taken back, which is the absence of an
+                        // entry rather than an entry holding nothing — a row left holding `{}`
+                        // reads later as a figure somebody entered.
+                        const own = { ...(current[rowKey] ?? {}) }
+                        if (value === undefined) delete own[field]
+                        else own[field] = value
+                        const next = { ...current }
+                        if (Object.keys(own).length) next[rowKey] = own
+                        else delete next[rowKey]
+                        return next
+                      })
+                    }
+                  />
+                  <ChecksPanel checks={checks} canGenerate={canGenerate} />
+                  <OverridesPanel
+                    reconciliation={reconciliation}
+                    overrides={overrides}
+                    onSave={(record) => void saveOverride(record)}
+                    onDelete={(sourceCode) => void removeOverride(sourceCode)}
+                  />
+                  <ManualFieldsPanel
+                    profile={profile}
+                    settings={settings}
+                    adapter={adapter}
+                    onProfileChange={setProfile}
+                    onSettingsChange={(next) => {
+                      // A value a person changes is theirs for this shipment, and stops being
+                      // reported as a default or a carry-over.
+                      setSettingSources((sources) => sourcesAfterEdit(sources, settings, next))
+                      setSettings(next)
+                    }}
+                    settingSources={settingSources}
+                    onConfirmSettings={() => setSettingSources({})}
+                    parts={shipmentParts}
+                    exportControlByPart={exportControlByPart}
+                    onExportControlChange={(part, next) =>
+                      setExportControlByPart((current) => {
+                        const kept = { ...current }
+                        if (next.eccn || next.license || next.sme) kept[part] = next
+                        else delete kept[part]
+                        return kept
+                      })
+                    }
+                  />
+                  <OutputPanel
+                    adapter={adapter}
+                    reconciliation={reconciliation}
+                    draft={draft}
+                    canGenerate={canGenerate}
+                    onGenerated={() => void handleGenerated()}
+                    keyedCarrier={keyedCarrier}
+                    bridge={bridge}
+                    descriptionsByPart={descriptionsByPart}
+                    sourceFile={parsed.fileName}
+                    excludedSets={parsed.availableSets.filter((set) => set !== reconciliation.selectedSet)}
+                    scheduleB={scheduleB}
+                    codesByPart={codesByPart}
+                    classificationOverrides={overridesToMap(overrides)}
+                    eccn={settings.eccn || null}
+                    license={settings.license || null}
+                    sme={settings.sme || null}
+                    exportControlByPart={exportControlByPart}
+                    originStatusByPart={originStatusByPart}
+                  />
+                  <BookingSummaryPanel
+                    header={reconciliation.header}
+                    draft={draft}
+                    carrier={keyedCarrier ? KEYED_CARRIERS[keyedCarrier].label : undefined}
+                  />
+                </>
+              )}
               <HistoryPanel shipments={shipments} onClear={() => void clearAll()} />
             </>
           ) : null}

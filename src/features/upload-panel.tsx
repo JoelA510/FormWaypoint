@@ -20,13 +20,18 @@ export function UploadPanel({
   const inputRef = useRef<HTMLInputElement>(null)
   const working = busy || parsing
 
-  const handleFile = useCallback(
-    async (file: File | undefined) => {
-      if (!file || parsing) return
+  const handleFiles = useCallback(
+    async (files: FileList | null) => {
+      if (working || !files?.length) return
+      if (files.length > 1) {
+        onError('Choose one shipment file. Combine separate invoice and packing list PDFs into one PDF before uploading.')
+        return
+      }
+      const file = files[0]
       if (!/\.(pdf|xlsx)$/i.test(file.name)) {
         onError(
           'That is not a PDF or a .xlsx workbook. Upload the combined commercial invoice and packing ' +
-            'list, or the Commercial Invoice form (00004-00202).',
+            'list, or the Commercial Invoice form.',
         )
         return
       }
@@ -36,7 +41,7 @@ export function UploadPanel({
         if (!parsed.lines.length) {
           onError(
             `No merchandise lines were found in ${file.name}. The supported layouts are a combined ` +
-              'commercial invoice and packing list, or the Commercial Invoice form (00004-00202); ' +
+              'commercial invoice and packing list, or the Commercial Invoice form; ' +
               'another format needs its own parser.',
           )
           return
@@ -48,14 +53,14 @@ export function UploadPanel({
         setParsing(false)
       }
     },
-    [onParsed, onError, parsing],
+    [onParsed, onError, working],
   )
 
   return (
     <Card>
       <CardHeader
         title="Upload the CIPL"
-        description="A combined commercial invoice and packing list PDF, or the Commercial Invoice form (00004-00202) as .xlsx. It is read here on your machine and never uploaded."
+        description="Choose a combined invoice and packing list PDF, or a supported commercial invoice in PDF or Excel format. The file is read on this machine."
       />
       <CardBody>
         <div
@@ -67,7 +72,7 @@ export function UploadPanel({
           onDrop={(e) => {
             e.preventDefault()
             setDragging(false)
-            void handleFile(e.dataTransfer.files[0])
+            void handleFiles(e.dataTransfer.files)
           }}
           className={[
             'flex flex-col items-center gap-3 rounded-lg border-2 border-dashed px-6 py-12 text-center transition-colors',
@@ -84,12 +89,12 @@ export function UploadPanel({
             accept="application/pdf,.pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.xlsx"
             className="sr-only"
             onChange={(e) => {
-              void handleFile(e.target.files?.[0])
+              void handleFiles(e.target.files)
               e.target.value = ''
             }}
           />
           <p className="max-w-md text-xs text-[var(--color-ink-faint)]">
-            A PDF needs a real text layer, which these documents have. Scanned images are not supported.
+            PDFs must contain selectable text. Scanned images are not supported.
           </p>
         </div>
       </CardBody>

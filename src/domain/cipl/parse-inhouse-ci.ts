@@ -1008,7 +1008,7 @@ export function parseInHouseCiPdf(fileName: string, pages: TextPage[]): ParsedCi
   if (own.length !== pages.length) {
     parsed.warnings.unshift(
       `${pages.length - own.length} of this file's ${pages.length} pages do not carry the Commercial Invoice ` +
-        `form's document number (${DOC_NUMBER}) and were not read as part of it. If any of them is a page of ` +
+        `form's document number and were not read as part of it. If any of them is a page of ` +
         'this invoice, it is missing from what was imported.',
     )
   }
