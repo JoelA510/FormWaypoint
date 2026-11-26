@@ -1,3 +1,4 @@
+import { inspectItemHeaders } from '../item-library'
 /**
  * CIPL parsing entry point.
  *
@@ -76,6 +77,8 @@ export async function parseCipl(fileName: string, data: ArrayBuffer | Uint8Array
   return format.parse(fileName, pages)
 }
 
+export class ItemMasterWorkbookError extends Error {}
+
 /**
  * Parse a shipment document of any supported kind — a CIPL PDF or the Commercial Invoice
  * workbook (form 00004-00202) as .xlsx.
@@ -95,13 +98,21 @@ export async function parseCiplFile(fileName: string, data: ArrayBuffer | Uint8A
   // more than one right one. Reading only the first filed a four-page shipment as its first
   // page, with nothing said.
   let found
+  let firstSheet = true
+  let itemMaster = false
   try {
-    found = await findXlsxSheets(bytes, isInHouseCiWorkbook)
+    found = await findXlsxSheets(bytes, (rows) => {
+      const invoice = isInHouseCiWorkbook(rows)
+      if (firstSheet && !invoice) itemMaster = inspectItemHeaders(rows) !== null
+      firstSheet = false
+      return invoice
+    })
   } catch (error) {
     if (error instanceof WorkbookError) throw new Error(`${fileName}: ${error.message}`)
     throw error
   }
   if (!found.sheets.length) {
+    if (itemMaster) throw new ItemMasterWorkbookError('This workbook appears to be an item master.')
     throw new Error(
       `${fileName} is a workbook, but none of its ${found.sheetCount} sheet(s) is the Commercial Invoice ` +
         'form this tool reads. Workbook import supports that form only; CIPLs from other ' +

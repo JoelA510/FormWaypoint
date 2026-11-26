@@ -216,7 +216,14 @@ export interface DgRulesSourceStamp {
 
 export type AppearancePreference = 'system' | 'light' | 'dark'
 
+export interface ScheduleBCheck {
+  at: string
+  outcome: 'matched' | 'updated' | 'failed'
+}
+
 export interface LocalStore {
+  getScheduleBCheck(): Promise<ScheduleBCheck | null>
+  saveScheduleBCheck(check: ScheduleBCheck): Promise<void>
   getAppearance(): Promise<AppearancePreference>
   saveAppearance(value: AppearancePreference): Promise<void>
 
@@ -422,6 +429,24 @@ function db(): Promise<Schema> {
 }
 
 export const indexedDbStore: LocalStore = {
+  async getScheduleBCheck() {
+    const tx = (await db()).transaction('profile')
+    const [at, outcome] = await Promise.all([
+      tx.store.get('scheduleBCheckedAt'), tx.store.get('scheduleBCheckOutcome'),
+    ])
+    if (at === undefined && outcome === undefined) return null
+    if (typeof at !== 'string' || !Number.isFinite(Date.parse(at)) ||
+        (outcome !== 'matched' && outcome !== 'updated' && outcome !== 'failed')) {
+      throw new Error('The saved Census check could not be read.')
+    }
+    return { at, outcome }
+  },
+  async saveScheduleBCheck({ at, outcome }) {
+    const tx = (await db()).transaction('profile', 'readwrite')
+    await Promise.all([
+      tx.store.put(at, 'scheduleBCheckedAt'), tx.store.put(outcome, 'scheduleBCheckOutcome'), tx.done,
+    ])
+  },
   async getAppearance() {
     const saved: unknown = await (await db()).get('profile', 'appearance')
     return saved === 'light' || saved === 'dark' ? saved : 'system'

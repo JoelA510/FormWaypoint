@@ -178,7 +178,7 @@ function detectWeightUnit(header: string | undefined): WeightUnit | null {
  * above it. The first row that yields both a part number and one of weight or export code
  * wins.
  */
-export function inspectWorkbook(rows: string[][]): WorkbookInspection {
+export function inspectItemHeaders(rows: string[][]): WorkbookInspection | null {
   // The 20-row budget counts rows with content, not raw indices: the workbook reader
   // preserves the sheet's own row numbering, so a file whose header sits below a run of
   // empty rows (which Excel omits from the XML but the grid now represents) must not
@@ -203,6 +203,12 @@ export function inspectWorkbook(rows: string[][]): WorkbookInspection {
     }
   }
 
+  return null
+}
+
+export function inspectWorkbook(rows: string[][]): WorkbookInspection {
+  const inspection = inspectItemHeaders(rows)
+  if (inspection) return inspection
   throw new ItemLibraryError(
     'Could not find a header row naming a part number alongside a weight or a commodity code. ' +
       'Expected column headings such as "Part Number", "Weight (G)" and "Current Export HTS".',

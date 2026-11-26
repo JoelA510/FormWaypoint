@@ -336,6 +336,7 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
     { id: 'set-selection', severity: 'info', title: 'Controlling document set', detail: reason, passed: true },
     {
       id: 'quantities-usable',
+      refs: unusable.flatMap(row => row.sourceLineIds),
       severity: 'blocking',
       title: 'Every commodity row has a usable quantity',
       detail: unusable.length
@@ -347,6 +348,7 @@ export function reconcile(parsed: ParsedCipl, index: ScheduleBIndex | null, opti
     },
     {
       id: 'quantities-overstated',
+      refs: atMinimum.flatMap(row => row.sourceLineIds),
       severity: 'warning',
       title: 'No commodity row files more than it holds',
       detail: understated.length
@@ -1124,6 +1126,7 @@ function partCodeChecks(
 
   results.push({
     id: 'part-codes',
+    refs: merged.filter(line => badOnDocument.some(part => part.part === line.partNumber && part.code === line.classification)).map(line => line.id),
     severity: 'warning',
     title: 'Every part’s commodity number is well-formed and current',
     detail: badOnDocument.length
@@ -1217,6 +1220,7 @@ function partCodeChecks(
   if (disagreeing.length) {
     results.push({
       id: 'item-library-conflict',
+      refs: merged.filter(line => disagreeing.some(part => part.part === line.partNumber)).map(line => line.id),
       severity: 'warning',
       title: 'The CIPL and the item library classify some parts differently',
       detail:
@@ -1399,6 +1403,7 @@ function partCodeOverrideChecks(merged: MergedLine[], codesByPart?: Record<strin
   return [
     {
       id: 'part-code-overrides',
+      refs: merged.filter(line => substituted.has(line.partNumber)).map(line => line.id),
       severity: 'warning',
       title: 'Some parts are filed under a manually entered commodity number',
       detail:
@@ -1468,6 +1473,7 @@ function originStatusChecks(merged: MergedLine[], originStatusByPart?: Record<st
   if (changed.size) {
     checks.push({
       id: 'origin-status-entered',
+      refs: merged.filter(line => changed.has(`${partKey(line.partNumber)}|${line.countryOfOrigin.trim().toUpperCase()}`)).map(line => line.id),
       severity: 'warning',
       title: 'Some parts are filed under a D/F entered by hand',
       detail:

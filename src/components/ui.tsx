@@ -92,17 +92,20 @@ function useDescription(props: { id?: string; 'aria-describedby'?: string }) {
 }
 
 export function Field({
+  id: fieldId,
   label,
   hint,
   children,
   className,
 }: {
+  id?: string
   label: string
   hint?: ReactNode
   children: (id: string) => ReactNode
   className?: string
 }) {
-  const id = useId()
+  const generatedId = useId()
+  const id = fieldId ?? generatedId
   return (
     <div className={cn('flex flex-col gap-1', className)}>
       <label htmlFor={id} className="text-xs font-medium tracking-wide text-[var(--color-ink-soft)] uppercase">

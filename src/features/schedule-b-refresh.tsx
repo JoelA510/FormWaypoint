@@ -5,54 +5,18 @@
  * CORS header, so the page can never fetch the concordance itself. Offering a button that
  * always failed would be worse than not offering one.
  */
-import { useState } from 'react'
 import { Badge, Button, Card, CardBody, CardHeader } from '../components/ui'
-import type { DesktopBridge } from '../desktop'
-import type { ItemLibraryEntry } from '../domain/item-library'
-import type { RawPayload } from '../domain/schedule-b'
-import { scheduleBIsStale } from '../domain/schedule-b'
-import { refreshScheduleB, type RefreshResult } from '../domain/schedule-b/refresh'
+import { scheduleBIsStale, type RawPayload } from '../domain/schedule-b'
+import type { RefreshResult } from '../domain/schedule-b/refresh'
+import type { useScheduleBCheck } from './use-schedule-b-check'
 
-export function ScheduleBRefreshPanel({
-  bridge,
-  installed,
-  items,
-  libraryLoaded,
-  onRefreshed,
-}: {
-  bridge: DesktopBridge
+export function ScheduleBRefreshPanel({ installed, check }: {
   installed: RawPayload | null
-  items: ItemLibraryEntry[]
-  libraryLoaded: boolean
-  onRefreshed: (payload: RawPayload) => void
+  check: ReturnType<typeof useScheduleBCheck>
 }) {
-  const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState<RefreshResult | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
+  const { last, result, error, storageError, busy, run } = check
+  const failed = last?.outcome === 'failed' && !busy
   const stale = installed ? scheduleBIsStale(installed.generatedAt) : false
-
-  async function run() {
-    if (!installed) return
-    setBusy(true)
-    setError(null)
-    setResult(null)
-    try {
-      const outcome = await refreshScheduleB({
-        bridge,
-        installed,
-        items,
-        libraryLoaded,
-        today: new Date().toISOString().slice(0, 10),
-      })
-      setResult(outcome)
-      if (!outcome.revision.empty) onRefreshed(outcome.payload)
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'The refresh did not complete.')
-    } finally {
-      setBusy(false)
-    }
-  }
 
   return (
     <Card>
@@ -62,23 +26,27 @@ export function ScheduleBRefreshPanel({
         actions={
           installed ? (
             <Badge tone={stale ? 'warn' : 'pass'}>
-              {installed.count.toLocaleString()} codes · {installed.generatedAt}
+              {installed.count.toLocaleString()} codes · Installed revision {installed.generatedAt}
             </Badge>
           ) : undefined
         }
       />
       <CardBody className="space-y-3">
-        {error ? (
-          <p className="rounded-md border border-[var(--color-block)] bg-[var(--color-block-soft)] px-3 py-2 text-sm">
-            {error}
-          </p>
-        ) : null}
+        {last && <p className="text-sm">Last checked <time dateTime={last.at}>{new Date(last.at).toLocaleString()}</time>
+          {' · '}{({ matched: 'Dataset matched', updated: 'Revision installed', failed: 'Check failed' })[last.outcome]}</p>}
+        {storageError && <p role="status" className="text-sm">{storageError}</p>}
+        {failed && <div role="alert" className="rounded-md border border-[var(--color-warn)] px-3 py-2 text-sm">
+          <p>The Census check did not finish. {installed
+            ? `You can continue reviewing shipments with the installed revision from ${installed.generatedAt}.`
+            : 'Wait for the installed dataset to load.'} Retry the check when ready.</p>
+          {error && <details><summary className="cursor-pointer">Technical details</summary><p>{error}</p></details>}
+        </div>}
 
         {result ? <RefreshReport result={result} /> : null}
 
         <div className="flex flex-wrap items-center gap-3">
           <Button variant={stale ? 'primary' : 'default'} onClick={() => void run()} disabled={busy || !installed}>
-            {busy ? 'Checking the Census Bureau…' : 'Check for a new revision'}
+            {busy ? 'Checking the Census Bureau…' : failed ? 'Retry Census check' : 'Check for a new revision'}
           </Button>
           <p className="text-xs text-[var(--color-ink-soft)]">
             {stale

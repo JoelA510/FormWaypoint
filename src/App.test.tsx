@@ -21,6 +21,7 @@ import type { AppearancePreference, ConsigneeRecord, LocalStore } from './store/
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
+let lastCheck: { at: string; outcome: 'matched' | 'updated' | 'failed' } | null = null
 let savedAppearance: AppearancePreference = 'system'
 const consignees = new Map<string, ConsigneeRecord>()
 
@@ -30,6 +31,8 @@ vi.mock('./store/local-store', async (importOriginal) => {
   const nothing = async () => {}
   const store: Partial<LocalStore> = {
     getAppearance: async () => savedAppearance,
+    getScheduleBCheck: async () => lastCheck,
+    saveScheduleBCheck: async (value) => { lastCheck = value },
     saveAppearance: async (value) => { savedAppearance = value },
     getProfile: async () => null,
     saveProfile: nothing,
@@ -56,6 +59,7 @@ let container: HTMLDivElement | null = null
 let root: Root | null = null
 
 beforeEach(() => {
+  lastCheck = null
   savedAppearance = 'system'
   consignees.clear()
   vi.stubGlobal(
@@ -142,6 +146,7 @@ describe('declared values nobody chose, through the application', () => {
     // The way a person moves on to the next document.
     const startOver = [...container!.querySelectorAll('button')].find((b) => b.textContent === 'Start over')!
     await act(async () => startOver.click())
+    await act(async () => button('Discard shipment edits')!.click())
     await settle()
     await upload('second.xlsx', { ...simpleInHouseCi(), invoiceNumber: 'CI-2026-0002' })
     expect(text()).toContain('CI-2026-0002')
@@ -344,4 +349,83 @@ it('keeps the workbook target with the keyed carrier and retires the old Open ac
   await act(async () => finishSave({ path: '/test/late.xlsx', fileName: 'late.xlsx' }))
   expect(open).not.toHaveBeenCalled()
   expect(button('Open')).toBeUndefined()
+})
+
+it('offers exporter setup before upload and links a blocked draft to its missing field and part', async () => {
+  await mount()
+  expect(text()).toContain('Exporter profile')
+  const spec = simpleInHouseCi()
+  spec.lines[1].hts = ''
+  await upload('review.xlsx', spec)
+  const target = (id: string) => container!.querySelector<HTMLAnchorElement>(`a[href="#${id}"]`)
+  expect(target('profile-usppiName')).toBeTruthy()
+  expect(document.getElementById('profile-usppiName')?.tagName).toBe('INPUT')
+  const id = 'part-code-' + spec.lines[1].partNumber
+  expect(target(id)).toBeTruthy()
+  expect(document.getElementById(id)?.tagName).toBe('INPUT')
+  expect(target('shipment-checks')).toBeTruthy()
+})
+
+it('keeps edited shipment fields on cancel and resets an untouched draft immediately', async () => {
+  await mount()
+  await upload('review.xlsx', simpleInHouseCi())
+  await act(async () => button('Start over')!.click())
+  expect(button('Choose a file')).toBeDefined()
+  await upload('next.xlsx', simpleInHouseCi())
+  await selectValue(carrierSelect(), 'ceva')
+  await act(async () => button('Start over')!.click())
+  expect(button('Keep editing')).toBeDefined()
+  await act(async () => button('Keep editing')!.click())
+  expect(carrierSelect().value).toBe('ceva')
+  await act(async () => button('Start over')!.click())
+  await act(async () => button('Discard shipment edits')!.click())
+  expect(button('Choose a file')).toBeDefined()
+})
+
+it('previews the sum of individually rounded CEVA rows and leaves other carriers in cents', async () => {
+  const spec = simpleInHouseCi()
+  for (const line of spec.lines) { line.quantity = 1; line.unitPrice = 10.49 }
+  await mount()
+  await upload('preview.xlsx', spec)
+  expect(text()).not.toContain('CEVA filed USD')
+  await selectValue(carrierSelect(), 'ceva')
+  const header = [...container!.querySelectorAll('th')].find(el => el.textContent === 'CEVA filed USD')
+  expect(header).toBeDefined()
+  const total = header!.closest('table')!.querySelector('tfoot tr')!
+  expect(total.lastElementChild?.textContent).toBe('20')
+  expect(total.lastElementChild?.previousElementSibling?.textContent).toBe('20.98')
+})
+
+it('directs a recognized item master to its own importer before any import', async () => {
+  await mount()
+  const data = buildXlsx([{ name: 'Parts', rows: [['Part Number', 'Weight (G)'], ['TEST-PART', '50']] }])
+  const file = new File([data as BlobPart], 'parts.xlsx')
+  Object.defineProperty(file, 'arrayBuffer', { value: async () => data })
+  const input = container!.querySelector<HTMLInputElement>('input[type=file]')!
+  Object.defineProperty(input, 'files', { value: [file], configurable: true })
+  await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })))
+  await settle()
+  expect(container!.querySelector('[role=alert]')?.textContent).toMatch(/appears to be an item master/i)
+  expect(container!.querySelector('[role=alert] a')?.getAttribute('href')).toBe('#item-master-file')
+  expect(text()).toContain('replace the library or update matching parts')
+})
+
+it('announces a failed Census check, keeps the installed revision usable and restores the outcome', async () => {
+  vi.stubGlobal('__TAURI_INTERNALS__', { invoke: async (cmd: string) => {
+    if (cmd === 'fetch_concordance') throw new Error('Test connection refused')
+    return null
+  } })
+  await mount()
+  await act(async () => button('Check for a new revision')!.click())
+  const alert = container!.querySelector('[role=alert]')
+  expect(alert?.textContent).toMatch(/continue reviewing shipments/i)
+  expect(alert?.querySelector('details')?.textContent).toContain('Test connection refused')
+  expect(button('Retry Census check')).toBeDefined()
+  expect(lastCheck).toMatchObject({ outcome: 'failed' })
+  const stamp = container!.querySelector('time')!.dateTime
+  await act(async () => root!.unmount())
+  container!.remove()
+  await mount()
+  expect(container!.querySelector('time')?.dateTime).toBe(stamp)
+  expect(button('Retry Census check')).toBeDefined()
 })

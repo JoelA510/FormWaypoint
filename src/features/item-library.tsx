@@ -8,7 +8,7 @@
  *     tells them apart, so the choice is explicit and previewed against real rows first.
  *   - **What to do about bad commodity numbers.** They are listed, never corrected.
  */
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Field, Select } from '../components/ui'
 import {
   WEIGHT_UNIT_LABELS,
@@ -138,7 +138,7 @@ export function ItemLibraryPanel({
       />
       <CardBody className="space-y-4">
         {error ? (
-          <p className="rounded-md border border-[var(--color-block)] bg-[var(--color-block-soft)] px-3 py-2 text-sm">
+          <p role="alert" className="rounded-md border border-[var(--color-block)] bg-[var(--color-block-soft)] px-3 py-2 text-sm">
             {error}
           </p>
         ) : null}
@@ -159,8 +159,9 @@ export function ItemLibraryPanel({
 
         {!staged ? (
           <Field
+            id="item-master-file"
             label="Import an item master"
-            hint="Excel (.xlsx) or delimited text (.csv, .tsv). Columns are matched by heading, so the layout does not have to match. Importing replaces the whole library."
+            hint="Excel (.xlsx) or delimited text (.csv, .tsv). Columns are matched by heading, so the layout does not have to match. After preview, replace the library or update matching parts and add new ones."
           >
             {(id) => (
               <input
@@ -225,12 +226,14 @@ function StagedImport({
   onCancel: () => void
   onCommit: () => void
 }) {
+  const preview = useRef<HTMLDivElement>(null)
+  useEffect(() => { preview.current?.focus() }, [])
   const { inspection } = staged
   const declared = inspection.declaredWeightUnit
   const weightColumn = inspection.columns.weight
 
   return (
-    <div className="space-y-3 rounded-md border bg-[var(--color-sunken)] px-3 py-3">
+    <div ref={preview} id="item-master-file" tabIndex={-1} className="space-y-3 rounded-md border bg-[var(--color-sunken)] px-3 py-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <p className="text-sm font-medium">{staged.fileName}</p>
         <p className="text-xs text-[var(--color-ink-soft)]">
@@ -238,6 +241,7 @@ function StagedImport({
         </p>
       </div>
 
+      <a href="#confirm-library-import" className="text-sm underline">Review import settings and confirm</a>
       <dl className="grid gap-x-4 gap-y-1 text-xs sm:grid-cols-2">
         {Object.entries(inspection.columns).map(([role, column]) => (
           <div key={role} className="flex justify-between gap-2">
@@ -319,9 +323,12 @@ function StagedImport({
         </div>
       ) : null}
 
-      <div className="flex gap-2 border-t pt-3">
+      <div id="confirm-library-import" tabIndex={-1} className="flex flex-wrap items-center gap-2 border-t pt-3">
+        <p className="w-full text-sm">{!heldCount ? 'Create the item library from this file.'
+          : mode === 'replace' ? 'Replace the library with the parts in this file.'
+          : 'Update matching parts, add new parts and keep the rest of the library.'}</p>
         <Button variant="primary" size="sm" onClick={onCommit}>
-          {heldCount && mode === 'merge' ? 'Merge' : 'Import'} {inspection.dataRowCount.toLocaleString()} parts
+          {heldCount && mode === 'merge' ? 'Merge' : 'Import'} {inspection.dataRowCount.toLocaleString()} row{inspection.dataRowCount === 1 ? '' : 's'}
         </Button>
         <Button variant="ghost" size="sm" onClick={onCancel}>
           Cancel

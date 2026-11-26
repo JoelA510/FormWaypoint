@@ -78,3 +78,6 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Leave the shipment status and return link visible above a focused correction. */
+:target { scroll-margin-top: 5rem; }

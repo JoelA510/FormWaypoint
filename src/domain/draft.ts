@@ -439,6 +439,15 @@ export function shippingWeightBasisCheck(adapter: CarrierAdapter): CheckResult {
   }
 }
 
+const requiredProfileFields = [
+  ['usppiName', 'USPPI name'], ['usppiEin', 'USPPI EIN'], ['usppiZip', 'ZIP code'],
+  ['pointOfOrigin', 'Point of origin'], ['signerName', 'Signer name'], ['signerTitle', 'Signer title'],
+] as const
+
+export function missingProfileFields(profile: Pick<CompanyProfile, (typeof requiredProfileFields)[number][0]>) {
+  return requiredProfileFields.filter(([key]) => !profile[key]?.trim())
+}
+
 /**
  * Checks over the assembled draft rather than the source document.
  *
@@ -450,15 +459,7 @@ export function checkDraft(draft: SliDraft, adapter: CarrierAdapter): CheckResul
   // The destination this draft will file, which can differ from the document's.
   const checks: CheckResult[] = [...eeiDestinationCheck(draft.destinationCountry, draft.lines)]
 
-  const required: [string, string][] = [
-    ['USPPI name', draft.usppiName],
-    ['USPPI EIN', draft.usppiEin],
-    ['ZIP code', draft.usppiZip],
-    ['Point of origin', draft.pointOfOrigin],
-    ['Signer name', draft.signerName],
-    ['Signer title', draft.signerTitle],
-  ]
-  const missing = required.filter(([, value]) => !value?.trim()).map(([label]) => label)
+  const missing = missingProfileFields(draft).map(([, label]) => label)
 
   checks.push({
     id: 'profile-complete',
