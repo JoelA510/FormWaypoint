@@ -1,10 +1,12 @@
 ---
 name: complete
-description: "Use when someone asks by name to bring existing code to production grade; it audits and then changes the repo, so don't start it unasked. Runs prompts/existing-project.md — baseline, twelve-area audit, a remediation plan that accounts for every finding, and milestone 1."
+description: "Use when someone asks by name to bring existing code to production grade; it audits and then changes the repo, so don't start it unasked. Runs prompts/existing-project.md — baseline, thirteen-area audit, a remediation plan that accounts for every finding, and milestone 1."
 metadata:
   invocation: explicit
-  argument-hint: "<repo, current state, hosting, constraints, what complete means, known issues, repo visibility and GitHub plan>"
+  argument-hint: "repo, current state, hosting, constraints, what complete means, known issues, the coding agents it uses, repo visibility and GitHub plan"
 ---
+
+# Assess an existing project
 
 Run the existing-project audit-and-completion process, exactly as written in
 `prompts/existing-project.md`. Read that file in full first — it is the authoritative
@@ -12,9 +14,13 @@ instruction set; this skill only wires it up. Then:
 
 1. **Assemble the project inputs.** Parse whatever was given with the request, and map what you
    can onto the prompt's input fields (repo path/URL, current state, hosting, hard constraints,
-   what "complete" means in user terms, known issues already reported, and repository
-   visibility and GitHub plan). Visibility and plan never block: read them from the host, and
-   assume private on GitHub Free for whatever can't be read, as the prompt's inputs say.
+   what "complete" means in user terms, known issues already reported, the coding agents it
+   uses, and repository visibility and GitHub plan). Visibility and plan never block: read them
+   from the host, and assume private on GitHub Free for whatever can't be read, as the prompt's
+   inputs say. The coding agents come from `<repo>/.agents/platforms.json` when the repo
+   records them; otherwise ask, before judging the instruction files, and record the answer
+   there as the prompt's inputs say (an agent not in `prompts/agent-platforms.md` is
+   researched, not guessed).
    `[COMPLETE_MEANS]`
    is the highest-leverage field — everything downstream is ordered against it — so if it's
    missing, derive it from the README, product docs, or spec and state it as an assumption.
@@ -28,7 +34,7 @@ instruction set; this skill only wires it up. Then:
    codebase before writing a word of the audit.
 4. **Use the skeletons for the required artifacts.** They're in the skeletons directory:
    `<repo>/prompts/skeletons/` after `process:apply`, `<template>/templates/project/` in the template repo
-   itself. The audit skeleton (baseline gate table, twelve areas, file-path evidence, severity,
+   itself. The audit skeleton (baseline gate table, thirteen areas, file-path evidence, severity,
    verification labels, refuted findings, coverage limits) and the remediation-plan skeleton
    (item fields, fixed ordering, small independently shippable milestones, or the single-PR
    form for a small project) are copied into a dated folder, `docs/audits/YYYY-MM-<slug>/`, or a
@@ -39,8 +45,11 @@ instruction set; this skill only wires it up. Then:
    them; it catches a half-deleted guidance comment the grep can't see. Where the target lacks
    CLAUDE.md, CONTRIBUTING.md, ADRs, or a typed env module, the remediation plan may draw on the other
    skeletons — as remediation items, not as wholesale replacements for what exists. Where it
-   already has its own (or an AGENTS.md, Cursor rules, …), merge from the skeleton rather
-   than adding a parallel file. Merged rules name this repo's real paths: rule 3's env module
+   already has its own, merge from the skeleton rather than adding a parallel file. Agent rules
+   land in one AGENTS.md at the root, the shape the standard core.agent-rules passes: merge the
+   AGENTS skeleton into an existing AGENTS.md; rules kept only in CLAUDE.md, Cursor rules, or
+   another tool's format move into a new AGENTS.md, and CLAUDE.md keeps an `@AGENTS.md` import
+   and only what's specific to Claude Code. Merged rules name this repo's real paths: rule 3's env module
    and rule 7's ADR folder and template point where this repo keeps them, and a rule whose file
    doesn't exist yet waits for the remediation item that adds it. For §12, run the template's
    `check:instructions` script from a template checkout

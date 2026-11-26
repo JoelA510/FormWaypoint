@@ -38,6 +38,15 @@ can't see.
 - Definition of "complete" for this app, in user terms: [COMPLETE_MEANS]
 - Known issues already reported (bug tracker, playtest notes, support
   threads, TODO/HARDENING files), or "none known": [KNOWN_ISSUES]
+- Coding agents the project uses (Claude Code, Codex, Cursor, GitHub
+  Copilot, Gemini CLI, Antigravity, or another): [AGENT PLATFORMS]. Read it
+  from `.agents/platforms.json` when the repo records one. Otherwise ask the
+  owner before judging instruction-file size or wiring (area 12), offering
+  the list in `prompts/agent-platforms.md` plus "other", and record the
+  answer there; an agent that list doesn't have is researched from its
+  vendor's documentation as that page describes, never guessed. Where no
+  answer can be had, judge against every listed agent and make the missing
+  selection a finding.
 - Repository visibility and GitHub plan (public/private; Free/Pro/Team),
   which decide whether CI can be a required check: [VISIBILITY AND PLAN]. If
   it isn't given, read it from the host (the GitHub API, `gh repo view`, or
@@ -146,7 +155,10 @@ delivery is committed first.
   Scored on the delivery commit instead, the delivery's own standards
   (`core.process-delivered`, and `core.instructions-resolve` over the
   delivered skills) pass because of the delivery, not the repo; if you score
-  it, say so beside the scorecard.
+  it, say so beside the scorecard. Scored before it, `core.process-delivered`
+  fails only because the delivery isn't in that commit yet: record the finding,
+  and in the plan put it under "Resolved before the plan" with the delivery
+  commit, not as an item or a deferral.
   The standards it marks as repository settings are scored by
   `npm run check:settings -- --repo <owner/name>`, with a token that can read
   the repository's settings in `GITHUB_TOKEN`; run it too, and record a setting
@@ -191,18 +203,23 @@ site has no server-side authz or database):
    test doubles that enforce none of the real backend's constraints.
 7. CI/CD - does CI run typecheck+lint+test+build as a required check that
    blocks merge (a ruleset is one importable file - skeleton:
-   .github/rulesets/main.json); do scripts do what their names say; does CI run the
+   .github/rulesets/main.json; a Node workflow to start from - skeleton:
+   .github/workflows/ci.yml); do scripts do what their names say; does CI run the
    production runtime version, pinned in one file, and is it still supported
    upstream; config keys dead after a tool upgrade; preview
    deploys; rollback path; is the shipped artifact ever checked; build
    settings that live only in a hosting dashboard (yardstick: ixartz; target
-   shape: the release-runbook skeleton, docs/release-runbook.md).
+   shape: the release-runbook skeleton, docs/release-runbook.md); on a free
+   plan, what each push spends (CI minutes, deployments, preview branches)
+   and whether agents' and bots' pushes stay inside it (skeleton:
+   docs/free-tier.md).
 8. Security - secrets in code/history, dependency audit (does it run in CI,
    block on high/critical, and run on a schedule; are waivers reasoned and
-   expiring - skeleton: docs/dependency-policy.md), input
-   sanitization, rate limiting on public endpoints, CORS/headers/CSP,
-   licensing, and what the client bundle carries: secrets behind a public
-   prefix, env reads the bundler doesn't inline, placeholder values
+   expiring - skeleton: docs/dependency-policy.md), whether updates arrive
+   on their own (skeleton: .github/dependabot.yml), input sanitization,
+   rate limiting on public endpoints, CORS/headers/CSP, licensing, and what
+   the client bundle carries: secrets behind a public prefix, env reads the
+   bundler doesn't inline, placeholder values
    (`npm run check:env -- --root <repo>` from a template checkout). Can
    someone report a vulnerability privately, and to whom (skeleton:
    SECURITY.md)?
@@ -225,16 +242,38 @@ site has no server-side authz or database):
     checkout). A repo with both a CLAUDE.md and an AGENTS.md where CLAUDE.md
     doesn't import AGENTS.md is a finding: Claude Code never reads AGENTS.md
     there. So is a repo that uses Gemini CLI without pointing it at AGENTS.md,
-    a skill that breaks the Agent Skills spec, and an AGENTS.md over 24,000
-    bytes (Antigravity's limit); `check:instructions` reports all three. Rules
-    kept in a tool-specific form another agent can't read (Antigravity
-    workflows, which stop working on 2026-10-19; Cursor `.mdc` rules) are a
-    finding when the team uses more than one agent: move them to AGENTS.md or
-    a skill. Look for agent instructions kept in ordinary docs too (a handoff
+    a skill that breaks the Agent Skills spec, and an AGENTS.md over the
+    strictest size limit among the agents `.agents/platforms.json` selects
+    (24,000 bytes, Antigravity's, when nothing is selected);
+    `check:instructions` reports all three, and notes a file past a selected
+    agent's guidance length (Claude Code's 200 lines). Wiring for an agent
+    the project doesn't use, or missing for one it does, is a finding too. Rules
+    kept only in a tool-specific form other agents can't read (a lone
+    CLAUDE.md, Antigravity workflows, which stop working on 2026-10-19; Cursor
+    `.mdc` rules) are a finding (standard core.agent-rules, high): move them
+    to a root AGENTS.md, with CLAUDE.md importing it (`@AGENTS.md`), or to a
+    skill. Look for agent instructions kept in ordinary docs too (a handoff
     file, prompt packets, a docs folder agents are told to start from): no
     agent reads them by default, and neither the scorecard nor
     `check:instructions` sees them, so check their paths and commands by hand
     and plan to merge them into AGENTS.md.
+13. Core flows - every flow the README, the spec, or [COMPLETE_MEANS] promises
+    (sign up, check out, play a game to the end): list them, then exercise
+    each one end to end, by running the app or driving it through its real
+    entry point in a test, and name the test that proves it, if any. The
+    other areas grade how the code is built; this one asks whether the
+    product does what it says, and a green baseline doesn't answer it. Try
+    the configurations the docs offer, not only the default one. One that can
+    only be exercised against a shared or production environment (a hosted
+    database, staging, a live email or payment provider) is not exercised
+    unless [CONSTRAINTS] allows it: never touch a shared or production
+    environment for this area. Record it as not exercised, with the reason
+    (and the missing tool, where a local stand-in would do, such as a local
+    database stack), and make it a finding here when no test covers it. A flow
+    that doesn't work is a blocker (the severity scale's "broken core flow"); a
+    flow that works but no test proves is a finding in this area, not only
+    in §6. Record every flow and how it was exercised, including the ones
+    that work, so the next audit can see what was tried.
 
 Separate executed findings from statically reviewed ones. Where sources or
 code paths conflict, name the conflict and which controls; do not merge
@@ -248,11 +287,20 @@ docs/remediation-plan.md):
 - Ordered by: blockers to production -> data integrity/security -> testing/CI
   -> completeness gaps vs [COMPLETE_MEANS] -> polish.
 - Every audit finding ID appears exactly once: as an item, as "resolved by"
-  another item, or under "Deferred with reason". Severity uses the audit's
-  definitions; a regraded item says why.
+  another item, under "Resolved before the plan" (closed by a commit already
+  made, such as the process delivery, named with that commit), or under
+  "Deferred with reason". Severity uses the audit's definitions; a regraded
+  item says why.
 - Each item: gap, fix approach, files touched, dependencies, effort (S/M/L),
   acceptance criteria, a test gate shown failing with the fix reverted,
-  rollback, and whether it is a minimal diff or a flagged refactor.
+  rollback, and whether it is a minimal diff or a flagged refactor. Where no
+  automated check can cover an item (a documentation change, a setting changed
+  by hand), its gate says so and names the manual check instead: what is
+  checked, who checks it, and where the result is recorded.
+- For each fix, ask which other findings it widens: a defect the fix makes
+  more frequent or reachable from more places (unblocking a path that runs
+  into it). A widened finding moves into the same milestone, and the item
+  names it ("Widens: 4.3").
 - Group into milestones, each independently shippable and ending with the app
   deployable and all tests green. Milestone 1 must end with: CI enforcing
   typecheck/lint/test as a required check, no known blockers, and error

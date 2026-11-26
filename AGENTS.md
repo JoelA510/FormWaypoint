@@ -36,22 +36,26 @@ preparing export paperwork on their own Windows machine. What it is for and refu
 | `npm run check` | The gate CI runs: typecheck, lint, test, build. Run before considering any change done. |
 | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` (in `src-tauri/`) | The Rust gates; CI runs all three on Windows on every pull request, on the toolchain `src-tauri/rust-toolchain.toml` pins. |
 
-Cloud and background agents start from a fresh clone: run `npm ci` before anything else. No setup
-hook is wired up yet.
+**Where you are running.** A fresh clone needs Node 24 (`.nvmrc`), npm 11.15 or later and git. Run `npm ci` first.
+The `src-tauri/` gates need Rust 1.97.0 on Windows. Where they can't run locally, list them in the PR. CI runs them on Windows.
+
+**Ask first** before any of the following. Merging to `main` can publish a Windows release.
+
+- Force-pushing, rewriting history, touching refs/pull, or deleting a branch, tag or data.
+- Tagging, releasing, publishing, or dispatching `desktop.yml` or `publish-windows.yml`.
+- Installing or upgrading a tool that neither the lockfile nor `src-tauri/rust-toolchain.toml` pins.
+- Changing workflow permissions, `.codex/` or `.claude/`.
 
 ## Workflows
 
-The process workflows are Agent Skills in `.agents/skills/`. Claude Code reads the copies in
-`.claude/skills/`, whose frontmatter differs by design. Invoke one as `/name` in Claude Code or
-Antigravity, `$name` in Codex, or by name in any other agent: `discovery` before the next piece of
-work, for the open questions worth a discovery pass, `plan-change` to agree a large change before
-building it, `root-cause` for a defect whose cause is unknown, `review-change` for an adversarial
-review, `pre-pr` before a change leaves your hands, `verify` before each commit (Claude Code runs
-it on its own), `template-update` to take a template release. They come from the template
-(https://github.com/JoelA510/agent-ready-template), delivered by its `process:apply`; don't edit
-them here. Report a gap in one, or a lesson whose check would hold in other repositories, to the
-template (an issue or pull request there), and take the fix with a re-apply, which updates only
-files this repo hasn't edited.
+The process skills live in `.agents/skills/`. Claude Code reads `.claude/skills/`, with different frontmatter by design.
+Invoke one as `/name` in Claude Code or Antigravity, `$name` in Codex, or by name elsewhere.
+Use `discovery` for open questions before the next piece of work, `plan-change` to agree a large change,
+`root-cause` for a defect whose cause is unknown, `review-change` for an adversarial review, and `pre-pr`
+before handing off. Use `verify` before each commit (Claude Code runs it on its own), `template-update`
+to take a template release, and `continuity` to record or check a decision. The template
+(https://github.com/JoelA510/agent-ready-template) delivers them through `process:apply`. Report gaps and
+cross-repository lessons in a template issue or PR. Take the fix by re-applying it here. Keep edits upstream.
 
 ## Operating rules
 
@@ -108,6 +112,16 @@ files this repo hasn't edited.
     workaround when the fix ships.
 
 <!-- operating-rules:end -->
+
+## Security findings
+
+Report privately through `SECURITY.md`. Use synthetic examples and agree disclosure with the maintainer.
+Keep exploit details, secrets, personal data and shipment details out of public issues, draft PRs, logs and artifacts.
+
+## Code review
+
+Follow `prompts/review.md` for every review, including automated PR reviews. Report findings in severity
+order with a file and line, the concrete failure and a verification label. Leave style to the linter.
 
 ## Project-specific rules
 

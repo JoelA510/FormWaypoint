@@ -2,15 +2,17 @@
 
 Repo: **JoelA510/FormWaypoint** · Plan drawn up: 2026-10-08 · Source audit: [`audit.md`](./audit.md)
 
-**Status:** IN PROGRESS as of 2026-10-21. D1, Milestone 1 (#58, #59, #60) and Milestone 2a and 2b
-(#61, #62, #63) merged. Milestone 3 is part done: M3.1-M3.4, M3.6, M3.8 and M3.9 merged, and M3.7
-apart from ESLint 10 (#68, #69); M3.5 (coverage), M3.10 (unchecked index reads), M3.11 (browser
-journey test) and the ESLint 10 half of M3.7 are open, and its exit criteria unchecked, so Milestone
-3 is the current milestone. Milestone 4 is not started; #79 covers part of M5.9 and M5.10 (roadmap
-and README drift). Outside the plan, #78 added the dangerous goods fill from the CIPL and
-unanswered-by-default DG fields (see "Discovered during execution"). Milestone 1 closes on the
-owner's three actions (ruleset import, `npm run test:real`, the GitHub Support request). The owner
-approves each pull request before it merges.
+**Status:** IN PROGRESS on 2026-11-23 at `d061eec` (#103). D1 and the code for Milestones 1,
+2a and 2b merged (#58–#63). Milestone 3 remains current. Its CI and test changes landed in #68
+and #69, leaving coverage, strict parser index checks, the browser journey and ESLint 10 open.
+Since the previous status, `git diff --stat 018371e..d061eec -- '*config*' e2e package.json .github/workflows/ci.yml`
+shows only the package version bump from #100. Milestone 4 delivery is under way. Windows builds
+have automatic versions (#100), published binaries (#102) and a download page (#102, #103).
+The Windows baseline passed `npm run check` (1,256 tests passed, 104 skipped), `cargo fmt --check`,
+`cargo clippy --all-targets -- -D warnings`, `cargo test` and `npm run desktop:build`. Installed-build
+QA, ruleset enforcement and the owner's Support request still need confirmation (#59, #60).
+The last recorded real-shipment run is at `1e181f5` (#91). On this machine,
+`Test-Path -LiteralPath src/test/fixtures/manifest.json` returned False.
 
 End state: every audit area at "no blocker/high findings", end-to-end coverage of the critical
 journey, a released build installed and smoke-tested, docs current. Measured against: a shipper
