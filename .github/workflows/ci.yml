@@ -20,12 +20,21 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # Two commits, so the changelog step below can compare against the base branch.
+          fetch-depth: 2
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           cache: 'npm'
           cache-dependency-path: package-lock.json
+
+      # Every desktop build from main is published, so a pull request that changes what the
+      # build ships must add a line to CHANGELOG.md (ADR 0011). The checkout is the pull
+      # request's merge commit; its first parent is the base branch.
+      - name: Changelog entry for a shipped change
+        if: github.event_name == 'pull_request'
+        run: node scripts/check-changelog.mjs HEAD^1
 
       - name: Install dependencies
         run: npm ci

@@ -174,4 +174,6 @@ Engineering:
 - Don't change the bundle identifier `com.formwaypoint.app` in `src-tauri/tauri.conf.json`: the
   desktop app's saved data is kept under it.
 - Don't add a dependency without flagging it in the PR description with the reason.
+- Don't change what the desktop build ships without a line in `CHANGELOG.md` saying what changed
+  for the shipper: every build from `main` is published, and CI refuses the pull request (ADR 0011).
 - Don't merge with failing or skipped checks; fix or explicitly descope with a note.
