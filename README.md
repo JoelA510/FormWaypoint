@@ -126,6 +126,11 @@ Upload one shipment at a time. Combine separate invoice and packing list PDFs be
 them into the app. If the document does not identify a supported carrier, choose one in the
 Carrier panel to continue. Choosing UPS or FedEx also selects its workbook layout.
 
+Exporter setup is available on intake. During review, the status bar links back to Checks,
+where missing profile fields, commodity codes and editable figures link to their controls.
+Start over asks before discarding shipment edits. For CEVA, the commodity table shows the
+source amounts and the whole dollars that print for each row, with both totals.
+
 Adding a carrier means writing one adapter under `src/carriers/`. The parser and the
 reconciliation engine contain no carrier-specific logic.
 
@@ -396,6 +401,9 @@ node scripts/build-schedule-b.mjs --fetch
 The app knows the revision calendar: once a 1 January or 1 July boundary passes the
 dataset's generation date, the header badge turns amber and a notice explains that retired
 codes will still pass as active until the dataset is rebuilt.
+
+The desktop Schedule B panel keeps the time and outcome of the last check on this machine.
+When a check fails, review can continue using the installed revision.
 
 **On the desktop the app refreshes it itself.** "Check for a new revision" downloads the
 concordance, diffs it against the installed dataset, and writes a change log beside it

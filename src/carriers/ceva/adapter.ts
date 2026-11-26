@@ -24,6 +24,9 @@ import {
 import { paginateForm } from '../paginate'
 import { rowsByPage } from '../../lib/pagination'
 
+/** Box 22 prints each commodity row in whole dollars. */
+export const cevaFiledDollars = (valueUsd: number) => Math.round(valueUsd)
+
 /**
  * CEVA Logistics Shipper's Letter of Instructions.
  *
@@ -243,7 +246,7 @@ export function createCevaAdapter(): CarrierAdapter {
 
       // Whole dollars can turn a row with value into $0, which reads as goods of no value. The
       // form's own rule is followed, but never silently: each such row is named.
-      const roundedAway = draft.lines.filter((l) => l.valueUsd > 0 && Math.round(l.valueUsd) === 0)
+      const roundedAway = draft.lines.filter((l) => l.valueUsd > 0 && cevaFiledDollars(l.valueUsd) === 0)
       if (roundedAway.length) {
         ctx.warnings.push(
           `${roundedAway.length} row(s) worth under $0.50 file as $0 in whole dollars: ` +
@@ -265,7 +268,7 @@ export function createCevaAdapter(): CarrierAdapter {
         setText(ctx, on(F.quantity), pageRows.map(formatReportedQuantity).join('\r'))
         setText(ctx, on(F.weight), pageRows.map((l) => l.weightKg.toFixed(3)).join('\r'))
         // "U.S. dollar, omit cents" — rounded to the nearest dollar.
-        setText(ctx, on(F.value), pageRows.map((l) => String(Math.round(l.valueUsd))).join('\r'))
+        setText(ctx, on(F.value), pageRows.map((l) => String(cevaFiledDollars(l.valueUsd))).join('\r'))
       })
 
       // The form has one licence box for the whole shipment. Rows can now carry their own

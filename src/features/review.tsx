@@ -1,3 +1,6 @@
+import { rowFieldId, type LinkTarget } from './check-navigation'
+import type { ReactNode } from 'react'
+import { cevaFiledDollars } from '../carriers/ceva/adapter'
 import { useEffect, useState } from 'react'
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Field, Input, ProvenanceRow, Select, type Tone } from '../components/ui'
 import { printsQuantityTotal, resolveDestination } from '../domain/reconcile'
@@ -103,13 +106,26 @@ export function ShipmentSummary({ parsed, reconciliation }: { parsed: ParsedCipl
   )
 }
 
+export function CorrectionLinks({ targets }: { targets: LinkTarget[] }) {
+  if (!targets.length) return null
+  const links = targets.map(({ id, label }) => <a key={id} href={'#' + encodeURIComponent(id)} className="underline">{label}</a>)
+  return <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm">
+    {links[0]}
+    {links.length > 1 && <details><summary className="cursor-pointer">More fields ({links.length - 1})</summary>
+      <div className="flex flex-wrap gap-x-3">{links.slice(1)}</div>
+    </details>}
+  </div>
+}
+
 /** Reconciliation and compliance results, blocking failures first. */
 export function ChecksPanel({
   checks,
   canGenerate,
+  corrections,
   description = 'Totals are proved against the source document before anything is generated.',
 }: {
   checks: CheckResult[]
+  corrections?: (check: CheckResult) => ReactNode
   canGenerate: boolean
   /**
    * What these checks are proving. The default describes the CIPL reconciliation; the
@@ -139,7 +155,7 @@ export function ChecksPanel({
       />
       <CardBody className="space-y-2">
         {[...blocking, ...advisory].map((check) => (
-          <CheckRow key={check.id} check={check} />
+          <CheckRow key={check.id} check={check} correction={corrections?.(check)} />
         ))}
 
         {passed.length ? (
@@ -159,7 +175,7 @@ export function ChecksPanel({
   )
 }
 
-function CheckRow({ check }: { check: CheckResult }) {
+function CheckRow({ check, correction }: { check: CheckResult; correction?: ReactNode }) {
   const tone: Tone = check.passed ? 'pass' : SEVERITY_TONE[check.severity]
   return (
     <div
@@ -173,6 +189,7 @@ function CheckRow({ check }: { check: CheckResult }) {
         <Badge tone={tone}>{check.passed ? 'pass' : check.severity}</Badge>
       </div>
       <p className="mt-0.5 text-sm text-[var(--color-ink-soft)]">{check.detail}</p>
+      {correction}
       {check.expected !== undefined && !check.passed ? (
         <p className="tabular mt-1 text-xs text-[var(--color-ink-faint)]">
           expected {check.expected} · got {check.actual}
@@ -185,11 +202,13 @@ function CheckRow({ check }: { check: CheckResult }) {
 /** The commodity rows that will be written to the form, with full source lineage. */
 export function CommodityTable({
   reconciliation,
+  previewCeva = false,
   reportingUnits = {},
   onReportingUnitChange,
   rowFigures = {},
   onRowFigureChange,
 }: {
+  previewCeva?: boolean
   reconciliation: Reconciliation
   /** The unit chosen for each commodity number, keyed by normalised code. */
   reportingUnits?: Record<string, string>
@@ -227,6 +246,7 @@ export function CommodityTable({
     if (!onRowFigureChange) return <span className="tabular">{atLeast(line[field], decimals)}</span>
     return (
       <RowFigureInput
+        id={rowFieldId(line.rowKey, field)}
         value={entered}
         // Shown as the placeholder throughout, so the box always says what the row would file
         // if it were cleared — including while it is holding something else.
@@ -256,6 +276,7 @@ export function CommodityTable({
       <CardBody className="px-0 py-0">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1040px] border-collapse text-sm">
+            {previewCeva && <caption className="px-4 py-2 text-left text-sm">CEVA rounds each row to the nearest whole dollar. The filed total adds those rounded rows.</caption>}
             <thead>
               <tr className="border-b bg-[var(--color-sunken)] text-left text-xs tracking-wide text-[var(--color-ink-faint)] uppercase">
                 <th className="px-4 py-2.5 font-semibold">D/F</th>
@@ -265,6 +286,7 @@ export function CommodityTable({
                 <th className="px-4 py-2.5 font-semibold">Filed qty &amp; unit</th>
                 <th className="px-4 py-2.5 text-right font-semibold">Net kg</th>
                 <th className="px-4 py-2.5 text-right font-semibold">Value USD</th>
+                {previewCeva && <th className="px-4 py-2.5 text-right font-semibold">CEVA filed USD</th>}
               </tr>
             </thead>
             <tbody>
@@ -295,7 +317,7 @@ export function CommodityTable({
                       <span className="text-xs text-[var(--color-ink-faint)]">{line.sourceUom}</span>
                     </div>
                   </td>
-                  <td className="px-4 py-3">
+                  <td id={rowFieldId(line.rowKey, 'unit')} tabIndex={-1} className="px-4 py-3">
                     <ReportingUnitPicker
                       line={line}
                       chosen={reportingUnits[normalizeScheduleB(line.scheduleB)] ?? ''}
@@ -308,6 +330,7 @@ export function CommodityTable({
                   </td>
                   <td className="px-4 py-3 text-right">{figure(line, 'weightKg', 3, 'Net weight')}</td>
                   <td className="px-4 py-3 text-right">{figure(line, 'valueUsd', 2, 'Value')}</td>
+                  {previewCeva && <td className="tabular px-4 py-3 text-right">{cevaFiledDollars(line.valueUsd)}</td>}
                 </tr>
               ))}
             </tbody>
@@ -327,6 +350,7 @@ export function CommodityTable({
                   ) : null}
                 </td>
                 <td className="tabular px-4 py-2.5 text-right">{sum(sliLines.map((l) => l.valueUsd)).toFixed(2)}</td>
+                {previewCeva && <td className="tabular px-4 py-2.5 text-right">{sum(sliLines.map(l => cevaFiledDollars(l.valueUsd)))}</td>}
               </tr>
             </tfoot>
           </table>
@@ -533,6 +557,7 @@ export function OverridesPanel({
             {(id) => (
               <Input
                 id={id}
+                data-pending-edit={approvedCode || reason ? 'unapplied classification overrides' : undefined}
                 value={approvedCode}
                 onChange={(e) => setApprovedCode(e.target.value)}
                 placeholder="8544.42.0000"
@@ -685,6 +710,7 @@ export function PartOverridesPanel({
                     {weightsNeeded ? (
                       <td className="px-4 py-2.5">
                         <UnitWeightInput
+                          id={part.partNumber.trim() ? 'part-weight-' + partKey(part.partNumber) : undefined}
                           value={unit}
                           onCommit={(next) => onSaveWeight(part.partNumber, part.description, next)}
                         />
@@ -701,6 +727,7 @@ export function PartOverridesPanel({
                     ) : null}
                     <td className="px-4 py-2.5">
                       <PartCodeInput
+                        id={part.partNumber.trim() ? 'part-code-' + partKey(part.partNumber) : undefined}
                         documentCode={part.classification}
                         value={codes[partKey(part.partNumber)]}
                         enteredBy={enteredBy}
@@ -752,6 +779,7 @@ export function PartOverridesPanel({
  * committing them keystroke by keystroke would file `1` on the way to `12`.
  */
 function RowFigureInput({
+  id,
   value,
   documentValue,
   decimals,
@@ -760,6 +788,7 @@ function RowFigureInput({
 }: {
   value: number | undefined
   /** What the row files without an override; shown as the placeholder. Absent while overridden. */
+  id: string
   documentValue: string | undefined
   /** Places the figure is filed at. What is typed past them is not what the form would carry. */
   decimals: number
@@ -784,6 +813,7 @@ function RowFigureInput({
     <Input
       value={draft}
       inputMode="decimal"
+      id={id}
       aria-label={label}
       placeholder={documentValue ?? ''}
       className={`tabular w-24 text-right ${valid ? '' : 'border-[var(--color-block)]'} ${
@@ -814,7 +844,7 @@ function RowFigureInput({
   )
 }
 
-function UnitWeightInput({ value, onCommit }: { value: number | undefined; onCommit: (next: number) => void }) {
+function UnitWeightInput({ id, value, onCommit }: { id?: string; value: number | undefined; onCommit: (next: number) => void }) {
   const [draft, setDraft] = useState(value == null ? '' : String(value))
 
   // Saved weights arrive from IndexedDB after the first render, so the input has to follow
@@ -830,6 +860,7 @@ function UnitWeightInput({ value, onCommit }: { value: number | undefined; onCom
     <Input
       value={draft}
       inputMode="decimal"
+      id={id}
       aria-label="Net weight per unit in kilograms"
       placeholder="0.000"
       className={valid || draft === '' ? undefined : 'border-[var(--color-block)]'}
@@ -851,12 +882,14 @@ function UnitWeightInput({ value, onCommit }: { value: number | undefined; onCom
  * present, because a code with no stated reason is the exact shape of a typo.
  */
 function PartCodeInput({
+  id,
   documentCode,
   value,
   enteredBy,
   onCommit,
   onClear,
 }: {
+  id?: string
   documentCode: string
   value: string | undefined
   enteredBy: string
@@ -880,6 +913,8 @@ function PartCodeInput({
     <div className="space-y-1.5">
       <Input
         value={draft}
+        id={id}
+        data-pending-edit={dirty || reason.trim() ? 'unapplied part classifications' : undefined}
         aria-label="Schedule B number to file for this part"
         placeholder={formatScheduleB(documentCode) || '0000.00.0000'}
         className={draft.trim() === '' || wellFormed ? undefined : 'border-[var(--color-block)]'}
@@ -1022,6 +1057,8 @@ function OriginStatusInput({
       {editable ? (
         <Select
           value={choice}
+          data-pending-edit={choice || reason.trim() ? 'unapplied origin choices' : undefined}
+          id={'part-origin-' + partKey(partNumber)}
           aria-label={`D/F to file for part ${partNumber}`}
           onChange={(e) => setChoice(e.target.value as OriginStatus | '')}
         >

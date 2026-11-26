@@ -1,9 +1,11 @@
+import { useScheduleBCheck } from './features/use-schedule-b-check'
+import { correctionTargets } from './features/check-navigation'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Badge, Button, Card, CardBody, CardHeader, Select } from './components/ui'
 import { UploadPanel } from './features/upload-panel'
 import { Appearance } from './components/appearance'
-import { ChecksPanel, CommodityTable, OverridesPanel, PartOverridesPanel, ShipmentSummary } from './features/review'
-import { ManualFieldsPanel } from './features/manual-fields'
+import { ChecksPanel, CorrectionLinks, CommodityTable, OverridesPanel, PartOverridesPanel, ShipmentSummary } from './features/review'
+import { ExporterProfilePanel, ManualFieldsPanel } from './features/manual-fields'
 import { ItemLibraryPanel, ItemMasterUpdatesPanel, type ImportMode } from './features/item-library'
 import { HistoryPanel, OutputPanel } from './features/output-panel'
 import {
@@ -106,6 +108,11 @@ export function App() {
 
   const [workflow, setWorkflow] = useState<Workflow>('standard')
   const [appearance, setAppearance] = useState<AppearancePreference | null>(null)
+  const [shipmentFieldsEdited, setShipmentFieldsEdited] = useState(false)
+  const [confirmReset, setConfirmReset] = useState<string[] | null>(null)
+  useEffect(() => {
+    if (confirmReset) document.getElementById('keep-editing')?.focus()
+  }, [confirmReset])
   const [parsed, setParsed] = useState<ParsedCipl | null>(null)
   const [carrierId, setCarrierId] = useState<ShipmentCarrierId | null>(null)
   const [profile, setProfile] = useState<CompanyProfile>(EMPTY_PROFILE)
@@ -213,6 +220,12 @@ export function App() {
   )
   // Null in the browser build; the whole desktop surface keys off this.
   const bridge = useMemo(() => desktopBridge(), [])
+  const scheduleCheck = useScheduleBCheck(bridge, scheduleBPayload, items, payload => {
+    setScheduleBPayload(payload)
+    setScheduleB(createScheduleBIndex(payload))
+  })
+  const clearScheduleCheck = scheduleCheck.clear
+
 
   /**
    * Runs a store write, saying so when it fails and withdrawing a stale complaint when it
@@ -327,6 +340,8 @@ export function App() {
   const handleParsed = useCallback(
     async (next: ParsedCipl) => {
       setBusy(true)
+      setShipmentFieldsEdited(false)
+      setConfirmReset(null)
       setParsed(next)
       setError(null)
       // Everything entered about the *last* document's rows. These goods are measured however
@@ -778,6 +793,7 @@ export function App() {
     // store is one of the ones that actually cleared: a write just succeeded against it,
     // so this screen is now the truth about what is stored.
     if (cleared('the exporter profile')) {
+      clearScheduleCheck()
       setAppearance('system')
       setProfileUnavailable(false)
       setProfileLoaded(true)
@@ -802,7 +818,27 @@ export function App() {
           'the full set.',
       )
     }
-  }, [])
+  }, [clearScheduleCheck])
+
+  const blockingChecks = checks.filter(check => !check.passed && check.severity === 'blocking')
+  const corrections = (check: (typeof checks)[number]) => reconciliation && draft && parsed &&
+    <CorrectionLinks targets={correctionTargets(check, reconciliation, draft, parsed.providesWeights)} />
+
+  const edited = [
+    ...(shipmentFieldsEdited ? ['shipment settings'] : []),
+    ...(Object.keys(rowFigures).length ? ['commodity row figures'] : []),
+    ...(Object.keys(reportingUnits).length ? ['reporting units'] : []),
+    ...(Object.keys(exportControlByPart).length ? ['per-part export controls'] : []),
+  ]
+  function startOver() {
+    setParsed(null)
+    setError(null)
+    setReportingUnits({})
+    setRowFigures({})
+    setExportControlByPart({})
+    setConfirmReset(null)
+    setShipmentFieldsEdited(false)
+  }
 
   return (
     <div className="min-h-dvh">
@@ -927,18 +963,10 @@ export function App() {
 
           {!parsed ? (
             <>
-              <UploadPanel onParsed={(p) => void handleParsed(p)} onError={setError} busy={busy} />
+              <UploadPanel onParsed={(p) => void handleParsed(p)} busy={busy} />
+              {profileLoaded && <ExporterProfilePanel profile={profile} onProfileChange={setProfile} />}
               {bridge ? (
-                <ScheduleBRefreshPanel
-                  bridge={bridge}
-                  installed={scheduleBPayload}
-                  items={items}
-                  libraryLoaded={items.length > 0}
-                  onRefreshed={(payload) => {
-                    setScheduleBPayload(payload)
-                    setScheduleB(createScheduleBIndex(payload))
-                  }}
-                />
+                <ScheduleBRefreshPanel installed={scheduleBPayload} check={scheduleCheck} />
               ) : null}
               <ItemLibraryPanel
                 entries={items}
@@ -956,6 +984,10 @@ export function App() {
             </>
           ) : reconciliation && draft ? (
             <>
+              {carrierId && <nav aria-label="Shipment review status" className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 rounded-md border bg-[var(--color-surface)] px-4 py-2 text-sm">
+                <span>{blockingChecks.length ? `${blockingChecks.length} blocking check${blockingChecks.length === 1 ? '' : 's'}` : 'Ready to generate'}</span>
+                <a className="underline" href="#shipment-checks">Review checks ({checks.filter(check => !check.passed).length})</a>
+              </nav>}
               <Card>
                 <CardHeader
                   title="Carrier"
@@ -975,16 +1007,13 @@ export function App() {
                       variant="ghost"
                       size="sm"
                       disabled={busy}
+                      id="start-over"
                       onClick={() => {
-                        setParsed(null)
-                        setError(null)
-                        // Along with everything entered about this document's rows. Loading
-                        // the next one clears these too, but "start over" has to mean it here
-                        // as well — otherwise the state survives with nothing on screen
-                        // referring to it.
-                        setReportingUnits({})
-                        setRowFigures({})
-                        setExportControlByPart({})
+                        const pending = [...document.querySelectorAll<HTMLElement>('[data-pending-edit]')]
+                          .map(el => el.dataset.pendingEdit ?? '').filter(Boolean)
+                        const changes = [...new Set([...edited, ...pending])]
+                        if (changes.length) setConfirmReset(changes)
+                        else startOver()
                       }}
                     >
                       Start over
@@ -992,6 +1021,16 @@ export function App() {
                   }
                 />
                 <CardBody>
+                  {confirmReset && (
+                    <div role="group" aria-label="Discard shipment edits?" className="mb-3 rounded-md border p-3">
+                      <p role="alert" className="mb-2 text-sm">Starting over discards your {confirmReset.join(', ')} for this shipment.</p>
+                      <Button id="keep-editing" size="sm" onClick={() => {
+                        setConfirmReset(null)
+                        document.getElementById('start-over')?.focus()
+                      }}>Keep editing</Button>{' '}
+                      <Button size="sm" variant="danger" onClick={startOver}>Discard shipment edits</Button>
+                    </div>
+                  )}
                   <Select
                     value={carrierId ?? ''}
                     disabled={busy}
@@ -999,6 +1038,7 @@ export function App() {
                     className="w-auto"
                     onChange={(e) => {
                       const next = e.target.value as ShipmentCarrierId
+                      setShipmentFieldsEdited(true)
                       setCarrierId(next)
                       setSettings((prev) =>
                         applyCarrierDefaults(
@@ -1044,6 +1084,7 @@ export function App() {
                     onClearOriginStatus={(part) => void clearPartOriginStatus(part)}
                   />
                   <CommodityTable
+                    previewCeva={carrierId === 'ceva'}
                     reconciliation={reconciliation}
                     reportingUnits={reportingUnits}
                     onReportingUnitChange={(code, unit) =>
@@ -1073,7 +1114,9 @@ export function App() {
                       })
                     }
                   />
-                  <ChecksPanel checks={checks} canGenerate={canGenerate} />
+                  <div id="shipment-checks" tabIndex={-1}>
+                    <ChecksPanel checks={checks} canGenerate={canGenerate} corrections={corrections} />
+                  </div>
                   <OverridesPanel
                     reconciliation={reconciliation}
                     overrides={overrides}
@@ -1088,11 +1131,12 @@ export function App() {
                     onSettingsChange={(next) => {
                       // A value a person changes is theirs for this shipment, and stops being
                       // reported as a default or a carry-over.
+                      setShipmentFieldsEdited(true)
                       setSettingSources((sources) => sourcesAfterEdit(sources, settings, next))
                       setSettings(next)
                     }}
                     settingSources={settingSources}
-                    onConfirmSettings={() => setSettingSources({})}
+                    onConfirmSettings={() => { setShipmentFieldsEdited(true); setSettingSources({}) }}
                     parts={shipmentParts}
                     exportControlByPart={exportControlByPart}
                     onExportControlChange={(part, next) =>
@@ -1109,6 +1153,12 @@ export function App() {
                     reconciliation={reconciliation}
                     draft={draft}
                     canGenerate={canGenerate}
+                    blockers={<>
+                      <p>Resolve the following before generating:</p>
+                      <ul className="ml-5 list-disc">{blockingChecks.map(check =>
+                        <li key={check.id}>{check.id === 'profile-complete' ? 'Required exporter details are missing' : check.title}{corrections(check)}</li>)}</ul>
+                      <a className="underline" href="#shipment-checks">Read check details</a>
+                    </>}
                     onGenerated={() => void handleGenerated()}
                     keyedCarrier={keyedCarrier}
                     bridge={bridge}

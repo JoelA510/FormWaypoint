@@ -1,17 +1,17 @@
 import { useCallback, useRef, useState } from 'react'
 import { Button, Card, CardBody, CardHeader } from '../components/ui'
-import { parseCiplFile } from '../domain/cipl'
+import { ItemMasterWorkbookError, parseCiplFile } from '../domain/cipl'
 import type { ParsedCipl } from '../domain/types'
 
 export function UploadPanel({
   onParsed,
-  onError,
   busy,
 }: {
   onParsed: (parsed: ParsedCipl) => void
-  onError: (message: string) => void
   busy: boolean
 }) {
+  const [error, setError] = useState<string | null>(null)
+  const [showImporter, setShowImporter] = useState(false)
   const [dragging, setDragging] = useState(false)
   // The parse itself runs here, before App learns anything, so App's `busy` cannot cover
   // it. Without this, a slow multi-page parse leaves the button live and accepting a second
@@ -23,13 +23,16 @@ export function UploadPanel({
   const handleFiles = useCallback(
     async (files: FileList | null) => {
       if (working || !files?.length) return
+      setError(null)
+      setShowImporter(false)
       if (files.length > 1) {
-        onError('Choose one shipment file. Combine separate invoice and packing list PDFs into one PDF before uploading.')
+        setError('Choose one shipment file. Combine separate invoice and packing list PDFs into one PDF before uploading.')
         return
       }
       const file = files[0]
       if (!/\.(pdf|xlsx)$/i.test(file.name)) {
-        onError(
+        setShowImporter(true)
+        setError(
           'That is not a PDF or a .xlsx workbook. Upload the combined commercial invoice and packing ' +
             'list, or the Commercial Invoice form.',
         )
@@ -39,7 +42,7 @@ export function UploadPanel({
       try {
         const parsed = await parseCiplFile(file.name, await file.arrayBuffer())
         if (!parsed.lines.length) {
-          onError(
+          setError(
             `No merchandise lines were found in ${file.name}. The supported layouts are a combined ` +
               'commercial invoice and packing list, or the Commercial Invoice form; ' +
               'another format needs its own parser.',
@@ -48,12 +51,13 @@ export function UploadPanel({
         }
         onParsed(parsed)
       } catch (error) {
-        onError(error instanceof Error ? error.message : 'That file could not be read.')
+        setShowImporter(error instanceof ItemMasterWorkbookError || /\.xlsx$/i.test(file.name))
+        setError(error instanceof Error ? error.message : 'That file could not be read.')
       } finally {
         setParsing(false)
       }
     },
-    [onParsed, onError, working],
+    [onParsed, working],
   )
 
   return (
@@ -63,6 +67,9 @@ export function UploadPanel({
         description="Choose a combined invoice and packing list PDF, or a supported commercial invoice in PDF or Excel format. The file is read on this machine."
       />
       <CardBody>
+        {error && <div role="alert" className="mb-3 rounded-md border border-[var(--color-block)] px-3 py-2 text-sm">
+          {error} {showImporter && <a className="underline" href="#item-master-file">Import an item master</a>}
+        </div>}
         <div
           onDragOver={(e) => {
             e.preventDefault()

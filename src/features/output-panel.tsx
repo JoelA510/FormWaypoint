@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Select } from '../components/ui'
 import { deliver, open as openDelivery, type Delivery } from '../lib/deliver'
@@ -29,6 +30,7 @@ export function OutputPanel({
   reconciliation,
   draft,
   canGenerate,
+  blockers,
   onGenerated,
   keyedCarrier = null,
   bridge,
@@ -70,6 +72,7 @@ export function OutputPanel({
   /** The D/F entered against a part, so the sheet states the letter the SLI files. */
   originStatusByPart?: Record<string, 'D' | 'F'>
   /** Gated on the document checks *and* the draft checks — see App. */
+  blockers: ReactNode
   canGenerate: boolean
   onGenerated: () => void
   /**
@@ -264,11 +267,9 @@ export function OutputPanel({
       />
       <CardBody className="space-y-4">
         {!canGenerate ? (
-          <p className="rounded-md border border-[var(--color-block)] bg-[var(--color-block-soft)] px-3 py-2 text-sm text-[var(--color-ink)]">
-            A blocking check has not passed, so {keyedCarrier ? 'the keying sheet' : 'the form'} cannot be
-            generated. Resolve it above — the totals must reconcile against the source document before
-            anything is filed.
-          </p>
+          <div className="rounded-md border border-[var(--color-block)] px-3 py-2 text-sm">
+            {blockers}
+          </div>
         ) : null}
 
         {keyedCarrier ? null : (

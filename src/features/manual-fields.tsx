@@ -47,8 +47,6 @@ export function ManualFieldsPanel({
   /** Omitted before a document is loaded, when there are no parts to enter anything against. */
   onExportControlChange?: (part: string, next: ExportControlOverride) => void
 }) {
-  const setProfile = <K extends keyof CompanyProfile>(key: K, value: CompanyProfile[K]) =>
-    onProfileChange({ ...profile, [key]: value })
   const setSetting = <K extends keyof ShipmentSettings>(key: K, value: ShipmentSettings[K]) =>
     onSettingsChange({ ...settings, [key]: value })
 
@@ -78,14 +76,14 @@ export function ManualFieldsPanel({
                 ))}
               </ul>
               {onConfirmSettings ? (
-                <Button size="sm" onClick={onConfirmSettings}>
+                <Button id="shipment-confirm" size="sm" onClick={onConfirmSettings}>
                   These are right for this shipment
                 </Button>
               ) : null}
             </div>
           ) : null}
           <Field
-            label="Shipment reference"
+            id="shipment-reference" label="Shipment reference"
             hint="Enter your internal sales-order reference."
           >
             {(id) => (
@@ -111,7 +109,7 @@ export function ManualFieldsPanel({
 
           <div className="grid gap-3 sm:grid-cols-2">
             <Field
-              label="Country of destination"
+              id="shipment-destination" label="Country of destination"
               hint="Leave blank to use the document. Some layouts state none."
             >
               {(id) => (
@@ -148,7 +146,7 @@ export function ManualFieldsPanel({
           </Field>
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Mode of transport">
+            <Field id="shipment-mode" label="Mode of transport">
               {(id) => (
                 <Select
                   id={id}
@@ -249,7 +247,7 @@ export function ManualFieldsPanel({
                 row that momentarily stops existing is dropped and does not come back. Typing
                 `5A992.c` should not be able to discard the weights on the screen above. */}
             <div className="grid gap-3 sm:grid-cols-3">
-              <Field label="ECCN / EAR99">
+              <Field id="shipment-eccn" label="ECCN / EAR99">
                 {(id) => (
                   <ControlInput
                     id={id}
@@ -260,7 +258,7 @@ export function ManualFieldsPanel({
                   />
                 )}
               </Field>
-              <Field label="SME">
+              <Field id="shipment-sme" label="SME">
                 {(id) => (
                   <Select id={id} value={settings.sme} onChange={(e) => setSetting('sme', e.target.value)}>
                     <option value="">—</option>
@@ -269,7 +267,7 @@ export function ManualFieldsPanel({
                   </Select>
                 )}
               </Field>
-              <Field label="Licence / NLR">
+              <Field id="shipment-license" label="Licence / NLR">
                 {(id) => (
                   <ControlInput
                     id={id}
@@ -323,62 +321,74 @@ export function ManualFieldsPanel({
         </CardBody>
       </Card>
 
-      <Card>
-        <CardHeader title="Exporter profile" description="Saved on this machine and reused on every shipment." />
-        <CardBody className="space-y-3">
-          <Field label="USPPI name">
-            {(id) => <Input id={id} value={profile.usppiName} onChange={(e) => setProfile('usppiName', e.target.value)} />}
-          </Field>
-          <Field label="Address" hint="One line per row.">
-            {(id) => (
-              <Textarea
-                id={id}
-                value={profile.usppiAddressLines.join('\n')}
-                onChange={(e) => setProfile('usppiAddressLines', e.target.value.split('\n'))}
-              />
-            )}
-          </Field>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="ZIP code">
-              {(id) => <Input id={id} value={profile.usppiZip} onChange={(e) => setProfile('usppiZip', e.target.value)} />}
-            </Field>
-            <Field label="USPPI EIN">
-              {(id) => <Input id={id} value={profile.usppiEin} onChange={(e) => setProfile('usppiEin', e.target.value)} />}
-            </Field>
-            <Field label="Contact name">
-              {(id) => <Input id={id} value={profile.contactName} onChange={(e) => setProfile('contactName', e.target.value)} />}
-            </Field>
-            <Field label="Contact phone">
-              {(id) => <Input id={id} value={profile.contactPhone} onChange={(e) => setProfile('contactPhone', e.target.value)} />}
-            </Field>
-            <Field label="Point of origin" hint="State where the goods begin their journey.">
-              {(id) => <Input id={id} value={profile.pointOfOrigin} onChange={(e) => setProfile('pointOfOrigin', e.target.value)} />}
-            </Field>
-            <Field label="Signer name">
-              {(id) => <Input id={id} value={profile.signerName} onChange={(e) => setProfile('signerName', e.target.value)} />}
-            </Field>
-            <Field label="Signer title">
-              {(id) => <Input id={id} value={profile.signerTitle} onChange={(e) => setProfile('signerTitle', e.target.value)} />}
-            </Field>
-            <Field label="Signer initials" hint="CEVA box 33 is initialled.">
-              {(id) => <Input id={id} value={profile.signerInitials} onChange={(e) => setProfile('signerInitials', e.target.value)} />}
-            </Field>
-            <Field label="Signer email">
-              {(id) => <Input id={id} type="email" value={profile.signerEmail} onChange={(e) => setProfile('signerEmail', e.target.value)} />}
-            </Field>
-            <Field label="Signer phone">
-              {(id) => <Input id={id} value={profile.signerPhone} onChange={(e) => setProfile('signerPhone', e.target.value)} />}
-            </Field>
-          </div>
-          <p className="rounded-md bg-[var(--color-sunken)] px-3 py-2 text-xs text-[var(--color-ink-soft)]">
-            Signature boxes are never filled automatically. The generated PDF stays editable so it can be signed
-            after review.
-          </p>
-        </CardBody>
-      </Card>
+      <ExporterProfilePanel profile={profile} onProfileChange={onProfileChange} />
     </div>
   )
 }
+
+export function ExporterProfilePanel({ profile, onProfileChange }: {
+  profile: CompanyProfile
+  onProfileChange: (next: CompanyProfile) => void
+}) {
+  const setProfile = <K extends keyof CompanyProfile>(key: K, value: CompanyProfile[K]) =>
+    onProfileChange({ ...profile, [key]: value })
+  return (
+    <Card>
+      <CardHeader title="Exporter profile" description="Saved on this machine and reused on every shipment." />
+      <CardBody className="space-y-3">
+        <Field id="profile-usppiName" label="USPPI name">
+          {(id) => <Input id={id} value={profile.usppiName} onChange={(e) => setProfile('usppiName', e.target.value)} />}
+        </Field>
+        <Field label="Address" hint="One line per row.">
+          {(id) => (
+            <Textarea
+              id={id}
+              value={profile.usppiAddressLines.join('\n')}
+              onChange={(e) => setProfile('usppiAddressLines', e.target.value.split('\n'))}
+            />
+          )}
+        </Field>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field id="profile-usppiZip" label="ZIP code">
+            {(id) => <Input id={id} value={profile.usppiZip} onChange={(e) => setProfile('usppiZip', e.target.value)} />}
+          </Field>
+          <Field id="profile-usppiEin" label="USPPI EIN">
+            {(id) => <Input id={id} value={profile.usppiEin} onChange={(e) => setProfile('usppiEin', e.target.value)} />}
+          </Field>
+          <Field label="Contact name">
+            {(id) => <Input id={id} value={profile.contactName} onChange={(e) => setProfile('contactName', e.target.value)} />}
+          </Field>
+          <Field label="Contact phone">
+            {(id) => <Input id={id} value={profile.contactPhone} onChange={(e) => setProfile('contactPhone', e.target.value)} />}
+          </Field>
+          <Field id="profile-pointOfOrigin" label="Point of origin" hint="State where the goods begin their journey.">
+            {(id) => <Input id={id} value={profile.pointOfOrigin} onChange={(e) => setProfile('pointOfOrigin', e.target.value)} />}
+          </Field>
+          <Field id="profile-signerName" label="Signer name">
+            {(id) => <Input id={id} value={profile.signerName} onChange={(e) => setProfile('signerName', e.target.value)} />}
+          </Field>
+          <Field id="profile-signerTitle" label="Signer title">
+            {(id) => <Input id={id} value={profile.signerTitle} onChange={(e) => setProfile('signerTitle', e.target.value)} />}
+          </Field>
+          <Field label="Signer initials" hint="CEVA box 33 is initialled.">
+            {(id) => <Input id={id} value={profile.signerInitials} onChange={(e) => setProfile('signerInitials', e.target.value)} />}
+          </Field>
+          <Field label="Signer email">
+            {(id) => <Input id={id} type="email" value={profile.signerEmail} onChange={(e) => setProfile('signerEmail', e.target.value)} />}
+          </Field>
+          <Field label="Signer phone">
+            {(id) => <Input id={id} value={profile.signerPhone} onChange={(e) => setProfile('signerPhone', e.target.value)} />}
+          </Field>
+        </div>
+        <p className="rounded-md bg-[var(--color-sunken)] px-3 py-2 text-xs text-[var(--color-ink-soft)]">
+          Signature boxes are never filled automatically. The generated PDF stays editable so it can be signed
+          after review.
+        </p>
+      </CardBody>
+    </Card>
+  )
+}
+
 
 /**
  * Export control for the part that does not match the rest of the shipment.
@@ -403,86 +413,73 @@ function PerPartExportControl({
   entered: Record<string, ExportControlOverride>
   onChange: (part: string, next: ExportControlOverride) => void
 }) {
-  const [open, setOpen] = useState(false)
   const count = parts.filter((part) => {
     const own = entered[partKey(part)]
     return Boolean(own?.eccn || own?.license || own?.sme)
   }).length
 
   return (
-    <div className="border-t border-[var(--color-warn)]/30 pt-3">
-      <button
-        type="button"
-        className="flex w-full items-center justify-between text-left text-xs font-semibold tracking-wide text-[var(--color-warn)] uppercase"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-      >
-        <span>
-          Per-part override — {count ? `${count} of ${parts.length} set` : `${parts.length} part${parts.length === 1 ? '' : 's'}`}
-        </span>
-        <span aria-hidden>{open ? '−' : '+'}</span>
-      </button>
-      {open ? (
-        <>
-          <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
-            For the item that is classified differently from the rest. Anything left empty files the
-            shipment-wide value above. A part filed on its own values is named in the checks.
-          </p>
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full min-w-[420px] border-collapse text-sm">
-              <thead>
-                <tr className="text-left text-xs tracking-wide text-[var(--color-ink-faint)] uppercase">
-                  <th className="py-1.5 pr-3 font-semibold">Part</th>
-                  <th className="py-1.5 pr-3 font-semibold">ECCN</th>
-                  <th className="py-1.5 pr-3 font-semibold">Licence</th>
-                  <th className="py-1.5 font-semibold">SME</th>
+    <details className="border-t border-[var(--color-warn)]/30 pt-3">
+      <summary className="cursor-pointer text-xs font-semibold tracking-wide text-[var(--color-warn)] uppercase">
+        Per-part override — {count ? `${count} of ${parts.length} set` : `${parts.length} part${parts.length === 1 ? '' : 's'}`}
+      </summary>
+      <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+        For the item that is classified differently from the rest. Anything left empty files the
+        shipment-wide value above. A part filed on its own values is named in the checks.
+      </p>
+      <div className="mt-3 overflow-x-auto">
+        <table className="w-full min-w-[420px] border-collapse text-sm">
+          <thead>
+            <tr className="text-left text-xs tracking-wide text-[var(--color-ink-faint)] uppercase">
+              <th className="py-1.5 pr-3 font-semibold">Part</th>
+              <th className="py-1.5 pr-3 font-semibold">ECCN</th>
+              <th className="py-1.5 pr-3 font-semibold">Licence</th>
+              <th className="py-1.5 font-semibold">SME</th>
+            </tr>
+          </thead>
+          <tbody>
+            {parts.map((part) => {
+              const key = partKey(part)
+              const own = entered[key] ?? {}
+              const set = (field: keyof ExportControlOverride, value: string) =>
+                onChange(key, { ...own, [field]: value.trim() || undefined })
+              return (
+                <tr id={'part-export-' + key} tabIndex={-1} key={key} className="border-t align-middle">
+                  <td className="tabular py-1.5 pr-3 whitespace-nowrap">{part}</td>
+                  <td className="py-1.5 pr-3">
+                    <ControlInput
+                      value={own.eccn}
+                      label={`ECCN for ${part}`}
+                      placeholder={blanket.eccn || '—'}
+                      onCommit={(next) => set('eccn', next)}
+                    />
+                  </td>
+                  <td className="py-1.5 pr-3">
+                    <ControlInput
+                      value={own.license}
+                      label={`Licence for ${part}`}
+                      placeholder={blanket.license || '—'}
+                      onCommit={(next) => set('license', next)}
+                    />
+                  </td>
+                  <td className="py-1.5">
+                    <Select
+                      value={own.sme ?? ''}
+                      aria-label={`SME for ${part}`}
+                      onChange={(e) => set('sme', e.target.value)}
+                    >
+                      <option value="">{blanket.sme || '—'}</option>
+                      <option value="N">N</option>
+                      <option value="Y">Y</option>
+                    </Select>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {parts.map((part) => {
-                  const key = partKey(part)
-                  const own = entered[key] ?? {}
-                  const set = (field: keyof ExportControlOverride, value: string) =>
-                    onChange(key, { ...own, [field]: value.trim() || undefined })
-                  return (
-                    <tr key={key} className="border-t align-middle">
-                      <td className="tabular py-1.5 pr-3 whitespace-nowrap">{part}</td>
-                      <td className="py-1.5 pr-3">
-                        <ControlInput
-                          value={own.eccn}
-                          label={`ECCN for ${part}`}
-                          placeholder={blanket.eccn || '—'}
-                          onCommit={(next) => set('eccn', next)}
-                        />
-                      </td>
-                      <td className="py-1.5 pr-3">
-                        <ControlInput
-                          value={own.license}
-                          label={`Licence for ${part}`}
-                          placeholder={blanket.license || '—'}
-                          onCommit={(next) => set('license', next)}
-                        />
-                      </td>
-                      <td className="py-1.5">
-                        <Select
-                          value={own.sme ?? ''}
-                          aria-label={`SME for ${part}`}
-                          onChange={(e) => set('sme', e.target.value)}
-                        >
-                          <option value="">{blanket.sme || '—'}</option>
-                          <option value="N">N</option>
-                          <option value="Y">Y</option>
-                        </Select>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        </>
-      ) : null}
-    </div>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </details>
   )
 }
 
