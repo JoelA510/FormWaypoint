@@ -11,6 +11,8 @@
  */
 import { openDB, type IDBPDatabase } from 'idb'
 import { localDate } from '../lib/report'
+import type { Delivery } from '../lib/deliver'
+import type { KeyingTarget } from '../carriers/keying-sheet'
 import type { CompanyProfile, ShipmentSettings } from '../domain/draft'
 import type { ItemLibraryEntry } from '../domain/item-library'
 import type { KeyingOptions } from '../carriers/keying-sheet/options'
@@ -131,6 +133,8 @@ export type PartOverridePatch = Partial<
   >
 >
 
+export type ShipmentOutput = Delivery & { kind: 'sli' | KeyingTarget }
+
 /** One processed shipment, kept for autofill and as an audit trail. */
 export interface ShipmentRecord {
   /**
@@ -145,7 +149,10 @@ export interface ShipmentRecord {
   invoiceNumber: string
   processedAt: string
   carrierId: string
+  /** The source document used to prepare this shipment. */
   fileName: string
+  /** The delivered artifact. Older records only identify the source document. */
+  output?: ShipmentOutput
   consigneeName: string
   destinationCountry: string
   totalQuantity: number

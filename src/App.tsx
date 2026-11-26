@@ -7,7 +7,7 @@ import { Appearance } from './components/appearance'
 import { ChecksPanel, CorrectionLinks, CommodityTable, OverridesPanel, PartOverridesPanel, ShipmentSummary } from './features/review'
 import { ExporterProfilePanel, ManualFieldsPanel } from './features/manual-fields'
 import { ItemLibraryPanel, ItemMasterUpdatesPanel, type ImportMode } from './features/item-library'
-import { HistoryPanel, OutputPanel, type ShipmentOutput } from './features/output-panel'
+import { HistoryPanel, OutputPanel } from './features/output-panel'
 import {
   reconcile,
   selectDocumentSet,
@@ -66,6 +66,7 @@ import {
   type PartOverrideRecord,
   type PartOverridePatch,
   type ShipmentRecord,
+  type ShipmentOutput,
 } from './store/local-store'
 import { DangerousGoodsPanel } from './features/dangerous-goods'
 import { newConsignment, type DgConsignment } from './domain/dangerous-goods/types'
@@ -135,7 +136,6 @@ export function App() {
   const [partOverrides, setPartOverrides] = useState<PartOverrideRecord[]>([])
   const [items, setItems] = useState<ItemLibraryEntry[]>([])
   const [shipments, setShipments] = useState<ShipmentRecord[]>([])
-  const [outputs, setOutputs] = useState(() => new Map<string, ShipmentOutput>())
   const [dgConsignments, setDgConsignments] = useState<DgConsignmentRecord[]>([])
   // Held here rather than inside the tab, which unmounts when the other one is shown. A
   // half-entered dangerous goods consignment is measured, weighed, looked-up work; losing it
@@ -640,6 +640,7 @@ export function App() {
       processedAt,
       carrierId,
       fileName: parsed.fileName,
+      output,
       consigneeName: header.consignedTo.name,
       destinationCountry: resolveDestinationCountry(header) ?? '',
       totalQuantity: header.totalQuantity,
@@ -653,13 +654,12 @@ export function App() {
       settings,
     }
     // Reported, not swallowed. This is the audit record for a form that has already been
-    // written and opened, and `db()` rejects rather than hanging now — so a tab superseded
+    // written, and `db()` rejects rather than hanging now — so a tab superseded
     // by a newer version in another window would lose the record while the panel went on
     // saying "Saved to …". The consignee is convenience data and the list on screen is a
     // view; the record is the only one of the three that has to be said out loud.
     try {
       await localStore.saveShipment(record)
-      setOutputs(current => new Map(current).set(record.id, output))
       setUnrecordedShipment(null)
     } catch (e: unknown) {
       const because = e instanceof Error ? e.message : 'this machine’s stored data could not be reached'
@@ -764,10 +764,7 @@ export function App() {
     if (cleared('the classification overrides')) setOverrides([])
     if (cleared('the per-part weights')) setPartOverrides([])
     if (cleared('the item library')) setItems([])
-    if (cleared('the shipment history')) {
-      setShipments([])
-      setOutputs(new Map())
-    }
+    if (cleared('the shipment history')) setShipments([])
     setWriteError(
       remaining.length
         ? {
@@ -979,7 +976,7 @@ export function App() {
                 today={localDate()}
                 bridge={bridge}
               />
-              <HistoryPanel shipments={shipments} outputs={outputs} bridge={bridge} onClear={() => void clearAll()} />
+              <HistoryPanel shipments={shipments} bridge={bridge} onClear={() => void clearAll()} />
             </>
           ) : reconciliation && draft ? (
             <>
@@ -1180,7 +1177,7 @@ export function App() {
                   />
                 </>
               )}
-              <HistoryPanel shipments={shipments} outputs={outputs} bridge={bridge} onClear={() => void clearAll()} />
+              <HistoryPanel shipments={shipments} bridge={bridge} onClear={() => void clearAll()} />
             </>
           ) : null}
           </>

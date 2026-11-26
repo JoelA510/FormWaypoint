@@ -70,6 +70,25 @@ describe('records read back from storage', () => {
     expect(readErrorLog().map((e) => e.message)).toEqual([expect.stringMatching(/dangerous goods .* 1 left out/)])
   })
 
+  it('only restores output metadata that identifies a PDF or workbook of the recorded kind', () => {
+    const legacy = { id: 'run-1', processedAt: '2026-10-01T00:00:00Z', fileName: 'source.pdf' }
+    const desktop = { kind: 'sli', fileName: 'export (2).pdf', path: 'C:\\Downloads\\export (2).pdf' }
+    const browser = { kind: 'fedex-ship-manager', fileName: 'export.xlsx', path: null }
+    for (const output of [desktop, browser]) {
+      expect(decodeShipments([{ ...legacy, output }])).toEqual([{ ...legacy, output }])
+    }
+    expect(readErrorLog()).toEqual([])
+    for (const output of [
+      null, [], { ...desktop, kind: 'unknown' }, { ...desktop, path: undefined },
+      { ...desktop, kind: 'ups-worldship' }, { ...browser, fileName: 'folder/export.xlsx' },
+      { ...desktop, fileName: 'folder:export.pdf' }, { ...desktop, path: 'C:\\Downloads\\other.pdf' },
+      { ...desktop, path: 'relative/export (2).pdf' },
+    ]) {
+      expect(decodeShipments([{ ...legacy, output }])).toEqual([legacy])
+    }
+    expect(readErrorLog().at(-1)?.message).toMatch(/shipment history .* 0 left out, 1 repaired/)
+  })
+
   it('reads a DG record saved before the rules source was dated, and one saved with it', () => {
     const old = { id: 'D1', preparedAt: '2026-10-01', retainUntil: '2028-10-01', consignment: {}, checks: [] }
     const stamped = {

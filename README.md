@@ -509,9 +509,9 @@ Kept in IndexedDB on this machine only, and clearable from the History panel:
 - prepared dangerous goods consignments, kept for their two-year retention period: clearing
   leaves the ones still inside it.
 
-In the desktop app, History can reopen an SLI or keying sheet saved during the current session,
-even after Start over. The row shows the recorded carrier and the filename returned by the save.
-For browser exports, look for that filename in the browser’s downloads.
+History records the carrier, export type and filename for each new SLI or keying sheet. On Windows,
+it also keeps the exact saved path so Open works after Start over or an app restart. For browser
+exports, check your browser’s downloads. Older entries show that the output location is unavailable.
 
 `localStore` in `src/store/local-store.ts` is the one place an implementation is named. The
 browser and the desktop builds both use IndexedDB; the desktop keeps its data under the

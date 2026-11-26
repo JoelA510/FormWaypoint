@@ -378,10 +378,10 @@ it('keeps the workbook target with the keyed carrier and retires the old Open ac
   expect(button('Open')).toBeUndefined()
 })
 
-it.each(['desktop', 'browser'])('keeps the delivered workbook in History after Start over on %s', async (platform) => {
+it.each(['desktop', 'browser'])('restores the delivered workbook in History after restarting on %s', async (platform) => {
   const desktop = platform === 'desktop'
   const fileName = desktop ? 'shipment_ups-worldship (2).xlsx' : 'shipment_ups-worldship.xlsx'
-  const savedPath = '/exports/' + fileName
+  const savedPath = 'C:\\Exports\\' + fileName
   const invoke = vi.fn().mockResolvedValue(null)
   if (desktop) vi.stubGlobal('__TAURI_INTERNALS__', { invoke })
   const shipments: ShipmentRecord[] = []
@@ -405,6 +405,10 @@ it.each(['desktop', 'browser'])('keeps the delivered workbook in History after S
   expect(shipments).toHaveLength(1)
   await act(async () => button('Start over')!.click())
   await act(async () => button('Discard shipment edits')!.click())
+  expect(text()).toContain(fileName)
+  await act(async () => root!.unmount())
+  container!.remove()
+  await mount()
   const row = [...container!.querySelectorAll('tr')].find(tr => tr.textContent?.includes(fileName))
   expect(row?.textContent).toContain('CEVA Logistics')
   expect(row?.textContent).toContain('UPS WorldShip keying sheet')
